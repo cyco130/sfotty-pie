@@ -7,7 +7,7 @@
 	"license": "MIT",
 	"repository": "https://github.com/cyco130/sfotty-pie",
 	"scripts": {
-		"dev": "pnpm -r dev",
+		"dev": "pnpm -r --parallel dev",
 		"build": "pnpm -r build",
 		"prepare": "husky install",
 		"precommit": "lint-staged"

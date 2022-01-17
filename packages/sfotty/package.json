@@ -1,7 +1,7 @@
 {
-	"name": "@sfotty-pie/opcodes",
+	"name": "@sfotty-pie/sfotty",
 	"version": "0.1.0",
-	"description": "6502 opcode tables for Sfotty Pie",
+	"description": "Cycle-exact 6502 emulator for Node.js and the browser",
 	"author": "Fatih Aygün <cyco130@gmail.com>",
 	"type": "module",
 	"license": "MIT",
@@ -24,6 +24,9 @@
 		"opcodes",
 		"sfotty-pie"
 	],
+	"dependencies": {
+		"@sfotty-pie/opcodes": "workspace:*"
+	},
 	"devDependencies": {
 		"@cyco130/eslint-config": "^1.0.0",
 		"eslint": "^8.7.0",

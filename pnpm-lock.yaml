@@ -13,12 +13,42 @@ importers:
             prettier: 2.5.1
             vitest: 0.1.17
 
+    packages/cli:
+        specifiers:
+            "@cyco130/eslint-config": ^1.0.0
+            "@sfotty-pie/sfotty": workspace:*
+            eslint: ^8.7.0
+            tsup: ^5.11.11
+            typescript: ^4.5.4
+        dependencies:
+            "@sfotty-pie/sfotty": link:../sfotty
+        devDependencies:
+            "@cyco130/eslint-config": 1.0.0_eslint@8.7.0+typescript@4.5.4
+            eslint: 8.7.0
+            tsup: 5.11.11_typescript@4.5.4
+            typescript: 4.5.4
+
     packages/opcodes:
         specifiers:
             "@cyco130/eslint-config": ^1.0.0
             eslint: ^8.7.0
             tsup: ^5.11.11
             typescript: ^4.5.4
+        devDependencies:
+            "@cyco130/eslint-config": 1.0.0_eslint@8.7.0+typescript@4.5.4
+            eslint: 8.7.0
+            tsup: 5.11.11_typescript@4.5.4
+            typescript: 4.5.4
+
+    packages/sfotty:
+        specifiers:
+            "@cyco130/eslint-config": ^1.0.0
+            "@sfotty-pie/opcodes": workspace:*
+            eslint: ^8.7.0
+            tsup: ^5.11.11
+            typescript: ^4.5.4
+        dependencies:
+            "@sfotty-pie/opcodes": link:../opcodes
         devDependencies:
             "@cyco130/eslint-config": 1.0.0_eslint@8.7.0+typescript@4.5.4
             eslint: 8.7.0

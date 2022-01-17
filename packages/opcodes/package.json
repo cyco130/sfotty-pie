@@ -1,0 +1,33 @@
+{
+	"name": "@sfotty-pie/opcodes",
+	"version": "0.1.0",
+	"description": "6502 opcode tables for Sfotty Pie",
+	"author": "Fatih Aygün <cyco130@gmail.com>",
+	"type": "module",
+	"license": "MIT",
+	"repository": "https://github.com/cyco130/sfotty-pie",
+	"files": [
+		"dist"
+	],
+	"module": "./dist/index.js",
+	"main": "dist/index.cjs",
+	"types": "dist/types.d.ts",
+	"scripts": {
+		"dev": "tsup src/index.ts --clean --format esm,cjs --dts --watch",
+		"build": "tsup src/index.ts --clean --format esm,cjs --dts",
+		"prepack": "pnpm build",
+		"precommit": "lint-staged"
+	},
+	"keywords": [
+		"6502",
+		"emulator",
+		"opcodes",
+		"sfotty-pie"
+	],
+	"devDependencies": {
+		"@cyco130/eslint-config": "^1.0.0",
+		"eslint": "^8.7.0",
+		"tsup": "^5.11.11",
+		"typescript": "^4.5.4"
+	}
+}

@@ -1,0 +1,21 @@
+{
+	"private": true,
+	"name": "sfotty-pie-workspace-root",
+	"version": "0.0.0",
+	"description": "Sfotty Pie workspace root",
+	"author": "Fatih Aygün <cyco130@gmail.com>",
+	"license": "MIT",
+	"repository": "https://github.com/cyco130/sfotty-pie",
+	"scripts": {
+		"dev": "pnpm -r dev",
+		"build": "pnpm -r build",
+		"prepare": "husky install",
+		"precommit": "lint-staged"
+	},
+	"devDependencies": {
+		"husky": "^7.0.4",
+		"lint-staged": "^12.1.7",
+		"prettier": "^2.5.1",
+		"vitest": "^0.1.17"
+	}
+}

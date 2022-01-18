@@ -1,7 +1,7 @@
 import { VANILLA_OPCODES, Opcode } from "@sfotty-pie/opcodes";
 
 export interface Memory {
-	read(address: number): number;
+	read(address: number, decode?: boolean): number;
 	write(address: number, value: number): void;
 }
 
@@ -28,7 +28,7 @@ export class Sfotty {
 	public trace = false;
 	public traceOnce = 0;
 
-	public resetPending = false;
+	public resetPending = true;
 	public tmp = 0;
 	public tmp2 = 0;
 
@@ -36,30 +36,7 @@ export class Sfotty {
 
 	private opcodes: Array<Opcode | undefined>;
 
-	private operations = [
-		() => this.memory.read(this.PC),
-
-		() => {
-			this.memory.read(this.S + 0x0100);
-			this.S--;
-		},
-
-		() => {
-			this.memory.read(this.S + 0x0100);
-			this.S--;
-		},
-
-		() => {
-			this.memory.write(this.S + 0x0100, this.getP());
-			this.S--;
-		},
-
-		() => (this.tmp = this.memory.read(0xfffc)),
-
-		() => (this.PC = this.memory.read(0xfffd) * 0x100 + this.tmp),
-
-		() => this.decode(),
-	];
+	private operations = [() => this.decode()];
 
 	constructor(private readonly memory: Memory) {
 		this.opcodes = new Array(256).fill(undefined);
@@ -228,6 +205,44 @@ export class Sfotty {
 			return;
 		}
 
+		if (this.resetPending) {
+			if (this.trace || this.traceOnce) {
+				this.traceOnce--;
+				// eslint-disable-next-line no-console
+				console.log("RESET");
+			}
+
+			this.operations = [
+				() => this.memory.read(this.PC),
+
+				() => {
+					this.memory.read(this.S + 0x0100);
+					this.S = (this.S - 1) & 0xff;
+				},
+
+				() => {
+					this.memory.read(this.S + 0x0100);
+					this.S = (this.S - 1) & 0xff;
+				},
+
+				() => {
+					this.memory.write(this.S + 0x0100, this.getP());
+					this.S = (this.S - 1) & 0xff;
+				},
+
+				() => (this.tmp = this.memory.read(0xfffc)),
+
+				() => (this.PC = this.memory.read(0xfffd) * 0x100 + this.tmp),
+
+				() => this.decode(),
+			];
+
+			this.resetPending = false;
+			this.cycleCounter = 0;
+
+			return;
+		}
+
 		if (this.nmi) {
 			this.nmi--;
 		}
@@ -238,17 +253,17 @@ export class Sfotty {
 
 				() => {
 					this.memory.write(this.S + 0x0100, this.PC >> 8);
-					this.S--;
+					this.S = (this.S - 1) & 0xff;
 				},
 
 				() => {
 					this.memory.write(this.S + 0x0100, this.PC & 255);
-					this.S--;
+					this.S = (this.S - 1) & 0xff;
 				},
 
 				() => {
 					this.memory.write(this.S + 0x0100, this.getP(false));
-					this.S--;
+					this.S = (this.S - 1) & 0xff;
 				},
 
 				() => (this.tmp = this.memory.read(0xfffa)),
@@ -269,14 +284,13 @@ export class Sfotty {
 
 		this.cycleCounter = 0;
 
-		const opcode = this.memory.read(this.PC++);
+		const opcode = this.memory.read(this.PC, true);
+		this.PC = (this.PC + 1) & 0xffff;
 		const decoded = this.opcodes[opcode];
 		if (!decoded) {
 			this.crashed = true;
 			console.error("The 6502 CPU crashed");
 			this.PC--;
-			// eslint-disable-next-line no-console
-			console.log(this.print());
 
 			return;
 		}
@@ -288,17 +302,17 @@ export class Sfotty {
 
 					() => {
 						this.memory.write(this.S + 0x0100, this.PC >> 8);
-						this.S--;
+						this.S = (this.S - 1) & 0xff;
 					},
 
 					() => {
 						this.memory.write(this.S + 0x0100, this.PC & 255);
-						this.S--;
+						this.S = (this.S - 1) & 0xff;
 					},
 
 					() => {
 						this.memory.write(this.S + 0x0100, this.getP(true));
-						this.S--;
+						this.S = (this.S - 1) & 0xff;
 					},
 
 					() => (this.tmp = this.memory.read(0xfffe)),
@@ -313,12 +327,20 @@ export class Sfotty {
 			case "RTI":
 				this.operations = [
 					() => this.memory.read(this.PC),
-					() => this.memory.read(this.S++ + 0x0100),
-					() => this.setP(this.memory.read(this.S++ + 0x0100)),
-					() =>
-						(this.PC =
+					() => {
+						this.memory.read(this.S + 0x0100);
+						this.S = (this.S + 1) & 0xff;
+					},
+					() => {
+						this.setP(this.memory.read(this.S + 0x0100));
+						this.S = (this.S + 1) & 0xff;
+					},
+					() => {
+						this.PC =
 							(this.PC & 0xff00) |
-							this.memory.read(this.S++ + 0x0100)),
+							this.memory.read(this.S + 0x0100);
+						this.S = (this.S + 1) & 0xff;
+					},
 					() =>
 						(this.PC =
 							(this.PC & 0xff) +
@@ -330,16 +352,24 @@ export class Sfotty {
 			case "RTS":
 				this.operations = [
 					() => this.memory.read(this.PC),
-					() => this.memory.read(this.S++ + 0x100),
-					() =>
-						(this.PC =
+					() => {
+						this.memory.read(this.S + 0x100);
+						this.S = (this.S + 1) & 0xff;
+					},
+					() => {
+						this.PC =
 							(this.PC & 0xff00) |
-							this.memory.read(this.S++ + 0x0100)),
+							this.memory.read(this.S + 0x0100);
+						this.S = (this.S + 1) & 0xff;
+					},
 					() =>
 						(this.PC =
 							(this.PC & 0xff) +
 							this.memory.read(this.S + 0x0100) * 0x100),
-					() => this.memory.read(++this.PC),
+					() => {
+						this.PC = (this.PC + 1) & 0xffff;
+						this.memory.read(this.PC);
+					},
 					() => this.decode(),
 				];
 				break;
@@ -355,7 +385,7 @@ export class Sfotty {
 								? this.A
 								: this.getP(true)
 						);
-						this.S--;
+						this.S = (this.S - 1) & 0xff;
 					},
 					() => this.decode(),
 				];
@@ -365,7 +395,10 @@ export class Sfotty {
 			case "PLP":
 				this.operations = [
 					() => this.memory.read(this.PC),
-					() => this.memory.read(this.S++ + 0x100),
+					() => {
+						this.memory.read(this.S + 0x100);
+						this.S = (this.S + 1) & 0xff;
+					},
 					() => {
 						const op = this.memory.read(this.S + 0x0100);
 						if (decoded.mnemonic === "PLA") {
@@ -382,10 +415,19 @@ export class Sfotty {
 
 			case "JSR":
 				this.operations = [
-					() => (this.tmp = this.memory.read(this.PC++)),
+					() => {
+						this.tmp = this.memory.read(this.PC);
+						this.PC = (this.PC + 1) & 0xffff;
+					},
 					() => this.memory.read(this.S + 0x100),
-					() => this.memory.write(this.S-- + 0x100, this.PC >> 8),
-					() => this.memory.write(this.S-- + 0x100, this.PC & 0xff),
+					() => {
+						this.memory.write(this.S + 0x100, this.PC >> 8);
+						this.S = (this.S - 1) & 0xff;
+					},
+					() => {
+						this.memory.write(this.S + 0x100, this.PC & 0xff);
+						this.S = (this.S - 1) & 0xff;
+					},
 					() =>
 						(this.PC =
 							this.memory.read(this.PC) * 0x100 + this.tmp),
@@ -396,7 +438,10 @@ export class Sfotty {
 			case "JMP":
 				if (decoded.mode === "abs") {
 					this.operations = [
-						() => (this.tmp = this.memory.read(this.PC++)),
+						() => {
+							this.tmp = this.memory.read(this.PC);
+							this.PC = (this.PC + 1) & 0xffff;
+						},
 						() =>
 							(this.PC =
 								this.memory.read(this.PC) * 0x100 + this.tmp),
@@ -404,7 +449,10 @@ export class Sfotty {
 					];
 				} else {
 					this.operations = [
-						() => (this.tmp = this.memory.read(this.PC++)),
+						() => {
+							this.tmp = this.memory.read(this.PC);
+							this.PC = (this.PC + 1) & 0xffff;
+						},
 						() => (this.tmp += this.memory.read(this.PC) * 0x100),
 						() => {
 							this.tmp2 = this.memory.read(this.tmp);
@@ -430,7 +478,10 @@ export class Sfotty {
 			case "BEQ":
 				this.operations = [
 					// 1
-					() => (this.tmp = this.memory.read(this.PC++)),
+					() => {
+						this.tmp = this.memory.read(this.PC);
+						this.PC = (this.PC + 1) & 0xffff;
+					},
 
 					// 2
 					() => {
@@ -871,7 +922,10 @@ export class Sfotty {
 					switch (decoded.mode) {
 						case "imm":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => {
 									ops[decoded.mnemonic]();
 									this.decode();
@@ -881,7 +935,10 @@ export class Sfotty {
 
 						case "zpg":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => (this.tmp = this.memory.read(this.tmp)),
 								() => {
 									ops[decoded.mnemonic]();
@@ -892,10 +949,15 @@ export class Sfotty {
 
 						case "abs":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp +=
-										this.memory.read(this.PC++) * 0x100),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp +=
+										this.memory.read(this.PC) * 0x100;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => (this.tmp = this.memory.read(this.tmp)),
 								() => {
 									ops[decoded.mnemonic]();
@@ -906,7 +968,10 @@ export class Sfotty {
 
 						case "zpx":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => this.memory.read(this.tmp),
 								() =>
 									(this.tmp = this.memory.read(
@@ -921,7 +986,10 @@ export class Sfotty {
 
 						case "zpy":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => this.memory.read(this.tmp),
 								() =>
 									(this.tmp = this.memory.read(
@@ -936,10 +1004,15 @@ export class Sfotty {
 
 						case "abx":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp +=
-										this.memory.read(this.PC++) * 0x100),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp +=
+										this.memory.read(this.PC) * 0x100;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => {
 									let lo = this.tmp & 0xff;
 									const hi = this.tmp & 0xff00;
@@ -967,10 +1040,15 @@ export class Sfotty {
 
 						case "aby":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp +=
-										this.memory.read(this.PC++) * 0x100),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp +=
+										this.memory.read(this.PC) * 0x100;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => {
 									let lo = this.tmp & 0xff;
 									const hi = this.tmp & 0xff00;
@@ -998,7 +1076,10 @@ export class Sfotty {
 
 						case "inx":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => {
 									this.memory.read(this.tmp);
 									this.tmp2 = (this.tmp + this.X) & 0xff;
@@ -1021,9 +1102,14 @@ export class Sfotty {
 
 						case "iny":
 							this.operations = [
-								() => (this.tmp2 = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp = this.memory.read(this.tmp2++)),
+								() => {
+									this.tmp2 = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp = this.memory.read(this.tmp2);
+									this.tmp2 = (this.tmp2 + 1) & 0xffff;
+								},
 								() => {
 									this.tmp +=
 										this.memory.read(this.tmp2 & 0xff) *
@@ -1073,7 +1159,10 @@ export class Sfotty {
 					switch (decoded.mode) {
 						case "zpg":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => ops[decoded.mnemonic](),
 								() => this.decode(),
 							];
@@ -1081,10 +1170,15 @@ export class Sfotty {
 
 						case "abs":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp +=
-										this.memory.read(this.PC++) * 0x100),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp +=
+										this.memory.read(this.PC) * 0x100;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => ops[decoded.mnemonic](),
 								() => this.decode(),
 							];
@@ -1092,10 +1186,12 @@ export class Sfotty {
 
 						case "zpx":
 							this.operations = [
-								() =>
-									(this.tmp =
-										(this.memory.read(this.PC++) + this.X) &
-										0xff),
+								() => {
+									this.tmp =
+										(this.memory.read(this.PC) + this.X) &
+										0xff;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => ops[decoded.mnemonic](),
 								() => this.decode(),
 							];
@@ -1103,10 +1199,12 @@ export class Sfotty {
 
 						case "zpy":
 							this.operations = [
-								() =>
-									(this.tmp =
-										(this.memory.read(this.PC++) + this.Y) &
-										0xff),
+								() => {
+									this.tmp =
+										(this.memory.read(this.PC) + this.Y) &
+										0xff;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => ops[decoded.mnemonic](),
 								() => this.decode(),
 							];
@@ -1114,10 +1212,15 @@ export class Sfotty {
 
 						case "abx":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp +=
-										this.memory.read(this.PC++) * 0x100),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp +=
+										this.memory.read(this.PC) * 0x100;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => {
 									let lo = this.tmp & 0xff;
 									const hi = this.tmp & 0xff00;
@@ -1133,10 +1236,15 @@ export class Sfotty {
 
 						case "aby":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp +=
-										this.memory.read(this.PC++) * 0x100),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp +=
+										this.memory.read(this.PC) * 0x100;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => {
 									let lo = this.tmp & 0xff;
 									const hi = this.tmp & 0xff00;
@@ -1152,7 +1260,10 @@ export class Sfotty {
 
 						case "inx":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => {
 									this.memory.read(this.tmp);
 									this.tmp2 = this.tmp + this.X;
@@ -1172,7 +1283,10 @@ export class Sfotty {
 
 						case "iny":
 							this.operations = [
-								() => (this.tmp2 = this.memory.read(this.PC++)),
+								() => {
+									this.tmp2 = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() =>
 									(this.tmp = this.memory.read(this.tmp2++)),
 								() => {
@@ -1252,7 +1366,10 @@ export class Sfotty {
 
 						case "zpg":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => (this.tmp2 = this.memory.read(this.tmp)),
 								() => {
 									this.memory.write(this.tmp, this.tmp2);
@@ -1267,10 +1384,15 @@ export class Sfotty {
 
 						case "abs":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp +=
-										this.memory.read(this.PC++) * 0x100),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp +=
+										this.memory.read(this.PC) * 0x100;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => (this.tmp2 = this.memory.read(this.tmp)),
 								() => {
 									this.memory.write(this.tmp, this.tmp2);
@@ -1285,7 +1407,10 @@ export class Sfotty {
 
 						case "zpx":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => this.memory.read(this.tmp),
 								() => {
 									this.tmp = (this.tmp + this.X) & 0xff;
@@ -1304,10 +1429,15 @@ export class Sfotty {
 
 						case "abx":
 							this.operations = [
-								() => (this.tmp = this.memory.read(this.PC++)),
-								() =>
-									(this.tmp +=
-										this.memory.read(this.PC++) * 0x100),
+								() => {
+									this.tmp = this.memory.read(this.PC);
+									this.PC = (this.PC + 1) & 0xffff;
+								},
+								() => {
+									this.tmp +=
+										this.memory.read(this.PC) * 0x100;
+									this.PC = (this.PC + 1) & 0xffff;
+								},
 								() => {
 									let lo = this.tmp & 0xff;
 									const hi = this.tmp & 0xff00;

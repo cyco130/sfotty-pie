@@ -4,8 +4,16 @@
 
 Currently, Sfotty Pie consists of the following packages:
 
-| Package                                             | Description                             |
-| --------------------------------------------------- | --------------------------------------- |
-| [`@sfotty-pie/sfotty`](packages/sfotty/readme.md)   | Cycle-exact 6502 emulator               |
-| [`@sfotty-pie/spasm`](packages/spasm/readme.md)     | 6502 assembler                          |
-| [`@sfotty-pie/opcodes`](packages/opcodes/readme.md) | Opcode tables (used by the tools above) |
+| Package                                             | Description                                   |
+| --------------------------------------------------- | --------------------------------------------- |
+| [`@sfotty-pie/sfotty`](packages/sfotty/readme.md)   | Cycle-exact 6502 emulator                     |
+| [`@sfotty-pie/cli`](packages/cli/readme.md)         | An emulator for a virtual 6502-based computer |
+| [`@sfotty-pie/opcodes`](packages/opcodes/readme.md) | Opcode tables (used by other tools above)     |
+
+## Planned features
+
+-   A web based emulation/debugging interface
+-   An assembler
+-   A disassembler
+-   A high/mid level programming language
+-   A web based Atari 8-bit emulator

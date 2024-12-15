@@ -27,9 +27,9 @@
 		"@sfotty-pie/opcodes": "workspace:*"
 	},
 	"devDependencies": {
-		"@cyco130/eslint-config": "^1.0.0",
-		"eslint": "^8.13.0",
-		"tsup": "^5.12.4",
-		"typescript": "^4.6.3"
+		"@cyco130/eslint-config": "^5.0.1",
+		"eslint": "^9.17.0",
+		"tsup": "^8.3.5",
+		"typescript": "^5.7.2"
 	}
 }

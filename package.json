@@ -13,9 +13,9 @@
 		"precommit": "lint-staged"
 	},
 	"devDependencies": {
-		"husky": "^7.0.4",
-		"lint-staged": "^12.3.7",
-		"prettier": "^2.6.2",
-		"vitest": "^0.9.3"
+		"husky": "^9.1.7",
+		"lint-staged": "^15.2.11",
+		"prettier": "^3.4.2",
+		"vitest": "^2.1.8"
 	}
 }

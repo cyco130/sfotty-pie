@@ -1,7 +1,7 @@
 import { Sfotty } from "@sfotty-pie/sfotty";
-import fs from "fs";
-import readline from "readline";
-import util from "util";
+import fs from "node:fs";
+import readline from "node:readline";
+import util from "node:util";
 
 async function main() {
 	const args = process.argv.slice(2);
@@ -20,7 +20,7 @@ async function main() {
 	const buffer = await fs.promises.readFile(filename);
 
 	const expected = Buffer.from("SFOTTY");
-	if (!buffer.slice(0, expected.length).equals(expected)) {
+	if (!buffer.subarray(0, expected.length).equals(expected)) {
 		console.error("File is not a Sfotty Pie executable");
 		process.exit(1);
 	}
@@ -28,11 +28,11 @@ async function main() {
 	const ram = new Uint8Array(65536).fill(0);
 
 	// Copy the vectors
-	const vectors = buffer.slice(10, 16);
+	const vectors = buffer.subarray(10, 16);
 	ram.set(vectors, 0xfffa);
 
 	// Copy the program
-	const program = buffer.slice(16);
+	const program = buffer.subarray(16);
 	ram.set(program, 0x0400);
 
 	// Copy the command line args
@@ -56,19 +56,19 @@ async function main() {
 
 	let stdinBuffer = Buffer.alloc(0);
 	let stdinOffset = 0;
-	let abortController: AbortController;
+	let abortController = new AbortController();
 
 	rl.on("close", () => {
 		abortController.abort();
 	});
 
 	const sfotty = new Sfotty({
-		read(address, decode) {
+		read(address, decode): number {
 			if (address >= 0x0200 && address < 0x0300) {
 				switch (address) {
 					case 0x0201:
 						if (stdinOffset < stdinBuffer.length) {
-							return stdinBuffer[stdinOffset++];
+							return stdinBuffer[stdinOffset++]!;
 						} else if (abortController?.signal.aborted) {
 							return 0;
 						} else {
@@ -83,12 +83,12 @@ async function main() {
 
 					default:
 						console.error(
-							`Unhandled read from ${address.toString(16)}`
+							`Unhandled read from ${address.toString(16)}`,
 						);
 						process.exit(2);
 				}
 			} else {
-				const value = ram[address];
+				const value = ram[address]!;
 				if (decode && value === 0) {
 					throw new BreakError();
 				}
@@ -112,7 +112,7 @@ async function main() {
 
 					default:
 						console.error(
-							`Unhandled write to address ${address.toString(16)}`
+							`Unhandled write to address ${address.toString(16)}`,
 						);
 						process.exit(2);
 				}

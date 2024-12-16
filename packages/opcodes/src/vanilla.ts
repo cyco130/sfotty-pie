@@ -1,4 +1,4 @@
-import { Opcode } from "./types";
+import type { Opcode } from "./types";
 
 export const VANILLA_OPCODES: Opcode[] = [
 	{

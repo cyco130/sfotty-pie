@@ -1,4 +1,4 @@
-import { VANILLA_OPCODES, Opcode } from "@sfotty-pie/opcodes";
+import { VANILLA_OPCODES, type Opcode } from "@sfotty-pie/opcodes";
 
 export interface Memory {
 	read(address: number, decode?: boolean): number;
@@ -289,7 +289,7 @@ export class Sfotty {
 		const decoded = this.opcodes[opcode];
 		if (!decoded) {
 			this.crashed = true;
-			console.error("The 6502 CPU crashed");
+			// console.error("The 6502 CPU crashed");
 			this.PC--;
 
 			return;
@@ -301,7 +301,7 @@ export class Sfotty {
 					() => this.memory.read(this.PC),
 
 					() => {
-						this.memory.write(this.S + 0x0100, this.PC >> 8);
+						this.memory.write(this.S + 0x0100, ++this.PC >> 8);
 						this.S = (this.S - 1) & 0xff;
 					},
 
@@ -313,6 +313,7 @@ export class Sfotty {
 					() => {
 						this.memory.write(this.S + 0x0100, this.getP(true));
 						this.S = (this.S - 1) & 0xff;
+						this.I = true;
 					},
 
 					() => (this.tmp = this.memory.read(0xfffe)),
@@ -367,8 +368,8 @@ export class Sfotty {
 							(this.PC & 0xff) +
 							this.memory.read(this.S + 0x0100) * 0x100),
 					() => {
-						this.PC = (this.PC + 1) & 0xffff;
 						this.memory.read(this.PC);
+						this.PC = (this.PC + 1) & 0xffff;
 					},
 					() => this.decode(),
 				];
@@ -383,7 +384,7 @@ export class Sfotty {
 							this.S + 0x0100,
 							decoded.mnemonic === "PHA"
 								? this.A
-								: this.getP(true)
+								: this.getP(true),
 						);
 						this.S = (this.S - 1) & 0xff;
 					},
@@ -521,7 +522,7 @@ export class Sfotty {
 
 							default:
 								throw new Error(
-									"Unknown mnemonic " + decoded.mnemonic
+									"Unknown mnemonic " + decoded.mnemonic,
 								);
 						}
 
@@ -533,8 +534,9 @@ export class Sfotty {
 
 						this.memory.read(this.PC);
 						this.tmp =
-							this.PC +
-							(this.tmp >= 128 ? this.tmp - 256 : this.tmp);
+							(this.PC +
+								(this.tmp >= 128 ? this.tmp - 256 : this.tmp)) &
+							0xffff;
 						if (this.tmp >> 8 === this.PC >> 8) {
 							// No page crossing, skip fixup cycle
 							this.PC = this.tmp;
@@ -545,7 +547,10 @@ export class Sfotty {
 					},
 
 					// 3
-					() => (this.PC = this.tmp),
+					() => {
+						this.memory.read(this.PC);
+						this.PC = this.tmp;
+					},
 
 					// 4
 					() => this.decode(),
@@ -675,6 +680,8 @@ export class Sfotty {
 					() => {
 						this.memory.read(this.PC);
 						this.X = this.S;
+						this.Z = !this.X;
+						this.N = this.X >= 0x80;
 					},
 					() => this.decode(),
 				];
@@ -791,36 +798,30 @@ export class Sfotty {
 						},
 						ADC: () => {
 							if (this.D) {
-								// Decimal mode (credit goes to MAME)
-								let al =
-									(this.A & 0x0f) +
-									(this.tmp & 0x0f) +
-									+this.C;
+								// Decimal mode
+								let lo =
+									(this.A & 0xf) + (this.tmp & 0xf) + +this.C;
+								if (lo >= 10) lo += 6;
+								if (lo >= 0x20) lo -= 0x10;
 
-								if (al > 9) {
-									al += 6;
-								}
-
-								let ah =
-									(this.A >> 4) +
-									(this.tmp >> 4) +
-									+(al > 0x0f);
+								let hi =
+									(this.A & 0xf0) + (this.tmp & 0xf0) + lo;
 
 								this.V = !!(
 									~(this.A ^ this.tmp) &
-									(this.A ^ (ah << 4)) &
+									(this.A ^ hi) &
 									0x80
 								);
 
-								if (ah > 9) {
-									ah += 6;
-								}
+								this.N = !!(hi & 0x80);
 
-								this.C = ah > 15;
+								if (hi >= 0xa0) hi += 0x60;
+								this.Z =
+									((this.A + this.tmp + +this.C) & 0xff) ===
+									0;
+								this.C = hi >= 0x100;
 
-								this.tmp = this.A = (ah << 4) | (al & 0x0f);
-								this.Z = !this.tmp;
-								this.N = this.tmp >= 0x80;
+								this.A = hi & 0xff;
 							} else {
 								// Binary mode
 								const sum = this.A + this.tmp + +this.C;
@@ -839,31 +840,44 @@ export class Sfotty {
 						},
 						SBC: () => {
 							if (this.D) {
-								// Decimal mode (credit goes to MAME)
-								const c = +this.C;
-								const diff = this.A + (~this.tmp & 0xff) + c;
-								let al =
-									(this.A & 0x0f) - (this.tmp & 0x0f) - c;
-								if ((al & 0xff) > 0x7f) {
-									al -= 6;
-								}
-								let ah =
-									(this.A >> 4) -
-									(this.tmp >> 4) -
-									+((al & 0xff) > 0x7f);
+								// Decimal mode
+								this.tmp ^= 0xff;
 
-								this.V = !!(
-									(this.A ^ this.tmp) &
-									(this.A ^ diff) &
-									0x80
-								);
-								this.C = diff > 0xff;
-								if (ah & 0x80) {
-									ah -= 6;
+								const carry7 =
+									(this.A & 0x7f) +
+									(this.tmp & 0x7f) +
+									+this.C;
+								const result =
+									carry7 +
+									(this.A & 0x80) +
+									(this.tmp & 0x80);
+
+								// BCD
+								let lowResult =
+									(this.A & 0xf) + (this.tmp & 0xf) + +this.C;
+								let highCarry = 0x10;
+								if (lowResult < 0x10) {
+									lowResult -= 6;
+									highCarry = 0;
 								}
-								this.tmp = this.A = (ah << 4) | (al & 0x0f);
-								this.Z = !this.tmp;
-								this.N = this.tmp >= 0x80;
+
+								let highResult =
+									(this.A & 0xf0) +
+									(this.tmp & 0xf0) +
+									(lowResult & 0x0f) +
+									highCarry;
+
+								if (highResult < 0x100) highResult -= 0x60;
+
+								this.N = !!(result & 0x80);
+								this.C = result >= 0x100;
+								this.Z = !(result & 0xff);
+								this.V = !!(
+									((result >> 2) ^ (carry7 >> 1)) &
+									0x40
+								);
+
+								this.A = highResult & 0xff;
 							} else {
 								// Binary mode
 								this.tmp ^= 0xff;
@@ -927,7 +941,7 @@ export class Sfotty {
 									this.PC = (this.PC + 1) & 0xffff;
 								},
 								() => {
-									ops[decoded.mnemonic]();
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -941,7 +955,7 @@ export class Sfotty {
 								},
 								() => (this.tmp = this.memory.read(this.tmp)),
 								() => {
-									ops[decoded.mnemonic]();
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -960,7 +974,7 @@ export class Sfotty {
 								},
 								() => (this.tmp = this.memory.read(this.tmp)),
 								() => {
-									ops[decoded.mnemonic]();
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -975,10 +989,10 @@ export class Sfotty {
 								() => this.memory.read(this.tmp),
 								() =>
 									(this.tmp = this.memory.read(
-										(this.tmp + this.X) & 0xff
+										(this.tmp + this.X) & 0xff,
 									)),
 								() => {
-									ops[decoded.mnemonic]();
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -993,10 +1007,10 @@ export class Sfotty {
 								() => this.memory.read(this.tmp),
 								() =>
 									(this.tmp = this.memory.read(
-										(this.tmp + this.Y) & 0xff
+										(this.tmp + this.Y) & 0xff,
 									)),
 								() => {
-									ops[decoded.mnemonic]();
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -1017,10 +1031,10 @@ export class Sfotty {
 									let lo = this.tmp & 0xff;
 									const hi = this.tmp & 0xff00;
 									lo += this.X;
-									if (lo < 0xff) {
+									if (lo <= 0xff) {
 										// No page crossing, skip fixup cycle
 										this.tmp = this.memory.read(
-											this.tmp + this.X
+											(this.tmp + this.X) & 0xffff,
 										);
 										this.cycleCounter++;
 									} else {
@@ -1029,10 +1043,10 @@ export class Sfotty {
 								},
 								() =>
 									(this.tmp = this.memory.read(
-										this.tmp + this.X
+										(this.tmp + this.X) & 0xffff,
 									)),
 								() => {
-									ops[decoded.mnemonic]();
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -1053,10 +1067,10 @@ export class Sfotty {
 									let lo = this.tmp & 0xff;
 									const hi = this.tmp & 0xff00;
 									lo += this.Y;
-									if (lo < 0xff) {
+									if (lo <= 0xff) {
 										// No page crossing, skip fixup cycle
 										this.tmp = this.memory.read(
-											this.tmp + this.Y
+											(this.tmp + this.Y) & 0xffff,
 										);
 										this.cycleCounter++;
 									} else {
@@ -1065,10 +1079,10 @@ export class Sfotty {
 								},
 								() =>
 									(this.tmp = this.memory.read(
-										this.tmp + this.Y
+										(this.tmp + this.Y) & 0xffff,
 									)),
 								() => {
-									ops[decoded.mnemonic]();
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -1086,7 +1100,7 @@ export class Sfotty {
 								},
 								() =>
 									(this.tmp = this.memory.read(
-										this.tmp2++ & 0xff
+										this.tmp2++ & 0xff,
 									)),
 								() =>
 									(this.tmp +=
@@ -1094,7 +1108,7 @@ export class Sfotty {
 										0x100),
 								() => (this.tmp = this.memory.read(this.tmp)),
 								() => {
-									ops[decoded.mnemonic]();
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -1119,22 +1133,23 @@ export class Sfotty {
 									let lo = this.tmp & 0xff;
 									const hi = this.tmp & 0xff00;
 									lo += this.Y;
-									if (lo < 0xff) {
+									if (lo <= 0xff) {
 										// No page crossing, skip fixup cycle
 										this.tmp = this.memory.read(
-											this.tmp + this.Y
+											(this.tmp + this.Y) & 0xffff,
 										);
 										this.cycleCounter++;
 									} else {
 										this.memory.read(hi | (lo & 0xff));
 									}
 								},
-								() =>
-									(this.tmp = this.memory.read(
-										this.tmp + this.Y
-									)),
 								() => {
-									ops[decoded.mnemonic]();
+									this.tmp = this.memory.read(
+										(this.tmp + this.Y) & 0xffff,
+									);
+								},
+								() => {
+									ops[decoded.mnemonic]!();
 									this.decode();
 								},
 							];
@@ -1163,7 +1178,7 @@ export class Sfotty {
 									this.tmp = this.memory.read(this.PC);
 									this.PC = (this.PC + 1) & 0xffff;
 								},
-								() => ops[decoded.mnemonic](),
+								() => ops[decoded.mnemonic]!(),
 								() => this.decode(),
 							];
 							break;
@@ -1179,7 +1194,7 @@ export class Sfotty {
 										this.memory.read(this.PC) * 0x100;
 									this.PC = (this.PC + 1) & 0xffff;
 								},
-								() => ops[decoded.mnemonic](),
+								() => ops[decoded.mnemonic]!(),
 								() => this.decode(),
 							];
 							break;
@@ -1187,12 +1202,14 @@ export class Sfotty {
 						case "zpx":
 							this.operations = [
 								() => {
-									this.tmp =
-										(this.memory.read(this.PC) + this.X) &
-										0xff;
+									this.tmp = this.memory.read(this.PC);
 									this.PC = (this.PC + 1) & 0xffff;
 								},
-								() => ops[decoded.mnemonic](),
+								() => {
+									this.memory.read(this.tmp);
+									this.tmp = (this.tmp + this.X) & 0xff;
+								},
+								() => ops[decoded.mnemonic]!(),
 								() => this.decode(),
 							];
 							break;
@@ -1200,12 +1217,14 @@ export class Sfotty {
 						case "zpy":
 							this.operations = [
 								() => {
-									this.tmp =
-										(this.memory.read(this.PC) + this.Y) &
-										0xff;
+									this.tmp = this.memory.read(this.PC);
 									this.PC = (this.PC + 1) & 0xffff;
 								},
-								() => ops[decoded.mnemonic](),
+								() => {
+									this.memory.read(this.tmp);
+									this.tmp = (this.tmp + this.Y) & 0xff;
+								},
+								() => ops[decoded.mnemonic]!(),
 								() => this.decode(),
 							];
 							break;
@@ -1227,9 +1246,9 @@ export class Sfotty {
 									lo += this.X;
 									// Read from potentially invalid address
 									this.memory.read(hi | (lo & 0xff));
-									this.tmp += this.X;
+									this.tmp = (this.tmp + this.X) & 0xffff;
 								},
-								() => ops[decoded.mnemonic](),
+								() => ops[decoded.mnemonic]!(),
 								() => this.decode(),
 							];
 							break;
@@ -1251,9 +1270,9 @@ export class Sfotty {
 									lo += this.Y;
 									// Read from potentially invalid address
 									this.memory.read(hi | (lo & 0xff));
-									this.tmp += this.Y;
+									this.tmp = (this.tmp + this.Y) & 0xffff;
 								},
-								() => ops[decoded.mnemonic](),
+								() => ops[decoded.mnemonic]!(),
 								() => this.decode(),
 							];
 							break;
@@ -1270,13 +1289,13 @@ export class Sfotty {
 								},
 								() =>
 									(this.tmp = this.memory.read(
-										this.tmp2++ & 0xff
+										this.tmp2++ & 0xff,
 									)),
 								() =>
 									(this.tmp +=
 										this.memory.read(this.tmp2 & 0xff) *
 										0x100),
-								() => ops[decoded.mnemonic](),
+								() => ops[decoded.mnemonic]!(),
 								() => this.decode(),
 							];
 							break;
@@ -1299,9 +1318,9 @@ export class Sfotty {
 									const hi = this.tmp & 0xff00;
 									lo += this.Y;
 									this.memory.read(hi | (lo & 0xff));
-									this.tmp = this.tmp + this.Y;
+									this.tmp = (this.tmp + this.Y) & 0xffff;
 								},
-								() => ops[decoded.mnemonic](),
+								() => ops[decoded.mnemonic]!(),
 								() => this.decode(),
 							];
 							break;
@@ -1356,7 +1375,7 @@ export class Sfotty {
 								},
 								() => {
 									const r = (this.A =
-										ops[decoded.mnemonic]());
+										ops[decoded.mnemonic]!());
 									this.Z = !r;
 									this.N = r >= 0x80;
 									this.decode();
@@ -1373,7 +1392,7 @@ export class Sfotty {
 								() => (this.tmp2 = this.memory.read(this.tmp)),
 								() => {
 									this.memory.write(this.tmp, this.tmp2);
-									this.tmp2 = ops[decoded.mnemonic]();
+									this.tmp2 = ops[decoded.mnemonic]!();
 									this.Z = !this.tmp2;
 									this.N = this.tmp2 >= 0x80;
 								},
@@ -1396,7 +1415,7 @@ export class Sfotty {
 								() => (this.tmp2 = this.memory.read(this.tmp)),
 								() => {
 									this.memory.write(this.tmp, this.tmp2);
-									this.tmp2 = ops[decoded.mnemonic]();
+									this.tmp2 = ops[decoded.mnemonic]!();
 									this.Z = !this.tmp2;
 									this.N = this.tmp2 >= 0x80;
 								},
@@ -1418,7 +1437,7 @@ export class Sfotty {
 								},
 								() => {
 									this.memory.write(this.tmp, this.tmp2);
-									this.tmp2 = ops[decoded.mnemonic]();
+									this.tmp2 = ops[decoded.mnemonic]!();
 									this.Z = !this.tmp2;
 									this.N = this.tmp2 >= 0x80;
 								},
@@ -1444,12 +1463,12 @@ export class Sfotty {
 									lo += this.X;
 									// Read from potentially invalid address
 									this.memory.read(hi | (lo & 0xff));
-									this.tmp += this.X;
+									this.tmp = (this.tmp + this.X) & 0xffff;
 								},
 								() => (this.tmp2 = this.memory.read(this.tmp)),
 								() => {
 									this.memory.write(this.tmp, this.tmp2);
-									this.tmp2 = ops[decoded.mnemonic]();
+									this.tmp2 = ops[decoded.mnemonic]!();
 									this.Z = !this.tmp2;
 									this.N = this.tmp2 >= 0x80;
 								},

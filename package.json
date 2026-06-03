@@ -1,0 +1,22 @@
+{
+  "name": "sfotty-pie-workspace-root",
+  "private": "true",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter \"./packages/*\" --filter \"!@sfotty-pie/template-*\" run dev",
+    "build": "pnpm -r --filter \"./packages/*\" --filter \"!@sfotty-pie/template-*\" run build",
+    "prepare": "husky",
+    "precommit": "lint-staged",
+    "format": "prettier --write .",
+    "ci": "pnpm -r --filter \"!@sfotty-pie/template-*\" --stream run ci",
+    "test": "pnpm run /^test:/",
+    "test:packages": "pnpm -r --filter \"!@sfotty-pie/template-*\" --stream run test",
+    "test:format": "prettier --check ."
+  },
+  "packageManager": "pnpm@11.5.1",
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.7",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3"
+  }
+}

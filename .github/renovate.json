@@ -1,0 +1,24 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": ["config:recommended", "schedule:weekly", "group:allNonMajor"],
+	"ignorePresets": ["ignorePaths"],
+	"ignorePaths": ["**/node_modules/**", "**/dist/**"],
+	"labels": ["dependencies"],
+	"rangeStrategy": "bump",
+	"minimumReleaseAge": "1 day",
+	"packageRules": [
+		{
+			"matchManagers": ["github-actions"],
+			"rangeStrategy": "replace"
+		},
+		{
+			"matchDepTypes": ["peerDependencies"],
+			"enabled": false
+		},
+		{
+			"allowedVersions": "22",
+			"matchPackageNames": ["/^@types/node$/"]
+		}
+	],
+	"ignoreDeps": []
+}

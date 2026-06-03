@@ -1,4 +1,2 @@
-// sfotty-pie
-
-// eslint-disable-next-line no-console
-console.log("Hello world!");
+export { Sfotty, type SfottyOptions } from "./sfotty.ts";
+export { ReadOptions, TRAP, type Memory } from "./interface.ts";

@@ -29,6 +29,7 @@ These are deliberate. Don't change them without a reason.
 - **ESM only.** No CJS output, no `"type": "commonjs"`. tsdown is configured for `format: ["esm"]` and `platform: "node"`.
 - **Strict TS** with `nodenext` module resolution, `noUncheckedIndexedAccess`, and `noImplicitOverride`.
 - **Relative imports use `.ts` extensions**, not `.js`. Lint enforces this; tsconfigs allow it via `allowImportingTsExtensions`. The point is that source runs natively under Node's TS support and Deno, no transpile step required.
+- **No TS constructs that emit runtime code**, because that "runs natively, no transpile" model uses Node's strip-only type support, which rejects them: no `enum` (use a `const` object + a `type` alias), no constructor parameter properties (declare the field and assign in the body), no `namespace`. These pass `tsc` but throw `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` at runtime.
 - **Tabs, 80 cols.** Markdown and `package.json` use 2-space indent (see [.prettierrc](.prettierrc)). Don't reformat with spaces.
 - **Node**: published source in `packages/*/src/` targets the lowest `engines.node` major (every LTS plus every Current Node release that's still maintained upstream). Dev tooling, build configs, and scripts (e.g. `init`, `tsdown.config.ts`) can assume the latest minor of the most recent LTS — features that landed in recent LTS minors are fair game there; Current-only features aren't. Off-limits inside `packages/*/src/`.
 - **ESLint config** comes from `@cyco130/eslint-config/node`. Lint rules live there, not in-repo.

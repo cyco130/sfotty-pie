@@ -55,6 +55,34 @@ importers:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@22.19.19)(vite@7.3.1(@types/node@22.19.19)(yaml@2.9.0))
 
+  packages/cli:
+    dependencies:
+      '@sfotty-pie/sfotty':
+        specifier: workspace:*
+        version: link:../sfotty
+    devDependencies:
+      '@cyco130/eslint-config':
+        specifier: ^9.0.1
+        version: 9.0.1(@typescript-eslint/utils@8.59.4(eslint@10.4.1)(typescript@6.0.3))(eslint@10.4.1)(typescript@6.0.3)
+      '@types/node':
+        specifier: ^22.19.19
+        version: 22.19.19
+      eslint:
+        specifier: ^10.4.1
+        version: 10.4.1
+      publint:
+        specifier: ^0.3.21
+        version: 0.3.21
+      tsdown:
+        specifier: 0.22.1
+        version: 0.22.1(publint@0.3.21)(typescript@6.0.3)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.8(@types/node@22.19.19)(vite@7.3.1(@types/node@22.19.19)(yaml@2.9.0))
+
   packages/sfotty:
     devDependencies:
       '@cyco130/eslint-config':

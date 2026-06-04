@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Sfotty } from "@sfotty-pie/sfotty";
+import { DECODE, Sfotty, traceLine } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
 
@@ -132,13 +132,13 @@ async function main() {
 	});
 
 	let maxCycles = Infinity;
+	let trace = false;
 
 	const opts = args.slice(0, index);
 	for (const opt of opts) {
-		// if (opt === "--trace") {
-		// 	sfotty.trace = true; // TODO: trace not implemented on the new core
-		// } else
-		if (opt.startsWith("--max-cycles=")) {
+		if (opt === "--trace") {
+			trace = true;
+		} else if (opt.startsWith("--max-cycles=")) {
 			maxCycles = parseInt(opt.slice("--max-cycles=".length));
 		} else {
 			console.error(`Unrecognized option ${opt}`);
@@ -146,10 +146,16 @@ async function main() {
 		}
 	}
 
+	// Side-effect-free reader for the disassembler (RAM only, no I/O triggers).
+	const peek = (address: number) => ram[address & 0xffff]!;
+
 	// The new core doesn't run a reset sequence yet, so jump to the reset vector.
 	sfotty.PC = ram[0xfffc]! | (ram[0xfffd]! << 8);
 
 	while (!sfotty.crashed && maxCycles--) {
+		if (trace && sfotty.state === DECODE) {
+			process.stderr.write(traceLine(sfotty, peek) + "\n");
+		}
 		try {
 			sfotty.run();
 		} catch (error) {

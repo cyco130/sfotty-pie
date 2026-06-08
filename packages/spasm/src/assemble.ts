@@ -1,16 +1,15 @@
 import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
 import { render, Segment } from "./layout.ts";
+import { loadModules, type Host } from "./loader.ts";
 import {
 	getExpressionLocation,
-	parse,
 	type Expression,
 	type Message,
 	type Operand,
 	type Statement,
 	type StatementContent,
 } from "./parser.ts";
-import { SourceFile } from "./source-file.ts";
 import { SymbolTable, type SymbolKind } from "./symbols.ts";
 import { decodeStringLiteral, type Value } from "./value.ts";
 
@@ -22,10 +21,36 @@ export interface AssembleResult {
 
 type Reporter = (message: string, span: readonly [number, number]) => void;
 
-export function assemble(source: string, name = "input"): AssembleResult {
-	const sourceFile = new SourceFile(name, source);
-	const { module, errors } = parse(sourceFile);
-	const statements = module.statements;
+/** Assemble a single source string (no module imports). */
+export function assemble(source: string, name?: string): AssembleResult;
+/** Assemble a project rooted at `entry`, reaching modules through `host`. */
+export function assemble(entry: string, host: Host): AssembleResult;
+export function assemble(
+	sourceOrEntry: string,
+	nameOrHost: string | Host = "input",
+): AssembleResult {
+	if (typeof nameOrHost === "object") {
+		return assembleProject(sourceOrEntry, nameOrHost);
+	}
+	const name = nameOrHost;
+	const host: Host = {
+		read: (id) => {
+			if (id === name) return sourceOrEntry;
+			throw new Error(`no module "${id}"`);
+		},
+		resolve: (specifier) => {
+			throw new Error(`cannot resolve "${specifier}"`);
+		},
+	};
+	return assembleProject(name, host);
+}
+
+function assembleProject(entryId: string, host: Host): AssembleResult {
+	const loadDiagnostics: Message[] = [];
+	const modules = loadModules(entryId, host, loadDiagnostics);
+	// Flat merge for now: collect every module's statements into one scope, in
+	// dependency order. Per-module scoping lands in step 4.3.
+	const statements = modules.flatMap((m) => m.statements);
 
 	const symbols = new SymbolTable();
 	let output: number[] = [];
@@ -86,7 +111,7 @@ export function assemble(source: string, name = "input"): AssembleResult {
 	return {
 		output: new Uint8Array(output),
 		symbols: symbols.resolved(),
-		diagnostics: [...errors, ...diagnostics],
+		diagnostics: [...loadDiagnostics, ...diagnostics],
 	};
 }
 

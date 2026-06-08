@@ -19,6 +19,8 @@ function expr(e: Expression): string {
 			return `${e.operator.text}${expr(e.expression)}`;
 		case "grouped-expression":
 			return `[${expr(e.expression)}]`;
+		case "member-expression":
+			return `${expr(e.object)}::${e.member.text}`;
 		default:
 			return e.text;
 	}
@@ -69,6 +71,12 @@ function content(c: StatementContent): string {
 			return `.emit ${c.nameToken.text}`;
 		case "emplace":
 			return `.emplace ${c.nameToken.text}`;
+		case "import":
+			return `.import ${c.specToken.text}`;
+		case "export":
+			return `.export ${content(c.content)}`;
+		case "global":
+			return `.global ${c.nameToken.text}`;
 	}
 }
 
@@ -204,6 +212,17 @@ describe("directives", () => {
 	test("a segment directive needs a string name", () => {
 		const { errors } = parse(new SourceFile("t", ".segment CODE\n"));
 		expect(errors).toHaveLength(1);
+	});
+
+	test("module directives", () => {
+		expect(dump('.import "./lib.s"')).toEqual(['.import "./lib.s"']);
+		expect(dump(".global start")).toEqual([".global start"]);
+		expect(dump(".export EXIT := $0200")).toEqual([".export EXIT := $0200"]);
+	});
+
+	test("scope resolution with ::", () => {
+		expect(dump("sym := .global::start")).toEqual(["sym := .global::start"]);
+		expect(dump("lda #foo::bar")).toEqual(["lda #foo::bar"]);
 	});
 
 	test("trailing comma is accepted and preserved", () => {

@@ -50,6 +50,9 @@ export const DOT_KEYWORDS = [
 	"define_segment",
 	"emit",
 	"emplace",
+	"import",
+	"export",
+	"global",
 ] as const;
 
 const REGISTER_NAMES = ["a", "x", "y"] as const;

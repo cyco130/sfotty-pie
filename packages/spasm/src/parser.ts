@@ -187,6 +187,33 @@ class Parser {
 					nameToken: this.#expect("string"),
 				};
 			}
+
+			case "import": {
+				this.#consume();
+				return {
+					type: "import",
+					importToken: token,
+					specToken: this.#expect("string"),
+				};
+			}
+
+			case "export": {
+				this.#consume();
+				const content = this.#statementContent();
+				if (!content) {
+					throw new ParseError(this.#token, ["a definition to export"]);
+				}
+				return { type: "export", exportToken: token, content };
+			}
+
+			case "global": {
+				this.#consume();
+				return {
+					type: "global",
+					globalToken: token,
+					nameToken: this.#expect("identifier"),
+				};
+			}
 		}
 
 		return null;
@@ -411,9 +438,10 @@ class Parser {
 			case "hexadecimal":
 			case "string":
 			case "character":
-			case "*": {
+			case "*":
+			case "global": {
 				this.#consume();
-				return token;
+				return this.#memberTail(token);
 			}
 
 			// Unary prefixes
@@ -451,6 +479,22 @@ class Parser {
 			default:
 				return null;
 		}
+	}
+
+	// Apply any `::member` scope-resolution postfixes (tightest binding).
+	#memberTail(object: Expression): Expression {
+		let head = object;
+		while (this.#token.type === "::") {
+			const colonColonToken = this.#token;
+			this.#consume();
+			head = {
+				type: "member-expression",
+				object: head,
+				colonColonToken,
+				member: this.#expect("identifier"),
+			};
+		}
+		return head;
 	}
 
 	#expressionTail(precedence: number, head: Expression): Expression | null {
@@ -602,7 +646,13 @@ export function getExpressionLocation(
 		case "string":
 		case "character":
 		case "*":
+		case "global":
 			return [expression.start, expression.end];
+		case "member-expression":
+			return [
+				getExpressionLocation(expression.object)[0],
+				expression.member.end,
+			];
 		case "grouped-expression":
 			return [
 				expression.openingBracketToken.start,
@@ -681,7 +731,10 @@ export type StatementContent =
 	| DefineSegment
 	| Segment
 	| Emit
-	| Emplace;
+	| Emplace
+	| Import
+	| Export
+	| Global;
 
 export interface Assignment {
 	type: "assignment";
@@ -801,15 +854,43 @@ export interface Emplace {
 	nameToken: Token<"string">;
 }
 
+export interface Import {
+	type: "import";
+	importToken: Token<"import">;
+	specToken: Token<"string">;
+}
+
+export interface Export {
+	type: "export";
+	exportToken: Token<"export">;
+	content: StatementContent;
+}
+
+export interface Global {
+	type: "global";
+	globalToken: Token<"global">;
+	nameToken: Token<"identifier">;
+}
+
 export type Expression =
 	| Token<"identifier">
 	| Token<"string">
 	| Token<"character">
 	| Token<"*">
+	| Token<"global">
 	| IntegerLiteral
 	| GroupedExpression
 	| PrefixExpression
-	| InfixExpression;
+	| InfixExpression
+	| MemberExpression;
+
+/** Scope resolution: `object::member`, e.g. `.global::start` or `mod::sym`. */
+export interface MemberExpression {
+	type: "member-expression";
+	object: Expression;
+	colonColonToken: Token<"::">;
+	member: Token<"identifier">;
+}
 
 export type IntegerLiteral = Token<"decimal"> | Token<"hexadecimal">;
 

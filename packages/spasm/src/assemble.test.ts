@@ -1,5 +1,17 @@
 import { describe, test, expect } from "vitest";
 import { assemble } from "./assemble.ts";
+import type { Host } from "./loader.ts";
+
+/** An in-memory host: module ids are their own specifiers (identity resolve). */
+function memHost(files: Record<string, string>): Host {
+	return {
+		resolve: (specifier) => specifier,
+		read: (id) => {
+			if (id in files) return files[id]!;
+			throw new Error(`no module "${id}"`);
+		},
+	};
+}
 
 function asm(src: string): {
 	bytes: number[];
@@ -228,5 +240,42 @@ end:
 		expect(symbols.get("start")).toBe(0x040en);
 		expect(symbols.get("loop")).toBe(0x0410n);
 		expect(symbols.get("end")).toBe(0x041cn);
+	});
+});
+
+describe("modules (flat merge)", () => {
+	test("an imported module's symbols are visible", () => {
+		const host = memHost({
+			main: '.import "consts"\n.byte FOO\n',
+			consts: "FOO = $42\n",
+		});
+		const r = assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([0x42]);
+	});
+
+	test("a module shared by a diamond loads once", () => {
+		const host = memHost({
+			a: '.import "b"\n.import "c"\n',
+			b: '.import "d"\n',
+			c: '.import "d"\n',
+			d: ".byte $11\n",
+		});
+		const r = assemble("a", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([0x11]); // d's byte once, not twice
+	});
+
+	test("an unreadable module is reported", () => {
+		const r = assemble("main", memHost({ main: '.import "nope"\n' }));
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Cannot read module "nope"',
+		);
+	});
+
+	test("an import cycle is reported, not looped", () => {
+		const host = memHost({ a: '.import "b"\n', b: '.import "a"\n' });
+		const r = assemble("a", host);
+		expect(r.diagnostics.some((d) => d.message.includes("cycle"))).toBe(true);
 	});
 });

@@ -11,383 +11,434 @@ function badState(cpu: Sfotty): void {
 
 /** The shared opcode-decode cycle. */
 function decode(cpu: Sfotty): void {
-	cpu.decode();
+	cpu.opReadDecode();
 }
 
-function brkImp00C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+// The reset sequence (states RESET..RESET+6), launched by Sfotty.reset(). It is
+// hand-written rather than token-generated: reset isn't an opcode, and its stack
+// accesses are reads (writes suppressed) vectoring from $FFFC.
+
+/** Reset cycles 1–2: dummy reads at PC. */
+function reset_read(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.state++;
+}
+
+/** Reset cycles 3–5: dummy stack reads, decrementing S each time. */
+function reset_push(cpu: Sfotty): void {
 	cpu.opAddrFromSp();
-	cpu.opDrFromPch();
-	cpu.state = (0x00 << 3) | 1;
+	if (!cpu.opReadAddr()) return;
+	cpu.opDecS();
+	cpu.state++;
 }
 
-function brkImp00C1(cpu: Sfotty): void {
-	cpu.opWriteAddrDec();
-	cpu.opDrFromPcl();
-	cpu.state = (0x00 << 3) | 2;
-}
-
-function brkImp00C2(cpu: Sfotty): void {
-	cpu.opWriteAddrDec();
-	cpu.opDrFromP();
-	cpu.opSetInterrupt();
-	cpu.state = (0x00 << 3) | 3;
-}
-
-function brkImp00C3(cpu: Sfotty): void {
-	cpu.opWriteAddrDec();
-	cpu.opSFromAl();
-	cpu.opAddrVector();
-	cpu.state = (0x00 << 3) | 4;
-}
-
-function brkImp00C4(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
+/** Reset cycle 6: read the reset vector low byte into PCL and set I. */
+function reset_vector_low(cpu: Sfotty): void {
+	cpu.opAddrFFFC();
+	if (!cpu.opReadAddrInc()) return;
 	cpu.opPclFromDr();
-	cpu.state = (0x00 << 3) | 5;
+	cpu.opSetInterrupt();
+	cpu.state++;
 }
 
-function brkImp00C5(cpu: Sfotty): void {
-	cpu.opReadAddr();
+/** Reset cycle 7: read the reset vector high byte into PCH, then decode. */
+function reset_vector_high(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opPchFromDr();
 	cpu.state = DECODE;
 }
 
-function oraInx01C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x01 << 3) | 1;
+function brk_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadBreakByte()) return;
+	cpu.opAddrFromSp();
+	cpu.opDrFromPch();
+	cpu.state++;
 }
 
-function oraInx01C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function brk_imp_2(cpu: Sfotty): void {
+	cpu.opWriteAddrDec();
+	cpu.opDrFromPcl();
+	cpu.state++;
+}
+
+function brk_imp_3(cpu: Sfotty): void {
+	cpu.opWriteAddrDec();
+	cpu.opDrFromP();
+	cpu.opSetInterrupt();
+	cpu.state++;
+}
+
+function brk_imp_4(cpu: Sfotty): void {
+	cpu.opWriteAddrDec();
+	cpu.opSFromAl();
+	cpu.opAddrVector();
+	cpu.state++;
+}
+
+function brk_imp_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
+	cpu.opPclFromDr();
+	cpu.state++;
+}
+
+function brk_imp_6(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPchFromDr();
+	cpu.opNmiHold();
+	cpu.state = DECODE;
+}
+
+function ora_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opAddrFromDr();
+	cpu.state++;
+}
+
+function ora_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x01 << 3) | 2;
+	cpu.state++;
 }
 
-function oraInx01C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x01 << 3) | 3;
+function ora_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function oraInx01C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0x01 << 3) | 4;
+function ora_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function oraInx01C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opOra();
 	cpu.state = DECODE;
 }
 
-function cimImp02C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function cim_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	cpu.opAddrFFFF();
-	cpu.state = (0x02 << 3) | 1;
+	cpu.state++;
 }
 
-function cimImp02C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cim_imp_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddrFFFE();
-	cpu.state = (0x02 << 3) | 2;
+	cpu.state++;
 }
 
-function cimImp02C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cim_imp_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddrFFFE();
-	cpu.state = (0x02 << 3) | 3;
+	cpu.state++;
 }
 
-function cimImp02C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cim_imp_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddrFFFF();
-	cpu.state = (0x02 << 3) | 4;
+	cpu.state++;
 }
 
-function cimImp02C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x02 << 3) | 4;
+function cim_imp_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opCrash();
 }
 
-function sloInx03C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x03 << 3) | 1;
+	cpu.state++;
 }
 
-function sloInx03C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function slo_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x03 << 3) | 2;
+	cpu.state++;
 }
 
-function sloInx03C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x03 << 3) | 3;
+function slo_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function sloInx03C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0x03 << 3) | 4;
+function slo_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function sloInx03C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x03 << 3) | 5;
+function slo_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sloInx03C5(cpu: Sfotty): void {
+function slo_inx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSlo();
-	cpu.state = (0x03 << 3) | 6;
+	cpu.state++;
 }
 
-function sloInx03C6(cpu: Sfotty): void {
+function slo_inx_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpg04C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function nop_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x04 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpg04C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function nop_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opNop();
 	cpu.state = DECODE;
 }
 
-function oraZpg05C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x05 << 3) | 1;
+	cpu.state++;
 }
 
-function oraZpg05C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opOra();
 	cpu.state = DECODE;
 }
 
-function aslZpg06C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function asl_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x06 << 3) | 1;
+	cpu.state++;
 }
 
-function aslZpg06C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x06 << 3) | 2;
+function asl_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function aslZpg06C2(cpu: Sfotty): void {
+function asl_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opAsl();
-	cpu.state = (0x06 << 3) | 3;
+	cpu.state++;
 }
 
-function aslZpg06C3(cpu: Sfotty): void {
+function asl_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sloZpg07C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x07 << 3) | 1;
+	cpu.state++;
 }
 
-function sloZpg07C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x07 << 3) | 2;
+function slo_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sloZpg07C2(cpu: Sfotty): void {
+function slo_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSlo();
-	cpu.state = (0x07 << 3) | 3;
+	cpu.state++;
 }
 
-function sloZpg07C3(cpu: Sfotty): void {
+function slo_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function phpImp08C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function php_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	cpu.opAddrFromSp();
 	cpu.opDrFromP();
-	cpu.state = (0x08 << 3) | 1;
+	cpu.state++;
 }
 
-function phpImp08C1(cpu: Sfotty): void {
+function php_imp_2(cpu: Sfotty): void {
 	cpu.opWriteAddrDec();
+	cpu.opPoll();
 	cpu.opSFromAl();
 	cpu.state = DECODE;
 }
 
-function oraImm09C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opOra();
 	cpu.state = DECODE;
 }
 
-function aslAcc0AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function asl_acc_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opAslA();
 	cpu.state = DECODE;
 }
 
-function ancImm0BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function anc_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opAnc();
 	cpu.state = DECODE;
 }
 
-function nopAbs0CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function nop_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x0c << 3) | 1;
+	cpu.state++;
 }
 
-function nopAbs0CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function nop_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x0c << 3) | 2;
+	cpu.state++;
 }
 
-function nopAbs0CC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function nop_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opNop();
 	cpu.state = DECODE;
 }
 
-function oraAbs0DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x0d << 3) | 1;
+	cpu.state++;
 }
 
-function oraAbs0DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x0d << 3) | 2;
+	cpu.state++;
 }
 
-function oraAbs0DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opOra();
 	cpu.state = DECODE;
 }
 
-function aslAbs0EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function asl_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x0e << 3) | 1;
+	cpu.state++;
 }
 
-function aslAbs0EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function asl_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x0e << 3) | 2;
+	cpu.state++;
 }
 
-function aslAbs0EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x0e << 3) | 3;
+function asl_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function aslAbs0EC3(cpu: Sfotty): void {
+function asl_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opAsl();
-	cpu.state = (0x0e << 3) | 4;
+	cpu.state++;
 }
 
-function aslAbs0EC4(cpu: Sfotty): void {
+function asl_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sloAbs0FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x0f << 3) | 1;
+	cpu.state++;
 }
 
-function sloAbs0FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x0f << 3) | 2;
+	cpu.state++;
 }
 
-function sloAbs0FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x0f << 3) | 3;
+function slo_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sloAbs0FC3(cpu: Sfotty): void {
+function slo_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSlo();
-	cpu.state = (0x0f << 3) | 4;
+	cpu.state++;
 }
 
-function sloAbs0FC4(cpu: Sfotty): void {
+function slo_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function bplRel10C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bpl_rel_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	if (!cpu.opCondPl()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x10 << 3) | 1;
+	cpu.state++;
 }
 
-function bplRel10C1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bpl_rel_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	if (!cpu.opBranchOffset()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x10 << 3) | 2;
+	cpu.state++;
 }
 
-function bplRel10C2(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bpl_rel_3(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opFixPch();
 	cpu.state = DECODE;
 }
 
-function oraIny11C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x11 << 3) | 1;
+	cpu.state++;
 }
 
-function oraIny11C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x11 << 3) | 2;
+function ora_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function oraIny11C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function ora_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x11 << 3) | 3;
+	cpu.state++;
 }
 
-function oraIny11C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x11 << 3) | 4;
+		cpu.state++;
 	} else {
 		cpu.opOra();
 		cpu.state = DECODE;
@@ -395,197 +446,175 @@ function oraIny11C3(cpu: Sfotty): void {
 	return;
 }
 
-function oraIny11C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opOra();
 	cpu.state = DECODE;
 }
 
-function cimImp12C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0x12 << 3) | 1;
-}
-
-function cimImp12C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x12 << 3) | 2;
-}
-
-function cimImp12C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x12 << 3) | 3;
-}
-
-function cimImp12C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0x12 << 3) | 4;
-}
-
-function cimImp12C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x12 << 3) | 4;
-}
-
-function sloIny13C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x13 << 3) | 1;
+	cpu.state++;
 }
 
-function sloIny13C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x13 << 3) | 2;
+function slo_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function sloIny13C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function slo_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x13 << 3) | 3;
+	cpu.state++;
 }
 
-function sloIny13C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function slo_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x13 << 3) | 4;
+	cpu.state++;
 }
 
-function sloIny13C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x13 << 3) | 5;
+function slo_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sloIny13C5(cpu: Sfotty): void {
+function slo_iny_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSlo();
-	cpu.state = (0x13 << 3) | 6;
+	cpu.state++;
 }
 
-function sloIny13C6(cpu: Sfotty): void {
+function slo_iny_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpx14C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function nop_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x14 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpx14C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function nop_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x14 << 3) | 2;
+	cpu.state++;
 }
 
-function nopZpx14C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function nop_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opNop();
 	cpu.state = DECODE;
 }
 
-function oraZpx15C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x15 << 3) | 1;
+	cpu.state++;
 }
 
-function oraZpx15C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x15 << 3) | 2;
+	cpu.state++;
 }
 
-function oraZpx15C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opOra();
 	cpu.state = DECODE;
 }
 
-function aslZpx16C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function asl_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x16 << 3) | 1;
+	cpu.state++;
 }
 
-function aslZpx16C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function asl_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x16 << 3) | 2;
+	cpu.state++;
 }
 
-function aslZpx16C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x16 << 3) | 3;
+function asl_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function aslZpx16C3(cpu: Sfotty): void {
+function asl_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opAsl();
-	cpu.state = (0x16 << 3) | 4;
+	cpu.state++;
 }
 
-function aslZpx16C4(cpu: Sfotty): void {
+function asl_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sloZpx17C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x17 << 3) | 1;
+	cpu.state++;
 }
 
-function sloZpx17C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function slo_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x17 << 3) | 2;
+	cpu.state++;
 }
 
-function sloZpx17C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x17 << 3) | 3;
+function slo_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sloZpx17C3(cpu: Sfotty): void {
+function slo_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSlo();
-	cpu.state = (0x17 << 3) | 4;
+	cpu.state++;
 }
 
-function sloZpx17C4(cpu: Sfotty): void {
+function slo_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function clcImp18C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function clc_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opClearCarry();
 	cpu.state = DECODE;
 }
 
-function oraAby19C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x19 << 3) | 1;
+	cpu.state++;
 }
 
-function oraAby19C1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x19 << 3) | 2;
+	cpu.state++;
 }
 
-function oraAby19C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x19 << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opOra();
 		cpu.state = DECODE;
@@ -593,70 +622,74 @@ function oraAby19C2(cpu: Sfotty): void {
 	return;
 }
 
-function oraAby19C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opOra();
 	cpu.state = DECODE;
 }
 
-function nopImp1AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function nop_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sloAby1BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x1b << 3) | 1;
+	cpu.state++;
 }
 
-function sloAby1BC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x1b << 3) | 2;
+	cpu.state++;
 }
 
-function sloAby1BC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function slo_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x1b << 3) | 3;
+	cpu.state++;
 }
 
-function sloAby1BC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x1b << 3) | 4;
+function slo_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sloAby1BC4(cpu: Sfotty): void {
+function slo_aby_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSlo();
-	cpu.state = (0x1b << 3) | 5;
+	cpu.state++;
 }
 
-function sloAby1BC5(cpu: Sfotty): void {
+function slo_aby_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopAbx1CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function nop_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x1c << 3) | 1;
+	cpu.state++;
 }
 
-function nopAbx1CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function nop_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x1c << 3) | 2;
+	cpu.state++;
 }
 
-function nopAbx1CC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function nop_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x1c << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opNop();
 		cpu.state = DECODE;
@@ -664,30 +697,32 @@ function nopAbx1CC2(cpu: Sfotty): void {
 	return;
 }
 
-function nopAbx1CC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function nop_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opNop();
 	cpu.state = DECODE;
 }
 
-function oraAbx1DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x1d << 3) | 1;
+	cpu.state++;
 }
 
-function oraAbx1DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ora_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x1d << 3) | 2;
+	cpu.state++;
 }
 
-function oraAbx1DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x1d << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opOra();
 		cpu.state = DECODE;
@@ -695,454 +730,438 @@ function oraAbx1DC2(cpu: Sfotty): void {
 	return;
 }
 
-function oraAbx1DC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ora_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opOra();
 	cpu.state = DECODE;
 }
 
-function aslAbx1EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function asl_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x1e << 3) | 1;
+	cpu.state++;
 }
 
-function aslAbx1EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function asl_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x1e << 3) | 2;
+	cpu.state++;
 }
 
-function aslAbx1EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function asl_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x1e << 3) | 3;
+	cpu.state++;
 }
 
-function aslAbx1EC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x1e << 3) | 4;
+function asl_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function aslAbx1EC4(cpu: Sfotty): void {
+function asl_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opAsl();
-	cpu.state = (0x1e << 3) | 5;
+	cpu.state++;
 }
 
-function aslAbx1EC5(cpu: Sfotty): void {
+function asl_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sloAbx1FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x1f << 3) | 1;
+	cpu.state++;
 }
 
-function sloAbx1FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function slo_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x1f << 3) | 2;
+	cpu.state++;
 }
 
-function sloAbx1FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function slo_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x1f << 3) | 3;
+	cpu.state++;
 }
 
-function sloAbx1FC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x1f << 3) | 4;
+function slo_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sloAbx1FC4(cpu: Sfotty): void {
+function slo_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSlo();
-	cpu.state = (0x1f << 3) | 5;
+	cpu.state++;
 }
 
-function sloAbx1FC5(cpu: Sfotty): void {
+function slo_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function jsrAbs20C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function jsr_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromSp();
 	cpu.opSFromDr();
-	cpu.state = (0x20 << 3) | 1;
+	cpu.state++;
 }
 
-function jsrAbs20C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function jsr_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opDrFromPch();
-	cpu.state = (0x20 << 3) | 2;
+	cpu.state++;
 }
 
-function jsrAbs20C2(cpu: Sfotty): void {
+function jsr_abs_3(cpu: Sfotty): void {
 	cpu.opWriteAddrDec();
 	cpu.opDrFromPcl();
-	cpu.state = (0x20 << 3) | 3;
+	cpu.state++;
 }
 
-function jsrAbs20C3(cpu: Sfotty): void {
+function jsr_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddrDec();
-	cpu.state = (0x20 << 3) | 4;
+	cpu.state++;
 }
 
-function jsrAbs20C4(cpu: Sfotty): void {
-	cpu.opReadPc();
+function jsr_abs_5(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opPclFromS();
 	cpu.opSFromAl();
 	cpu.opPchFromDr();
 	cpu.state = DECODE;
 }
 
-function andInx21C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x21 << 3) | 1;
+	cpu.state++;
 }
 
-function andInx21C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x21 << 3) | 2;
+	cpu.state++;
 }
 
-function andInx21C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x21 << 3) | 3;
+function and_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function andInx21C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0x21 << 3) | 4;
+function and_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function andInx21C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAnd();
 	cpu.state = DECODE;
 }
 
-function cimImp22C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0x22 << 3) | 1;
-}
-
-function cimImp22C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x22 << 3) | 2;
-}
-
-function cimImp22C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x22 << 3) | 3;
-}
-
-function cimImp22C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0x22 << 3) | 4;
-}
-
-function cimImp22C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x22 << 3) | 4;
-}
-
-function rlaInx23C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x23 << 3) | 1;
+	cpu.state++;
 }
 
-function rlaInx23C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rla_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x23 << 3) | 2;
+	cpu.state++;
 }
 
-function rlaInx23C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x23 << 3) | 3;
+function rla_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function rlaInx23C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0x23 << 3) | 4;
+function rla_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function rlaInx23C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x23 << 3) | 5;
+function rla_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rlaInx23C5(cpu: Sfotty): void {
+function rla_inx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRla();
-	cpu.state = (0x23 << 3) | 6;
+	cpu.state++;
 }
 
-function rlaInx23C6(cpu: Sfotty): void {
+function rla_inx_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function bitZpg24C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bit_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x24 << 3) | 1;
+	cpu.state++;
 }
 
-function bitZpg24C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function bit_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opBit();
 	cpu.state = DECODE;
 }
 
-function andZpg25C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x25 << 3) | 1;
+	cpu.state++;
 }
 
-function andZpg25C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAnd();
 	cpu.state = DECODE;
 }
 
-function rolZpg26C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rol_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x26 << 3) | 1;
+	cpu.state++;
 }
 
-function rolZpg26C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x26 << 3) | 2;
+function rol_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rolZpg26C2(cpu: Sfotty): void {
+function rol_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRol();
-	cpu.state = (0x26 << 3) | 3;
+	cpu.state++;
 }
 
-function rolZpg26C3(cpu: Sfotty): void {
+function rol_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rlaZpg27C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x27 << 3) | 1;
+	cpu.state++;
 }
 
-function rlaZpg27C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x27 << 3) | 2;
+function rla_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rlaZpg27C2(cpu: Sfotty): void {
+function rla_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRla();
-	cpu.state = (0x27 << 3) | 3;
+	cpu.state++;
 }
 
-function rlaZpg27C3(cpu: Sfotty): void {
+function rla_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function plpImp28C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function plp_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	cpu.opAddrFromSp();
-	cpu.state = (0x28 << 3) | 1;
+	cpu.state++;
 }
 
-function plpImp28C1(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
-	cpu.state = (0x28 << 3) | 2;
+function plp_imp_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
+	cpu.state++;
 }
 
-function plpImp28C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function plp_imp_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSFromAl();
 	cpu.opPFromDr();
 	cpu.state = DECODE;
 }
 
-function andImm29C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opAnd();
 	cpu.state = DECODE;
 }
 
-function rolAcc2AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function rol_acc_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opRolA();
 	cpu.state = DECODE;
 }
 
-function ancImm2BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAnc();
-	cpu.state = DECODE;
-}
-
-function bitAbs2CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bit_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x2c << 3) | 1;
+	cpu.state++;
 }
 
-function bitAbs2CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bit_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x2c << 3) | 2;
+	cpu.state++;
 }
 
-function bitAbs2CC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function bit_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opBit();
 	cpu.state = DECODE;
 }
 
-function andAbs2DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x2d << 3) | 1;
+	cpu.state++;
 }
 
-function andAbs2DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x2d << 3) | 2;
+	cpu.state++;
 }
 
-function andAbs2DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAnd();
 	cpu.state = DECODE;
 }
 
-function rolAbs2EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rol_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x2e << 3) | 1;
+	cpu.state++;
 }
 
-function rolAbs2EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rol_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x2e << 3) | 2;
+	cpu.state++;
 }
 
-function rolAbs2EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x2e << 3) | 3;
+function rol_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rolAbs2EC3(cpu: Sfotty): void {
+function rol_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRol();
-	cpu.state = (0x2e << 3) | 4;
+	cpu.state++;
 }
 
-function rolAbs2EC4(cpu: Sfotty): void {
+function rol_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rlaAbs2FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x2f << 3) | 1;
+	cpu.state++;
 }
 
-function rlaAbs2FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x2f << 3) | 2;
+	cpu.state++;
 }
 
-function rlaAbs2FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x2f << 3) | 3;
+function rla_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rlaAbs2FC3(cpu: Sfotty): void {
+function rla_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRla();
-	cpu.state = (0x2f << 3) | 4;
+	cpu.state++;
 }
 
-function rlaAbs2FC4(cpu: Sfotty): void {
+function rla_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function bmiRel30C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bmi_rel_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	if (!cpu.opCondMi()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x30 << 3) | 1;
+	cpu.state++;
 }
 
-function bmiRel30C1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bmi_rel_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	if (!cpu.opBranchOffset()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x30 << 3) | 2;
+	cpu.state++;
 }
 
-function bmiRel30C2(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bmi_rel_3(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opFixPch();
 	cpu.state = DECODE;
 }
 
-function andIny31C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x31 << 3) | 1;
+	cpu.state++;
 }
 
-function andIny31C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x31 << 3) | 2;
+function and_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function andIny31C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function and_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x31 << 3) | 3;
+	cpu.state++;
 }
 
-function andIny31C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x31 << 3) | 4;
+		cpu.state++;
 	} else {
 		cpu.opAnd();
 		cpu.state = DECODE;
@@ -1150,197 +1169,156 @@ function andIny31C3(cpu: Sfotty): void {
 	return;
 }
 
-function andIny31C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAnd();
 	cpu.state = DECODE;
 }
 
-function cimImp32C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0x32 << 3) | 1;
-}
-
-function cimImp32C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x32 << 3) | 2;
-}
-
-function cimImp32C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x32 << 3) | 3;
-}
-
-function cimImp32C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0x32 << 3) | 4;
-}
-
-function cimImp32C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x32 << 3) | 4;
-}
-
-function rlaIny33C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x33 << 3) | 1;
+	cpu.state++;
 }
 
-function rlaIny33C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x33 << 3) | 2;
+function rla_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function rlaIny33C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function rla_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x33 << 3) | 3;
+	cpu.state++;
 }
 
-function rlaIny33C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rla_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x33 << 3) | 4;
+	cpu.state++;
 }
 
-function rlaIny33C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x33 << 3) | 5;
+function rla_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rlaIny33C5(cpu: Sfotty): void {
+function rla_iny_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRla();
-	cpu.state = (0x33 << 3) | 6;
+	cpu.state++;
 }
 
-function rlaIny33C6(cpu: Sfotty): void {
+function rla_iny_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpx34C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x34 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpx34C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x34 << 3) | 2;
+	cpu.state++;
 }
 
-function nopZpx34C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function andZpx35C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x35 << 3) | 1;
-}
-
-function andZpx35C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddX();
-	cpu.state = (0x35 << 3) | 2;
-}
-
-function andZpx35C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAnd();
 	cpu.state = DECODE;
 }
 
-function rolZpx36C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rol_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x36 << 3) | 1;
+	cpu.state++;
 }
 
-function rolZpx36C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rol_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x36 << 3) | 2;
+	cpu.state++;
 }
 
-function rolZpx36C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x36 << 3) | 3;
+function rol_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rolZpx36C3(cpu: Sfotty): void {
+function rol_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRol();
-	cpu.state = (0x36 << 3) | 4;
+	cpu.state++;
 }
 
-function rolZpx36C4(cpu: Sfotty): void {
+function rol_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rlaZpx37C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x37 << 3) | 1;
+	cpu.state++;
 }
 
-function rlaZpx37C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rla_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x37 << 3) | 2;
+	cpu.state++;
 }
 
-function rlaZpx37C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x37 << 3) | 3;
+function rla_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rlaZpx37C3(cpu: Sfotty): void {
+function rla_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRla();
-	cpu.state = (0x37 << 3) | 4;
+	cpu.state++;
 }
 
-function rlaZpx37C4(cpu: Sfotty): void {
+function rla_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function secImp38C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function sec_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opSetCarry();
 	cpu.state = DECODE;
 }
 
-function andAby39C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x39 << 3) | 1;
+	cpu.state++;
 }
 
-function andAby39C1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x39 << 3) | 2;
+	cpu.state++;
 }
 
-function andAby39C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x39 << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opAnd();
 		cpu.state = DECODE;
@@ -1348,101 +1326,68 @@ function andAby39C2(cpu: Sfotty): void {
 	return;
 }
 
-function andAby39C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAnd();
 	cpu.state = DECODE;
 }
 
-function nopImp3AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.state = DECODE;
-}
-
-function rlaAby3BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x3b << 3) | 1;
+	cpu.state++;
 }
 
-function rlaAby3BC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x3b << 3) | 2;
+	cpu.state++;
 }
 
-function rlaAby3BC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rla_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x3b << 3) | 3;
+	cpu.state++;
 }
 
-function rlaAby3BC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x3b << 3) | 4;
+function rla_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rlaAby3BC4(cpu: Sfotty): void {
+function rla_aby_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRla();
-	cpu.state = (0x3b << 3) | 5;
+	cpu.state++;
 }
 
-function rlaAby3BC5(cpu: Sfotty): void {
+function rla_aby_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopAbx3CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x3c << 3) | 1;
+	cpu.state++;
 }
 
-function nopAbx3CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function and_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x3c << 3) | 2;
+	cpu.state++;
 }
 
-function nopAbx3CC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x3c << 3) | 3;
-	} else {
-		cpu.opNop();
-		cpu.state = DECODE;
-	}
-	return;
-}
-
-function nopAbx3CC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function andAbx3DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x3d << 3) | 1;
-}
-
-function andAbx3DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrHighFromDr();
-	cpu.opAddXCarry();
-	cpu.state = (0x3d << 3) | 2;
-}
-
-function andAbx3DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	if (cpu.crossed) {
-		cpu.opIncAddrHigh();
-		cpu.state = (0x3d << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opAnd();
 		cpu.state = DECODE;
@@ -1450,442 +1395,420 @@ function andAbx3DC2(cpu: Sfotty): void {
 	return;
 }
 
-function andAbx3DC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function and_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAnd();
 	cpu.state = DECODE;
 }
 
-function rolAbx3EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rol_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x3e << 3) | 1;
+	cpu.state++;
 }
 
-function rolAbx3EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rol_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x3e << 3) | 2;
+	cpu.state++;
 }
 
-function rolAbx3EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rol_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x3e << 3) | 3;
+	cpu.state++;
 }
 
-function rolAbx3EC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x3e << 3) | 4;
+function rol_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rolAbx3EC4(cpu: Sfotty): void {
+function rol_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRol();
-	cpu.state = (0x3e << 3) | 5;
+	cpu.state++;
 }
 
-function rolAbx3EC5(cpu: Sfotty): void {
+function rol_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rlaAbx3FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x3f << 3) | 1;
+	cpu.state++;
 }
 
-function rlaAbx3FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rla_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x3f << 3) | 2;
+	cpu.state++;
 }
 
-function rlaAbx3FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rla_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x3f << 3) | 3;
+	cpu.state++;
 }
 
-function rlaAbx3FC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x3f << 3) | 4;
+function rla_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rlaAbx3FC4(cpu: Sfotty): void {
+function rla_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRla();
-	cpu.state = (0x3f << 3) | 5;
+	cpu.state++;
 }
 
-function rlaAbx3FC5(cpu: Sfotty): void {
+function rla_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rtiImp40C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function rti_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	cpu.opAddrFromSp();
-	cpu.state = (0x40 << 3) | 1;
+	cpu.state++;
 }
 
-function rtiImp40C1(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
-	cpu.state = (0x40 << 3) | 2;
+function rti_imp_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
+	cpu.state++;
 }
 
-function rtiImp40C2(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
+function rti_imp_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
 	cpu.opPFromDr();
-	cpu.state = (0x40 << 3) | 3;
+	cpu.state++;
 }
 
-function rtiImp40C3(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
+function rti_imp_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
 	cpu.opPclFromDr();
-	cpu.state = (0x40 << 3) | 4;
+	cpu.state++;
 }
 
-function rtiImp40C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rti_imp_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opPchFromDr();
 	cpu.opSFromAl();
 	cpu.state = DECODE;
 }
 
-function eorInx41C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x41 << 3) | 1;
+	cpu.state++;
 }
 
-function eorInx41C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x41 << 3) | 2;
+	cpu.state++;
 }
 
-function eorInx41C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x41 << 3) | 3;
+function eor_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function eorInx41C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0x41 << 3) | 4;
+function eor_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function eorInx41C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opEor();
 	cpu.state = DECODE;
 }
 
-function cimImp42C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0x42 << 3) | 1;
-}
-
-function cimImp42C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x42 << 3) | 2;
-}
-
-function cimImp42C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x42 << 3) | 3;
-}
-
-function cimImp42C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0x42 << 3) | 4;
-}
-
-function cimImp42C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x42 << 3) | 4;
-}
-
-function sreInx43C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x43 << 3) | 1;
+	cpu.state++;
 }
 
-function sreInx43C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sre_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x43 << 3) | 2;
+	cpu.state++;
 }
 
-function sreInx43C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x43 << 3) | 3;
+function sre_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function sreInx43C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0x43 << 3) | 4;
+function sre_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function sreInx43C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x43 << 3) | 5;
+function sre_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sreInx43C5(cpu: Sfotty): void {
+function sre_inx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSre();
-	cpu.state = (0x43 << 3) | 6;
+	cpu.state++;
 }
 
-function sreInx43C6(cpu: Sfotty): void {
+function sre_inx_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpg44C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x44 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpg44C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function eorZpg45C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x45 << 3) | 1;
-}
-
-function eorZpg45C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opEor();
 	cpu.state = DECODE;
 }
 
-function lsrZpg46C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lsr_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x46 << 3) | 1;
+	cpu.state++;
 }
 
-function lsrZpg46C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x46 << 3) | 2;
+function lsr_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function lsrZpg46C2(cpu: Sfotty): void {
+function lsr_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opLsr();
-	cpu.state = (0x46 << 3) | 3;
+	cpu.state++;
 }
 
-function lsrZpg46C3(cpu: Sfotty): void {
+function lsr_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sreZpg47C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x47 << 3) | 1;
+	cpu.state++;
 }
 
-function sreZpg47C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x47 << 3) | 2;
+function sre_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sreZpg47C2(cpu: Sfotty): void {
+function sre_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSre();
-	cpu.state = (0x47 << 3) | 3;
+	cpu.state++;
 }
 
-function sreZpg47C3(cpu: Sfotty): void {
+function sre_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function phaImp48C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function pha_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	cpu.opAddrFromSp();
 	cpu.opDrFromA();
-	cpu.state = (0x48 << 3) | 1;
+	cpu.state++;
 }
 
-function phaImp48C1(cpu: Sfotty): void {
+function pha_imp_2(cpu: Sfotty): void {
 	cpu.opWriteAddrDec();
+	cpu.opPoll();
 	cpu.opSFromAl();
 	cpu.state = DECODE;
 }
 
-function eorImm49C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opEor();
 	cpu.state = DECODE;
 }
 
-function lsrAcc4AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function lsr_acc_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opLsrA();
 	cpu.state = DECODE;
 }
 
-function asrImm4BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function asr_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opAsr();
 	cpu.state = DECODE;
 }
 
-function jmpAbs4CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function jmp_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x4c << 3) | 1;
+	cpu.state++;
 }
 
-function jmpAbs4CC1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function jmp_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opPclFromAl();
 	cpu.opPchFromDr();
 	cpu.state = DECODE;
 }
 
-function eorAbs4DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x4d << 3) | 1;
+	cpu.state++;
 }
 
-function eorAbs4DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x4d << 3) | 2;
+	cpu.state++;
 }
 
-function eorAbs4DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opEor();
 	cpu.state = DECODE;
 }
 
-function lsrAbs4EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lsr_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x4e << 3) | 1;
+	cpu.state++;
 }
 
-function lsrAbs4EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lsr_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x4e << 3) | 2;
+	cpu.state++;
 }
 
-function lsrAbs4EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x4e << 3) | 3;
+function lsr_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function lsrAbs4EC3(cpu: Sfotty): void {
+function lsr_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opLsr();
-	cpu.state = (0x4e << 3) | 4;
+	cpu.state++;
 }
 
-function lsrAbs4EC4(cpu: Sfotty): void {
+function lsr_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sreAbs4FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x4f << 3) | 1;
+	cpu.state++;
 }
 
-function sreAbs4FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x4f << 3) | 2;
+	cpu.state++;
 }
 
-function sreAbs4FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x4f << 3) | 3;
+function sre_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sreAbs4FC3(cpu: Sfotty): void {
+function sre_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSre();
-	cpu.state = (0x4f << 3) | 4;
+	cpu.state++;
 }
 
-function sreAbs4FC4(cpu: Sfotty): void {
+function sre_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function bvcRel50C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bvc_rel_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	if (!cpu.opCondVc()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x50 << 3) | 1;
+	cpu.state++;
 }
 
-function bvcRel50C1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bvc_rel_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	if (!cpu.opBranchOffset()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x50 << 3) | 2;
+	cpu.state++;
 }
 
-function bvcRel50C2(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bvc_rel_3(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opFixPch();
 	cpu.state = DECODE;
 }
 
-function eorIny51C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x51 << 3) | 1;
+	cpu.state++;
 }
 
-function eorIny51C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x51 << 3) | 2;
+function eor_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function eorIny51C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function eor_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x51 << 3) | 3;
+	cpu.state++;
 }
 
-function eorIny51C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x51 << 3) | 4;
+		cpu.state++;
 	} else {
 		cpu.opEor();
 		cpu.state = DECODE;
@@ -1893,197 +1816,156 @@ function eorIny51C3(cpu: Sfotty): void {
 	return;
 }
 
-function eorIny51C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opEor();
 	cpu.state = DECODE;
 }
 
-function cimImp52C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0x52 << 3) | 1;
-}
-
-function cimImp52C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x52 << 3) | 2;
-}
-
-function cimImp52C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x52 << 3) | 3;
-}
-
-function cimImp52C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0x52 << 3) | 4;
-}
-
-function cimImp52C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x52 << 3) | 4;
-}
-
-function sreIny53C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x53 << 3) | 1;
+	cpu.state++;
 }
 
-function sreIny53C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x53 << 3) | 2;
+function sre_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function sreIny53C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function sre_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x53 << 3) | 3;
+	cpu.state++;
 }
 
-function sreIny53C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sre_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x53 << 3) | 4;
+	cpu.state++;
 }
 
-function sreIny53C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x53 << 3) | 5;
+function sre_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sreIny53C5(cpu: Sfotty): void {
+function sre_iny_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSre();
-	cpu.state = (0x53 << 3) | 6;
+	cpu.state++;
 }
 
-function sreIny53C6(cpu: Sfotty): void {
+function sre_iny_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpx54C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x54 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpx54C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x54 << 3) | 2;
+	cpu.state++;
 }
 
-function nopZpx54C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function eorZpx55C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x55 << 3) | 1;
-}
-
-function eorZpx55C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddX();
-	cpu.state = (0x55 << 3) | 2;
-}
-
-function eorZpx55C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opEor();
 	cpu.state = DECODE;
 }
 
-function lsrZpx56C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lsr_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x56 << 3) | 1;
+	cpu.state++;
 }
 
-function lsrZpx56C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lsr_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x56 << 3) | 2;
+	cpu.state++;
 }
 
-function lsrZpx56C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x56 << 3) | 3;
+function lsr_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function lsrZpx56C3(cpu: Sfotty): void {
+function lsr_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opLsr();
-	cpu.state = (0x56 << 3) | 4;
+	cpu.state++;
 }
 
-function lsrZpx56C4(cpu: Sfotty): void {
+function lsr_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sreZpx57C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x57 << 3) | 1;
+	cpu.state++;
 }
 
-function sreZpx57C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sre_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x57 << 3) | 2;
+	cpu.state++;
 }
 
-function sreZpx57C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x57 << 3) | 3;
+function sre_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sreZpx57C3(cpu: Sfotty): void {
+function sre_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSre();
-	cpu.state = (0x57 << 3) | 4;
+	cpu.state++;
 }
 
-function sreZpx57C4(cpu: Sfotty): void {
+function sre_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function cliImp58C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function cli_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opClearInterrupt();
 	cpu.state = DECODE;
 }
 
-function eorAby59C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x59 << 3) | 1;
+	cpu.state++;
 }
 
-function eorAby59C1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x59 << 3) | 2;
+	cpu.state++;
 }
 
-function eorAby59C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x59 << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opEor();
 		cpu.state = DECODE;
@@ -2091,101 +1973,68 @@ function eorAby59C2(cpu: Sfotty): void {
 	return;
 }
 
-function eorAby59C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opEor();
 	cpu.state = DECODE;
 }
 
-function nopImp5AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.state = DECODE;
-}
-
-function sreAby5BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x5b << 3) | 1;
+	cpu.state++;
 }
 
-function sreAby5BC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x5b << 3) | 2;
+	cpu.state++;
 }
 
-function sreAby5BC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sre_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x5b << 3) | 3;
+	cpu.state++;
 }
 
-function sreAby5BC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x5b << 3) | 4;
+function sre_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sreAby5BC4(cpu: Sfotty): void {
+function sre_aby_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSre();
-	cpu.state = (0x5b << 3) | 5;
+	cpu.state++;
 }
 
-function sreAby5BC5(cpu: Sfotty): void {
+function sre_aby_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopAbx5CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x5c << 3) | 1;
+	cpu.state++;
 }
 
-function nopAbx5CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function eor_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x5c << 3) | 2;
+	cpu.state++;
 }
 
-function nopAbx5CC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x5c << 3) | 3;
-	} else {
-		cpu.opNop();
-		cpu.state = DECODE;
-	}
-	return;
-}
-
-function nopAbx5CC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function eorAbx5DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x5d << 3) | 1;
-}
-
-function eorAbx5DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrHighFromDr();
-	cpu.opAddXCarry();
-	cpu.state = (0x5d << 3) | 2;
-}
-
-function eorAbx5DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	if (cpu.crossed) {
-		cpu.opIncAddrHigh();
-		cpu.state = (0x5d << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opEor();
 		cpu.state = DECODE;
@@ -2193,457 +2042,435 @@ function eorAbx5DC2(cpu: Sfotty): void {
 	return;
 }
 
-function eorAbx5DC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function eor_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opEor();
 	cpu.state = DECODE;
 }
 
-function lsrAbx5EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lsr_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x5e << 3) | 1;
+	cpu.state++;
 }
 
-function lsrAbx5EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lsr_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x5e << 3) | 2;
+	cpu.state++;
 }
 
-function lsrAbx5EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lsr_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x5e << 3) | 3;
+	cpu.state++;
 }
 
-function lsrAbx5EC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x5e << 3) | 4;
+function lsr_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function lsrAbx5EC4(cpu: Sfotty): void {
+function lsr_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opLsr();
-	cpu.state = (0x5e << 3) | 5;
+	cpu.state++;
 }
 
-function lsrAbx5EC5(cpu: Sfotty): void {
+function lsr_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sreAbx5FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x5f << 3) | 1;
+	cpu.state++;
 }
 
-function sreAbx5FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sre_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x5f << 3) | 2;
+	cpu.state++;
 }
 
-function sreAbx5FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sre_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x5f << 3) | 3;
+	cpu.state++;
 }
 
-function sreAbx5FC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x5f << 3) | 4;
+function sre_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function sreAbx5FC4(cpu: Sfotty): void {
+function sre_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opSre();
-	cpu.state = (0x5f << 3) | 5;
+	cpu.state++;
 }
 
-function sreAbx5FC5(cpu: Sfotty): void {
+function sre_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rtsImp60C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function rts_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	cpu.opAddrFromSp();
-	cpu.state = (0x60 << 3) | 1;
+	cpu.state++;
 }
 
-function rtsImp60C1(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
-	cpu.state = (0x60 << 3) | 2;
+function rts_imp_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
+	cpu.state++;
 }
 
-function rtsImp60C2(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
+function rts_imp_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
 	cpu.opPclFromDr();
-	cpu.state = (0x60 << 3) | 3;
+	cpu.state++;
 }
 
-function rtsImp60C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rts_imp_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opPchFromDr();
 	cpu.opSFromAl();
-	cpu.state = (0x60 << 3) | 4;
+	cpu.state++;
 }
 
-function rtsImp60C4(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rts_imp_5(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function adcInx61C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x61 << 3) | 1;
+	cpu.state++;
 }
 
-function adcInx61C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x61 << 3) | 2;
+	cpu.state++;
 }
 
-function adcInx61C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x61 << 3) | 3;
+function adc_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function adcInx61C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0x61 << 3) | 4;
+function adc_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function adcInx61C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAdc();
 	cpu.state = DECODE;
 }
 
-function cimImp62C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0x62 << 3) | 1;
-}
-
-function cimImp62C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x62 << 3) | 2;
-}
-
-function cimImp62C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x62 << 3) | 3;
-}
-
-function cimImp62C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0x62 << 3) | 4;
-}
-
-function cimImp62C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x62 << 3) | 4;
-}
-
-function rraInx63C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x63 << 3) | 1;
+	cpu.state++;
 }
 
-function rraInx63C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rra_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x63 << 3) | 2;
+	cpu.state++;
 }
 
-function rraInx63C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x63 << 3) | 3;
+function rra_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function rraInx63C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0x63 << 3) | 4;
+function rra_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function rraInx63C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x63 << 3) | 5;
+function rra_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rraInx63C5(cpu: Sfotty): void {
+function rra_inx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRra();
-	cpu.state = (0x63 << 3) | 6;
+	cpu.state++;
 }
 
-function rraInx63C6(cpu: Sfotty): void {
+function rra_inx_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpg64C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x64 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpg64C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function adcZpg65C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x65 << 3) | 1;
-}
-
-function adcZpg65C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAdc();
 	cpu.state = DECODE;
 }
 
-function rorZpg66C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ror_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x66 << 3) | 1;
+	cpu.state++;
 }
 
-function rorZpg66C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x66 << 3) | 2;
+function ror_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rorZpg66C2(cpu: Sfotty): void {
+function ror_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRor();
-	cpu.state = (0x66 << 3) | 3;
+	cpu.state++;
 }
 
-function rorZpg66C3(cpu: Sfotty): void {
+function ror_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rraZpg67C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x67 << 3) | 1;
+	cpu.state++;
 }
 
-function rraZpg67C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x67 << 3) | 2;
+function rra_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rraZpg67C2(cpu: Sfotty): void {
+function rra_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRra();
-	cpu.state = (0x67 << 3) | 3;
+	cpu.state++;
 }
 
-function rraZpg67C3(cpu: Sfotty): void {
+function rra_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function plaImp68C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function pla_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	cpu.opAddrFromSp();
-	cpu.state = (0x68 << 3) | 1;
+	cpu.state++;
 }
 
-function plaImp68C1(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
-	cpu.state = (0x68 << 3) | 2;
+function pla_imp_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
+	cpu.state++;
 }
 
-function plaImp68C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function pla_imp_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSFromAl();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function adcImm69C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opAdc();
 	cpu.state = DECODE;
 }
 
-function rorAcc6AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function ror_acc_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opRorA();
 	cpu.state = DECODE;
 }
 
-function arrImm6BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function arr_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opArr();
 	cpu.state = DECODE;
 }
 
-function jmpInd6CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function jmp_ind_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x6c << 3) | 1;
+	cpu.state++;
 }
 
-function jmpInd6CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function jmp_ind_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x6c << 3) | 2;
+	cpu.state++;
 }
 
-function jmpInd6CC2(cpu: Sfotty): void {
-	cpu.opReadAddrInc();
+function jmp_ind_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddrInc()) return;
 	cpu.opPclFromDr();
-	cpu.state = (0x6c << 3) | 3;
+	cpu.state++;
 }
 
-function jmpInd6CC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function jmp_ind_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opPchFromDr();
 	cpu.state = DECODE;
 }
 
-function adcAbs6DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x6d << 3) | 1;
+	cpu.state++;
 }
 
-function adcAbs6DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x6d << 3) | 2;
+	cpu.state++;
 }
 
-function adcAbs6DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAdc();
 	cpu.state = DECODE;
 }
 
-function rorAbs6EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ror_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x6e << 3) | 1;
+	cpu.state++;
 }
 
-function rorAbs6EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ror_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x6e << 3) | 2;
+	cpu.state++;
 }
 
-function rorAbs6EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x6e << 3) | 3;
+function ror_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rorAbs6EC3(cpu: Sfotty): void {
+function ror_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRor();
-	cpu.state = (0x6e << 3) | 4;
+	cpu.state++;
 }
 
-function rorAbs6EC4(cpu: Sfotty): void {
+function ror_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rraAbs6FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x6f << 3) | 1;
+	cpu.state++;
 }
 
-function rraAbs6FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0x6f << 3) | 2;
+	cpu.state++;
 }
 
-function rraAbs6FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x6f << 3) | 3;
+function rra_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rraAbs6FC3(cpu: Sfotty): void {
+function rra_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRra();
-	cpu.state = (0x6f << 3) | 4;
+	cpu.state++;
 }
 
-function rraAbs6FC4(cpu: Sfotty): void {
+function rra_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function bvsRel70C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bvs_rel_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	if (!cpu.opCondVs()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x70 << 3) | 1;
+	cpu.state++;
 }
 
-function bvsRel70C1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bvs_rel_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	if (!cpu.opBranchOffset()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x70 << 3) | 2;
+	cpu.state++;
 }
 
-function bvsRel70C2(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bvs_rel_3(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opFixPch();
 	cpu.state = DECODE;
 }
 
-function adcIny71C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x71 << 3) | 1;
+	cpu.state++;
 }
 
-function adcIny71C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x71 << 3) | 2;
+function adc_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function adcIny71C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function adc_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x71 << 3) | 3;
+	cpu.state++;
 }
 
-function adcIny71C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x71 << 3) | 4;
+		cpu.state++;
 	} else {
 		cpu.opAdc();
 		cpu.state = DECODE;
@@ -2651,197 +2478,156 @@ function adcIny71C3(cpu: Sfotty): void {
 	return;
 }
 
-function adcIny71C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAdc();
 	cpu.state = DECODE;
 }
 
-function cimImp72C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0x72 << 3) | 1;
-}
-
-function cimImp72C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x72 << 3) | 2;
-}
-
-function cimImp72C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x72 << 3) | 3;
-}
-
-function cimImp72C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0x72 << 3) | 4;
-}
-
-function cimImp72C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x72 << 3) | 4;
-}
-
-function rraIny73C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x73 << 3) | 1;
+	cpu.state++;
 }
 
-function rraIny73C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x73 << 3) | 2;
+function rra_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function rraIny73C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function rra_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x73 << 3) | 3;
+	cpu.state++;
 }
 
-function rraIny73C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rra_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x73 << 3) | 4;
+	cpu.state++;
 }
 
-function rraIny73C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x73 << 3) | 5;
+function rra_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rraIny73C5(cpu: Sfotty): void {
+function rra_iny_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRra();
-	cpu.state = (0x73 << 3) | 6;
+	cpu.state++;
 }
 
-function rraIny73C6(cpu: Sfotty): void {
+function rra_iny_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpx74C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x74 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpx74C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x74 << 3) | 2;
+	cpu.state++;
 }
 
-function nopZpx74C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function adcZpx75C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x75 << 3) | 1;
-}
-
-function adcZpx75C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddX();
-	cpu.state = (0x75 << 3) | 2;
-}
-
-function adcZpx75C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAdc();
 	cpu.state = DECODE;
 }
 
-function rorZpx76C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ror_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x76 << 3) | 1;
+	cpu.state++;
 }
 
-function rorZpx76C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ror_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x76 << 3) | 2;
+	cpu.state++;
 }
 
-function rorZpx76C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x76 << 3) | 3;
+function ror_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rorZpx76C3(cpu: Sfotty): void {
+function ror_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRor();
-	cpu.state = (0x76 << 3) | 4;
+	cpu.state++;
 }
 
-function rorZpx76C4(cpu: Sfotty): void {
+function ror_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rraZpx77C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x77 << 3) | 1;
+	cpu.state++;
 }
 
-function rraZpx77C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rra_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0x77 << 3) | 2;
+	cpu.state++;
 }
 
-function rraZpx77C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x77 << 3) | 3;
+function rra_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rraZpx77C3(cpu: Sfotty): void {
+function rra_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRra();
-	cpu.state = (0x77 << 3) | 4;
+	cpu.state++;
 }
 
-function rraZpx77C4(cpu: Sfotty): void {
+function rra_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function seiImp78C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function sei_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opSetInterrupt();
 	cpu.state = DECODE;
 }
 
-function adcAby79C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x79 << 3) | 1;
+	cpu.state++;
 }
 
-function adcAby79C1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x79 << 3) | 2;
+	cpu.state++;
 }
 
-function adcAby79C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x79 << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opAdc();
 		cpu.state = DECODE;
@@ -2849,101 +2635,68 @@ function adcAby79C2(cpu: Sfotty): void {
 	return;
 }
 
-function adcAby79C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAdc();
 	cpu.state = DECODE;
 }
 
-function nopImp7AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.state = DECODE;
-}
-
-function rraAby7BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x7b << 3) | 1;
+	cpu.state++;
 }
 
-function rraAby7BC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x7b << 3) | 2;
+	cpu.state++;
 }
 
-function rraAby7BC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rra_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x7b << 3) | 3;
+	cpu.state++;
 }
 
-function rraAby7BC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x7b << 3) | 4;
+function rra_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rraAby7BC4(cpu: Sfotty): void {
+function rra_aby_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRra();
-	cpu.state = (0x7b << 3) | 5;
+	cpu.state++;
 }
 
-function rraAby7BC5(cpu: Sfotty): void {
+function rra_aby_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopAbx7CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x7c << 3) | 1;
+	cpu.state++;
 }
 
-function nopAbx7CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function adc_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x7c << 3) | 2;
+	cpu.state++;
 }
 
-function nopAbx7CC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0x7c << 3) | 3;
-	} else {
-		cpu.opNop();
-		cpu.state = DECODE;
-	}
-	return;
-}
-
-function nopAbx7CC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function adcAbx7DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0x7d << 3) | 1;
-}
-
-function adcAbx7DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrHighFromDr();
-	cpu.opAddXCarry();
-	cpu.state = (0x7d << 3) | 2;
-}
-
-function adcAbx7DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	if (cpu.crossed) {
-		cpu.opIncAddrHigh();
-		cpu.state = (0x7d << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opAdc();
 		cpu.state = DECODE;
@@ -2951,902 +2704,912 @@ function adcAbx7DC2(cpu: Sfotty): void {
 	return;
 }
 
-function adcAbx7DC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function adc_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opAdc();
 	cpu.state = DECODE;
 }
 
-function rorAbx7EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ror_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x7e << 3) | 1;
+	cpu.state++;
 }
 
-function rorAbx7EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ror_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x7e << 3) | 2;
+	cpu.state++;
 }
 
-function rorAbx7EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ror_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x7e << 3) | 3;
+	cpu.state++;
 }
 
-function rorAbx7EC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x7e << 3) | 4;
+function ror_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rorAbx7EC4(cpu: Sfotty): void {
+function ror_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRor();
-	cpu.state = (0x7e << 3) | 5;
+	cpu.state++;
 }
 
-function rorAbx7EC5(cpu: Sfotty): void {
+function ror_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function rraAbx7FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x7f << 3) | 1;
+	cpu.state++;
 }
 
-function rraAbx7FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function rra_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x7f << 3) | 2;
+	cpu.state++;
 }
 
-function rraAbx7FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function rra_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0x7f << 3) | 3;
+	cpu.state++;
 }
 
-function rraAbx7FC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0x7f << 3) | 4;
+function rra_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function rraAbx7FC4(cpu: Sfotty): void {
+function rra_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opRra();
-	cpu.state = (0x7f << 3) | 5;
+	cpu.state++;
 }
 
-function rraAbx7FC5(cpu: Sfotty): void {
+function rra_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopImm80C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function nop_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opNop();
 	cpu.state = DECODE;
 }
 
-function staInx81C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x81 << 3) | 1;
+	cpu.state++;
 }
 
-function staInx81C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sta_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x81 << 3) | 2;
+	cpu.state++;
 }
 
-function staInx81C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x81 << 3) | 3;
+function sta_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function staInx81C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function sta_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opDrFromA();
-	cpu.state = (0x81 << 3) | 4;
+	cpu.state++;
 }
 
-function staInx81C4(cpu: Sfotty): void {
+function sta_inx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopImm82C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function saxInx83C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sax_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x83 << 3) | 1;
+	cpu.state++;
 }
 
-function saxInx83C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sax_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0x83 << 3) | 2;
+	cpu.state++;
 }
 
-function saxInx83C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x83 << 3) | 3;
+function sax_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function saxInx83C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function sax_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opSax();
-	cpu.state = (0x83 << 3) | 4;
+	cpu.state++;
 }
 
-function saxInx83C4(cpu: Sfotty): void {
+function sax_inx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function styZpg84C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sty_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
 	cpu.opDrFromY();
-	cpu.state = (0x84 << 3) | 1;
+	cpu.state++;
 }
 
-function styZpg84C1(cpu: Sfotty): void {
+function sty_zpg_2(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function staZpg85C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
 	cpu.opDrFromA();
-	cpu.state = (0x85 << 3) | 1;
+	cpu.state++;
 }
 
-function staZpg85C1(cpu: Sfotty): void {
+function sta_zpg_2(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function stxZpg86C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function stx_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
 	cpu.opDrFromX();
-	cpu.state = (0x86 << 3) | 1;
+	cpu.state++;
 }
 
-function stxZpg86C1(cpu: Sfotty): void {
+function stx_zpg_2(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function saxZpg87C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sax_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
 	cpu.opSax();
-	cpu.state = (0x87 << 3) | 1;
+	cpu.state++;
 }
 
-function saxZpg87C1(cpu: Sfotty): void {
+function sax_zpg_2(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function deyImp88C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function dey_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opDecY();
 	cpu.state = DECODE;
 }
 
-function nopImm89C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function txaImp8AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function txa_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opAFromX();
 	cpu.state = DECODE;
 }
 
-function aneImm8BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ane_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opAne();
 	cpu.state = DECODE;
 }
 
-function styAbs8CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sty_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x8c << 3) | 1;
+	cpu.state++;
 }
 
-function styAbs8CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sty_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opDrFromY();
-	cpu.state = (0x8c << 3) | 2;
+	cpu.state++;
 }
 
-function styAbs8CC2(cpu: Sfotty): void {
+function sty_abs_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function staAbs8DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x8d << 3) | 1;
+	cpu.state++;
 }
 
-function staAbs8DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opDrFromA();
-	cpu.state = (0x8d << 3) | 2;
+	cpu.state++;
 }
 
-function staAbs8DC2(cpu: Sfotty): void {
+function sta_abs_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function stxAbs8EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function stx_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x8e << 3) | 1;
+	cpu.state++;
 }
 
-function stxAbs8EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function stx_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opDrFromX();
-	cpu.state = (0x8e << 3) | 2;
+	cpu.state++;
 }
 
-function stxAbs8EC2(cpu: Sfotty): void {
+function stx_abs_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function saxAbs8FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sax_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x8f << 3) | 1;
+	cpu.state++;
 }
 
-function saxAbs8FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sax_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opSax();
-	cpu.state = (0x8f << 3) | 2;
+	cpu.state++;
 }
 
-function saxAbs8FC2(cpu: Sfotty): void {
+function sax_abs_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function bccRel90C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bcc_rel_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	if (!cpu.opCondCc()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x90 << 3) | 1;
+	cpu.state++;
 }
 
-function bccRel90C1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bcc_rel_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	if (!cpu.opBranchOffset()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0x90 << 3) | 2;
+	cpu.state++;
 }
 
-function bccRel90C2(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bcc_rel_3(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opFixPch();
 	cpu.state = DECODE;
 }
 
-function staIny91C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x91 << 3) | 1;
+	cpu.state++;
 }
 
-function staIny91C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x91 << 3) | 2;
+function sta_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function staIny91C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function sta_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x91 << 3) | 3;
+	cpu.state++;
 }
 
-function staIny91C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sta_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
 	cpu.opDrFromA();
-	cpu.state = (0x91 << 3) | 4;
+	cpu.state++;
 }
 
-function staIny91C4(cpu: Sfotty): void {
+function sta_iny_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function cimImp92C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0x92 << 3) | 1;
-}
-
-function cimImp92C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x92 << 3) | 2;
-}
-
-function cimImp92C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0x92 << 3) | 3;
-}
-
-function cimImp92C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0x92 << 3) | 4;
-}
-
-function cimImp92C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0x92 << 3) | 4;
-}
-
-function shaIny93C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sha_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x93 << 3) | 1;
+	cpu.state++;
 }
 
-function shaIny93C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0x93 << 3) | 2;
+function sha_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function shaIny93C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function sha_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0x93 << 3) | 3;
+	cpu.state++;
 }
 
-function shaIny93C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sha_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
 	cpu.opSha();
-	cpu.state = (0x93 << 3) | 4;
+	cpu.state++;
 }
 
-function shaIny93C4(cpu: Sfotty): void {
+function sha_iny_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function styZpx94C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sty_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x94 << 3) | 1;
+	cpu.state++;
 }
 
-function styZpx94C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sty_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromY();
-	cpu.state = (0x94 << 3) | 2;
+	cpu.state++;
 }
 
-function styZpx94C2(cpu: Sfotty): void {
+function sty_zpx_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function staZpx95C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x95 << 3) | 1;
+	cpu.state++;
 }
 
-function staZpx95C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sta_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromA();
-	cpu.state = (0x95 << 3) | 2;
+	cpu.state++;
 }
 
-function staZpx95C2(cpu: Sfotty): void {
+function sta_zpx_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function stxZpy96C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function stx_zpy_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x96 << 3) | 1;
+	cpu.state++;
 }
 
-function stxZpy96C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function stx_zpy_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddY();
 	cpu.opDrFromX();
-	cpu.state = (0x96 << 3) | 2;
+	cpu.state++;
 }
 
-function stxZpy96C2(cpu: Sfotty): void {
+function stx_zpy_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function saxZpy97C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sax_zpy_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x97 << 3) | 1;
+	cpu.state++;
 }
 
-function saxZpy97C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sax_zpy_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddY();
 	cpu.opSax();
-	cpu.state = (0x97 << 3) | 2;
+	cpu.state++;
 }
 
-function saxZpy97C2(cpu: Sfotty): void {
+function sax_zpy_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function tyaImp98C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function tya_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opAFromY();
 	cpu.state = DECODE;
 }
 
-function staAby99C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x99 << 3) | 1;
+	cpu.state++;
 }
 
-function staAby99C1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x99 << 3) | 2;
+	cpu.state++;
 }
 
-function staAby99C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sta_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
 	cpu.opDrFromA();
-	cpu.state = (0x99 << 3) | 3;
+	cpu.state++;
 }
 
-function staAby99C3(cpu: Sfotty): void {
+function sta_aby_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function txsImp9AC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function txs_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opSFromX();
 	cpu.state = DECODE;
 }
 
-function shsAby9BC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function shs_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x9b << 3) | 1;
+	cpu.state++;
 }
 
-function shsAby9BC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function shs_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x9b << 3) | 2;
+	cpu.state++;
 }
 
-function shsAby9BC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function shs_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
 	cpu.opShs();
-	cpu.state = (0x9b << 3) | 3;
+	cpu.state++;
 }
 
-function shsAby9BC3(cpu: Sfotty): void {
+function shs_aby_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function shyAbx9CC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function shy_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x9c << 3) | 1;
+	cpu.state++;
 }
 
-function shyAbx9CC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function shy_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x9c << 3) | 2;
+	cpu.state++;
 }
 
-function shyAbx9CC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function shy_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
 	cpu.opShy();
-	cpu.state = (0x9c << 3) | 3;
+	cpu.state++;
 }
 
-function shyAbx9CC3(cpu: Sfotty): void {
+function shy_abx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function staAbx9DC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x9d << 3) | 1;
+	cpu.state++;
 }
 
-function staAbx9DC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sta_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0x9d << 3) | 2;
+	cpu.state++;
 }
 
-function staAbx9DC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sta_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
 	cpu.opDrFromA();
-	cpu.state = (0x9d << 3) | 3;
+	cpu.state++;
 }
 
-function staAbx9DC3(cpu: Sfotty): void {
+function sta_abx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function shxAby9EC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function shx_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x9e << 3) | 1;
+	cpu.state++;
 }
 
-function shxAby9EC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function shx_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x9e << 3) | 2;
+	cpu.state++;
 }
 
-function shxAby9EC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function shx_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
 	cpu.opShx();
-	cpu.state = (0x9e << 3) | 3;
+	cpu.state++;
 }
 
-function shxAby9EC3(cpu: Sfotty): void {
+function shx_aby_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function shaAby9FC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sha_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0x9f << 3) | 1;
+	cpu.state++;
 }
 
-function shaAby9FC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sha_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0x9f << 3) | 2;
+	cpu.state++;
 }
 
-function shaAby9FC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sha_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
 	cpu.opSha();
-	cpu.state = (0x9f << 3) | 3;
+	cpu.state++;
 }
 
-function shaAby9FC3(cpu: Sfotty): void {
+function sha_aby_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function ldyImmA0C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldy_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opLoadY();
 	cpu.state = DECODE;
 }
 
-function ldaInxA1C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xa1 << 3) | 1;
+	cpu.state++;
 }
 
-function ldaInxA1C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0xa1 << 3) | 2;
+	cpu.state++;
 }
 
-function ldaInxA1C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xa1 << 3) | 3;
+function lda_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function ldaInxA1C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0xa1 << 3) | 4;
+function lda_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function ldaInxA1C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function ldxImmA2C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldx_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opLoadX();
 	cpu.state = DECODE;
 }
 
-function laxInxA3C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lax_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xa3 << 3) | 1;
+	cpu.state++;
 }
 
-function laxInxA3C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0xa3 << 3) | 2;
+	cpu.state++;
 }
 
-function laxInxA3C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xa3 << 3) | 3;
+function lax_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function laxInxA3C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0xa3 << 3) | 4;
+function lax_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function laxInxA3C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLax();
 	cpu.state = DECODE;
 }
 
-function ldyZpgA4C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldy_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xa4 << 3) | 1;
+	cpu.state++;
 }
 
-function ldyZpgA4C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldy_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadY();
 	cpu.state = DECODE;
 }
 
-function ldaZpgA5C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xa5 << 3) | 1;
+	cpu.state++;
 }
 
-function ldaZpgA5C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function ldxZpgA6C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldx_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xa6 << 3) | 1;
+	cpu.state++;
 }
 
-function ldxZpgA6C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldx_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadX();
 	cpu.state = DECODE;
 }
 
-function laxZpgA7C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lax_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xa7 << 3) | 1;
+	cpu.state++;
 }
 
-function laxZpgA7C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLax();
 	cpu.state = DECODE;
 }
 
-function tayImpA8C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function tay_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opYFromA();
 	cpu.state = DECODE;
 }
 
-function ldaImmA9C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function taxImpAAC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function tax_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opXFromA();
 	cpu.state = DECODE;
 }
 
-function lxaImmABC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lxa_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opLxa();
 	cpu.state = DECODE;
 }
 
-function ldyAbsACC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldy_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xac << 3) | 1;
+	cpu.state++;
 }
 
-function ldyAbsACC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldy_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xac << 3) | 2;
+	cpu.state++;
 }
 
-function ldyAbsACC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldy_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadY();
 	cpu.state = DECODE;
 }
 
-function ldaAbsADC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xad << 3) | 1;
+	cpu.state++;
 }
 
-function ldaAbsADC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xad << 3) | 2;
+	cpu.state++;
 }
 
-function ldaAbsADC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function ldxAbsAEC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldx_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xae << 3) | 1;
+	cpu.state++;
 }
 
-function ldxAbsAEC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldx_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xae << 3) | 2;
+	cpu.state++;
 }
 
-function ldxAbsAEC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldx_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadX();
 	cpu.state = DECODE;
 }
 
-function laxAbsAFC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lax_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xaf << 3) | 1;
+	cpu.state++;
 }
 
-function laxAbsAFC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lax_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xaf << 3) | 2;
+	cpu.state++;
 }
 
-function laxAbsAFC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLax();
 	cpu.state = DECODE;
 }
 
-function bcsRelB0C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bcs_rel_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	if (!cpu.opCondCs()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0xb0 << 3) | 1;
+	cpu.state++;
 }
 
-function bcsRelB0C1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bcs_rel_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	if (!cpu.opBranchOffset()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0xb0 << 3) | 2;
+	cpu.state++;
 }
 
-function bcsRelB0C2(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bcs_rel_3(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opFixPch();
 	cpu.state = DECODE;
 }
 
-function ldaInyB1C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xb1 << 3) | 1;
+	cpu.state++;
 }
 
-function ldaInyB1C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xb1 << 3) | 2;
+function lda_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function ldaInyB1C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function lda_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0xb1 << 3) | 3;
+	cpu.state++;
 }
 
-function ldaInyB1C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xb1 << 3) | 4;
+		cpu.state++;
 	} else {
 		cpu.opLoadA();
 		cpu.state = DECODE;
@@ -3854,64 +3617,36 @@ function ldaInyB1C3(cpu: Sfotty): void {
 	return;
 }
 
-function ldaInyB1C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function cimImpB2C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0xb2 << 3) | 1;
-}
-
-function cimImpB2C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0xb2 << 3) | 2;
-}
-
-function cimImpB2C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0xb2 << 3) | 3;
-}
-
-function cimImpB2C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0xb2 << 3) | 4;
-}
-
-function cimImpB2C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0xb2 << 3) | 4;
-}
-
-function laxInyB3C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lax_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xb3 << 3) | 1;
+	cpu.state++;
 }
 
-function laxInyB3C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xb3 << 3) | 2;
+function lax_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function laxInyB3C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function lax_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0xb3 << 3) | 3;
+	cpu.state++;
 }
 
-function laxInyB3C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xb3 << 3) | 4;
+		cpu.state++;
 	} else {
 		cpu.opLax();
 		cpu.state = DECODE;
@@ -3919,108 +3654,115 @@ function laxInyB3C3(cpu: Sfotty): void {
 	return;
 }
 
-function laxInyB3C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLax();
 	cpu.state = DECODE;
 }
 
-function ldyZpxB4C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldy_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xb4 << 3) | 1;
+	cpu.state++;
 }
 
-function ldyZpxB4C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldy_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0xb4 << 3) | 2;
+	cpu.state++;
 }
 
-function ldyZpxB4C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldy_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadY();
 	cpu.state = DECODE;
 }
 
-function ldaZpxB5C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xb5 << 3) | 1;
+	cpu.state++;
 }
 
-function ldaZpxB5C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0xb5 << 3) | 2;
+	cpu.state++;
 }
 
-function ldaZpxB5C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function ldxZpyB6C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldx_zpy_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xb6 << 3) | 1;
+	cpu.state++;
 }
 
-function ldxZpyB6C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldx_zpy_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddY();
-	cpu.state = (0xb6 << 3) | 2;
+	cpu.state++;
 }
 
-function ldxZpyB6C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldx_zpy_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadX();
 	cpu.state = DECODE;
 }
 
-function laxZpyB7C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lax_zpy_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xb7 << 3) | 1;
+	cpu.state++;
 }
 
-function laxZpyB7C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_zpy_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddY();
-	cpu.state = (0xb7 << 3) | 2;
+	cpu.state++;
 }
 
-function laxZpyB7C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_zpy_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLax();
 	cpu.state = DECODE;
 }
 
-function clvImpB8C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function clv_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opClearOverflow();
 	cpu.state = DECODE;
 }
 
-function ldaAbyB9C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xb9 << 3) | 1;
+	cpu.state++;
 }
 
-function ldaAbyB9C1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0xb9 << 3) | 2;
+	cpu.state++;
 }
 
-function ldaAbyB9C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xb9 << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opLoadA();
 		cpu.state = DECODE;
@@ -4028,36 +3770,39 @@ function ldaAbyB9C2(cpu: Sfotty): void {
 	return;
 }
 
-function ldaAbyB9C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function tsxImpBAC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function tsx_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opXFromS();
 	cpu.state = DECODE;
 }
 
-function lasAbyBBC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function las_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xbb << 3) | 1;
+	cpu.state++;
 }
 
-function lasAbyBBC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function las_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0xbb << 3) | 2;
+	cpu.state++;
 }
 
-function lasAbyBBC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function las_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xbb << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opLas();
 		cpu.state = DECODE;
@@ -4065,30 +3810,32 @@ function lasAbyBBC2(cpu: Sfotty): void {
 	return;
 }
 
-function lasAbyBBC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function las_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLas();
 	cpu.state = DECODE;
 }
 
-function ldyAbxBCC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldy_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xbc << 3) | 1;
+	cpu.state++;
 }
 
-function ldyAbxBCC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldy_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0xbc << 3) | 2;
+	cpu.state++;
 }
 
-function ldyAbxBCC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldy_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xbc << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opLoadY();
 		cpu.state = DECODE;
@@ -4096,30 +3843,32 @@ function ldyAbxBCC2(cpu: Sfotty): void {
 	return;
 }
 
-function ldyAbxBCC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldy_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadY();
 	cpu.state = DECODE;
 }
 
-function ldaAbxBDC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xbd << 3) | 1;
+	cpu.state++;
 }
 
-function ldaAbxBDC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lda_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0xbd << 3) | 2;
+	cpu.state++;
 }
 
-function ldaAbxBDC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xbd << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opLoadA();
 		cpu.state = DECODE;
@@ -4127,30 +3876,32 @@ function ldaAbxBDC2(cpu: Sfotty): void {
 	return;
 }
 
-function ldaAbxBDC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lda_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadA();
 	cpu.state = DECODE;
 }
 
-function ldxAbyBEC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldx_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xbe << 3) | 1;
+	cpu.state++;
 }
 
-function ldxAbyBEC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function ldx_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0xbe << 3) | 2;
+	cpu.state++;
 }
 
-function ldxAbyBEC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldx_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xbe << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opLoadX();
 		cpu.state = DECODE;
@@ -4158,30 +3909,32 @@ function ldxAbyBEC2(cpu: Sfotty): void {
 	return;
 }
 
-function ldxAbyBEC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function ldx_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLoadX();
 	cpu.state = DECODE;
 }
 
-function laxAbyBFC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lax_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xbf << 3) | 1;
+	cpu.state++;
 }
 
-function laxAbyBFC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function lax_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0xbf << 3) | 2;
+	cpu.state++;
 }
 
-function laxAbyBFC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xbf << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opLax();
 		cpu.state = DECODE;
@@ -4189,322 +3942,335 @@ function laxAbyBFC2(cpu: Sfotty): void {
 	return;
 }
 
-function laxAbyBFC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function lax_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opLax();
 	cpu.state = DECODE;
 }
 
-function cpyImmC0C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cpy_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opCpy();
 	cpu.state = DECODE;
 }
 
-function cmpInxC1C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xc1 << 3) | 1;
+	cpu.state++;
 }
 
-function cmpInxC1C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0xc1 << 3) | 2;
+	cpu.state++;
 }
 
-function cmpInxC1C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xc1 << 3) | 3;
+function cmp_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function cmpInxC1C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0xc1 << 3) | 4;
+function cmp_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function cmpInxC1C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCmp();
 	cpu.state = DECODE;
 }
 
-function nopImmC2C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function dcpInxC3C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xc3 << 3) | 1;
+	cpu.state++;
 }
 
-function dcpInxC3C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function dcp_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0xc3 << 3) | 2;
+	cpu.state++;
 }
 
-function dcpInxC3C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xc3 << 3) | 3;
+function dcp_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function dcpInxC3C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0xc3 << 3) | 4;
+function dcp_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function dcpInxC3C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xc3 << 3) | 5;
+function dcp_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function dcpInxC3C5(cpu: Sfotty): void {
+function dcp_inx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDcp();
-	cpu.state = (0xc3 << 3) | 6;
+	cpu.state++;
 }
 
-function dcpInxC3C6(cpu: Sfotty): void {
+function dcp_inx_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function cpyZpgC4C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cpy_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xc4 << 3) | 1;
+	cpu.state++;
 }
 
-function cpyZpgC4C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cpy_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCpy();
 	cpu.state = DECODE;
 }
 
-function cmpZpgC5C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xc5 << 3) | 1;
+	cpu.state++;
 }
 
-function cmpZpgC5C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCmp();
 	cpu.state = DECODE;
 }
 
-function decZpgC6C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dec_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xc6 << 3) | 1;
+	cpu.state++;
 }
 
-function decZpgC6C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xc6 << 3) | 2;
+function dec_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function decZpgC6C2(cpu: Sfotty): void {
+function dec_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDec();
-	cpu.state = (0xc6 << 3) | 3;
+	cpu.state++;
 }
 
-function decZpgC6C3(cpu: Sfotty): void {
+function dec_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function dcpZpgC7C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xc7 << 3) | 1;
+	cpu.state++;
 }
 
-function dcpZpgC7C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xc7 << 3) | 2;
+function dcp_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function dcpZpgC7C2(cpu: Sfotty): void {
+function dcp_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDcp();
-	cpu.state = (0xc7 << 3) | 3;
+	cpu.state++;
 }
 
-function dcpZpgC7C3(cpu: Sfotty): void {
+function dcp_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function inyImpC8C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function iny_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opIncY();
 	cpu.state = DECODE;
 }
 
-function cmpImmC9C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opCmp();
 	cpu.state = DECODE;
 }
 
-function dexImpCAC0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function dex_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opDecX();
 	cpu.state = DECODE;
 }
 
-function sbxImmCBC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbx_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opSbx();
 	cpu.state = DECODE;
 }
 
-function cpyAbsCCC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cpy_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xcc << 3) | 1;
+	cpu.state++;
 }
 
-function cpyAbsCCC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cpy_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xcc << 3) | 2;
+	cpu.state++;
 }
 
-function cpyAbsCCC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cpy_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCpy();
 	cpu.state = DECODE;
 }
 
-function cmpAbsCDC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xcd << 3) | 1;
+	cpu.state++;
 }
 
-function cmpAbsCDC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xcd << 3) | 2;
+	cpu.state++;
 }
 
-function cmpAbsCDC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCmp();
 	cpu.state = DECODE;
 }
 
-function decAbsCEC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dec_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xce << 3) | 1;
+	cpu.state++;
 }
 
-function decAbsCEC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dec_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xce << 3) | 2;
+	cpu.state++;
 }
 
-function decAbsCEC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xce << 3) | 3;
+function dec_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function decAbsCEC3(cpu: Sfotty): void {
+function dec_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDec();
-	cpu.state = (0xce << 3) | 4;
+	cpu.state++;
 }
 
-function decAbsCEC4(cpu: Sfotty): void {
+function dec_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function dcpAbsCFC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xcf << 3) | 1;
+	cpu.state++;
 }
 
-function dcpAbsCFC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xcf << 3) | 2;
+	cpu.state++;
 }
 
-function dcpAbsCFC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xcf << 3) | 3;
+function dcp_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function dcpAbsCFC3(cpu: Sfotty): void {
+function dcp_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDcp();
-	cpu.state = (0xcf << 3) | 4;
+	cpu.state++;
 }
 
-function dcpAbsCFC4(cpu: Sfotty): void {
+function dcp_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function bneRelD0C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function bne_rel_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	if (!cpu.opCondNe()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0xd0 << 3) | 1;
+	cpu.state++;
 }
 
-function bneRelD0C1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bne_rel_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	if (!cpu.opBranchOffset()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0xd0 << 3) | 2;
+	cpu.state++;
 }
 
-function bneRelD0C2(cpu: Sfotty): void {
-	cpu.opReadPc();
+function bne_rel_3(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opFixPch();
 	cpu.state = DECODE;
 }
 
-function cmpInyD1C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xd1 << 3) | 1;
+	cpu.state++;
 }
 
-function cmpInyD1C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xd1 << 3) | 2;
+function cmp_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function cmpInyD1C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function cmp_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0xd1 << 3) | 3;
+	cpu.state++;
 }
 
-function cmpInyD1C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xd1 << 3) | 4;
+		cpu.state++;
 	} else {
 		cpu.opCmp();
 		cpu.state = DECODE;
@@ -4512,197 +4278,156 @@ function cmpInyD1C3(cpu: Sfotty): void {
 	return;
 }
 
-function cmpInyD1C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCmp();
 	cpu.state = DECODE;
 }
 
-function cimImpD2C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0xd2 << 3) | 1;
-}
-
-function cimImpD2C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0xd2 << 3) | 2;
-}
-
-function cimImpD2C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0xd2 << 3) | 3;
-}
-
-function cimImpD2C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0xd2 << 3) | 4;
-}
-
-function cimImpD2C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0xd2 << 3) | 4;
-}
-
-function dcpInyD3C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xd3 << 3) | 1;
+	cpu.state++;
 }
 
-function dcpInyD3C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xd3 << 3) | 2;
+function dcp_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function dcpInyD3C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function dcp_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0xd3 << 3) | 3;
+	cpu.state++;
 }
 
-function dcpInyD3C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function dcp_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0xd3 << 3) | 4;
+	cpu.state++;
 }
 
-function dcpInyD3C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xd3 << 3) | 5;
+function dcp_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function dcpInyD3C5(cpu: Sfotty): void {
+function dcp_iny_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDcp();
-	cpu.state = (0xd3 << 3) | 6;
+	cpu.state++;
 }
 
-function dcpInyD3C6(cpu: Sfotty): void {
+function dcp_iny_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpxD4C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xd4 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpxD4C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0xd4 << 3) | 2;
+	cpu.state++;
 }
 
-function nopZpxD4C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function cmpZpxD5C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0xd5 << 3) | 1;
-}
-
-function cmpZpxD5C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddX();
-	cpu.state = (0xd5 << 3) | 2;
-}
-
-function cmpZpxD5C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCmp();
 	cpu.state = DECODE;
 }
 
-function decZpxD6C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dec_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xd6 << 3) | 1;
+	cpu.state++;
 }
 
-function decZpxD6C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function dec_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0xd6 << 3) | 2;
+	cpu.state++;
 }
 
-function decZpxD6C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xd6 << 3) | 3;
+function dec_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function decZpxD6C3(cpu: Sfotty): void {
+function dec_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDec();
-	cpu.state = (0xd6 << 3) | 4;
+	cpu.state++;
 }
 
-function decZpxD6C4(cpu: Sfotty): void {
+function dec_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function dcpZpxD7C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xd7 << 3) | 1;
+	cpu.state++;
 }
 
-function dcpZpxD7C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function dcp_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0xd7 << 3) | 2;
+	cpu.state++;
 }
 
-function dcpZpxD7C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xd7 << 3) | 3;
+function dcp_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function dcpZpxD7C3(cpu: Sfotty): void {
+function dcp_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDcp();
-	cpu.state = (0xd7 << 3) | 4;
+	cpu.state++;
 }
 
-function dcpZpxD7C4(cpu: Sfotty): void {
+function dcp_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function cldImpD8C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function cld_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opClearDecimal();
 	cpu.state = DECODE;
 }
 
-function cmpAbyD9C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xd9 << 3) | 1;
+	cpu.state++;
 }
 
-function cmpAbyD9C1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0xd9 << 3) | 2;
+	cpu.state++;
 }
 
-function cmpAbyD9C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xd9 << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opCmp();
 		cpu.state = DECODE;
@@ -4710,101 +4435,68 @@ function cmpAbyD9C2(cpu: Sfotty): void {
 	return;
 }
 
-function cmpAbyD9C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCmp();
 	cpu.state = DECODE;
 }
 
-function nopImpDAC0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.state = DECODE;
-}
-
-function dcpAbyDBC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xdb << 3) | 1;
+	cpu.state++;
 }
 
-function dcpAbyDBC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0xdb << 3) | 2;
+	cpu.state++;
 }
 
-function dcpAbyDBC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function dcp_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0xdb << 3) | 3;
+	cpu.state++;
 }
 
-function dcpAbyDBC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xdb << 3) | 4;
+function dcp_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function dcpAbyDBC4(cpu: Sfotty): void {
+function dcp_aby_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDcp();
-	cpu.state = (0xdb << 3) | 5;
+	cpu.state++;
 }
 
-function dcpAbyDBC5(cpu: Sfotty): void {
+function dcp_aby_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopAbxDCC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xdc << 3) | 1;
+	cpu.state++;
 }
 
-function nopAbxDCC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cmp_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0xdc << 3) | 2;
+	cpu.state++;
 }
 
-function nopAbxDCC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xdc << 3) | 3;
-	} else {
-		cpu.opNop();
-		cpu.state = DECODE;
-	}
-	return;
-}
-
-function nopAbxDCC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function cmpAbxDDC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0xdd << 3) | 1;
-}
-
-function cmpAbxDDC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrHighFromDr();
-	cpu.opAddXCarry();
-	cpu.state = (0xdd << 3) | 2;
-}
-
-function cmpAbxDDC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	if (cpu.crossed) {
-		cpu.opIncAddrHigh();
-		cpu.state = (0xdd << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opCmp();
 		cpu.state = DECODE;
@@ -4812,391 +4504,393 @@ function cmpAbxDDC2(cpu: Sfotty): void {
 	return;
 }
 
-function cmpAbxDDC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cmp_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCmp();
 	cpu.state = DECODE;
 }
 
-function decAbxDEC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dec_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xde << 3) | 1;
+	cpu.state++;
 }
 
-function decAbxDEC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dec_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0xde << 3) | 2;
+	cpu.state++;
 }
 
-function decAbxDEC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function dec_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0xde << 3) | 3;
+	cpu.state++;
 }
 
-function decAbxDEC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xde << 3) | 4;
+function dec_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function decAbxDEC4(cpu: Sfotty): void {
+function dec_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDec();
-	cpu.state = (0xde << 3) | 5;
+	cpu.state++;
 }
 
-function decAbxDEC5(cpu: Sfotty): void {
+function dec_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function dcpAbxDFC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xdf << 3) | 1;
+	cpu.state++;
 }
 
-function dcpAbxDFC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function dcp_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0xdf << 3) | 2;
+	cpu.state++;
 }
 
-function dcpAbxDFC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function dcp_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0xdf << 3) | 3;
+	cpu.state++;
 }
 
-function dcpAbxDFC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xdf << 3) | 4;
+function dcp_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function dcpAbxDFC4(cpu: Sfotty): void {
+function dcp_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opDcp();
-	cpu.state = (0xdf << 3) | 5;
+	cpu.state++;
 }
 
-function dcpAbxDFC5(cpu: Sfotty): void {
+function dcp_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function cpxImmE0C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cpx_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opCpx();
 	cpu.state = DECODE;
 }
 
-function sbcInxE1C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xe1 << 3) | 1;
+	cpu.state++;
 }
 
-function sbcInxE1C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0xe1 << 3) | 2;
+	cpu.state++;
 }
 
-function sbcInxE1C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xe1 << 3) | 3;
+function sbc_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function sbcInxE1C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0xe1 << 3) | 4;
+function sbc_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function sbcInxE1C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSbc();
 	cpu.state = DECODE;
 }
 
-function nopImmE2C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function isbInxE3C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_inx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xe3 << 3) | 1;
+	cpu.state++;
 }
 
-function isbInxE3C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function isb_inx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
 	cpu.opDrFromAl();
-	cpu.state = (0xe3 << 3) | 2;
+	cpu.state++;
 }
 
-function isbInxE3C2(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xe3 << 3) | 3;
+function isb_inx_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function isbInxE3C3(cpu: Sfotty): void {
-	cpu.opReadPointer();
-	cpu.state = (0xe3 << 3) | 4;
+function isb_inx_4(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
+	cpu.state++;
 }
 
-function isbInxE3C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xe3 << 3) | 5;
+function isb_inx_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function isbInxE3C5(cpu: Sfotty): void {
+function isb_inx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opIsb();
-	cpu.state = (0xe3 << 3) | 6;
+	cpu.state++;
 }
 
-function isbInxE3C6(cpu: Sfotty): void {
+function isb_inx_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function cpxZpgE4C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cpx_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xe4 << 3) | 1;
+	cpu.state++;
 }
 
-function cpxZpgE4C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cpx_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCpx();
 	cpu.state = DECODE;
 }
 
-function sbcZpgE5C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xe5 << 3) | 1;
+	cpu.state++;
 }
 
-function sbcZpgE5C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSbc();
 	cpu.state = DECODE;
 }
 
-function incZpgE6C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function inc_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xe6 << 3) | 1;
+	cpu.state++;
 }
 
-function incZpgE6C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xe6 << 3) | 2;
+function inc_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function incZpgE6C2(cpu: Sfotty): void {
+function inc_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opInc();
-	cpu.state = (0xe6 << 3) | 3;
+	cpu.state++;
 }
 
-function incZpgE6C3(cpu: Sfotty): void {
+function inc_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function isbZpgE7C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_zpg_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xe7 << 3) | 1;
+	cpu.state++;
 }
 
-function isbZpgE7C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xe7 << 3) | 2;
+function isb_zpg_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function isbZpgE7C2(cpu: Sfotty): void {
+function isb_zpg_3(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opIsb();
-	cpu.state = (0xe7 << 3) | 3;
+	cpu.state++;
 }
 
-function isbZpgE7C3(cpu: Sfotty): void {
+function isb_zpg_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function inxImpE8C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function inx_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opIncX();
 	cpu.state = DECODE;
 }
 
-function sbcImmE9C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_imm_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	cpu.opSbc();
 	cpu.state = DECODE;
 }
 
-function nopImpEAC0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.state = DECODE;
-}
-
-function sbcImmEBC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opSbc();
-	cpu.state = DECODE;
-}
-
-function cpxAbsECC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cpx_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xec << 3) | 1;
+	cpu.state++;
 }
 
-function cpxAbsECC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function cpx_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xec << 3) | 2;
+	cpu.state++;
 }
 
-function cpxAbsECC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function cpx_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opCpx();
 	cpu.state = DECODE;
 }
 
-function sbcAbsEDC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xed << 3) | 1;
+	cpu.state++;
 }
 
-function sbcAbsEDC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xed << 3) | 2;
+	cpu.state++;
 }
 
-function sbcAbsEDC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSbc();
 	cpu.state = DECODE;
 }
 
-function incAbsEEC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function inc_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xee << 3) | 1;
+	cpu.state++;
 }
 
-function incAbsEEC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function inc_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xee << 3) | 2;
+	cpu.state++;
 }
 
-function incAbsEEC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xee << 3) | 3;
+function inc_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function incAbsEEC3(cpu: Sfotty): void {
+function inc_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opInc();
-	cpu.state = (0xee << 3) | 4;
+	cpu.state++;
 }
 
-function incAbsEEC4(cpu: Sfotty): void {
+function inc_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function isbAbsEFC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_abs_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xef << 3) | 1;
+	cpu.state++;
 }
 
-function isbAbsEFC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_abs_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
-	cpu.state = (0xef << 3) | 2;
+	cpu.state++;
 }
 
-function isbAbsEFC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xef << 3) | 3;
+function isb_abs_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function isbAbsEFC3(cpu: Sfotty): void {
+function isb_abs_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opIsb();
-	cpu.state = (0xef << 3) | 4;
+	cpu.state++;
 }
 
-function isbAbsEFC4(cpu: Sfotty): void {
+function isb_abs_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function beqRelF0C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function beq_rel_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
+	cpu.opPoll();
 	if (!cpu.opCondEq()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0xf0 << 3) | 1;
+	cpu.state++;
 }
 
-function beqRelF0C1(cpu: Sfotty): void {
-	cpu.opReadPc();
+function beq_rel_2(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
 	if (!cpu.opBranchOffset()) {
 		cpu.state = DECODE;
 		return;
 	}
-	cpu.state = (0xf0 << 3) | 2;
+	cpu.state++;
 }
 
-function beqRelF0C2(cpu: Sfotty): void {
-	cpu.opReadPc();
+function beq_rel_3(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opFixPch();
 	cpu.state = DECODE;
 }
 
-function sbcInyF1C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xf1 << 3) | 1;
+	cpu.state++;
 }
 
-function sbcInyF1C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xf1 << 3) | 2;
+function sbc_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function sbcInyF1C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function sbc_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0xf1 << 3) | 3;
+	cpu.state++;
 }
 
-function sbcInyF1C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xf1 << 3) | 4;
+		cpu.state++;
 	} else {
 		cpu.opSbc();
 		cpu.state = DECODE;
@@ -5204,197 +4898,156 @@ function sbcInyF1C3(cpu: Sfotty): void {
 	return;
 }
 
-function sbcInyF1C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSbc();
 	cpu.state = DECODE;
 }
 
-function cimImpF2C0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.opAddrFFFF();
-	cpu.state = (0xf2 << 3) | 1;
-}
-
-function cimImpF2C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0xf2 << 3) | 2;
-}
-
-function cimImpF2C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFE();
-	cpu.state = (0xf2 << 3) | 3;
-}
-
-function cimImpF2C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddrFFFF();
-	cpu.state = (0xf2 << 3) | 4;
-}
-
-function cimImpF2C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opJam();
-	cpu.state = (0xf2 << 3) | 4;
-}
-
-function isbInyF3C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_iny_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xf3 << 3) | 1;
+	cpu.state++;
 }
 
-function isbInyF3C1(cpu: Sfotty): void {
-	cpu.opReadPointerInc();
-	cpu.state = (0xf3 << 3) | 2;
+function isb_iny_2(cpu: Sfotty): void {
+	if (!cpu.opReadPointerInc()) return;
+	cpu.state++;
 }
 
-function isbInyF3C2(cpu: Sfotty): void {
-	cpu.opReadPointer();
+function isb_iny_3(cpu: Sfotty): void {
+	if (!cpu.opReadPointer()) return;
 	cpu.opAddYCarry();
-	cpu.state = (0xf3 << 3) | 3;
+	cpu.state++;
 }
 
-function isbInyF3C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function isb_iny_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0xf3 << 3) | 4;
+	cpu.state++;
 }
 
-function isbInyF3C4(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xf3 << 3) | 5;
+function isb_iny_5(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function isbInyF3C5(cpu: Sfotty): void {
+function isb_iny_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opIsb();
-	cpu.state = (0xf3 << 3) | 6;
+	cpu.state++;
 }
 
-function isbInyF3C6(cpu: Sfotty): void {
+function isb_iny_7(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopZpxF4C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xf4 << 3) | 1;
+	cpu.state++;
 }
 
-function nopZpxF4C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0xf4 << 3) | 2;
+	cpu.state++;
 }
 
-function nopZpxF4C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function sbcZpxF5C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0xf5 << 3) | 1;
-}
-
-function sbcZpxF5C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opAddX();
-	cpu.state = (0xf5 << 3) | 2;
-}
-
-function sbcZpxF5C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSbc();
 	cpu.state = DECODE;
 }
 
-function incZpxF6C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function inc_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xf6 << 3) | 1;
+	cpu.state++;
 }
 
-function incZpxF6C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function inc_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0xf6 << 3) | 2;
+	cpu.state++;
 }
 
-function incZpxF6C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xf6 << 3) | 3;
+function inc_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function incZpxF6C3(cpu: Sfotty): void {
+function inc_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opInc();
-	cpu.state = (0xf6 << 3) | 4;
+	cpu.state++;
 }
 
-function incZpxF6C4(cpu: Sfotty): void {
+function inc_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function isbZpxF7C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_zpx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xf7 << 3) | 1;
+	cpu.state++;
 }
 
-function isbZpxF7C1(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function isb_zpx_2(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opAddX();
-	cpu.state = (0xf7 << 3) | 2;
+	cpu.state++;
 }
 
-function isbZpxF7C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xf7 << 3) | 3;
+function isb_zpx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function isbZpxF7C3(cpu: Sfotty): void {
+function isb_zpx_4(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opIsb();
-	cpu.state = (0xf7 << 3) | 4;
+	cpu.state++;
 }
 
-function isbZpxF7C4(cpu: Sfotty): void {
+function isb_zpx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function sedImpF8C0(cpu: Sfotty): void {
-	cpu.opReadPc();
+function sed_imp_1(cpu: Sfotty): void {
+	if (!cpu.opReadPc()) return;
+	cpu.opPoll();
 	cpu.opSetDecimal();
 	cpu.state = DECODE;
 }
 
-function sbcAbyF9C0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xf9 << 3) | 1;
+	cpu.state++;
 }
 
-function sbcAbyF9C1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0xf9 << 3) | 2;
+	cpu.state++;
 }
 
-function sbcAbyF9C2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xf9 << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opSbc();
 		cpu.state = DECODE;
@@ -5402,101 +5055,68 @@ function sbcAbyF9C2(cpu: Sfotty): void {
 	return;
 }
 
-function sbcAbyF9C3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSbc();
 	cpu.state = DECODE;
 }
 
-function nopImpFAC0(cpu: Sfotty): void {
-	cpu.opReadPc();
-	cpu.state = DECODE;
-}
-
-function isbAbyFBC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_aby_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xfb << 3) | 1;
+	cpu.state++;
 }
 
-function isbAbyFBC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_aby_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddYCarry();
-	cpu.state = (0xfb << 3) | 2;
+	cpu.state++;
 }
 
-function isbAbyFBC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function isb_aby_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0xfb << 3) | 3;
+	cpu.state++;
 }
 
-function isbAbyFBC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xfb << 3) | 4;
+function isb_aby_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function isbAbyFBC4(cpu: Sfotty): void {
+function isb_aby_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opIsb();
-	cpu.state = (0xfb << 3) | 5;
+	cpu.state++;
 }
 
-function isbAbyFBC5(cpu: Sfotty): void {
+function isb_aby_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function nopAbxFCC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xfc << 3) | 1;
+	cpu.state++;
 }
 
-function nopAbxFCC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function sbc_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0xfc << 3) | 2;
+	cpu.state++;
 }
 
-function nopAbxFCC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	if (cpu.crossed) {
 		cpu.opIncAddrHigh();
-		cpu.state = (0xfc << 3) | 3;
-	} else {
-		cpu.opNop();
-		cpu.state = DECODE;
-	}
-	return;
-}
-
-function nopAbxFCC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.opNop();
-	cpu.state = DECODE;
-}
-
-function sbcAbxFDC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrFromDr();
-	cpu.state = (0xfd << 3) | 1;
-}
-
-function sbcAbxFDC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
-	cpu.opAddrHighFromDr();
-	cpu.opAddXCarry();
-	cpu.state = (0xfd << 3) | 2;
-}
-
-function sbcAbxFDC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	if (cpu.crossed) {
-		cpu.opIncAddrHigh();
-		cpu.state = (0xfd << 3) | 3;
+		cpu.state++;
 	} else {
 		cpu.opSbc();
 		cpu.state = DECODE;
@@ -5504,1017 +5124,2404 @@ function sbcAbxFDC2(cpu: Sfotty): void {
 	return;
 }
 
-function sbcAbxFDC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function sbc_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.opPoll();
 	cpu.opSbc();
 	cpu.state = DECODE;
 }
 
-function incAbxFEC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function inc_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xfe << 3) | 1;
+	cpu.state++;
 }
 
-function incAbxFEC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function inc_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0xfe << 3) | 2;
+	cpu.state++;
 }
 
-function incAbxFEC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function inc_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0xfe << 3) | 3;
+	cpu.state++;
 }
 
-function incAbxFEC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xfe << 3) | 4;
+function inc_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function incAbxFEC4(cpu: Sfotty): void {
+function inc_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opInc();
-	cpu.state = (0xfe << 3) | 5;
+	cpu.state++;
 }
 
-function incAbxFEC5(cpu: Sfotty): void {
+function inc_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
-function isbAbxFFC0(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_abx_1(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrFromDr();
-	cpu.state = (0xff << 3) | 1;
+	cpu.state++;
 }
 
-function isbAbxFFC1(cpu: Sfotty): void {
-	cpu.opReadOperand();
+function isb_abx_2(cpu: Sfotty): void {
+	if (!cpu.opReadOperand()) return;
 	cpu.opAddrHighFromDr();
 	cpu.opAddXCarry();
-	cpu.state = (0xff << 3) | 2;
+	cpu.state++;
 }
 
-function isbAbxFFC2(cpu: Sfotty): void {
-	cpu.opReadAddr();
+function isb_abx_3(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
 	cpu.opFixAddrHigh();
-	cpu.state = (0xff << 3) | 3;
+	cpu.state++;
 }
 
-function isbAbxFFC3(cpu: Sfotty): void {
-	cpu.opReadAddr();
-	cpu.state = (0xff << 3) | 4;
+function isb_abx_4(cpu: Sfotty): void {
+	if (!cpu.opReadAddr()) return;
+	cpu.state++;
 }
 
-function isbAbxFFC4(cpu: Sfotty): void {
+function isb_abx_5(cpu: Sfotty): void {
 	cpu.opWriteAddr();
 	cpu.opIsb();
-	cpu.state = (0xff << 3) | 5;
+	cpu.state++;
 }
 
-function isbAbxFFC5(cpu: Sfotty): void {
+function isb_abx_6(cpu: Sfotty): void {
 	cpu.opWriteAddr();
+	cpu.opPoll();
 	cpu.state = DECODE;
 }
 
 /**
- * The microcode dispatch table, indexed by microstate. Pre-filled densely with
- * badState so V8 keeps it a fast packed array (no holes → no dictionary mode)
+ * The microcode dispatch table, indexed by microstate ((opcode << 3) | cycle).
+ * Every slot is filled — cycles past an instruction's length get badState — so
+ * the array stays densely packed (no holes → V8 keeps it a fast packed array)
  * and any jump to an unwired state throws instead of calling undefined.
  */
-export const MICROCODE: Step[] = new Array<Step>(DECODE + 1).fill(badState);
-MICROCODE[DECODE] = decode;
-MICROCODE[(0x00 << 3) | 0] = brkImp00C0;
-MICROCODE[(0x00 << 3) | 1] = brkImp00C1;
-MICROCODE[(0x00 << 3) | 2] = brkImp00C2;
-MICROCODE[(0x00 << 3) | 3] = brkImp00C3;
-MICROCODE[(0x00 << 3) | 4] = brkImp00C4;
-MICROCODE[(0x00 << 3) | 5] = brkImp00C5;
-MICROCODE[(0x01 << 3) | 0] = oraInx01C0;
-MICROCODE[(0x01 << 3) | 1] = oraInx01C1;
-MICROCODE[(0x01 << 3) | 2] = oraInx01C2;
-MICROCODE[(0x01 << 3) | 3] = oraInx01C3;
-MICROCODE[(0x01 << 3) | 4] = oraInx01C4;
-MICROCODE[(0x02 << 3) | 0] = cimImp02C0;
-MICROCODE[(0x02 << 3) | 1] = cimImp02C1;
-MICROCODE[(0x02 << 3) | 2] = cimImp02C2;
-MICROCODE[(0x02 << 3) | 3] = cimImp02C3;
-MICROCODE[(0x02 << 3) | 4] = cimImp02C4;
-MICROCODE[(0x03 << 3) | 0] = sloInx03C0;
-MICROCODE[(0x03 << 3) | 1] = sloInx03C1;
-MICROCODE[(0x03 << 3) | 2] = sloInx03C2;
-MICROCODE[(0x03 << 3) | 3] = sloInx03C3;
-MICROCODE[(0x03 << 3) | 4] = sloInx03C4;
-MICROCODE[(0x03 << 3) | 5] = sloInx03C5;
-MICROCODE[(0x03 << 3) | 6] = sloInx03C6;
-MICROCODE[(0x04 << 3) | 0] = nopZpg04C0;
-MICROCODE[(0x04 << 3) | 1] = nopZpg04C1;
-MICROCODE[(0x05 << 3) | 0] = oraZpg05C0;
-MICROCODE[(0x05 << 3) | 1] = oraZpg05C1;
-MICROCODE[(0x06 << 3) | 0] = aslZpg06C0;
-MICROCODE[(0x06 << 3) | 1] = aslZpg06C1;
-MICROCODE[(0x06 << 3) | 2] = aslZpg06C2;
-MICROCODE[(0x06 << 3) | 3] = aslZpg06C3;
-MICROCODE[(0x07 << 3) | 0] = sloZpg07C0;
-MICROCODE[(0x07 << 3) | 1] = sloZpg07C1;
-MICROCODE[(0x07 << 3) | 2] = sloZpg07C2;
-MICROCODE[(0x07 << 3) | 3] = sloZpg07C3;
-MICROCODE[(0x08 << 3) | 0] = phpImp08C0;
-MICROCODE[(0x08 << 3) | 1] = phpImp08C1;
-MICROCODE[(0x09 << 3) | 0] = oraImm09C0;
-MICROCODE[(0x0a << 3) | 0] = aslAcc0AC0;
-MICROCODE[(0x0b << 3) | 0] = ancImm0BC0;
-MICROCODE[(0x0c << 3) | 0] = nopAbs0CC0;
-MICROCODE[(0x0c << 3) | 1] = nopAbs0CC1;
-MICROCODE[(0x0c << 3) | 2] = nopAbs0CC2;
-MICROCODE[(0x0d << 3) | 0] = oraAbs0DC0;
-MICROCODE[(0x0d << 3) | 1] = oraAbs0DC1;
-MICROCODE[(0x0d << 3) | 2] = oraAbs0DC2;
-MICROCODE[(0x0e << 3) | 0] = aslAbs0EC0;
-MICROCODE[(0x0e << 3) | 1] = aslAbs0EC1;
-MICROCODE[(0x0e << 3) | 2] = aslAbs0EC2;
-MICROCODE[(0x0e << 3) | 3] = aslAbs0EC3;
-MICROCODE[(0x0e << 3) | 4] = aslAbs0EC4;
-MICROCODE[(0x0f << 3) | 0] = sloAbs0FC0;
-MICROCODE[(0x0f << 3) | 1] = sloAbs0FC1;
-MICROCODE[(0x0f << 3) | 2] = sloAbs0FC2;
-MICROCODE[(0x0f << 3) | 3] = sloAbs0FC3;
-MICROCODE[(0x0f << 3) | 4] = sloAbs0FC4;
-MICROCODE[(0x10 << 3) | 0] = bplRel10C0;
-MICROCODE[(0x10 << 3) | 1] = bplRel10C1;
-MICROCODE[(0x10 << 3) | 2] = bplRel10C2;
-MICROCODE[(0x11 << 3) | 0] = oraIny11C0;
-MICROCODE[(0x11 << 3) | 1] = oraIny11C1;
-MICROCODE[(0x11 << 3) | 2] = oraIny11C2;
-MICROCODE[(0x11 << 3) | 3] = oraIny11C3;
-MICROCODE[(0x11 << 3) | 4] = oraIny11C4;
-MICROCODE[(0x12 << 3) | 0] = cimImp12C0;
-MICROCODE[(0x12 << 3) | 1] = cimImp12C1;
-MICROCODE[(0x12 << 3) | 2] = cimImp12C2;
-MICROCODE[(0x12 << 3) | 3] = cimImp12C3;
-MICROCODE[(0x12 << 3) | 4] = cimImp12C4;
-MICROCODE[(0x13 << 3) | 0] = sloIny13C0;
-MICROCODE[(0x13 << 3) | 1] = sloIny13C1;
-MICROCODE[(0x13 << 3) | 2] = sloIny13C2;
-MICROCODE[(0x13 << 3) | 3] = sloIny13C3;
-MICROCODE[(0x13 << 3) | 4] = sloIny13C4;
-MICROCODE[(0x13 << 3) | 5] = sloIny13C5;
-MICROCODE[(0x13 << 3) | 6] = sloIny13C6;
-MICROCODE[(0x14 << 3) | 0] = nopZpx14C0;
-MICROCODE[(0x14 << 3) | 1] = nopZpx14C1;
-MICROCODE[(0x14 << 3) | 2] = nopZpx14C2;
-MICROCODE[(0x15 << 3) | 0] = oraZpx15C0;
-MICROCODE[(0x15 << 3) | 1] = oraZpx15C1;
-MICROCODE[(0x15 << 3) | 2] = oraZpx15C2;
-MICROCODE[(0x16 << 3) | 0] = aslZpx16C0;
-MICROCODE[(0x16 << 3) | 1] = aslZpx16C1;
-MICROCODE[(0x16 << 3) | 2] = aslZpx16C2;
-MICROCODE[(0x16 << 3) | 3] = aslZpx16C3;
-MICROCODE[(0x16 << 3) | 4] = aslZpx16C4;
-MICROCODE[(0x17 << 3) | 0] = sloZpx17C0;
-MICROCODE[(0x17 << 3) | 1] = sloZpx17C1;
-MICROCODE[(0x17 << 3) | 2] = sloZpx17C2;
-MICROCODE[(0x17 << 3) | 3] = sloZpx17C3;
-MICROCODE[(0x17 << 3) | 4] = sloZpx17C4;
-MICROCODE[(0x18 << 3) | 0] = clcImp18C0;
-MICROCODE[(0x19 << 3) | 0] = oraAby19C0;
-MICROCODE[(0x19 << 3) | 1] = oraAby19C1;
-MICROCODE[(0x19 << 3) | 2] = oraAby19C2;
-MICROCODE[(0x19 << 3) | 3] = oraAby19C3;
-MICROCODE[(0x1a << 3) | 0] = nopImp1AC0;
-MICROCODE[(0x1b << 3) | 0] = sloAby1BC0;
-MICROCODE[(0x1b << 3) | 1] = sloAby1BC1;
-MICROCODE[(0x1b << 3) | 2] = sloAby1BC2;
-MICROCODE[(0x1b << 3) | 3] = sloAby1BC3;
-MICROCODE[(0x1b << 3) | 4] = sloAby1BC4;
-MICROCODE[(0x1b << 3) | 5] = sloAby1BC5;
-MICROCODE[(0x1c << 3) | 0] = nopAbx1CC0;
-MICROCODE[(0x1c << 3) | 1] = nopAbx1CC1;
-MICROCODE[(0x1c << 3) | 2] = nopAbx1CC2;
-MICROCODE[(0x1c << 3) | 3] = nopAbx1CC3;
-MICROCODE[(0x1d << 3) | 0] = oraAbx1DC0;
-MICROCODE[(0x1d << 3) | 1] = oraAbx1DC1;
-MICROCODE[(0x1d << 3) | 2] = oraAbx1DC2;
-MICROCODE[(0x1d << 3) | 3] = oraAbx1DC3;
-MICROCODE[(0x1e << 3) | 0] = aslAbx1EC0;
-MICROCODE[(0x1e << 3) | 1] = aslAbx1EC1;
-MICROCODE[(0x1e << 3) | 2] = aslAbx1EC2;
-MICROCODE[(0x1e << 3) | 3] = aslAbx1EC3;
-MICROCODE[(0x1e << 3) | 4] = aslAbx1EC4;
-MICROCODE[(0x1e << 3) | 5] = aslAbx1EC5;
-MICROCODE[(0x1f << 3) | 0] = sloAbx1FC0;
-MICROCODE[(0x1f << 3) | 1] = sloAbx1FC1;
-MICROCODE[(0x1f << 3) | 2] = sloAbx1FC2;
-MICROCODE[(0x1f << 3) | 3] = sloAbx1FC3;
-MICROCODE[(0x1f << 3) | 4] = sloAbx1FC4;
-MICROCODE[(0x1f << 3) | 5] = sloAbx1FC5;
-MICROCODE[(0x20 << 3) | 0] = jsrAbs20C0;
-MICROCODE[(0x20 << 3) | 1] = jsrAbs20C1;
-MICROCODE[(0x20 << 3) | 2] = jsrAbs20C2;
-MICROCODE[(0x20 << 3) | 3] = jsrAbs20C3;
-MICROCODE[(0x20 << 3) | 4] = jsrAbs20C4;
-MICROCODE[(0x21 << 3) | 0] = andInx21C0;
-MICROCODE[(0x21 << 3) | 1] = andInx21C1;
-MICROCODE[(0x21 << 3) | 2] = andInx21C2;
-MICROCODE[(0x21 << 3) | 3] = andInx21C3;
-MICROCODE[(0x21 << 3) | 4] = andInx21C4;
-MICROCODE[(0x22 << 3) | 0] = cimImp22C0;
-MICROCODE[(0x22 << 3) | 1] = cimImp22C1;
-MICROCODE[(0x22 << 3) | 2] = cimImp22C2;
-MICROCODE[(0x22 << 3) | 3] = cimImp22C3;
-MICROCODE[(0x22 << 3) | 4] = cimImp22C4;
-MICROCODE[(0x23 << 3) | 0] = rlaInx23C0;
-MICROCODE[(0x23 << 3) | 1] = rlaInx23C1;
-MICROCODE[(0x23 << 3) | 2] = rlaInx23C2;
-MICROCODE[(0x23 << 3) | 3] = rlaInx23C3;
-MICROCODE[(0x23 << 3) | 4] = rlaInx23C4;
-MICROCODE[(0x23 << 3) | 5] = rlaInx23C5;
-MICROCODE[(0x23 << 3) | 6] = rlaInx23C6;
-MICROCODE[(0x24 << 3) | 0] = bitZpg24C0;
-MICROCODE[(0x24 << 3) | 1] = bitZpg24C1;
-MICROCODE[(0x25 << 3) | 0] = andZpg25C0;
-MICROCODE[(0x25 << 3) | 1] = andZpg25C1;
-MICROCODE[(0x26 << 3) | 0] = rolZpg26C0;
-MICROCODE[(0x26 << 3) | 1] = rolZpg26C1;
-MICROCODE[(0x26 << 3) | 2] = rolZpg26C2;
-MICROCODE[(0x26 << 3) | 3] = rolZpg26C3;
-MICROCODE[(0x27 << 3) | 0] = rlaZpg27C0;
-MICROCODE[(0x27 << 3) | 1] = rlaZpg27C1;
-MICROCODE[(0x27 << 3) | 2] = rlaZpg27C2;
-MICROCODE[(0x27 << 3) | 3] = rlaZpg27C3;
-MICROCODE[(0x28 << 3) | 0] = plpImp28C0;
-MICROCODE[(0x28 << 3) | 1] = plpImp28C1;
-MICROCODE[(0x28 << 3) | 2] = plpImp28C2;
-MICROCODE[(0x29 << 3) | 0] = andImm29C0;
-MICROCODE[(0x2a << 3) | 0] = rolAcc2AC0;
-MICROCODE[(0x2b << 3) | 0] = ancImm2BC0;
-MICROCODE[(0x2c << 3) | 0] = bitAbs2CC0;
-MICROCODE[(0x2c << 3) | 1] = bitAbs2CC1;
-MICROCODE[(0x2c << 3) | 2] = bitAbs2CC2;
-MICROCODE[(0x2d << 3) | 0] = andAbs2DC0;
-MICROCODE[(0x2d << 3) | 1] = andAbs2DC1;
-MICROCODE[(0x2d << 3) | 2] = andAbs2DC2;
-MICROCODE[(0x2e << 3) | 0] = rolAbs2EC0;
-MICROCODE[(0x2e << 3) | 1] = rolAbs2EC1;
-MICROCODE[(0x2e << 3) | 2] = rolAbs2EC2;
-MICROCODE[(0x2e << 3) | 3] = rolAbs2EC3;
-MICROCODE[(0x2e << 3) | 4] = rolAbs2EC4;
-MICROCODE[(0x2f << 3) | 0] = rlaAbs2FC0;
-MICROCODE[(0x2f << 3) | 1] = rlaAbs2FC1;
-MICROCODE[(0x2f << 3) | 2] = rlaAbs2FC2;
-MICROCODE[(0x2f << 3) | 3] = rlaAbs2FC3;
-MICROCODE[(0x2f << 3) | 4] = rlaAbs2FC4;
-MICROCODE[(0x30 << 3) | 0] = bmiRel30C0;
-MICROCODE[(0x30 << 3) | 1] = bmiRel30C1;
-MICROCODE[(0x30 << 3) | 2] = bmiRel30C2;
-MICROCODE[(0x31 << 3) | 0] = andIny31C0;
-MICROCODE[(0x31 << 3) | 1] = andIny31C1;
-MICROCODE[(0x31 << 3) | 2] = andIny31C2;
-MICROCODE[(0x31 << 3) | 3] = andIny31C3;
-MICROCODE[(0x31 << 3) | 4] = andIny31C4;
-MICROCODE[(0x32 << 3) | 0] = cimImp32C0;
-MICROCODE[(0x32 << 3) | 1] = cimImp32C1;
-MICROCODE[(0x32 << 3) | 2] = cimImp32C2;
-MICROCODE[(0x32 << 3) | 3] = cimImp32C3;
-MICROCODE[(0x32 << 3) | 4] = cimImp32C4;
-MICROCODE[(0x33 << 3) | 0] = rlaIny33C0;
-MICROCODE[(0x33 << 3) | 1] = rlaIny33C1;
-MICROCODE[(0x33 << 3) | 2] = rlaIny33C2;
-MICROCODE[(0x33 << 3) | 3] = rlaIny33C3;
-MICROCODE[(0x33 << 3) | 4] = rlaIny33C4;
-MICROCODE[(0x33 << 3) | 5] = rlaIny33C5;
-MICROCODE[(0x33 << 3) | 6] = rlaIny33C6;
-MICROCODE[(0x34 << 3) | 0] = nopZpx34C0;
-MICROCODE[(0x34 << 3) | 1] = nopZpx34C1;
-MICROCODE[(0x34 << 3) | 2] = nopZpx34C2;
-MICROCODE[(0x35 << 3) | 0] = andZpx35C0;
-MICROCODE[(0x35 << 3) | 1] = andZpx35C1;
-MICROCODE[(0x35 << 3) | 2] = andZpx35C2;
-MICROCODE[(0x36 << 3) | 0] = rolZpx36C0;
-MICROCODE[(0x36 << 3) | 1] = rolZpx36C1;
-MICROCODE[(0x36 << 3) | 2] = rolZpx36C2;
-MICROCODE[(0x36 << 3) | 3] = rolZpx36C3;
-MICROCODE[(0x36 << 3) | 4] = rolZpx36C4;
-MICROCODE[(0x37 << 3) | 0] = rlaZpx37C0;
-MICROCODE[(0x37 << 3) | 1] = rlaZpx37C1;
-MICROCODE[(0x37 << 3) | 2] = rlaZpx37C2;
-MICROCODE[(0x37 << 3) | 3] = rlaZpx37C3;
-MICROCODE[(0x37 << 3) | 4] = rlaZpx37C4;
-MICROCODE[(0x38 << 3) | 0] = secImp38C0;
-MICROCODE[(0x39 << 3) | 0] = andAby39C0;
-MICROCODE[(0x39 << 3) | 1] = andAby39C1;
-MICROCODE[(0x39 << 3) | 2] = andAby39C2;
-MICROCODE[(0x39 << 3) | 3] = andAby39C3;
-MICROCODE[(0x3a << 3) | 0] = nopImp3AC0;
-MICROCODE[(0x3b << 3) | 0] = rlaAby3BC0;
-MICROCODE[(0x3b << 3) | 1] = rlaAby3BC1;
-MICROCODE[(0x3b << 3) | 2] = rlaAby3BC2;
-MICROCODE[(0x3b << 3) | 3] = rlaAby3BC3;
-MICROCODE[(0x3b << 3) | 4] = rlaAby3BC4;
-MICROCODE[(0x3b << 3) | 5] = rlaAby3BC5;
-MICROCODE[(0x3c << 3) | 0] = nopAbx3CC0;
-MICROCODE[(0x3c << 3) | 1] = nopAbx3CC1;
-MICROCODE[(0x3c << 3) | 2] = nopAbx3CC2;
-MICROCODE[(0x3c << 3) | 3] = nopAbx3CC3;
-MICROCODE[(0x3d << 3) | 0] = andAbx3DC0;
-MICROCODE[(0x3d << 3) | 1] = andAbx3DC1;
-MICROCODE[(0x3d << 3) | 2] = andAbx3DC2;
-MICROCODE[(0x3d << 3) | 3] = andAbx3DC3;
-MICROCODE[(0x3e << 3) | 0] = rolAbx3EC0;
-MICROCODE[(0x3e << 3) | 1] = rolAbx3EC1;
-MICROCODE[(0x3e << 3) | 2] = rolAbx3EC2;
-MICROCODE[(0x3e << 3) | 3] = rolAbx3EC3;
-MICROCODE[(0x3e << 3) | 4] = rolAbx3EC4;
-MICROCODE[(0x3e << 3) | 5] = rolAbx3EC5;
-MICROCODE[(0x3f << 3) | 0] = rlaAbx3FC0;
-MICROCODE[(0x3f << 3) | 1] = rlaAbx3FC1;
-MICROCODE[(0x3f << 3) | 2] = rlaAbx3FC2;
-MICROCODE[(0x3f << 3) | 3] = rlaAbx3FC3;
-MICROCODE[(0x3f << 3) | 4] = rlaAbx3FC4;
-MICROCODE[(0x3f << 3) | 5] = rlaAbx3FC5;
-MICROCODE[(0x40 << 3) | 0] = rtiImp40C0;
-MICROCODE[(0x40 << 3) | 1] = rtiImp40C1;
-MICROCODE[(0x40 << 3) | 2] = rtiImp40C2;
-MICROCODE[(0x40 << 3) | 3] = rtiImp40C3;
-MICROCODE[(0x40 << 3) | 4] = rtiImp40C4;
-MICROCODE[(0x41 << 3) | 0] = eorInx41C0;
-MICROCODE[(0x41 << 3) | 1] = eorInx41C1;
-MICROCODE[(0x41 << 3) | 2] = eorInx41C2;
-MICROCODE[(0x41 << 3) | 3] = eorInx41C3;
-MICROCODE[(0x41 << 3) | 4] = eorInx41C4;
-MICROCODE[(0x42 << 3) | 0] = cimImp42C0;
-MICROCODE[(0x42 << 3) | 1] = cimImp42C1;
-MICROCODE[(0x42 << 3) | 2] = cimImp42C2;
-MICROCODE[(0x42 << 3) | 3] = cimImp42C3;
-MICROCODE[(0x42 << 3) | 4] = cimImp42C4;
-MICROCODE[(0x43 << 3) | 0] = sreInx43C0;
-MICROCODE[(0x43 << 3) | 1] = sreInx43C1;
-MICROCODE[(0x43 << 3) | 2] = sreInx43C2;
-MICROCODE[(0x43 << 3) | 3] = sreInx43C3;
-MICROCODE[(0x43 << 3) | 4] = sreInx43C4;
-MICROCODE[(0x43 << 3) | 5] = sreInx43C5;
-MICROCODE[(0x43 << 3) | 6] = sreInx43C6;
-MICROCODE[(0x44 << 3) | 0] = nopZpg44C0;
-MICROCODE[(0x44 << 3) | 1] = nopZpg44C1;
-MICROCODE[(0x45 << 3) | 0] = eorZpg45C0;
-MICROCODE[(0x45 << 3) | 1] = eorZpg45C1;
-MICROCODE[(0x46 << 3) | 0] = lsrZpg46C0;
-MICROCODE[(0x46 << 3) | 1] = lsrZpg46C1;
-MICROCODE[(0x46 << 3) | 2] = lsrZpg46C2;
-MICROCODE[(0x46 << 3) | 3] = lsrZpg46C3;
-MICROCODE[(0x47 << 3) | 0] = sreZpg47C0;
-MICROCODE[(0x47 << 3) | 1] = sreZpg47C1;
-MICROCODE[(0x47 << 3) | 2] = sreZpg47C2;
-MICROCODE[(0x47 << 3) | 3] = sreZpg47C3;
-MICROCODE[(0x48 << 3) | 0] = phaImp48C0;
-MICROCODE[(0x48 << 3) | 1] = phaImp48C1;
-MICROCODE[(0x49 << 3) | 0] = eorImm49C0;
-MICROCODE[(0x4a << 3) | 0] = lsrAcc4AC0;
-MICROCODE[(0x4b << 3) | 0] = asrImm4BC0;
-MICROCODE[(0x4c << 3) | 0] = jmpAbs4CC0;
-MICROCODE[(0x4c << 3) | 1] = jmpAbs4CC1;
-MICROCODE[(0x4d << 3) | 0] = eorAbs4DC0;
-MICROCODE[(0x4d << 3) | 1] = eorAbs4DC1;
-MICROCODE[(0x4d << 3) | 2] = eorAbs4DC2;
-MICROCODE[(0x4e << 3) | 0] = lsrAbs4EC0;
-MICROCODE[(0x4e << 3) | 1] = lsrAbs4EC1;
-MICROCODE[(0x4e << 3) | 2] = lsrAbs4EC2;
-MICROCODE[(0x4e << 3) | 3] = lsrAbs4EC3;
-MICROCODE[(0x4e << 3) | 4] = lsrAbs4EC4;
-MICROCODE[(0x4f << 3) | 0] = sreAbs4FC0;
-MICROCODE[(0x4f << 3) | 1] = sreAbs4FC1;
-MICROCODE[(0x4f << 3) | 2] = sreAbs4FC2;
-MICROCODE[(0x4f << 3) | 3] = sreAbs4FC3;
-MICROCODE[(0x4f << 3) | 4] = sreAbs4FC4;
-MICROCODE[(0x50 << 3) | 0] = bvcRel50C0;
-MICROCODE[(0x50 << 3) | 1] = bvcRel50C1;
-MICROCODE[(0x50 << 3) | 2] = bvcRel50C2;
-MICROCODE[(0x51 << 3) | 0] = eorIny51C0;
-MICROCODE[(0x51 << 3) | 1] = eorIny51C1;
-MICROCODE[(0x51 << 3) | 2] = eorIny51C2;
-MICROCODE[(0x51 << 3) | 3] = eorIny51C3;
-MICROCODE[(0x51 << 3) | 4] = eorIny51C4;
-MICROCODE[(0x52 << 3) | 0] = cimImp52C0;
-MICROCODE[(0x52 << 3) | 1] = cimImp52C1;
-MICROCODE[(0x52 << 3) | 2] = cimImp52C2;
-MICROCODE[(0x52 << 3) | 3] = cimImp52C3;
-MICROCODE[(0x52 << 3) | 4] = cimImp52C4;
-MICROCODE[(0x53 << 3) | 0] = sreIny53C0;
-MICROCODE[(0x53 << 3) | 1] = sreIny53C1;
-MICROCODE[(0x53 << 3) | 2] = sreIny53C2;
-MICROCODE[(0x53 << 3) | 3] = sreIny53C3;
-MICROCODE[(0x53 << 3) | 4] = sreIny53C4;
-MICROCODE[(0x53 << 3) | 5] = sreIny53C5;
-MICROCODE[(0x53 << 3) | 6] = sreIny53C6;
-MICROCODE[(0x54 << 3) | 0] = nopZpx54C0;
-MICROCODE[(0x54 << 3) | 1] = nopZpx54C1;
-MICROCODE[(0x54 << 3) | 2] = nopZpx54C2;
-MICROCODE[(0x55 << 3) | 0] = eorZpx55C0;
-MICROCODE[(0x55 << 3) | 1] = eorZpx55C1;
-MICROCODE[(0x55 << 3) | 2] = eorZpx55C2;
-MICROCODE[(0x56 << 3) | 0] = lsrZpx56C0;
-MICROCODE[(0x56 << 3) | 1] = lsrZpx56C1;
-MICROCODE[(0x56 << 3) | 2] = lsrZpx56C2;
-MICROCODE[(0x56 << 3) | 3] = lsrZpx56C3;
-MICROCODE[(0x56 << 3) | 4] = lsrZpx56C4;
-MICROCODE[(0x57 << 3) | 0] = sreZpx57C0;
-MICROCODE[(0x57 << 3) | 1] = sreZpx57C1;
-MICROCODE[(0x57 << 3) | 2] = sreZpx57C2;
-MICROCODE[(0x57 << 3) | 3] = sreZpx57C3;
-MICROCODE[(0x57 << 3) | 4] = sreZpx57C4;
-MICROCODE[(0x58 << 3) | 0] = cliImp58C0;
-MICROCODE[(0x59 << 3) | 0] = eorAby59C0;
-MICROCODE[(0x59 << 3) | 1] = eorAby59C1;
-MICROCODE[(0x59 << 3) | 2] = eorAby59C2;
-MICROCODE[(0x59 << 3) | 3] = eorAby59C3;
-MICROCODE[(0x5a << 3) | 0] = nopImp5AC0;
-MICROCODE[(0x5b << 3) | 0] = sreAby5BC0;
-MICROCODE[(0x5b << 3) | 1] = sreAby5BC1;
-MICROCODE[(0x5b << 3) | 2] = sreAby5BC2;
-MICROCODE[(0x5b << 3) | 3] = sreAby5BC3;
-MICROCODE[(0x5b << 3) | 4] = sreAby5BC4;
-MICROCODE[(0x5b << 3) | 5] = sreAby5BC5;
-MICROCODE[(0x5c << 3) | 0] = nopAbx5CC0;
-MICROCODE[(0x5c << 3) | 1] = nopAbx5CC1;
-MICROCODE[(0x5c << 3) | 2] = nopAbx5CC2;
-MICROCODE[(0x5c << 3) | 3] = nopAbx5CC3;
-MICROCODE[(0x5d << 3) | 0] = eorAbx5DC0;
-MICROCODE[(0x5d << 3) | 1] = eorAbx5DC1;
-MICROCODE[(0x5d << 3) | 2] = eorAbx5DC2;
-MICROCODE[(0x5d << 3) | 3] = eorAbx5DC3;
-MICROCODE[(0x5e << 3) | 0] = lsrAbx5EC0;
-MICROCODE[(0x5e << 3) | 1] = lsrAbx5EC1;
-MICROCODE[(0x5e << 3) | 2] = lsrAbx5EC2;
-MICROCODE[(0x5e << 3) | 3] = lsrAbx5EC3;
-MICROCODE[(0x5e << 3) | 4] = lsrAbx5EC4;
-MICROCODE[(0x5e << 3) | 5] = lsrAbx5EC5;
-MICROCODE[(0x5f << 3) | 0] = sreAbx5FC0;
-MICROCODE[(0x5f << 3) | 1] = sreAbx5FC1;
-MICROCODE[(0x5f << 3) | 2] = sreAbx5FC2;
-MICROCODE[(0x5f << 3) | 3] = sreAbx5FC3;
-MICROCODE[(0x5f << 3) | 4] = sreAbx5FC4;
-MICROCODE[(0x5f << 3) | 5] = sreAbx5FC5;
-MICROCODE[(0x60 << 3) | 0] = rtsImp60C0;
-MICROCODE[(0x60 << 3) | 1] = rtsImp60C1;
-MICROCODE[(0x60 << 3) | 2] = rtsImp60C2;
-MICROCODE[(0x60 << 3) | 3] = rtsImp60C3;
-MICROCODE[(0x60 << 3) | 4] = rtsImp60C4;
-MICROCODE[(0x61 << 3) | 0] = adcInx61C0;
-MICROCODE[(0x61 << 3) | 1] = adcInx61C1;
-MICROCODE[(0x61 << 3) | 2] = adcInx61C2;
-MICROCODE[(0x61 << 3) | 3] = adcInx61C3;
-MICROCODE[(0x61 << 3) | 4] = adcInx61C4;
-MICROCODE[(0x62 << 3) | 0] = cimImp62C0;
-MICROCODE[(0x62 << 3) | 1] = cimImp62C1;
-MICROCODE[(0x62 << 3) | 2] = cimImp62C2;
-MICROCODE[(0x62 << 3) | 3] = cimImp62C3;
-MICROCODE[(0x62 << 3) | 4] = cimImp62C4;
-MICROCODE[(0x63 << 3) | 0] = rraInx63C0;
-MICROCODE[(0x63 << 3) | 1] = rraInx63C1;
-MICROCODE[(0x63 << 3) | 2] = rraInx63C2;
-MICROCODE[(0x63 << 3) | 3] = rraInx63C3;
-MICROCODE[(0x63 << 3) | 4] = rraInx63C4;
-MICROCODE[(0x63 << 3) | 5] = rraInx63C5;
-MICROCODE[(0x63 << 3) | 6] = rraInx63C6;
-MICROCODE[(0x64 << 3) | 0] = nopZpg64C0;
-MICROCODE[(0x64 << 3) | 1] = nopZpg64C1;
-MICROCODE[(0x65 << 3) | 0] = adcZpg65C0;
-MICROCODE[(0x65 << 3) | 1] = adcZpg65C1;
-MICROCODE[(0x66 << 3) | 0] = rorZpg66C0;
-MICROCODE[(0x66 << 3) | 1] = rorZpg66C1;
-MICROCODE[(0x66 << 3) | 2] = rorZpg66C2;
-MICROCODE[(0x66 << 3) | 3] = rorZpg66C3;
-MICROCODE[(0x67 << 3) | 0] = rraZpg67C0;
-MICROCODE[(0x67 << 3) | 1] = rraZpg67C1;
-MICROCODE[(0x67 << 3) | 2] = rraZpg67C2;
-MICROCODE[(0x67 << 3) | 3] = rraZpg67C3;
-MICROCODE[(0x68 << 3) | 0] = plaImp68C0;
-MICROCODE[(0x68 << 3) | 1] = plaImp68C1;
-MICROCODE[(0x68 << 3) | 2] = plaImp68C2;
-MICROCODE[(0x69 << 3) | 0] = adcImm69C0;
-MICROCODE[(0x6a << 3) | 0] = rorAcc6AC0;
-MICROCODE[(0x6b << 3) | 0] = arrImm6BC0;
-MICROCODE[(0x6c << 3) | 0] = jmpInd6CC0;
-MICROCODE[(0x6c << 3) | 1] = jmpInd6CC1;
-MICROCODE[(0x6c << 3) | 2] = jmpInd6CC2;
-MICROCODE[(0x6c << 3) | 3] = jmpInd6CC3;
-MICROCODE[(0x6d << 3) | 0] = adcAbs6DC0;
-MICROCODE[(0x6d << 3) | 1] = adcAbs6DC1;
-MICROCODE[(0x6d << 3) | 2] = adcAbs6DC2;
-MICROCODE[(0x6e << 3) | 0] = rorAbs6EC0;
-MICROCODE[(0x6e << 3) | 1] = rorAbs6EC1;
-MICROCODE[(0x6e << 3) | 2] = rorAbs6EC2;
-MICROCODE[(0x6e << 3) | 3] = rorAbs6EC3;
-MICROCODE[(0x6e << 3) | 4] = rorAbs6EC4;
-MICROCODE[(0x6f << 3) | 0] = rraAbs6FC0;
-MICROCODE[(0x6f << 3) | 1] = rraAbs6FC1;
-MICROCODE[(0x6f << 3) | 2] = rraAbs6FC2;
-MICROCODE[(0x6f << 3) | 3] = rraAbs6FC3;
-MICROCODE[(0x6f << 3) | 4] = rraAbs6FC4;
-MICROCODE[(0x70 << 3) | 0] = bvsRel70C0;
-MICROCODE[(0x70 << 3) | 1] = bvsRel70C1;
-MICROCODE[(0x70 << 3) | 2] = bvsRel70C2;
-MICROCODE[(0x71 << 3) | 0] = adcIny71C0;
-MICROCODE[(0x71 << 3) | 1] = adcIny71C1;
-MICROCODE[(0x71 << 3) | 2] = adcIny71C2;
-MICROCODE[(0x71 << 3) | 3] = adcIny71C3;
-MICROCODE[(0x71 << 3) | 4] = adcIny71C4;
-MICROCODE[(0x72 << 3) | 0] = cimImp72C0;
-MICROCODE[(0x72 << 3) | 1] = cimImp72C1;
-MICROCODE[(0x72 << 3) | 2] = cimImp72C2;
-MICROCODE[(0x72 << 3) | 3] = cimImp72C3;
-MICROCODE[(0x72 << 3) | 4] = cimImp72C4;
-MICROCODE[(0x73 << 3) | 0] = rraIny73C0;
-MICROCODE[(0x73 << 3) | 1] = rraIny73C1;
-MICROCODE[(0x73 << 3) | 2] = rraIny73C2;
-MICROCODE[(0x73 << 3) | 3] = rraIny73C3;
-MICROCODE[(0x73 << 3) | 4] = rraIny73C4;
-MICROCODE[(0x73 << 3) | 5] = rraIny73C5;
-MICROCODE[(0x73 << 3) | 6] = rraIny73C6;
-MICROCODE[(0x74 << 3) | 0] = nopZpx74C0;
-MICROCODE[(0x74 << 3) | 1] = nopZpx74C1;
-MICROCODE[(0x74 << 3) | 2] = nopZpx74C2;
-MICROCODE[(0x75 << 3) | 0] = adcZpx75C0;
-MICROCODE[(0x75 << 3) | 1] = adcZpx75C1;
-MICROCODE[(0x75 << 3) | 2] = adcZpx75C2;
-MICROCODE[(0x76 << 3) | 0] = rorZpx76C0;
-MICROCODE[(0x76 << 3) | 1] = rorZpx76C1;
-MICROCODE[(0x76 << 3) | 2] = rorZpx76C2;
-MICROCODE[(0x76 << 3) | 3] = rorZpx76C3;
-MICROCODE[(0x76 << 3) | 4] = rorZpx76C4;
-MICROCODE[(0x77 << 3) | 0] = rraZpx77C0;
-MICROCODE[(0x77 << 3) | 1] = rraZpx77C1;
-MICROCODE[(0x77 << 3) | 2] = rraZpx77C2;
-MICROCODE[(0x77 << 3) | 3] = rraZpx77C3;
-MICROCODE[(0x77 << 3) | 4] = rraZpx77C4;
-MICROCODE[(0x78 << 3) | 0] = seiImp78C0;
-MICROCODE[(0x79 << 3) | 0] = adcAby79C0;
-MICROCODE[(0x79 << 3) | 1] = adcAby79C1;
-MICROCODE[(0x79 << 3) | 2] = adcAby79C2;
-MICROCODE[(0x79 << 3) | 3] = adcAby79C3;
-MICROCODE[(0x7a << 3) | 0] = nopImp7AC0;
-MICROCODE[(0x7b << 3) | 0] = rraAby7BC0;
-MICROCODE[(0x7b << 3) | 1] = rraAby7BC1;
-MICROCODE[(0x7b << 3) | 2] = rraAby7BC2;
-MICROCODE[(0x7b << 3) | 3] = rraAby7BC3;
-MICROCODE[(0x7b << 3) | 4] = rraAby7BC4;
-MICROCODE[(0x7b << 3) | 5] = rraAby7BC5;
-MICROCODE[(0x7c << 3) | 0] = nopAbx7CC0;
-MICROCODE[(0x7c << 3) | 1] = nopAbx7CC1;
-MICROCODE[(0x7c << 3) | 2] = nopAbx7CC2;
-MICROCODE[(0x7c << 3) | 3] = nopAbx7CC3;
-MICROCODE[(0x7d << 3) | 0] = adcAbx7DC0;
-MICROCODE[(0x7d << 3) | 1] = adcAbx7DC1;
-MICROCODE[(0x7d << 3) | 2] = adcAbx7DC2;
-MICROCODE[(0x7d << 3) | 3] = adcAbx7DC3;
-MICROCODE[(0x7e << 3) | 0] = rorAbx7EC0;
-MICROCODE[(0x7e << 3) | 1] = rorAbx7EC1;
-MICROCODE[(0x7e << 3) | 2] = rorAbx7EC2;
-MICROCODE[(0x7e << 3) | 3] = rorAbx7EC3;
-MICROCODE[(0x7e << 3) | 4] = rorAbx7EC4;
-MICROCODE[(0x7e << 3) | 5] = rorAbx7EC5;
-MICROCODE[(0x7f << 3) | 0] = rraAbx7FC0;
-MICROCODE[(0x7f << 3) | 1] = rraAbx7FC1;
-MICROCODE[(0x7f << 3) | 2] = rraAbx7FC2;
-MICROCODE[(0x7f << 3) | 3] = rraAbx7FC3;
-MICROCODE[(0x7f << 3) | 4] = rraAbx7FC4;
-MICROCODE[(0x7f << 3) | 5] = rraAbx7FC5;
-MICROCODE[(0x80 << 3) | 0] = nopImm80C0;
-MICROCODE[(0x81 << 3) | 0] = staInx81C0;
-MICROCODE[(0x81 << 3) | 1] = staInx81C1;
-MICROCODE[(0x81 << 3) | 2] = staInx81C2;
-MICROCODE[(0x81 << 3) | 3] = staInx81C3;
-MICROCODE[(0x81 << 3) | 4] = staInx81C4;
-MICROCODE[(0x82 << 3) | 0] = nopImm82C0;
-MICROCODE[(0x83 << 3) | 0] = saxInx83C0;
-MICROCODE[(0x83 << 3) | 1] = saxInx83C1;
-MICROCODE[(0x83 << 3) | 2] = saxInx83C2;
-MICROCODE[(0x83 << 3) | 3] = saxInx83C3;
-MICROCODE[(0x83 << 3) | 4] = saxInx83C4;
-MICROCODE[(0x84 << 3) | 0] = styZpg84C0;
-MICROCODE[(0x84 << 3) | 1] = styZpg84C1;
-MICROCODE[(0x85 << 3) | 0] = staZpg85C0;
-MICROCODE[(0x85 << 3) | 1] = staZpg85C1;
-MICROCODE[(0x86 << 3) | 0] = stxZpg86C0;
-MICROCODE[(0x86 << 3) | 1] = stxZpg86C1;
-MICROCODE[(0x87 << 3) | 0] = saxZpg87C0;
-MICROCODE[(0x87 << 3) | 1] = saxZpg87C1;
-MICROCODE[(0x88 << 3) | 0] = deyImp88C0;
-MICROCODE[(0x89 << 3) | 0] = nopImm89C0;
-MICROCODE[(0x8a << 3) | 0] = txaImp8AC0;
-MICROCODE[(0x8b << 3) | 0] = aneImm8BC0;
-MICROCODE[(0x8c << 3) | 0] = styAbs8CC0;
-MICROCODE[(0x8c << 3) | 1] = styAbs8CC1;
-MICROCODE[(0x8c << 3) | 2] = styAbs8CC2;
-MICROCODE[(0x8d << 3) | 0] = staAbs8DC0;
-MICROCODE[(0x8d << 3) | 1] = staAbs8DC1;
-MICROCODE[(0x8d << 3) | 2] = staAbs8DC2;
-MICROCODE[(0x8e << 3) | 0] = stxAbs8EC0;
-MICROCODE[(0x8e << 3) | 1] = stxAbs8EC1;
-MICROCODE[(0x8e << 3) | 2] = stxAbs8EC2;
-MICROCODE[(0x8f << 3) | 0] = saxAbs8FC0;
-MICROCODE[(0x8f << 3) | 1] = saxAbs8FC1;
-MICROCODE[(0x8f << 3) | 2] = saxAbs8FC2;
-MICROCODE[(0x90 << 3) | 0] = bccRel90C0;
-MICROCODE[(0x90 << 3) | 1] = bccRel90C1;
-MICROCODE[(0x90 << 3) | 2] = bccRel90C2;
-MICROCODE[(0x91 << 3) | 0] = staIny91C0;
-MICROCODE[(0x91 << 3) | 1] = staIny91C1;
-MICROCODE[(0x91 << 3) | 2] = staIny91C2;
-MICROCODE[(0x91 << 3) | 3] = staIny91C3;
-MICROCODE[(0x91 << 3) | 4] = staIny91C4;
-MICROCODE[(0x92 << 3) | 0] = cimImp92C0;
-MICROCODE[(0x92 << 3) | 1] = cimImp92C1;
-MICROCODE[(0x92 << 3) | 2] = cimImp92C2;
-MICROCODE[(0x92 << 3) | 3] = cimImp92C3;
-MICROCODE[(0x92 << 3) | 4] = cimImp92C4;
-MICROCODE[(0x93 << 3) | 0] = shaIny93C0;
-MICROCODE[(0x93 << 3) | 1] = shaIny93C1;
-MICROCODE[(0x93 << 3) | 2] = shaIny93C2;
-MICROCODE[(0x93 << 3) | 3] = shaIny93C3;
-MICROCODE[(0x93 << 3) | 4] = shaIny93C4;
-MICROCODE[(0x94 << 3) | 0] = styZpx94C0;
-MICROCODE[(0x94 << 3) | 1] = styZpx94C1;
-MICROCODE[(0x94 << 3) | 2] = styZpx94C2;
-MICROCODE[(0x95 << 3) | 0] = staZpx95C0;
-MICROCODE[(0x95 << 3) | 1] = staZpx95C1;
-MICROCODE[(0x95 << 3) | 2] = staZpx95C2;
-MICROCODE[(0x96 << 3) | 0] = stxZpy96C0;
-MICROCODE[(0x96 << 3) | 1] = stxZpy96C1;
-MICROCODE[(0x96 << 3) | 2] = stxZpy96C2;
-MICROCODE[(0x97 << 3) | 0] = saxZpy97C0;
-MICROCODE[(0x97 << 3) | 1] = saxZpy97C1;
-MICROCODE[(0x97 << 3) | 2] = saxZpy97C2;
-MICROCODE[(0x98 << 3) | 0] = tyaImp98C0;
-MICROCODE[(0x99 << 3) | 0] = staAby99C0;
-MICROCODE[(0x99 << 3) | 1] = staAby99C1;
-MICROCODE[(0x99 << 3) | 2] = staAby99C2;
-MICROCODE[(0x99 << 3) | 3] = staAby99C3;
-MICROCODE[(0x9a << 3) | 0] = txsImp9AC0;
-MICROCODE[(0x9b << 3) | 0] = shsAby9BC0;
-MICROCODE[(0x9b << 3) | 1] = shsAby9BC1;
-MICROCODE[(0x9b << 3) | 2] = shsAby9BC2;
-MICROCODE[(0x9b << 3) | 3] = shsAby9BC3;
-MICROCODE[(0x9c << 3) | 0] = shyAbx9CC0;
-MICROCODE[(0x9c << 3) | 1] = shyAbx9CC1;
-MICROCODE[(0x9c << 3) | 2] = shyAbx9CC2;
-MICROCODE[(0x9c << 3) | 3] = shyAbx9CC3;
-MICROCODE[(0x9d << 3) | 0] = staAbx9DC0;
-MICROCODE[(0x9d << 3) | 1] = staAbx9DC1;
-MICROCODE[(0x9d << 3) | 2] = staAbx9DC2;
-MICROCODE[(0x9d << 3) | 3] = staAbx9DC3;
-MICROCODE[(0x9e << 3) | 0] = shxAby9EC0;
-MICROCODE[(0x9e << 3) | 1] = shxAby9EC1;
-MICROCODE[(0x9e << 3) | 2] = shxAby9EC2;
-MICROCODE[(0x9e << 3) | 3] = shxAby9EC3;
-MICROCODE[(0x9f << 3) | 0] = shaAby9FC0;
-MICROCODE[(0x9f << 3) | 1] = shaAby9FC1;
-MICROCODE[(0x9f << 3) | 2] = shaAby9FC2;
-MICROCODE[(0x9f << 3) | 3] = shaAby9FC3;
-MICROCODE[(0xa0 << 3) | 0] = ldyImmA0C0;
-MICROCODE[(0xa1 << 3) | 0] = ldaInxA1C0;
-MICROCODE[(0xa1 << 3) | 1] = ldaInxA1C1;
-MICROCODE[(0xa1 << 3) | 2] = ldaInxA1C2;
-MICROCODE[(0xa1 << 3) | 3] = ldaInxA1C3;
-MICROCODE[(0xa1 << 3) | 4] = ldaInxA1C4;
-MICROCODE[(0xa2 << 3) | 0] = ldxImmA2C0;
-MICROCODE[(0xa3 << 3) | 0] = laxInxA3C0;
-MICROCODE[(0xa3 << 3) | 1] = laxInxA3C1;
-MICROCODE[(0xa3 << 3) | 2] = laxInxA3C2;
-MICROCODE[(0xa3 << 3) | 3] = laxInxA3C3;
-MICROCODE[(0xa3 << 3) | 4] = laxInxA3C4;
-MICROCODE[(0xa4 << 3) | 0] = ldyZpgA4C0;
-MICROCODE[(0xa4 << 3) | 1] = ldyZpgA4C1;
-MICROCODE[(0xa5 << 3) | 0] = ldaZpgA5C0;
-MICROCODE[(0xa5 << 3) | 1] = ldaZpgA5C1;
-MICROCODE[(0xa6 << 3) | 0] = ldxZpgA6C0;
-MICROCODE[(0xa6 << 3) | 1] = ldxZpgA6C1;
-MICROCODE[(0xa7 << 3) | 0] = laxZpgA7C0;
-MICROCODE[(0xa7 << 3) | 1] = laxZpgA7C1;
-MICROCODE[(0xa8 << 3) | 0] = tayImpA8C0;
-MICROCODE[(0xa9 << 3) | 0] = ldaImmA9C0;
-MICROCODE[(0xaa << 3) | 0] = taxImpAAC0;
-MICROCODE[(0xab << 3) | 0] = lxaImmABC0;
-MICROCODE[(0xac << 3) | 0] = ldyAbsACC0;
-MICROCODE[(0xac << 3) | 1] = ldyAbsACC1;
-MICROCODE[(0xac << 3) | 2] = ldyAbsACC2;
-MICROCODE[(0xad << 3) | 0] = ldaAbsADC0;
-MICROCODE[(0xad << 3) | 1] = ldaAbsADC1;
-MICROCODE[(0xad << 3) | 2] = ldaAbsADC2;
-MICROCODE[(0xae << 3) | 0] = ldxAbsAEC0;
-MICROCODE[(0xae << 3) | 1] = ldxAbsAEC1;
-MICROCODE[(0xae << 3) | 2] = ldxAbsAEC2;
-MICROCODE[(0xaf << 3) | 0] = laxAbsAFC0;
-MICROCODE[(0xaf << 3) | 1] = laxAbsAFC1;
-MICROCODE[(0xaf << 3) | 2] = laxAbsAFC2;
-MICROCODE[(0xb0 << 3) | 0] = bcsRelB0C0;
-MICROCODE[(0xb0 << 3) | 1] = bcsRelB0C1;
-MICROCODE[(0xb0 << 3) | 2] = bcsRelB0C2;
-MICROCODE[(0xb1 << 3) | 0] = ldaInyB1C0;
-MICROCODE[(0xb1 << 3) | 1] = ldaInyB1C1;
-MICROCODE[(0xb1 << 3) | 2] = ldaInyB1C2;
-MICROCODE[(0xb1 << 3) | 3] = ldaInyB1C3;
-MICROCODE[(0xb1 << 3) | 4] = ldaInyB1C4;
-MICROCODE[(0xb2 << 3) | 0] = cimImpB2C0;
-MICROCODE[(0xb2 << 3) | 1] = cimImpB2C1;
-MICROCODE[(0xb2 << 3) | 2] = cimImpB2C2;
-MICROCODE[(0xb2 << 3) | 3] = cimImpB2C3;
-MICROCODE[(0xb2 << 3) | 4] = cimImpB2C4;
-MICROCODE[(0xb3 << 3) | 0] = laxInyB3C0;
-MICROCODE[(0xb3 << 3) | 1] = laxInyB3C1;
-MICROCODE[(0xb3 << 3) | 2] = laxInyB3C2;
-MICROCODE[(0xb3 << 3) | 3] = laxInyB3C3;
-MICROCODE[(0xb3 << 3) | 4] = laxInyB3C4;
-MICROCODE[(0xb4 << 3) | 0] = ldyZpxB4C0;
-MICROCODE[(0xb4 << 3) | 1] = ldyZpxB4C1;
-MICROCODE[(0xb4 << 3) | 2] = ldyZpxB4C2;
-MICROCODE[(0xb5 << 3) | 0] = ldaZpxB5C0;
-MICROCODE[(0xb5 << 3) | 1] = ldaZpxB5C1;
-MICROCODE[(0xb5 << 3) | 2] = ldaZpxB5C2;
-MICROCODE[(0xb6 << 3) | 0] = ldxZpyB6C0;
-MICROCODE[(0xb6 << 3) | 1] = ldxZpyB6C1;
-MICROCODE[(0xb6 << 3) | 2] = ldxZpyB6C2;
-MICROCODE[(0xb7 << 3) | 0] = laxZpyB7C0;
-MICROCODE[(0xb7 << 3) | 1] = laxZpyB7C1;
-MICROCODE[(0xb7 << 3) | 2] = laxZpyB7C2;
-MICROCODE[(0xb8 << 3) | 0] = clvImpB8C0;
-MICROCODE[(0xb9 << 3) | 0] = ldaAbyB9C0;
-MICROCODE[(0xb9 << 3) | 1] = ldaAbyB9C1;
-MICROCODE[(0xb9 << 3) | 2] = ldaAbyB9C2;
-MICROCODE[(0xb9 << 3) | 3] = ldaAbyB9C3;
-MICROCODE[(0xba << 3) | 0] = tsxImpBAC0;
-MICROCODE[(0xbb << 3) | 0] = lasAbyBBC0;
-MICROCODE[(0xbb << 3) | 1] = lasAbyBBC1;
-MICROCODE[(0xbb << 3) | 2] = lasAbyBBC2;
-MICROCODE[(0xbb << 3) | 3] = lasAbyBBC3;
-MICROCODE[(0xbc << 3) | 0] = ldyAbxBCC0;
-MICROCODE[(0xbc << 3) | 1] = ldyAbxBCC1;
-MICROCODE[(0xbc << 3) | 2] = ldyAbxBCC2;
-MICROCODE[(0xbc << 3) | 3] = ldyAbxBCC3;
-MICROCODE[(0xbd << 3) | 0] = ldaAbxBDC0;
-MICROCODE[(0xbd << 3) | 1] = ldaAbxBDC1;
-MICROCODE[(0xbd << 3) | 2] = ldaAbxBDC2;
-MICROCODE[(0xbd << 3) | 3] = ldaAbxBDC3;
-MICROCODE[(0xbe << 3) | 0] = ldxAbyBEC0;
-MICROCODE[(0xbe << 3) | 1] = ldxAbyBEC1;
-MICROCODE[(0xbe << 3) | 2] = ldxAbyBEC2;
-MICROCODE[(0xbe << 3) | 3] = ldxAbyBEC3;
-MICROCODE[(0xbf << 3) | 0] = laxAbyBFC0;
-MICROCODE[(0xbf << 3) | 1] = laxAbyBFC1;
-MICROCODE[(0xbf << 3) | 2] = laxAbyBFC2;
-MICROCODE[(0xbf << 3) | 3] = laxAbyBFC3;
-MICROCODE[(0xc0 << 3) | 0] = cpyImmC0C0;
-MICROCODE[(0xc1 << 3) | 0] = cmpInxC1C0;
-MICROCODE[(0xc1 << 3) | 1] = cmpInxC1C1;
-MICROCODE[(0xc1 << 3) | 2] = cmpInxC1C2;
-MICROCODE[(0xc1 << 3) | 3] = cmpInxC1C3;
-MICROCODE[(0xc1 << 3) | 4] = cmpInxC1C4;
-MICROCODE[(0xc2 << 3) | 0] = nopImmC2C0;
-MICROCODE[(0xc3 << 3) | 0] = dcpInxC3C0;
-MICROCODE[(0xc3 << 3) | 1] = dcpInxC3C1;
-MICROCODE[(0xc3 << 3) | 2] = dcpInxC3C2;
-MICROCODE[(0xc3 << 3) | 3] = dcpInxC3C3;
-MICROCODE[(0xc3 << 3) | 4] = dcpInxC3C4;
-MICROCODE[(0xc3 << 3) | 5] = dcpInxC3C5;
-MICROCODE[(0xc3 << 3) | 6] = dcpInxC3C6;
-MICROCODE[(0xc4 << 3) | 0] = cpyZpgC4C0;
-MICROCODE[(0xc4 << 3) | 1] = cpyZpgC4C1;
-MICROCODE[(0xc5 << 3) | 0] = cmpZpgC5C0;
-MICROCODE[(0xc5 << 3) | 1] = cmpZpgC5C1;
-MICROCODE[(0xc6 << 3) | 0] = decZpgC6C0;
-MICROCODE[(0xc6 << 3) | 1] = decZpgC6C1;
-MICROCODE[(0xc6 << 3) | 2] = decZpgC6C2;
-MICROCODE[(0xc6 << 3) | 3] = decZpgC6C3;
-MICROCODE[(0xc7 << 3) | 0] = dcpZpgC7C0;
-MICROCODE[(0xc7 << 3) | 1] = dcpZpgC7C1;
-MICROCODE[(0xc7 << 3) | 2] = dcpZpgC7C2;
-MICROCODE[(0xc7 << 3) | 3] = dcpZpgC7C3;
-MICROCODE[(0xc8 << 3) | 0] = inyImpC8C0;
-MICROCODE[(0xc9 << 3) | 0] = cmpImmC9C0;
-MICROCODE[(0xca << 3) | 0] = dexImpCAC0;
-MICROCODE[(0xcb << 3) | 0] = sbxImmCBC0;
-MICROCODE[(0xcc << 3) | 0] = cpyAbsCCC0;
-MICROCODE[(0xcc << 3) | 1] = cpyAbsCCC1;
-MICROCODE[(0xcc << 3) | 2] = cpyAbsCCC2;
-MICROCODE[(0xcd << 3) | 0] = cmpAbsCDC0;
-MICROCODE[(0xcd << 3) | 1] = cmpAbsCDC1;
-MICROCODE[(0xcd << 3) | 2] = cmpAbsCDC2;
-MICROCODE[(0xce << 3) | 0] = decAbsCEC0;
-MICROCODE[(0xce << 3) | 1] = decAbsCEC1;
-MICROCODE[(0xce << 3) | 2] = decAbsCEC2;
-MICROCODE[(0xce << 3) | 3] = decAbsCEC3;
-MICROCODE[(0xce << 3) | 4] = decAbsCEC4;
-MICROCODE[(0xcf << 3) | 0] = dcpAbsCFC0;
-MICROCODE[(0xcf << 3) | 1] = dcpAbsCFC1;
-MICROCODE[(0xcf << 3) | 2] = dcpAbsCFC2;
-MICROCODE[(0xcf << 3) | 3] = dcpAbsCFC3;
-MICROCODE[(0xcf << 3) | 4] = dcpAbsCFC4;
-MICROCODE[(0xd0 << 3) | 0] = bneRelD0C0;
-MICROCODE[(0xd0 << 3) | 1] = bneRelD0C1;
-MICROCODE[(0xd0 << 3) | 2] = bneRelD0C2;
-MICROCODE[(0xd1 << 3) | 0] = cmpInyD1C0;
-MICROCODE[(0xd1 << 3) | 1] = cmpInyD1C1;
-MICROCODE[(0xd1 << 3) | 2] = cmpInyD1C2;
-MICROCODE[(0xd1 << 3) | 3] = cmpInyD1C3;
-MICROCODE[(0xd1 << 3) | 4] = cmpInyD1C4;
-MICROCODE[(0xd2 << 3) | 0] = cimImpD2C0;
-MICROCODE[(0xd2 << 3) | 1] = cimImpD2C1;
-MICROCODE[(0xd2 << 3) | 2] = cimImpD2C2;
-MICROCODE[(0xd2 << 3) | 3] = cimImpD2C3;
-MICROCODE[(0xd2 << 3) | 4] = cimImpD2C4;
-MICROCODE[(0xd3 << 3) | 0] = dcpInyD3C0;
-MICROCODE[(0xd3 << 3) | 1] = dcpInyD3C1;
-MICROCODE[(0xd3 << 3) | 2] = dcpInyD3C2;
-MICROCODE[(0xd3 << 3) | 3] = dcpInyD3C3;
-MICROCODE[(0xd3 << 3) | 4] = dcpInyD3C4;
-MICROCODE[(0xd3 << 3) | 5] = dcpInyD3C5;
-MICROCODE[(0xd3 << 3) | 6] = dcpInyD3C6;
-MICROCODE[(0xd4 << 3) | 0] = nopZpxD4C0;
-MICROCODE[(0xd4 << 3) | 1] = nopZpxD4C1;
-MICROCODE[(0xd4 << 3) | 2] = nopZpxD4C2;
-MICROCODE[(0xd5 << 3) | 0] = cmpZpxD5C0;
-MICROCODE[(0xd5 << 3) | 1] = cmpZpxD5C1;
-MICROCODE[(0xd5 << 3) | 2] = cmpZpxD5C2;
-MICROCODE[(0xd6 << 3) | 0] = decZpxD6C0;
-MICROCODE[(0xd6 << 3) | 1] = decZpxD6C1;
-MICROCODE[(0xd6 << 3) | 2] = decZpxD6C2;
-MICROCODE[(0xd6 << 3) | 3] = decZpxD6C3;
-MICROCODE[(0xd6 << 3) | 4] = decZpxD6C4;
-MICROCODE[(0xd7 << 3) | 0] = dcpZpxD7C0;
-MICROCODE[(0xd7 << 3) | 1] = dcpZpxD7C1;
-MICROCODE[(0xd7 << 3) | 2] = dcpZpxD7C2;
-MICROCODE[(0xd7 << 3) | 3] = dcpZpxD7C3;
-MICROCODE[(0xd7 << 3) | 4] = dcpZpxD7C4;
-MICROCODE[(0xd8 << 3) | 0] = cldImpD8C0;
-MICROCODE[(0xd9 << 3) | 0] = cmpAbyD9C0;
-MICROCODE[(0xd9 << 3) | 1] = cmpAbyD9C1;
-MICROCODE[(0xd9 << 3) | 2] = cmpAbyD9C2;
-MICROCODE[(0xd9 << 3) | 3] = cmpAbyD9C3;
-MICROCODE[(0xda << 3) | 0] = nopImpDAC0;
-MICROCODE[(0xdb << 3) | 0] = dcpAbyDBC0;
-MICROCODE[(0xdb << 3) | 1] = dcpAbyDBC1;
-MICROCODE[(0xdb << 3) | 2] = dcpAbyDBC2;
-MICROCODE[(0xdb << 3) | 3] = dcpAbyDBC3;
-MICROCODE[(0xdb << 3) | 4] = dcpAbyDBC4;
-MICROCODE[(0xdb << 3) | 5] = dcpAbyDBC5;
-MICROCODE[(0xdc << 3) | 0] = nopAbxDCC0;
-MICROCODE[(0xdc << 3) | 1] = nopAbxDCC1;
-MICROCODE[(0xdc << 3) | 2] = nopAbxDCC2;
-MICROCODE[(0xdc << 3) | 3] = nopAbxDCC3;
-MICROCODE[(0xdd << 3) | 0] = cmpAbxDDC0;
-MICROCODE[(0xdd << 3) | 1] = cmpAbxDDC1;
-MICROCODE[(0xdd << 3) | 2] = cmpAbxDDC2;
-MICROCODE[(0xdd << 3) | 3] = cmpAbxDDC3;
-MICROCODE[(0xde << 3) | 0] = decAbxDEC0;
-MICROCODE[(0xde << 3) | 1] = decAbxDEC1;
-MICROCODE[(0xde << 3) | 2] = decAbxDEC2;
-MICROCODE[(0xde << 3) | 3] = decAbxDEC3;
-MICROCODE[(0xde << 3) | 4] = decAbxDEC4;
-MICROCODE[(0xde << 3) | 5] = decAbxDEC5;
-MICROCODE[(0xdf << 3) | 0] = dcpAbxDFC0;
-MICROCODE[(0xdf << 3) | 1] = dcpAbxDFC1;
-MICROCODE[(0xdf << 3) | 2] = dcpAbxDFC2;
-MICROCODE[(0xdf << 3) | 3] = dcpAbxDFC3;
-MICROCODE[(0xdf << 3) | 4] = dcpAbxDFC4;
-MICROCODE[(0xdf << 3) | 5] = dcpAbxDFC5;
-MICROCODE[(0xe0 << 3) | 0] = cpxImmE0C0;
-MICROCODE[(0xe1 << 3) | 0] = sbcInxE1C0;
-MICROCODE[(0xe1 << 3) | 1] = sbcInxE1C1;
-MICROCODE[(0xe1 << 3) | 2] = sbcInxE1C2;
-MICROCODE[(0xe1 << 3) | 3] = sbcInxE1C3;
-MICROCODE[(0xe1 << 3) | 4] = sbcInxE1C4;
-MICROCODE[(0xe2 << 3) | 0] = nopImmE2C0;
-MICROCODE[(0xe3 << 3) | 0] = isbInxE3C0;
-MICROCODE[(0xe3 << 3) | 1] = isbInxE3C1;
-MICROCODE[(0xe3 << 3) | 2] = isbInxE3C2;
-MICROCODE[(0xe3 << 3) | 3] = isbInxE3C3;
-MICROCODE[(0xe3 << 3) | 4] = isbInxE3C4;
-MICROCODE[(0xe3 << 3) | 5] = isbInxE3C5;
-MICROCODE[(0xe3 << 3) | 6] = isbInxE3C6;
-MICROCODE[(0xe4 << 3) | 0] = cpxZpgE4C0;
-MICROCODE[(0xe4 << 3) | 1] = cpxZpgE4C1;
-MICROCODE[(0xe5 << 3) | 0] = sbcZpgE5C0;
-MICROCODE[(0xe5 << 3) | 1] = sbcZpgE5C1;
-MICROCODE[(0xe6 << 3) | 0] = incZpgE6C0;
-MICROCODE[(0xe6 << 3) | 1] = incZpgE6C1;
-MICROCODE[(0xe6 << 3) | 2] = incZpgE6C2;
-MICROCODE[(0xe6 << 3) | 3] = incZpgE6C3;
-MICROCODE[(0xe7 << 3) | 0] = isbZpgE7C0;
-MICROCODE[(0xe7 << 3) | 1] = isbZpgE7C1;
-MICROCODE[(0xe7 << 3) | 2] = isbZpgE7C2;
-MICROCODE[(0xe7 << 3) | 3] = isbZpgE7C3;
-MICROCODE[(0xe8 << 3) | 0] = inxImpE8C0;
-MICROCODE[(0xe9 << 3) | 0] = sbcImmE9C0;
-MICROCODE[(0xea << 3) | 0] = nopImpEAC0;
-MICROCODE[(0xeb << 3) | 0] = sbcImmEBC0;
-MICROCODE[(0xec << 3) | 0] = cpxAbsECC0;
-MICROCODE[(0xec << 3) | 1] = cpxAbsECC1;
-MICROCODE[(0xec << 3) | 2] = cpxAbsECC2;
-MICROCODE[(0xed << 3) | 0] = sbcAbsEDC0;
-MICROCODE[(0xed << 3) | 1] = sbcAbsEDC1;
-MICROCODE[(0xed << 3) | 2] = sbcAbsEDC2;
-MICROCODE[(0xee << 3) | 0] = incAbsEEC0;
-MICROCODE[(0xee << 3) | 1] = incAbsEEC1;
-MICROCODE[(0xee << 3) | 2] = incAbsEEC2;
-MICROCODE[(0xee << 3) | 3] = incAbsEEC3;
-MICROCODE[(0xee << 3) | 4] = incAbsEEC4;
-MICROCODE[(0xef << 3) | 0] = isbAbsEFC0;
-MICROCODE[(0xef << 3) | 1] = isbAbsEFC1;
-MICROCODE[(0xef << 3) | 2] = isbAbsEFC2;
-MICROCODE[(0xef << 3) | 3] = isbAbsEFC3;
-MICROCODE[(0xef << 3) | 4] = isbAbsEFC4;
-MICROCODE[(0xf0 << 3) | 0] = beqRelF0C0;
-MICROCODE[(0xf0 << 3) | 1] = beqRelF0C1;
-MICROCODE[(0xf0 << 3) | 2] = beqRelF0C2;
-MICROCODE[(0xf1 << 3) | 0] = sbcInyF1C0;
-MICROCODE[(0xf1 << 3) | 1] = sbcInyF1C1;
-MICROCODE[(0xf1 << 3) | 2] = sbcInyF1C2;
-MICROCODE[(0xf1 << 3) | 3] = sbcInyF1C3;
-MICROCODE[(0xf1 << 3) | 4] = sbcInyF1C4;
-MICROCODE[(0xf2 << 3) | 0] = cimImpF2C0;
-MICROCODE[(0xf2 << 3) | 1] = cimImpF2C1;
-MICROCODE[(0xf2 << 3) | 2] = cimImpF2C2;
-MICROCODE[(0xf2 << 3) | 3] = cimImpF2C3;
-MICROCODE[(0xf2 << 3) | 4] = cimImpF2C4;
-MICROCODE[(0xf3 << 3) | 0] = isbInyF3C0;
-MICROCODE[(0xf3 << 3) | 1] = isbInyF3C1;
-MICROCODE[(0xf3 << 3) | 2] = isbInyF3C2;
-MICROCODE[(0xf3 << 3) | 3] = isbInyF3C3;
-MICROCODE[(0xf3 << 3) | 4] = isbInyF3C4;
-MICROCODE[(0xf3 << 3) | 5] = isbInyF3C5;
-MICROCODE[(0xf3 << 3) | 6] = isbInyF3C6;
-MICROCODE[(0xf4 << 3) | 0] = nopZpxF4C0;
-MICROCODE[(0xf4 << 3) | 1] = nopZpxF4C1;
-MICROCODE[(0xf4 << 3) | 2] = nopZpxF4C2;
-MICROCODE[(0xf5 << 3) | 0] = sbcZpxF5C0;
-MICROCODE[(0xf5 << 3) | 1] = sbcZpxF5C1;
-MICROCODE[(0xf5 << 3) | 2] = sbcZpxF5C2;
-MICROCODE[(0xf6 << 3) | 0] = incZpxF6C0;
-MICROCODE[(0xf6 << 3) | 1] = incZpxF6C1;
-MICROCODE[(0xf6 << 3) | 2] = incZpxF6C2;
-MICROCODE[(0xf6 << 3) | 3] = incZpxF6C3;
-MICROCODE[(0xf6 << 3) | 4] = incZpxF6C4;
-MICROCODE[(0xf7 << 3) | 0] = isbZpxF7C0;
-MICROCODE[(0xf7 << 3) | 1] = isbZpxF7C1;
-MICROCODE[(0xf7 << 3) | 2] = isbZpxF7C2;
-MICROCODE[(0xf7 << 3) | 3] = isbZpxF7C3;
-MICROCODE[(0xf7 << 3) | 4] = isbZpxF7C4;
-MICROCODE[(0xf8 << 3) | 0] = sedImpF8C0;
-MICROCODE[(0xf9 << 3) | 0] = sbcAbyF9C0;
-MICROCODE[(0xf9 << 3) | 1] = sbcAbyF9C1;
-MICROCODE[(0xf9 << 3) | 2] = sbcAbyF9C2;
-MICROCODE[(0xf9 << 3) | 3] = sbcAbyF9C3;
-MICROCODE[(0xfa << 3) | 0] = nopImpFAC0;
-MICROCODE[(0xfb << 3) | 0] = isbAbyFBC0;
-MICROCODE[(0xfb << 3) | 1] = isbAbyFBC1;
-MICROCODE[(0xfb << 3) | 2] = isbAbyFBC2;
-MICROCODE[(0xfb << 3) | 3] = isbAbyFBC3;
-MICROCODE[(0xfb << 3) | 4] = isbAbyFBC4;
-MICROCODE[(0xfb << 3) | 5] = isbAbyFBC5;
-MICROCODE[(0xfc << 3) | 0] = nopAbxFCC0;
-MICROCODE[(0xfc << 3) | 1] = nopAbxFCC1;
-MICROCODE[(0xfc << 3) | 2] = nopAbxFCC2;
-MICROCODE[(0xfc << 3) | 3] = nopAbxFCC3;
-MICROCODE[(0xfd << 3) | 0] = sbcAbxFDC0;
-MICROCODE[(0xfd << 3) | 1] = sbcAbxFDC1;
-MICROCODE[(0xfd << 3) | 2] = sbcAbxFDC2;
-MICROCODE[(0xfd << 3) | 3] = sbcAbxFDC3;
-MICROCODE[(0xfe << 3) | 0] = incAbxFEC0;
-MICROCODE[(0xfe << 3) | 1] = incAbxFEC1;
-MICROCODE[(0xfe << 3) | 2] = incAbxFEC2;
-MICROCODE[(0xfe << 3) | 3] = incAbxFEC3;
-MICROCODE[(0xfe << 3) | 4] = incAbxFEC4;
-MICROCODE[(0xfe << 3) | 5] = incAbxFEC5;
-MICROCODE[(0xff << 3) | 0] = isbAbxFFC0;
-MICROCODE[(0xff << 3) | 1] = isbAbxFFC1;
-MICROCODE[(0xff << 3) | 2] = isbAbxFFC2;
-MICROCODE[(0xff << 3) | 3] = isbAbxFFC3;
-MICROCODE[(0xff << 3) | 4] = isbAbxFFC4;
-MICROCODE[(0xff << 3) | 5] = isbAbxFFC5;
-
-/** Opcodes whose microcode is fully generated — scopes the Harte test runner. */
-export const GENERATED_OPCODES: number[] = [
-	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
-	0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
-	0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26,
-	0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33,
-	0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40,
-	0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d,
-	0x4e, 0x4f, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a,
-	0x5b, 0x5c, 0x5d, 0x5e, 0x5f, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67,
-	0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0x71, 0x72, 0x73, 0x74,
-	0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f, 0x80, 0x81,
-	0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e,
-	0x8f, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b,
-	0x9c, 0x9d, 0x9e, 0x9f, 0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8,
-	0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf, 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5,
-	0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xc0, 0xc1, 0xc2,
-	0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf,
-	0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc,
-	0xdd, 0xde, 0xdf, 0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9,
-	0xea, 0xeb, 0xec, 0xed, 0xee, 0xef, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6,
-	0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff,
+export const MICROCODE: Step[] = [
+	// 00 BRK imp
+	brk_imp_1,
+	brk_imp_2,
+	brk_imp_3,
+	brk_imp_4,
+	brk_imp_5,
+	brk_imp_6,
+	badState,
+	badState,
+	// 01 ORA inx
+	ora_inx_1,
+	ora_inx_2,
+	ora_inx_3,
+	ora_inx_4,
+	ora_inx_5,
+	badState,
+	badState,
+	badState,
+	// 02 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 03 SLO inx
+	slo_inx_1,
+	slo_inx_2,
+	slo_inx_3,
+	slo_inx_4,
+	slo_inx_5,
+	slo_inx_6,
+	slo_inx_7,
+	badState,
+	// 04 NOP zpg
+	nop_zpg_1,
+	nop_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 05 ORA zpg
+	ora_zpg_1,
+	ora_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 06 ASL zpg
+	asl_zpg_1,
+	asl_zpg_2,
+	asl_zpg_3,
+	asl_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 07 SLO zpg
+	slo_zpg_1,
+	slo_zpg_2,
+	slo_zpg_3,
+	slo_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 08 PHP imp
+	php_imp_1,
+	php_imp_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 09 ORA imm
+	ora_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 0a ASL acc
+	asl_acc_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 0b ANC imm
+	anc_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 0c NOP abs
+	nop_abs_1,
+	nop_abs_2,
+	nop_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 0d ORA abs
+	ora_abs_1,
+	ora_abs_2,
+	ora_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 0e ASL abs
+	asl_abs_1,
+	asl_abs_2,
+	asl_abs_3,
+	asl_abs_4,
+	asl_abs_5,
+	badState,
+	badState,
+	badState,
+	// 0f SLO abs
+	slo_abs_1,
+	slo_abs_2,
+	slo_abs_3,
+	slo_abs_4,
+	slo_abs_5,
+	badState,
+	badState,
+	badState,
+	// 10 BPL rel
+	bpl_rel_1,
+	bpl_rel_2,
+	bpl_rel_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 11 ORA iny
+	ora_iny_1,
+	ora_iny_2,
+	ora_iny_3,
+	ora_iny_4,
+	ora_iny_5,
+	badState,
+	badState,
+	badState,
+	// 12 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 13 SLO iny
+	slo_iny_1,
+	slo_iny_2,
+	slo_iny_3,
+	slo_iny_4,
+	slo_iny_5,
+	slo_iny_6,
+	slo_iny_7,
+	badState,
+	// 14 NOP zpx
+	nop_zpx_1,
+	nop_zpx_2,
+	nop_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 15 ORA zpx
+	ora_zpx_1,
+	ora_zpx_2,
+	ora_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 16 ASL zpx
+	asl_zpx_1,
+	asl_zpx_2,
+	asl_zpx_3,
+	asl_zpx_4,
+	asl_zpx_5,
+	badState,
+	badState,
+	badState,
+	// 17 SLO zpx
+	slo_zpx_1,
+	slo_zpx_2,
+	slo_zpx_3,
+	slo_zpx_4,
+	slo_zpx_5,
+	badState,
+	badState,
+	badState,
+	// 18 CLC imp
+	clc_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 19 ORA aby
+	ora_aby_1,
+	ora_aby_2,
+	ora_aby_3,
+	ora_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 1a NOP imp
+	nop_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 1b SLO aby
+	slo_aby_1,
+	slo_aby_2,
+	slo_aby_3,
+	slo_aby_4,
+	slo_aby_5,
+	slo_aby_6,
+	badState,
+	badState,
+	// 1c NOP abx
+	nop_abx_1,
+	nop_abx_2,
+	nop_abx_3,
+	nop_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 1d ORA abx
+	ora_abx_1,
+	ora_abx_2,
+	ora_abx_3,
+	ora_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 1e ASL abx
+	asl_abx_1,
+	asl_abx_2,
+	asl_abx_3,
+	asl_abx_4,
+	asl_abx_5,
+	asl_abx_6,
+	badState,
+	badState,
+	// 1f SLO abx
+	slo_abx_1,
+	slo_abx_2,
+	slo_abx_3,
+	slo_abx_4,
+	slo_abx_5,
+	slo_abx_6,
+	badState,
+	badState,
+	// 20 JSR abs
+	jsr_abs_1,
+	jsr_abs_2,
+	jsr_abs_3,
+	jsr_abs_4,
+	jsr_abs_5,
+	badState,
+	badState,
+	badState,
+	// 21 AND inx
+	and_inx_1,
+	and_inx_2,
+	and_inx_3,
+	and_inx_4,
+	and_inx_5,
+	badState,
+	badState,
+	badState,
+	// 22 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 23 RLA inx
+	rla_inx_1,
+	rla_inx_2,
+	rla_inx_3,
+	rla_inx_4,
+	rla_inx_5,
+	rla_inx_6,
+	rla_inx_7,
+	badState,
+	// 24 BIT zpg
+	bit_zpg_1,
+	bit_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 25 AND zpg
+	and_zpg_1,
+	and_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 26 ROL zpg
+	rol_zpg_1,
+	rol_zpg_2,
+	rol_zpg_3,
+	rol_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 27 RLA zpg
+	rla_zpg_1,
+	rla_zpg_2,
+	rla_zpg_3,
+	rla_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 28 PLP imp
+	plp_imp_1,
+	plp_imp_2,
+	plp_imp_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 29 AND imm
+	and_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 2a ROL acc
+	rol_acc_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 2b ANC imm
+	anc_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 2c BIT abs
+	bit_abs_1,
+	bit_abs_2,
+	bit_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 2d AND abs
+	and_abs_1,
+	and_abs_2,
+	and_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 2e ROL abs
+	rol_abs_1,
+	rol_abs_2,
+	rol_abs_3,
+	rol_abs_4,
+	rol_abs_5,
+	badState,
+	badState,
+	badState,
+	// 2f RLA abs
+	rla_abs_1,
+	rla_abs_2,
+	rla_abs_3,
+	rla_abs_4,
+	rla_abs_5,
+	badState,
+	badState,
+	badState,
+	// 30 BMI rel
+	bmi_rel_1,
+	bmi_rel_2,
+	bmi_rel_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 31 AND iny
+	and_iny_1,
+	and_iny_2,
+	and_iny_3,
+	and_iny_4,
+	and_iny_5,
+	badState,
+	badState,
+	badState,
+	// 32 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 33 RLA iny
+	rla_iny_1,
+	rla_iny_2,
+	rla_iny_3,
+	rla_iny_4,
+	rla_iny_5,
+	rla_iny_6,
+	rla_iny_7,
+	badState,
+	// 34 NOP zpx
+	nop_zpx_1,
+	nop_zpx_2,
+	nop_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 35 AND zpx
+	and_zpx_1,
+	and_zpx_2,
+	and_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 36 ROL zpx
+	rol_zpx_1,
+	rol_zpx_2,
+	rol_zpx_3,
+	rol_zpx_4,
+	rol_zpx_5,
+	badState,
+	badState,
+	badState,
+	// 37 RLA zpx
+	rla_zpx_1,
+	rla_zpx_2,
+	rla_zpx_3,
+	rla_zpx_4,
+	rla_zpx_5,
+	badState,
+	badState,
+	badState,
+	// 38 SEC imp
+	sec_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 39 AND aby
+	and_aby_1,
+	and_aby_2,
+	and_aby_3,
+	and_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 3a NOP imp
+	nop_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 3b RLA aby
+	rla_aby_1,
+	rla_aby_2,
+	rla_aby_3,
+	rla_aby_4,
+	rla_aby_5,
+	rla_aby_6,
+	badState,
+	badState,
+	// 3c NOP abx
+	nop_abx_1,
+	nop_abx_2,
+	nop_abx_3,
+	nop_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 3d AND abx
+	and_abx_1,
+	and_abx_2,
+	and_abx_3,
+	and_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 3e ROL abx
+	rol_abx_1,
+	rol_abx_2,
+	rol_abx_3,
+	rol_abx_4,
+	rol_abx_5,
+	rol_abx_6,
+	badState,
+	badState,
+	// 3f RLA abx
+	rla_abx_1,
+	rla_abx_2,
+	rla_abx_3,
+	rla_abx_4,
+	rla_abx_5,
+	rla_abx_6,
+	badState,
+	badState,
+	// 40 RTI imp
+	rti_imp_1,
+	rti_imp_2,
+	rti_imp_3,
+	rti_imp_4,
+	rti_imp_5,
+	badState,
+	badState,
+	badState,
+	// 41 EOR inx
+	eor_inx_1,
+	eor_inx_2,
+	eor_inx_3,
+	eor_inx_4,
+	eor_inx_5,
+	badState,
+	badState,
+	badState,
+	// 42 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 43 SRE inx
+	sre_inx_1,
+	sre_inx_2,
+	sre_inx_3,
+	sre_inx_4,
+	sre_inx_5,
+	sre_inx_6,
+	sre_inx_7,
+	badState,
+	// 44 NOP zpg
+	nop_zpg_1,
+	nop_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 45 EOR zpg
+	eor_zpg_1,
+	eor_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 46 LSR zpg
+	lsr_zpg_1,
+	lsr_zpg_2,
+	lsr_zpg_3,
+	lsr_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 47 SRE zpg
+	sre_zpg_1,
+	sre_zpg_2,
+	sre_zpg_3,
+	sre_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 48 PHA imp
+	pha_imp_1,
+	pha_imp_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 49 EOR imm
+	eor_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 4a LSR acc
+	lsr_acc_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 4b ASR imm
+	asr_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 4c JMP abs
+	jmp_abs_1,
+	jmp_abs_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 4d EOR abs
+	eor_abs_1,
+	eor_abs_2,
+	eor_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 4e LSR abs
+	lsr_abs_1,
+	lsr_abs_2,
+	lsr_abs_3,
+	lsr_abs_4,
+	lsr_abs_5,
+	badState,
+	badState,
+	badState,
+	// 4f SRE abs
+	sre_abs_1,
+	sre_abs_2,
+	sre_abs_3,
+	sre_abs_4,
+	sre_abs_5,
+	badState,
+	badState,
+	badState,
+	// 50 BVC rel
+	bvc_rel_1,
+	bvc_rel_2,
+	bvc_rel_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 51 EOR iny
+	eor_iny_1,
+	eor_iny_2,
+	eor_iny_3,
+	eor_iny_4,
+	eor_iny_5,
+	badState,
+	badState,
+	badState,
+	// 52 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 53 SRE iny
+	sre_iny_1,
+	sre_iny_2,
+	sre_iny_3,
+	sre_iny_4,
+	sre_iny_5,
+	sre_iny_6,
+	sre_iny_7,
+	badState,
+	// 54 NOP zpx
+	nop_zpx_1,
+	nop_zpx_2,
+	nop_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 55 EOR zpx
+	eor_zpx_1,
+	eor_zpx_2,
+	eor_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 56 LSR zpx
+	lsr_zpx_1,
+	lsr_zpx_2,
+	lsr_zpx_3,
+	lsr_zpx_4,
+	lsr_zpx_5,
+	badState,
+	badState,
+	badState,
+	// 57 SRE zpx
+	sre_zpx_1,
+	sre_zpx_2,
+	sre_zpx_3,
+	sre_zpx_4,
+	sre_zpx_5,
+	badState,
+	badState,
+	badState,
+	// 58 CLI imp
+	cli_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 59 EOR aby
+	eor_aby_1,
+	eor_aby_2,
+	eor_aby_3,
+	eor_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 5a NOP imp
+	nop_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 5b SRE aby
+	sre_aby_1,
+	sre_aby_2,
+	sre_aby_3,
+	sre_aby_4,
+	sre_aby_5,
+	sre_aby_6,
+	badState,
+	badState,
+	// 5c NOP abx
+	nop_abx_1,
+	nop_abx_2,
+	nop_abx_3,
+	nop_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 5d EOR abx
+	eor_abx_1,
+	eor_abx_2,
+	eor_abx_3,
+	eor_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 5e LSR abx
+	lsr_abx_1,
+	lsr_abx_2,
+	lsr_abx_3,
+	lsr_abx_4,
+	lsr_abx_5,
+	lsr_abx_6,
+	badState,
+	badState,
+	// 5f SRE abx
+	sre_abx_1,
+	sre_abx_2,
+	sre_abx_3,
+	sre_abx_4,
+	sre_abx_5,
+	sre_abx_6,
+	badState,
+	badState,
+	// 60 RTS imp
+	rts_imp_1,
+	rts_imp_2,
+	rts_imp_3,
+	rts_imp_4,
+	rts_imp_5,
+	badState,
+	badState,
+	badState,
+	// 61 ADC inx
+	adc_inx_1,
+	adc_inx_2,
+	adc_inx_3,
+	adc_inx_4,
+	adc_inx_5,
+	badState,
+	badState,
+	badState,
+	// 62 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 63 RRA inx
+	rra_inx_1,
+	rra_inx_2,
+	rra_inx_3,
+	rra_inx_4,
+	rra_inx_5,
+	rra_inx_6,
+	rra_inx_7,
+	badState,
+	// 64 NOP zpg
+	nop_zpg_1,
+	nop_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 65 ADC zpg
+	adc_zpg_1,
+	adc_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 66 ROR zpg
+	ror_zpg_1,
+	ror_zpg_2,
+	ror_zpg_3,
+	ror_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 67 RRA zpg
+	rra_zpg_1,
+	rra_zpg_2,
+	rra_zpg_3,
+	rra_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 68 PLA imp
+	pla_imp_1,
+	pla_imp_2,
+	pla_imp_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 69 ADC imm
+	adc_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 6a ROR acc
+	ror_acc_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 6b ARR imm
+	arr_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 6c JMP ind
+	jmp_ind_1,
+	jmp_ind_2,
+	jmp_ind_3,
+	jmp_ind_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 6d ADC abs
+	adc_abs_1,
+	adc_abs_2,
+	adc_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 6e ROR abs
+	ror_abs_1,
+	ror_abs_2,
+	ror_abs_3,
+	ror_abs_4,
+	ror_abs_5,
+	badState,
+	badState,
+	badState,
+	// 6f RRA abs
+	rra_abs_1,
+	rra_abs_2,
+	rra_abs_3,
+	rra_abs_4,
+	rra_abs_5,
+	badState,
+	badState,
+	badState,
+	// 70 BVS rel
+	bvs_rel_1,
+	bvs_rel_2,
+	bvs_rel_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 71 ADC iny
+	adc_iny_1,
+	adc_iny_2,
+	adc_iny_3,
+	adc_iny_4,
+	adc_iny_5,
+	badState,
+	badState,
+	badState,
+	// 72 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 73 RRA iny
+	rra_iny_1,
+	rra_iny_2,
+	rra_iny_3,
+	rra_iny_4,
+	rra_iny_5,
+	rra_iny_6,
+	rra_iny_7,
+	badState,
+	// 74 NOP zpx
+	nop_zpx_1,
+	nop_zpx_2,
+	nop_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 75 ADC zpx
+	adc_zpx_1,
+	adc_zpx_2,
+	adc_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 76 ROR zpx
+	ror_zpx_1,
+	ror_zpx_2,
+	ror_zpx_3,
+	ror_zpx_4,
+	ror_zpx_5,
+	badState,
+	badState,
+	badState,
+	// 77 RRA zpx
+	rra_zpx_1,
+	rra_zpx_2,
+	rra_zpx_3,
+	rra_zpx_4,
+	rra_zpx_5,
+	badState,
+	badState,
+	badState,
+	// 78 SEI imp
+	sei_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 79 ADC aby
+	adc_aby_1,
+	adc_aby_2,
+	adc_aby_3,
+	adc_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 7a NOP imp
+	nop_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 7b RRA aby
+	rra_aby_1,
+	rra_aby_2,
+	rra_aby_3,
+	rra_aby_4,
+	rra_aby_5,
+	rra_aby_6,
+	badState,
+	badState,
+	// 7c NOP abx
+	nop_abx_1,
+	nop_abx_2,
+	nop_abx_3,
+	nop_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 7d ADC abx
+	adc_abx_1,
+	adc_abx_2,
+	adc_abx_3,
+	adc_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 7e ROR abx
+	ror_abx_1,
+	ror_abx_2,
+	ror_abx_3,
+	ror_abx_4,
+	ror_abx_5,
+	ror_abx_6,
+	badState,
+	badState,
+	// 7f RRA abx
+	rra_abx_1,
+	rra_abx_2,
+	rra_abx_3,
+	rra_abx_4,
+	rra_abx_5,
+	rra_abx_6,
+	badState,
+	badState,
+	// 80 NOP imm
+	nop_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 81 STA inx
+	sta_inx_1,
+	sta_inx_2,
+	sta_inx_3,
+	sta_inx_4,
+	sta_inx_5,
+	badState,
+	badState,
+	badState,
+	// 82 NOP imm
+	nop_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 83 SAX inx
+	sax_inx_1,
+	sax_inx_2,
+	sax_inx_3,
+	sax_inx_4,
+	sax_inx_5,
+	badState,
+	badState,
+	badState,
+	// 84 STY zpg
+	sty_zpg_1,
+	sty_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 85 STA zpg
+	sta_zpg_1,
+	sta_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 86 STX zpg
+	stx_zpg_1,
+	stx_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 87 SAX zpg
+	sax_zpg_1,
+	sax_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 88 DEY imp
+	dey_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 89 NOP imm
+	nop_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 8a TXA imp
+	txa_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 8b ANE imm
+	ane_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 8c STY abs
+	sty_abs_1,
+	sty_abs_2,
+	sty_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 8d STA abs
+	sta_abs_1,
+	sta_abs_2,
+	sta_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 8e STX abs
+	stx_abs_1,
+	stx_abs_2,
+	stx_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 8f SAX abs
+	sax_abs_1,
+	sax_abs_2,
+	sax_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 90 BCC rel
+	bcc_rel_1,
+	bcc_rel_2,
+	bcc_rel_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 91 STA iny
+	sta_iny_1,
+	sta_iny_2,
+	sta_iny_3,
+	sta_iny_4,
+	sta_iny_5,
+	badState,
+	badState,
+	badState,
+	// 92 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// 93 SHA iny
+	sha_iny_1,
+	sha_iny_2,
+	sha_iny_3,
+	sha_iny_4,
+	sha_iny_5,
+	badState,
+	badState,
+	badState,
+	// 94 STY zpx
+	sty_zpx_1,
+	sty_zpx_2,
+	sty_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 95 STA zpx
+	sta_zpx_1,
+	sta_zpx_2,
+	sta_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 96 STX zpy
+	stx_zpy_1,
+	stx_zpy_2,
+	stx_zpy_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 97 SAX zpy
+	sax_zpy_1,
+	sax_zpy_2,
+	sax_zpy_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 98 TYA imp
+	tya_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 99 STA aby
+	sta_aby_1,
+	sta_aby_2,
+	sta_aby_3,
+	sta_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 9a TXS imp
+	txs_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 9b SHS aby
+	shs_aby_1,
+	shs_aby_2,
+	shs_aby_3,
+	shs_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 9c SHY abx
+	shy_abx_1,
+	shy_abx_2,
+	shy_abx_3,
+	shy_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 9d STA abx
+	sta_abx_1,
+	sta_abx_2,
+	sta_abx_3,
+	sta_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 9e SHX aby
+	shx_aby_1,
+	shx_aby_2,
+	shx_aby_3,
+	shx_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// 9f SHA aby
+	sha_aby_1,
+	sha_aby_2,
+	sha_aby_3,
+	sha_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// a0 LDY imm
+	ldy_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// a1 LDA inx
+	lda_inx_1,
+	lda_inx_2,
+	lda_inx_3,
+	lda_inx_4,
+	lda_inx_5,
+	badState,
+	badState,
+	badState,
+	// a2 LDX imm
+	ldx_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// a3 LAX inx
+	lax_inx_1,
+	lax_inx_2,
+	lax_inx_3,
+	lax_inx_4,
+	lax_inx_5,
+	badState,
+	badState,
+	badState,
+	// a4 LDY zpg
+	ldy_zpg_1,
+	ldy_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// a5 LDA zpg
+	lda_zpg_1,
+	lda_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// a6 LDX zpg
+	ldx_zpg_1,
+	ldx_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// a7 LAX zpg
+	lax_zpg_1,
+	lax_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// a8 TAY imp
+	tay_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// a9 LDA imm
+	lda_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// aa TAX imp
+	tax_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ab LXA imm
+	lxa_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ac LDY abs
+	ldy_abs_1,
+	ldy_abs_2,
+	ldy_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ad LDA abs
+	lda_abs_1,
+	lda_abs_2,
+	lda_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ae LDX abs
+	ldx_abs_1,
+	ldx_abs_2,
+	ldx_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// af LAX abs
+	lax_abs_1,
+	lax_abs_2,
+	lax_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// b0 BCS rel
+	bcs_rel_1,
+	bcs_rel_2,
+	bcs_rel_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// b1 LDA iny
+	lda_iny_1,
+	lda_iny_2,
+	lda_iny_3,
+	lda_iny_4,
+	lda_iny_5,
+	badState,
+	badState,
+	badState,
+	// b2 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// b3 LAX iny
+	lax_iny_1,
+	lax_iny_2,
+	lax_iny_3,
+	lax_iny_4,
+	lax_iny_5,
+	badState,
+	badState,
+	badState,
+	// b4 LDY zpx
+	ldy_zpx_1,
+	ldy_zpx_2,
+	ldy_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// b5 LDA zpx
+	lda_zpx_1,
+	lda_zpx_2,
+	lda_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// b6 LDX zpy
+	ldx_zpy_1,
+	ldx_zpy_2,
+	ldx_zpy_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// b7 LAX zpy
+	lax_zpy_1,
+	lax_zpy_2,
+	lax_zpy_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// b8 CLV imp
+	clv_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// b9 LDA aby
+	lda_aby_1,
+	lda_aby_2,
+	lda_aby_3,
+	lda_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ba TSX imp
+	tsx_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// bb LAS aby
+	las_aby_1,
+	las_aby_2,
+	las_aby_3,
+	las_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// bc LDY abx
+	ldy_abx_1,
+	ldy_abx_2,
+	ldy_abx_3,
+	ldy_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// bd LDA abx
+	lda_abx_1,
+	lda_abx_2,
+	lda_abx_3,
+	lda_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// be LDX aby
+	ldx_aby_1,
+	ldx_aby_2,
+	ldx_aby_3,
+	ldx_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// bf LAX aby
+	lax_aby_1,
+	lax_aby_2,
+	lax_aby_3,
+	lax_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// c0 CPY imm
+	cpy_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// c1 CMP inx
+	cmp_inx_1,
+	cmp_inx_2,
+	cmp_inx_3,
+	cmp_inx_4,
+	cmp_inx_5,
+	badState,
+	badState,
+	badState,
+	// c2 NOP imm
+	nop_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// c3 DCP inx
+	dcp_inx_1,
+	dcp_inx_2,
+	dcp_inx_3,
+	dcp_inx_4,
+	dcp_inx_5,
+	dcp_inx_6,
+	dcp_inx_7,
+	badState,
+	// c4 CPY zpg
+	cpy_zpg_1,
+	cpy_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// c5 CMP zpg
+	cmp_zpg_1,
+	cmp_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// c6 DEC zpg
+	dec_zpg_1,
+	dec_zpg_2,
+	dec_zpg_3,
+	dec_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// c7 DCP zpg
+	dcp_zpg_1,
+	dcp_zpg_2,
+	dcp_zpg_3,
+	dcp_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// c8 INY imp
+	iny_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// c9 CMP imm
+	cmp_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ca DEX imp
+	dex_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// cb SBX imm
+	sbx_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// cc CPY abs
+	cpy_abs_1,
+	cpy_abs_2,
+	cpy_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// cd CMP abs
+	cmp_abs_1,
+	cmp_abs_2,
+	cmp_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ce DEC abs
+	dec_abs_1,
+	dec_abs_2,
+	dec_abs_3,
+	dec_abs_4,
+	dec_abs_5,
+	badState,
+	badState,
+	badState,
+	// cf DCP abs
+	dcp_abs_1,
+	dcp_abs_2,
+	dcp_abs_3,
+	dcp_abs_4,
+	dcp_abs_5,
+	badState,
+	badState,
+	badState,
+	// d0 BNE rel
+	bne_rel_1,
+	bne_rel_2,
+	bne_rel_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// d1 CMP iny
+	cmp_iny_1,
+	cmp_iny_2,
+	cmp_iny_3,
+	cmp_iny_4,
+	cmp_iny_5,
+	badState,
+	badState,
+	badState,
+	// d2 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// d3 DCP iny
+	dcp_iny_1,
+	dcp_iny_2,
+	dcp_iny_3,
+	dcp_iny_4,
+	dcp_iny_5,
+	dcp_iny_6,
+	dcp_iny_7,
+	badState,
+	// d4 NOP zpx
+	nop_zpx_1,
+	nop_zpx_2,
+	nop_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// d5 CMP zpx
+	cmp_zpx_1,
+	cmp_zpx_2,
+	cmp_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// d6 DEC zpx
+	dec_zpx_1,
+	dec_zpx_2,
+	dec_zpx_3,
+	dec_zpx_4,
+	dec_zpx_5,
+	badState,
+	badState,
+	badState,
+	// d7 DCP zpx
+	dcp_zpx_1,
+	dcp_zpx_2,
+	dcp_zpx_3,
+	dcp_zpx_4,
+	dcp_zpx_5,
+	badState,
+	badState,
+	badState,
+	// d8 CLD imp
+	cld_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// d9 CMP aby
+	cmp_aby_1,
+	cmp_aby_2,
+	cmp_aby_3,
+	cmp_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// da NOP imp
+	nop_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// db DCP aby
+	dcp_aby_1,
+	dcp_aby_2,
+	dcp_aby_3,
+	dcp_aby_4,
+	dcp_aby_5,
+	dcp_aby_6,
+	badState,
+	badState,
+	// dc NOP abx
+	nop_abx_1,
+	nop_abx_2,
+	nop_abx_3,
+	nop_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// dd CMP abx
+	cmp_abx_1,
+	cmp_abx_2,
+	cmp_abx_3,
+	cmp_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// de DEC abx
+	dec_abx_1,
+	dec_abx_2,
+	dec_abx_3,
+	dec_abx_4,
+	dec_abx_5,
+	dec_abx_6,
+	badState,
+	badState,
+	// df DCP abx
+	dcp_abx_1,
+	dcp_abx_2,
+	dcp_abx_3,
+	dcp_abx_4,
+	dcp_abx_5,
+	dcp_abx_6,
+	badState,
+	badState,
+	// e0 CPX imm
+	cpx_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// e1 SBC inx
+	sbc_inx_1,
+	sbc_inx_2,
+	sbc_inx_3,
+	sbc_inx_4,
+	sbc_inx_5,
+	badState,
+	badState,
+	badState,
+	// e2 NOP imm
+	nop_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// e3 ISB inx
+	isb_inx_1,
+	isb_inx_2,
+	isb_inx_3,
+	isb_inx_4,
+	isb_inx_5,
+	isb_inx_6,
+	isb_inx_7,
+	badState,
+	// e4 CPX zpg
+	cpx_zpg_1,
+	cpx_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// e5 SBC zpg
+	sbc_zpg_1,
+	sbc_zpg_2,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// e6 INC zpg
+	inc_zpg_1,
+	inc_zpg_2,
+	inc_zpg_3,
+	inc_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// e7 ISB zpg
+	isb_zpg_1,
+	isb_zpg_2,
+	isb_zpg_3,
+	isb_zpg_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// e8 INX imp
+	inx_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// e9 SBC imm
+	sbc_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ea NOP imp
+	nop_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// eb SBC imm
+	sbc_imm_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ec CPX abs
+	cpx_abs_1,
+	cpx_abs_2,
+	cpx_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ed SBC abs
+	sbc_abs_1,
+	sbc_abs_2,
+	sbc_abs_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// ee INC abs
+	inc_abs_1,
+	inc_abs_2,
+	inc_abs_3,
+	inc_abs_4,
+	inc_abs_5,
+	badState,
+	badState,
+	badState,
+	// ef ISB abs
+	isb_abs_1,
+	isb_abs_2,
+	isb_abs_3,
+	isb_abs_4,
+	isb_abs_5,
+	badState,
+	badState,
+	badState,
+	// f0 BEQ rel
+	beq_rel_1,
+	beq_rel_2,
+	beq_rel_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// f1 SBC iny
+	sbc_iny_1,
+	sbc_iny_2,
+	sbc_iny_3,
+	sbc_iny_4,
+	sbc_iny_5,
+	badState,
+	badState,
+	badState,
+	// f2 CIM imp
+	cim_imp_1,
+	cim_imp_2,
+	cim_imp_3,
+	cim_imp_4,
+	cim_imp_5,
+	badState,
+	badState,
+	badState,
+	// f3 ISB iny
+	isb_iny_1,
+	isb_iny_2,
+	isb_iny_3,
+	isb_iny_4,
+	isb_iny_5,
+	isb_iny_6,
+	isb_iny_7,
+	badState,
+	// f4 NOP zpx
+	nop_zpx_1,
+	nop_zpx_2,
+	nop_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// f5 SBC zpx
+	sbc_zpx_1,
+	sbc_zpx_2,
+	sbc_zpx_3,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// f6 INC zpx
+	inc_zpx_1,
+	inc_zpx_2,
+	inc_zpx_3,
+	inc_zpx_4,
+	inc_zpx_5,
+	badState,
+	badState,
+	badState,
+	// f7 ISB zpx
+	isb_zpx_1,
+	isb_zpx_2,
+	isb_zpx_3,
+	isb_zpx_4,
+	isb_zpx_5,
+	badState,
+	badState,
+	badState,
+	// f8 SED imp
+	sed_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// f9 SBC aby
+	sbc_aby_1,
+	sbc_aby_2,
+	sbc_aby_3,
+	sbc_aby_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// fa NOP imp
+	nop_imp_1,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	badState,
+	// fb ISB aby
+	isb_aby_1,
+	isb_aby_2,
+	isb_aby_3,
+	isb_aby_4,
+	isb_aby_5,
+	isb_aby_6,
+	badState,
+	badState,
+	// fc NOP abx
+	nop_abx_1,
+	nop_abx_2,
+	nop_abx_3,
+	nop_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// fd SBC abx
+	sbc_abx_1,
+	sbc_abx_2,
+	sbc_abx_3,
+	sbc_abx_4,
+	badState,
+	badState,
+	badState,
+	badState,
+	// fe INC abx
+	inc_abx_1,
+	inc_abx_2,
+	inc_abx_3,
+	inc_abx_4,
+	inc_abx_5,
+	inc_abx_6,
+	badState,
+	badState,
+	// ff ISB abx
+	isb_abx_1,
+	isb_abx_2,
+	isb_abx_3,
+	isb_abx_4,
+	isb_abx_5,
+	isb_abx_6,
+	badState,
+	badState,
+	// 800 decode
+	decode,
+	// 801 reset (seven cycles, 801..807)
+	reset_read,
+	reset_read,
+	reset_push,
+	reset_push,
+	reset_push,
+	reset_vector_low,
+	reset_vector_high,
 ];

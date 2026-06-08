@@ -1,24 +1,33 @@
 import { ReadOptions, type Memory } from "./interface.ts";
-import { DECODE, type Step } from "./microcode.ts";
+import { DECODE, RESET, type Step } from "./microcode.ts";
 import { MICROCODE } from "./nmos-step.ts";
 import { NMOS_INSTRUCTIONS } from "./nmos.ts";
 
-function inc16(n: number): number {
-	return (n + 1) & 0xffff;
-}
-
 /** Variant flags that change the instruction set/behavior. */
 export interface SfottyOptions {
-	/** Decimal mode is inert: the D flag exists but ADC/SBC stay binary (Ricoh 2A03). */
+	/**
+	 * Specifies whether the CPU should disable decimal mode.
+	 *
+	 * Some variants of the 6502, such as the Ricoh 2A03/2A07 used in the NES,
+	 * do not support decimal mode. The flag is still present and its value can
+	 * be changed and observed, but instructions will always operate in binary
+	 * mode.
+	 *
+	 * @default false
+	 */
 	withoutDecimal?: boolean;
-	/** Undocumented opcodes crash the CPU like CIM/JAM instead of executing. */
+	/**
+	 * Specifies whether the CPU should support undocumented opcodes.
+	 *
+	 * Undocumented opcodes are not part of the official 6502 specification and
+	 * their behavior may vary between different implementations. If this
+	 * option is set to `false`, all undocumented opcodes will crash the CPU
+	 * similar to the `CIM` (also called `KIL`, `JAM`, or `HLT`) instruction.
+	 *
+	 * @default false
+	 */
 	withoutUndocumented?: boolean;
 }
-
-/** opcode → whether it is undocumented, indexed by opcode value. */
-const UNDOCUMENTED: boolean[] = NMOS_INSTRUCTIONS.map(
-	(instruction) => instruction.undocumented === true,
-);
 
 /**
  * The unstable "magic constant" ORed into A by ANE/LXA (`A = (A | C) & X & imm`).
@@ -26,8 +35,7 @@ const UNDOCUMENTED: boolean[] = NMOS_INSTRUCTIONS.map(
  * universally correct. We use $EE: it matches Harte's `8b` vectors exactly
  * (10000/10000) and is the value reported for the Atari 400/800. Measured
  * Harte failures for other choices: $FF → 2379, $00 → 5462. Note the Atari
- * XL/XE (SALLY) is reported as $00 (Hias), so this differs there. See
- * notes.local/unstable-opcodes.md.
+ * XL/XE (SALLY) is reported as $00 (Hias), so this differs there.
  */
 const ANE_MAGIC = 0xee;
 
@@ -46,6 +54,12 @@ export class Sfotty {
 	dFlag = false;
 	vFlag = false;
 	nFlag = false;
+	// The B flag. Unlike the others it isn't a real register bit — it only exists
+	// in the status byte pushed to the stack, where it's 1 for a software push
+	// (BRK/PHP) and 0 for a hardware interrupt (IRQ/NMI). `decode` sets it: true on
+	// a normal fetch, false when it forces the interrupt sequence. setP() ignores
+	// it (B is discarded on a pull), so it's read back only via getP().
+	bFlag = true;
 
 	// Internal latches.
 	#dr = 0; // Data latch; also the zero-page pointer for indirect modes.
@@ -59,17 +73,40 @@ export class Sfotty {
 	state = DECODE;
 
 	/**
-	 * When true, the next run() should run the reset sequence instead of a
-	 * normal decode. Not yet honored by run() — the test harness clears it and
-	 * seeds the registers directly. TODO: implement the reset sequence.
-	 */
-	resetPending = true;
-
-	/**
-	 * Set when the CPU jams on a CIM/JAM (or, with `withoutUndocumented`, on any
+	 * Set when the CPU crashes on a CIM (or, with `withoutUndocumented`, on any
 	 * undocumented opcode). It then repeats that cycle forever until reset.
 	 */
 	crashed = false;
+
+	/**
+	 * The RDY input line. When the host pulls it false before a read cycle, that
+	 * cycle still issues its bus read but then stalls: no register is mutated and
+	 * `state` does not advance, so the next `run()` repeats the same read until
+	 * RDY is true again. NMOS quirk: only read cycles honor RDY — write cycles
+	 * complete regardless.
+	 */
+	RDY = true;
+
+	/**
+	 * The IRQ input line (positive logic here: `true` = asserted). Level-sensitive
+	 * — while it is asserted and the I flag is clear, an IRQ is recognized at an
+	 * instruction boundary. The host must wired-OR all its IRQ sources into this
+	 * single boolean. Not yet honored by run().
+	 */
+	IRQ = false;
+
+	/**
+	 * The NMI input line (positive logic here: `true` = asserted). Edge-triggered
+	 * — a false→true transition latches a pending NMI, serviced at the next
+	 * instruction boundary regardless of the I flag. The host must wired-OR all
+	 * its NMI sources into this single boolean. Not yet honored by run().
+	 */
+	NMI = false;
+
+	#nmiPrev = false; // For edge detection of NMI.
+	#nmiPending = false; // Set when an NMI is latched, cleared when serviced.
+	#interruptDetected = false; // Combined NMI/IRQ detect, recomputed each cycle; opPoll latches it one cycle later (the two-cycles-before-decode delay).
+	#interruptPending = false; // When set, decode will enter the interrupt sequence instead of the opcode's normal microcode.
 
 	readonly #bus: Memory;
 	readonly #withoutDecimal: boolean;
@@ -84,12 +121,13 @@ export class Sfotty {
 				: MICROCODE;
 	}
 
-	/** Pack the status flags into a byte. Bits 4 (B) and 5 (unused) read as 1. */
+	/** Pack the status flags into a byte. Bit 5 (unused) reads as 1; bit 4 is B. */
 	getP(): number {
 		return (
 			(this.nFlag ? 0x80 : 0) |
 			(this.vFlag ? 0x40 : 0) |
-			0x30 |
+			0x20 |
+			(this.bFlag ? 0x10 : 0) |
 			(this.dFlag ? 0x08 : 0) |
 			(this.iFlag ? 0x04 : 0) |
 			(this.zFlag ? 0x02 : 0) |
@@ -110,50 +148,241 @@ export class Sfotty {
 	/** Advance the CPU by exactly one clock cycle (one bus access). */
 	run(): void {
 		this.#microcode[this.state]!(this);
+
+		// Interrupt detection: Checking it here introduces a one-cycle delay.
+		// The real hardware has a half-cycle delay but we only model full cycles.
+		if (this.NMI && !this.#nmiPrev) {
+			this.#nmiPending = true;
+		}
+		this.#nmiPrev = this.NMI;
+		this.#interruptDetected = this.#nmiPending || (this.IRQ && !this.iFlag);
 	}
 
 	/**
-	 * The decode cycle (the implicit `r-t1`): read the next opcode while
-	 * asserting the SYNC line, advance PC, and jump to the opcode's microcode.
+	 * Start the reset sequence (emulates the RES line). Puts the CPU into a
+	 * dedicated seven-cycle sequence that decrements S three times, sets I, and
+	 * reads the reset vector at $FFFC/$FFFD into PC — so the next seven run()
+	 * calls carry out the reset and land back at DECODE. Timing is not exact (no
+	 * reset-pulse-too-short modeling). When `cold` is true (power-on) the
+	 * registers, flags, and internal latches are first cleared to a known state
+	 * (S = 0, so the sequence's three decrements leave it at the usual $FD); a
+	 * warm reset leaves them as-is. Also clears a CIM crash. The host calls this;
+	 * nothing arms it automatically.
+	 */
+	reset(cold: boolean): void {
+		if (cold) {
+			this.A = 0;
+			this.X = 0;
+			this.Y = 0;
+			this.S = 0;
+			this.PC = 0;
+			this.cFlag = false;
+			this.zFlag = false;
+			this.iFlag = false;
+			this.dFlag = false;
+			this.vFlag = false;
+			this.nFlag = false;
+			this.#dr = 0;
+			this.#al = 0;
+			this.#ah = 0;
+			this.#crossed = false;
+			this.#offset = 0;
+			this.#branchFixup = 0;
+			this.#nmiPending = false;
+			this.#interruptDetected = false;
+			// Baseline the edge detector to the current line so a held NMI doesn't
+			// register a phantom false→true edge on the first post-reset cycle.
+			this.#nmiPrev = this.NMI;
+		}
+		this.crashed = false;
+		this.state = RESET;
+	}
+
+	/**
+	 * The bus read choke point — issues the single read. RDY is not handled here:
+	 * each read op issues the read through this method and then, if RDY is low,
+	 * bails without mutating state (so the bus still sees the read every stalled
+	 * cycle). A throw from the bus propagates out, before any register changes.
 	 * @internal
 	 */
-	decode(): void {
-		const opcode = this.#bus.read(this.PC, ReadOptions.OPCODE_FETCH);
-		this.PC = inc16(this.PC);
-		this.state = opcode << 3;
+	#read(address: number, options: ReadOptions): number {
+		return this.#bus.read(address, options);
+	}
+
+	/**
+	 * The bus write choke point. Writes ignore RDY entirely (NMOS quirk), so this
+	 * is a straight passthrough — it never stalls. @internal
+	 */
+	#write(address: number, value: number): void {
+		this.#bus.write(address, value);
 	}
 
 	/**
 	 * Human-readable description of a microstate, for logging/debugging — e.g.
-	 * `"LDA abs · cycle 3"` or `"decode"`. Cycles are numbered from 1 (decode).
+	 * `"LDA abs · cycle 3"` or `"decode"`. Cycles count the opcode fetch as cycle
+	 * 0 (`decode`), so `code[i]` is cycle `i + 1`, matching the generated step
+	 * names.
 	 */
 	describeState(state: number = this.state): string {
 		if (state === DECODE) return "decode";
+		if (state >= RESET && state <= RESET + 6) {
+			return `reset · cycle ${state - RESET + 1}`;
+		}
 		const instruction = NMOS_INSTRUCTIONS[state >> 3];
 		const cycle = state & 7;
 		if (!instruction || cycle >= instruction.code.length) {
 			return `<invalid state ${state}>`;
 		}
-		return `${instruction.mnemonic} ${instruction.mode} · cycle ${cycle + 2}`;
+		return `${instruction.mnemonic} ${instruction.mode} · cycle ${cycle + 1}`;
 	}
 
 	// --- Micro-op implementations (called by the microcode table) -------------
 	// One method per microcode token, all prefixed `op` so they stand apart from
 	// the public CPU API. The generator maps each token to one of these (e.g.
-	// "r-pc++" → opReadOperand). Bus ops perform the single read/write and bump
-	// pointers *after* the access returns (so a trap leaves state intact);
-	// internal ops are pure register transfers.
+	// "r-pc++" → opReadOperand). They are grouped below as bus reads, then bus
+	// writes, then internal ops: bus ops perform the single read/write and bump
+	// pointers *after* the access returns (so a bus throw leaves state intact); internal
+	// ops are pure register transfers.
+	//
+	// Bus reads return a boolean: `false` means RDY was low, so the read was issued
+	// to the bus but no register changed — the generated step must bail without
+	// advancing `state`, leaving the cycle to repeat (and re-read) until RDY rises.
+	// Writes ignore RDY and internal ops never stall, so both return void.
+
+	// Bus reads ----------------------------------------------------------------
+
+	/**
+	 * `opReadDecode` — the decode cycle (the implicit `r-t1`): read the next opcode
+	 * while asserting the SYNC line. Normally it advances PC and jumps to the
+	 * opcode's microcode. But if a poll latched a pending interrupt, the read is a
+	 * dummy: PC is *not* advanced and the CPU runs the BRK/interrupt sequence
+	 * (`state = 0`) instead of the fetched opcode, with `bFlag` cleared so the
+	 * pushed status has B = 0. The pending flag is consumed here — the sequence
+	 * itself never polls, so without this the next decode would re-enter it.
+	 * Unlike the other bus reads it is a whole step — it sets `state` itself — and
+	 * the generator wires it into the DECODE slot rather than mapping it from a
+	 * token. @internal
+	 */
+	opReadDecode(): boolean {
+		const value = this.#read(this.PC, ReadOptions.OPCODE_FETCH);
+		if (!this.RDY) {
+			return false;
+		}
+
+		if (this.#interruptPending) {
+			this.#interruptPending = false;
+			this.bFlag = false;
+			this.state = 0; // BRK / interrupt sequence
+		} else {
+			this.bFlag = true;
+			this.PC = inc16(this.PC);
+			this.state = value << 3;
+		}
+
+		return true;
+	}
 
 	/** `r-pc++`: read the operand byte at PC into DR, then advance PC. @internal */
-	opReadOperand(): void {
-		this.#dr = this.#bus.read(this.PC, ReadOptions.NONE);
+	opReadOperand(): boolean {
+		const value = this.#read(this.PC, ReadOptions.NONE);
+		if (!this.RDY) {
+			return false;
+		}
+
+		this.#dr = value;
 		this.PC = inc16(this.PC);
+		return true;
+	}
+
+	/**
+	 * `r-brk`: BRK/interrupt second-cycle read. Reads at PC (the value is a dummy —
+	 * it gets overwritten by the following `dr=pch`) and advances PC *only* on a
+	 * software BRK (`bFlag`); a hardware interrupt leaves PC put, so the pushed
+	 * return address is the interrupted instruction rather than skipping a byte.
+	 * @internal
+	 */
+	opReadBreakByte(): boolean {
+		const value = this.#read(this.PC, ReadOptions.NONE);
+		if (!this.RDY) {
+			return false;
+		}
+
+		this.#dr = value;
+		if (this.bFlag) this.PC = inc16(this.PC);
+		return true;
 	}
 
 	/** `r-ar`: read from the effective address (AR) into DR. @internal */
-	opReadAddr(): void {
-		this.#dr = this.#bus.read(this.#addr, ReadOptions.NONE);
+	opReadAddr(): boolean {
+		const value = this.#read(this.#addr, ReadOptions.NONE);
+		if (!this.RDY) {
+			return false;
+		}
+
+		this.#dr = value;
+		return true;
 	}
+
+	/** `r-pc`: read at PC into DR without advancing PC (dummy/operand read). @internal */
+	opReadPc(): boolean {
+		const value = this.#read(this.PC, ReadOptions.NONE);
+		if (!this.RDY) {
+			return false;
+		}
+
+		this.#dr = value;
+		return true;
+	}
+
+	/** `r-ar++`: read from AR into DR, then increment AR's low byte only (no carry). @internal */
+	opReadAddrInc(): boolean {
+		const value = this.#read(this.#addr, ReadOptions.NONE);
+		if (!this.RDY) {
+			return false;
+		}
+
+		this.#dr = value;
+		this.#al = (this.#al + 1) & 0xff;
+		return true;
+	}
+
+	/** `r-dr++`: read from the zero-page pointer DR into AL, then advance DR (wraps). @internal */
+	opReadPointerInc(): boolean {
+		const value = this.#read(this.#dr, ReadOptions.NONE);
+		if (!this.RDY) {
+			return false;
+		}
+
+		this.#al = value;
+		this.#dr = (this.#dr + 1) & 0xff;
+		return true;
+	}
+
+	/** `r-dr`: read from the zero-page pointer DR into AH. @internal */
+	opReadPointer(): boolean {
+		const value = this.#read(this.#dr, ReadOptions.NONE);
+		if (!this.RDY) {
+			return false;
+		}
+
+		this.#ah = value;
+		return true;
+	}
+
+	// Bus writes ---------------------------------------------------------------
+
+	/** `w-ar`: write DR to the effective address. @internal */
+	opWriteAddr(): void {
+		this.#write(this.#addr, this.#dr);
+	}
+
+	/** `w-ar--`: write DR to AR, then decrement AR's low byte only (no borrow). @internal */
+	opWriteAddrDec(): void {
+		this.#write(this.#addr, this.#dr);
+		this.#al = (this.#al - 1) & 0xff;
+	}
+
+	// Internal ops -------------------------------------------------------------
 
 	/** `ar=dr`: set the effective address to DR (zero page: high byte 0). @internal */
 	opAddrFromDr(): void {
@@ -228,41 +457,6 @@ export class Sfotty {
 		this.A = this.#dr;
 		this.X = this.#dr;
 		this.#setNZ(this.#dr);
-	}
-
-	// Bus ops ------------------------------------------------------------------
-
-	/** `r-pc`: read at PC into DR without advancing PC (dummy/operand read). @internal */
-	opReadPc(): void {
-		this.#dr = this.#bus.read(this.PC, ReadOptions.NONE);
-	}
-
-	/** `r-ar++`: read from AR into DR, then increment AR's low byte only (no carry). @internal */
-	opReadAddrInc(): void {
-		this.#dr = this.#bus.read(this.#addr, ReadOptions.NONE);
-		this.#al = (this.#al + 1) & 0xff;
-	}
-
-	/** `r-dr++`: read from the zero-page pointer DR into AL, then advance DR (wraps). @internal */
-	opReadPointerInc(): void {
-		this.#al = this.#bus.read(this.#dr, ReadOptions.NONE);
-		this.#dr = (this.#dr + 1) & 0xff;
-	}
-
-	/** `r-dr`: read from the zero-page pointer DR into AH. @internal */
-	opReadPointer(): void {
-		this.#ah = this.#bus.read(this.#dr, ReadOptions.NONE);
-	}
-
-	/** `w-ar`: write DR to the effective address. @internal */
-	opWriteAddr(): void {
-		this.#bus.write(this.#addr, this.#dr);
-	}
-
-	/** `w-ar--`: write DR to AR, then decrement AR's low byte only (no borrow). @internal */
-	opWriteAddrDec(): void {
-		this.#bus.write(this.#addr, this.#dr);
-		this.#al = (this.#al - 1) & 0xff;
 	}
 
 	// Data latch loads (stores stage DR for a later w-ar) ----------------------
@@ -688,6 +882,20 @@ export class Sfotty {
 		this.iFlag = true;
 	}
 
+	/**
+	 * `poll`: latch the interrupt-detect signal into `#interruptPending` for the
+	 * next decode to act on. The generator places it on every cycle that can end
+	 * an instruction (except BRK and a taken branch's PCL-add cycle), right after
+	 * the bus op so it runs before any I-flag change in the same cycle. It reads
+	 * `#interruptDetected`, which is recomputed at the end of the *previous* cycle,
+	 * giving the two-cycles-before-decode timing (and the CLI/SEI/PLP delays). It
+	 * overwrites rather than accumulates, so a later poll in the same instruction
+	 * (e.g. a branch's fix-up cycle) wins. @internal
+	 */
+	opPoll(): void {
+		this.#interruptPending = this.#interruptDetected;
+	}
+
 	/** `of=0` (CLV). @internal */
 	opClearOverflow(): void {
 		this.vFlag = false;
@@ -714,7 +922,7 @@ export class Sfotty {
 		this.#ah = 0x01;
 	}
 
-	/** `dr=p` / `dr=pi`: DR = status byte (B set). @internal */
+	/** `dr=p` / `dr=pi`: DR = status byte (B = bFlag, per getP). @internal */
 	opDrFromP(): void {
 		this.#dr = this.getP();
 	}
@@ -769,10 +977,33 @@ export class Sfotty {
 		this.setP(this.#dr);
 	}
 
-	/** `ar=vector`: address latch = the IRQ/BRK vector ($FFFE). @internal */
+	/**
+	 * `ar=vector`: select the interrupt vector at the push-P cycle. If an NMI is
+	 * latched it takes priority — address latch = `$FFFA` and the NMI is
+	 * acknowledged (`#nmiPending` cleared) — so an NMI asserted early enough in a
+	 * BRK/IRQ sequence hijacks it. Otherwise it's the IRQ/BRK vector `$FFFE`.
+	 * @internal
+	 */
 	opAddrVector(): void {
-		this.#al = 0xfe;
-		this.#ah = 0xff;
+		if (this.#nmiPending) {
+			this.#nmiPending = false;
+			this.#al = 0xfa;
+			this.#ah = 0xff;
+		} else {
+			this.#al = 0xfe;
+			this.#ah = 0xff;
+		}
+	}
+
+	/**
+	 * `nmi-hold`: the interrupt sequence's last cycle. Drop a still-pending NMI if
+	 * its line has gone inactive. An NMI latched too late to hijack the vector (at
+	 * the push-P cycle) is only serviced if it outlasts the sequence; a shorter
+	 * pulse is lost here. It only clears — never sets — so an NMI already consumed
+	 * by the vector selection (a hijack) is unaffected. @internal
+	 */
+	opNmiHold(): void {
+		if (!this.NMI) this.#nmiPending = false;
 	}
 
 	/** `ar=ffff`: address latch = $FFFF. @internal */
@@ -787,8 +1018,20 @@ export class Sfotty {
 		this.#ah = 0xff;
 	}
 
-	/** `cc--`: jam — flag the crash; the microcode repeats this cycle forever. @internal */
-	opJam(): void {
+	/** `ar=fffc`: address latch = the reset vector ($FFFC). @internal */
+	opAddrFFFC(): void {
+		this.#al = 0xfc;
+		this.#ah = 0xff;
+	}
+
+	/** `s--`: decrement the stack pointer (the reset sequence's fake pushes). @internal */
+	opDecS(): void {
+		this.S = (this.S - 1) & 0xff;
+	}
+
+	// TODO(fatih): CIM should set this on its first cycle so we know early.
+	/** `cc--`: crash — flag it; the microcode repeats this cycle forever. @internal */
+	opCrash(): void {
 		this.crashed = true;
 	}
 
@@ -887,18 +1130,26 @@ export class Sfotty {
 	}
 }
 
-/** Jam: flag the crash and repeat this cycle forever (the state is left as-is). */
-function jamStep(cpu: Sfotty): void {
+/** Crash: flag it and repeat this cycle forever (the state is left as-is). */
+function crashStep(cpu: Sfotty): void {
 	cpu.crashed = true;
 }
 
+function inc16(n: number): number {
+	return (n + 1) & 0xffff;
+}
+
+// TODO(fatih): We should just copy CIM behavior.
+
 /**
- * The default microcode table, with every undocumented opcode patched to jam at
- * its first cycle. `decode` still sets `state = opcode << 3`, so the crashed
+ * The default microcode table, with every undocumented opcode patched to crash
+ * at its first cycle. `decode` still sets `state = opcode << 3`, so the crashed
  * opcode is preserved in `state` (and reported by `describeState`); only the
  * step it lands on changes. Built once by copying the base table and patching.
  */
 const MICROCODE_CRASH_UNDOCUMENTED: Step[] = MICROCODE.slice();
 for (let opcode = 0; opcode < 0x100; opcode++) {
-	if (UNDOCUMENTED[opcode]) MICROCODE_CRASH_UNDOCUMENTED[opcode << 3] = jamStep;
+	if (NMOS_INSTRUCTIONS[opcode]!.undocumented) {
+		MICROCODE_CRASH_UNDOCUMENTED[opcode << 3] = crashStep;
+	}
 }

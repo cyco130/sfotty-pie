@@ -1,8 +1,17 @@
 {
   "name": "@sfotty-pie/sfotty",
   "version": "0.2.0",
-  "description": "sfotty-pie",
-  "keywords": [],
+  "description": "Cycle-accurate NMOS 6502 CPU core.",
+  "keywords": [
+    "6502",
+    "nmos-6502",
+    "mos-6502",
+    "2a03",
+    "cpu",
+    "emulator",
+    "emulation",
+    "cycle-accurate"
+  ],
   "license": "MIT",
   "repository": "github:cyco130/sfotty-pie",
   "files": [
@@ -19,15 +28,15 @@
   "scripts": {
     "build": "tsdown --clean",
     "dev": "tsdown --watch",
-    "generate:opcodes": "node src/generate.ts",
     "prepack": "pnpm build",
     "test": "pnpm run /^test:/",
     "test:unit": "vitest run",
     "test:typecheck": "tsc -p tsconfig.json",
     "test:lint": "eslint . --max-warnings 0",
     "test:package": "publint",
-    "generate:step": "node src/generate-step.ts",
-    "harte": "node src/single-step-test.ts"
+    "harte": "node src/single-step-test.ts",
+    "generate:opcodes": "node src/generate.ts",
+    "generate:step": "node src/generate-step.ts"
   },
   "devDependencies": {
     "@cyco130/eslint-config": "^9.0.1",

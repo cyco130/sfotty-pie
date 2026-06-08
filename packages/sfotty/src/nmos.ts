@@ -10,12 +10,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "BRK",
 		mode: "imp",
 		code: [
-			["r-pc++", "ar=sp", "dr=pch"],
+			["r-brk", "ar=sp", "dr=pch"],
 			["w-ar--", "dr=pcl"],
 			["w-ar--", "dr=pi", "if=1"],
 			["w-ar--", "s=al", "ar=vector"],
 			["r-ar++", "pcl=dr"],
-			["r-ar", "pch=dr"],
+			["r-ar", "pch=dr", "nmi-hold"],
 		],
 	},
 	// 01 ORA inx

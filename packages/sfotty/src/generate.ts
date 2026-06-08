@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import prettier from "prettier";
 import { NMOS_OPCODES } from "./nmos-opcodes.ts";
 import type { BusOp, InternalOp } from "./microcode.ts";
@@ -594,7 +594,7 @@ ${entries.join("\n")}
 ];
 `;
 
-const outPath = fileURLToPath(new URL("./nmos.ts", import.meta.url));
+const outPath = join(import.meta.dirname, "nmos.ts");
 const config = await prettier.resolveConfig(outPath);
 const formatted = await prettier.format(source, {
 	...config,

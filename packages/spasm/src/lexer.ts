@@ -42,7 +42,15 @@ export class Lexer {
 	#source: string;
 }
 
-export const DOT_KEYWORDS = ["byte", "org", "word"] as const;
+export const DOT_KEYWORDS = [
+	"byte",
+	"org",
+	"word",
+	"segment",
+	"define_segment",
+	"emit",
+	"emplace",
+] as const;
 
 const REGISTER_NAMES = ["a", "x", "y"] as const;
 
@@ -99,10 +107,12 @@ const REGEXES = [
 	[/'(?:[^'\r\n\\]|\\.)*'/, "character"],
 	[/'(?:[^'\r\n\\]|\\.)*/, "error:character"],
 
-	// Multi character punctuation
+	// Multi character punctuation (must precede the single-character ":")
 	[/\|\|/, "||"],
 	[/&&/, "&&"],
 	[/!=/, "!="],
+	[/:=/, ":="],
+	[/::/, "::"],
 
 	// Single character punctuation
 	[/#/, "#"],

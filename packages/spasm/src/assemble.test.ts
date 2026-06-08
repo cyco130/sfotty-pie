@@ -63,6 +63,110 @@ describe("diagnostics", () => {
 	});
 });
 
+describe("segments", () => {
+	test("emit places a segment at the OUTPUT location", () => {
+		const { bytes, symbols } = asm(
+			'.define_segment "CODE"\n' +
+				'.segment "OUTPUT"\n.org $0400\n.emit "CODE"\n' +
+				'.segment "CODE"\nstart:\n\tjmp start\n',
+		);
+		expect(symbols.get("start")).toBe(0x0400n);
+		expect(bytes).toEqual([0x4c, 0x00, 0x04]); // jmp $0400
+	});
+
+	test("OUTPUT can reference a label in a not-yet-emitted segment", () => {
+		const { bytes, symbols } = asm(
+			'.define_segment "CODE"\n' +
+				'.segment "OUTPUT"\n.word start\n.org $0400\n.emit "CODE"\n' +
+				'.segment "CODE"\nstart:\n\tnop\n',
+		);
+		expect(symbols.get("start")).toBe(0x0400n);
+		expect(bytes).toEqual([0x00, 0x04, 0xea]); // .word start ($0400), then nop
+	});
+
+	test("emplace reserves address space without emitting bytes", () => {
+		const { bytes, symbols } = asm(
+			'.define_segment "BSS"\n.define_segment "CODE"\n' +
+				'.segment "OUTPUT"\n.org $0200\n.emplace "BSS"\n.org $0400\n.emit "CODE"\n' +
+				'.segment "BSS"\nbuf:\n\t.byte 0, 0, 0\n' +
+				'.segment "CODE"\n\tlda buf\n',
+		);
+		expect(symbols.get("buf")).toBe(0x0200n); // got an address...
+		expect(bytes).toEqual([0xad, 0x00, 0x02]); // ...but BSS emitted no file bytes
+	});
+
+	test("an unknown segment in .emit is reported", () => {
+		const { messages } = asm('.segment "OUTPUT"\n.emit "NOPE"\n');
+		expect(messages).toContain('Unknown segment "NOPE"');
+	});
+
+	// The lib.s-inlined hello, exercising the whole engine: cross-segment refs
+	// (vectors → CODE's `start`, `lda message` → RODATA), `.org`, emit/emplace.
+	// OUTPUT emits CODE before RODATA, so start=$0400 and message follows the code.
+	const HELLO_SEGMENTED = `EXIT := $0200
+STDOUT := $0202
+
+.define_segment "CODE"
+.define_segment "RODATA"
+.define_segment "DATA"
+.define_segment "BSS"
+.define_segment "ZEROPAGE"
+
+.segment "OUTPUT"
+\t.byte "SFOTTY", 0, 0, 0, 0
+\t.word 0
+\t.word start
+\t.word 0
+\t.org $0000
+\t.emplace "ZEROPAGE"
+\t.org $0400
+\t.emit "CODE"
+\t.emit "RODATA"
+\t.emit "DATA"
+\t.emplace "BSS"
+
+.segment "RODATA"
+message:
+\t.byte "Hello world!", $0a, 0
+
+.segment "CODE"
+start:
+\tldx #0
+loop:
+\tlda message,x
+\tbeq end
+\tsta STDOUT
+\tinx
+\tjmp loop
+end:
+\tsta EXIT
+`;
+
+	test("assembles the inlined-lib hello", () => {
+		const { bytes, symbols, messages } = asm(HELLO_SEGMENTED);
+		expect(messages).toEqual([]);
+		// prettier-ignore
+		expect(bytes).toEqual([
+			0x53, 0x46, 0x4f, 0x54, 0x54, 0x59, 0x00, 0x00, 0x00, 0x00, // "SFOTTY" + padding
+			0x00, 0x00,                                                 // NMI vector
+			0x00, 0x04,                                                 // reset = start ($0400)
+			0x00, 0x00,                                                 // IRQ vector
+			0xa2, 0x00,                                                 // ldx #0
+			0xbd, 0x11, 0x04,                                           // lda message,x ($0411)
+			0xf0, 0x07,                                                 // beq end
+			0x8d, 0x02, 0x02,                                           // sta STDOUT
+			0xe8,                                                       // inx
+			0x4c, 0x02, 0x04,                                           // jmp loop ($0402)
+			0x8d, 0x00, 0x02,                                           // sta EXIT
+			0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x21, 0x0a, 0x00, // "Hello world!\n\0"
+		]);
+		expect(symbols.get("start")).toBe(0x0400n);
+		expect(symbols.get("loop")).toBe(0x0402n);
+		expect(symbols.get("end")).toBe(0x040en);
+		expect(symbols.get("message")).toBe(0x0411n);
+	});
+});
+
 describe("hello.s end to end", () => {
 	// Inlined (not read from notes.local/) so the test is self-contained.
 	const HELLO = `EXIT = $0200

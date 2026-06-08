@@ -59,6 +59,8 @@ describe("single tokens", () => {
 			["||", "||"],
 			["&&", "&&"],
 			["!=", "!="],
+			[":=", ":="],
+			["::", "::"],
 			["#", "#"],
 			["(", "("],
 			[")", ")"],
@@ -102,6 +104,26 @@ describe("registers vs identifiers", () => {
 	test("mnemonics lex as plain identifiers (reserved-ness is the parser's job)", () => {
 		expect(one("lda")).toBe("identifier");
 		expect(one("LDA")).toBe("identifier");
+	});
+});
+
+describe("colon tokens", () => {
+	test("`:`, `:=`, and `::` disambiguate by adjacency", () => {
+		expect(code("foo:bar")).toEqual([
+			["identifier", "foo"],
+			[":", ":"],
+			["identifier", "bar"],
+		]);
+		expect(code("foo:=bar")).toEqual([
+			["identifier", "foo"],
+			[":=", ":="],
+			["identifier", "bar"],
+		]);
+		expect(code("foo::bar")).toEqual([
+			["identifier", "foo"],
+			["::", "::"],
+			["identifier", "bar"],
+		]);
 	});
 });
 

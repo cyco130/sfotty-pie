@@ -54,13 +54,21 @@ function content(c: StatementContent): string {
 				? `${c.mnemonic.text} ${operand(c.operand)}`
 				: c.mnemonic.text;
 		case "assignment":
-			return `${c.identifier.text} = ${expr(c.expression)}`;
+			return `${c.identifier.text} ${c.operatorToken.text} ${expr(c.expression)}`;
 		case "org":
 			return `.org ${expr(c.expression)}`;
 		case "byte":
 			return `.byte ${list(c.list)}`;
 		case "word":
 			return `.word ${list(c.list)}`;
+		case "define-segment":
+			return `.define_segment ${c.nameToken.text}`;
+		case "segment":
+			return `.segment ${c.nameToken.text}`;
+		case "emit":
+			return `.emit ${c.nameToken.text}`;
+		case "emplace":
+			return `.emplace ${c.nameToken.text}`;
 	}
 }
 
@@ -87,8 +95,11 @@ describe("statements", () => {
 		expect(dump("foo:\nbar: baz: nop")).toEqual(["foo:", "bar: baz: nop"]);
 	});
 
-	test("assignment", () => {
+	test("assignment with = (constant) and := (label)", () => {
 		expect(dump("FOO = $1234")).toEqual(["FOO = $1234"]);
+		expect(dump("EXIT := $0200")).toEqual(["EXIT := $0200"]);
+		const [s] = parseOk("EXIT := $0200");
+		expect(s!.content).toMatchObject({ operatorToken: { type: ":=" } });
 	});
 
 	test("blank lines are empty statements", () => {
@@ -181,6 +192,18 @@ describe("directives", () => {
 	test("byte / word lists", () => {
 		expect(dump('.byte "hi", $0a, 0')).toEqual(['.byte "hi", $0a, 0']);
 		expect(dump(".word foo, bar")).toEqual([".word foo, bar"]);
+	});
+
+	test("segment directives", () => {
+		expect(dump('.define_segment "CODE"')).toEqual(['.define_segment "CODE"']);
+		expect(dump('.segment "CODE"')).toEqual(['.segment "CODE"']);
+		expect(dump('.emit "CODE"')).toEqual(['.emit "CODE"']);
+		expect(dump('.emplace "BSS"')).toEqual(['.emplace "BSS"']);
+	});
+
+	test("a segment directive needs a string name", () => {
+		const { errors } = parse(new SourceFile("t", ".segment CODE\n"));
+		expect(errors).toHaveLength(1);
 	});
 
 	test("trailing comma is accepted and preserved", () => {

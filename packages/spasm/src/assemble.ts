@@ -1,5 +1,6 @@
 import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
+import { render, Segment } from "./layout.ts";
 import {
 	getExpressionLocation,
 	parse,
@@ -10,8 +11,8 @@ import {
 	type StatementContent,
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
-import { SymbolTable } from "./symbols.ts";
-import type { Value } from "./value.ts";
+import { SymbolTable, type SymbolKind } from "./symbols.ts";
+import { decodeStringLiteral, type Value } from "./value.ts";
 
 export interface AssembleResult {
 	output: Uint8Array;
@@ -29,6 +30,7 @@ export function assemble(source: string, name = "input"): AssembleResult {
 	const symbols = new SymbolTable();
 	let output: number[] = [];
 	let diagnostics: Message[] = [];
+	let bases = new Map<string, bigint>(); // segment bases from the previous render
 
 	// Pessimistic shrink-only sizing is monotone, so it settles in at most one
 	// pass per shrinkable instruction; the cap is just a backstop.
@@ -38,9 +40,33 @@ export function assemble(source: string, name = "input"): AssembleResult {
 	for (let pass = 0; pass < cap; pass++) {
 		const snapshot = symbols.snapshot();
 		symbols.beginPass();
-		output = [];
 		diagnostics = [];
-		runPass(statements, symbols, output, diagnostics);
+		const report: Reporter = (message, span) => {
+			diagnostics.push({
+				type: "error",
+				start: span[0],
+				end: span[1],
+				message,
+			});
+		};
+
+		// Collect content into segments (defining constants), then render OUTPUT
+		// to bytes (defining labels). Everything evaluates against the previous
+		// pass's symbol values and segment bases; this pass produces the new ones.
+		const segments = collect(statements, symbols, report, bases);
+		const result = render(
+			segments,
+			"OUTPUT",
+			(labelName, value, kind, span) => {
+				if (symbols.define(labelName, value, kind, span)) {
+					report(`Symbol "${labelName}" is already defined`, span);
+				}
+			},
+			report,
+		);
+		output = result.bytes;
+		bases = result.bases;
+
 		if (!symbols.changedSince(snapshot)) {
 			converged = true;
 			break;
@@ -64,51 +90,110 @@ export function assemble(source: string, name = "input"): AssembleResult {
 	};
 }
 
-function runPass(
+/**
+ * Walk the statements, routing content into the current segment (OUTPUT by
+ * default, switched by `.segment`) and defining constants. Returns the segment
+ * map for rendering. Each segment tracks a running location counter — starting
+ * at its base from the previous render — so instructions get a pc for branch
+ * offsets (same-segment branches are base-invariant, so this converges).
+ */
+function collect(
 	statements: Statement[],
 	symbols: SymbolTable,
-	output: number[],
-	diagnostics: Message[],
-): void {
-	const report: Reporter = (message, span) => {
-		diagnostics.push({ type: "error", start: span[0], end: span[1], message });
+	report: Reporter,
+	bases: Map<string, bigint>,
+): Map<string, Segment> {
+	const segments = new Map<string, Segment>();
+	const getSegment = (name: string): Segment => {
+		let segment = segments.get(name);
+		if (!segment) {
+			segment = new Segment(name);
+			segments.set(name, segment);
+		}
+		return segment;
 	};
 
-	let location = 0n;
+	let current = getSegment("OUTPUT");
+	const locations = new Map<string, bigint>();
+	const locationOf = (name: string) =>
+		locations.get(name) ?? bases.get(name) ?? 0n;
+
 	for (const statement of statements) {
 		for (const label of statement.labels) {
-			define(symbols, label.identifier, location, report);
+			current.items.push({
+				kind: "label",
+				name: label.identifier.text,
+				symbolKind: "label",
+				span: [label.identifier.start, label.identifier.end],
+			});
 		}
-		if (statement.content) {
-			location = processContent(
-				statement.content,
-				symbols,
-				location,
-				output,
-				report,
-			);
+
+		const content = statement.content;
+		if (!content) continue;
+
+		switch (content.type) {
+			case "define-segment":
+				getSegment(segmentName(content.nameToken, report));
+				break;
+			case "segment":
+				current = getSegment(segmentName(content.nameToken, report));
+				break;
+			case "emit":
+			case "emplace":
+				current.items.push({
+					kind: content.type,
+					segment: segmentName(content.nameToken, report),
+					span: [content.nameToken.start, content.nameToken.end],
+				});
+				break;
+			default:
+				locations.set(
+					current.name,
+					collectContent(
+						content,
+						symbols,
+						locationOf(current.name),
+						current,
+						report,
+					),
+				);
 		}
 	}
+
+	return segments;
+}
+
+function segmentName(
+	token: { text: string; start: number; end: number },
+	report: Reporter,
+): string {
+	return decodeStringLiteral(token.text, (escape) =>
+		report(`Unknown escape sequence "\\${escape}"`, [token.start, token.end]),
+	);
 }
 
 function define(
 	symbols: SymbolTable,
 	identifier: { text: string; start: number; end: number },
 	value: Value | undefined,
+	kind: SymbolKind,
 	report: Reporter,
 ): void {
 	const span: readonly [number, number] = [identifier.start, identifier.end];
-	if (symbols.define(identifier.text, value, span)) {
+	if (symbols.define(identifier.text, value, kind, span)) {
 		report(`Symbol "${identifier.text}" is already defined`, span);
 	}
 }
 
-/** Process a statement's content, returning the new location counter. */
-function processContent(
+/**
+ * Collect a statement's content into `output`, returning the new running
+ * location counter (used as the pc for the next instruction's branch offsets).
+ */
+function collectContent(
 	content: StatementContent,
 	symbols: SymbolTable,
 	location: bigint,
-	output: number[],
+	output: Segment,
 	report: Reporter,
 ): bigint {
 	const env: EvalEnv = {
@@ -124,6 +209,7 @@ function processContent(
 				symbols,
 				content.identifier,
 				evaluate(content.expression, env),
+				content.operatorToken.type === ":=" ? "label" : "constant",
 				report,
 			);
 			return location;
@@ -138,25 +224,35 @@ function processContent(
 				);
 				return location;
 			}
+			output.items.push({ kind: "org", addr: value });
 			return value;
 		}
 
 		case "byte":
 		case "word": {
 			const size = content.type === "byte" ? 1 : 2;
-			const before = output.length;
+			const bytes: number[] = [];
 			for (const [expr] of content.list)
-				emitData(expr, env, output, size, report);
-			return location + BigInt(output.length - before);
+				emitData(expr, env, bytes, size, report);
+			output.items.push({ kind: "bytes", bytes });
+			return location + BigInt(bytes.length);
 		}
 
 		case "instruction": {
 			const expr = operandExpression(content.operand);
 			const value = expr ? evaluate(expr, env) : undefined;
 			const bytes = encodeInstruction(content, value, { location, report });
-			output.push(...bytes);
+			output.items.push({ kind: "bytes", bytes });
 			return location + BigInt(bytes.length);
 		}
+
+		// Parsed in step 3.1; the segment/OUTPUT engine that gives these meaning
+		// lands in step 3.2b. Until then they're inert (flat mode is unaffected).
+		case "define-segment":
+		case "segment":
+		case "emit":
+		case "emplace":
+			return location;
 	}
 }
 

@@ -7,6 +7,7 @@ A 6502 emulation project, organized as a monorepo of small, focused packages.
 - [@sfotty-pie/sfotty](packages/sfotty/readme.md) — the cycle-accurate NMOS 6502 CPU core.
 - [@sfotty-pie/a8](packages/a8/readme.md) — a (for now headless) Atari 8-bit emulator.
 - [@sfotty-pie/cli](packages/cli/readme.md) — an emulator for a hypothetical 6502 system for writing CLI programs.
+- [@sfotty-pie/spasm](packages/spasm/readme.md) — a multipass 6502 assembler.
 
 ## License and credits
 

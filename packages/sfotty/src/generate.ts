@@ -54,13 +54,18 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 6   $FFFE   R  fetch PCL
 			// 7   $FFFF   R  fetch PCH
 
+			// Shared with the IRQ/NMI sequence (forced by decode on a pending
+			// interrupt). `r-brk` advances PC only on a software BRK, and `dr=pi`
+			// pushes P with B reflecting bFlag — so a hardware interrupt pushes the
+			// interrupted PC with B clear, while a real BRK skips the signature byte
+			// with B set.
 			ops[opcode] = [
-				["r-pc++", "ar=sp", "dr=pch"],
+				["r-brk", "ar=sp", "dr=pch"],
 				["w-ar--", "dr=pcl"],
 				["w-ar--", "dr=pi", "if=1"],
 				["w-ar--", "s=al", "ar=vector"],
 				["r-ar++", "pcl=dr"],
-				["r-ar", "pch=dr"],
+				["r-ar", "pch=dr", "nmi-hold"],
 			];
 			break;
 

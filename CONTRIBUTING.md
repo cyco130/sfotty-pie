@@ -18,6 +18,8 @@ Concrete pins live in `engines.node` (`package.json`, the published support rang
 - `examples/*` — degit-cloneable consumer demos.
 - `packages/_template/` and `examples/_template/` — scaffolds; copy from these when adding new packages.
 
+Some packages carry a `design.md` next to their `readme.md` that explains how they work internally — start there when working on a package's guts. Not every package has one yet; more will get them over time.
+
 ## Common commands
 
 ```sh
@@ -31,7 +33,7 @@ Inside a package, `pnpm test` runs `test:unit` (vitest), `test:typecheck` (tsc),
 
 ## Adding a package
 
-Copy `packages/_template/` to `packages/<name>/`, rename `@<projname>/template-package` to `@<projname>/<name>` in its `package.json`, drop `"private": true`, and run `pnpm install`. Claude Code users: `/new-package <name>` does this in one step.
+Copy `packages/_template/` to `packages/<name>/`, rename `@<projname>/template-package` to `@<projname>/<name>` in its `package.json`, drop `"private": true`, fill in the `description`/`keywords` and the `TODO:` placeholders in `readme.md`, and run `pnpm install`. Claude Code users: `/new-package <name>` does this in one step.
 
 ## Code style and commits
 

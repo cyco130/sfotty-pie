@@ -10,10 +10,19 @@ import type { Sfotty } from "./sfotty.ts";
 export const DECODE = 0x800;
 
 /**
- * One CPU cycle. It performs the cycle's single bus access (which may throw
- * `TRAP`), applies the internal register transfers, and writes the next
- * microstate last — so a trap unwinds with the CPU untouched and the cycle is
- * retried on the next `run()`. Lives in the {@link Sfotty}-indexed dispatch
+ * First microstate of the reset sequence. `reset()` sets `state` here to launch
+ * a dedicated seven-cycle sequence occupying {@link RESET}..`RESET + 6`, also
+ * reserved above every real opcode state (and above {@link DECODE}). It is
+ * separate from BRK so it can do its stack accesses as reads and vector from
+ * `$FFFC` without runtime conditionals.
+ */
+export const RESET = 0x801;
+
+/**
+ * One CPU cycle. It performs the cycle's single bus access (which may throw to
+ * interrupt the CPU), applies the internal register transfers, and writes the
+ * next microstate last — so a throw unwinds with the CPU untouched and the cycle
+ * is retried on the next `run()`. Lives in the {@link Sfotty}-indexed dispatch
  * table emitted by `generate-step.ts`.
  */
 export type Step = (cpu: Sfotty) => void;
@@ -23,6 +32,7 @@ export type BusOp =
 	| "r-t1i" // IR = (fetch(PC), 0); // First cycle of interrupt handling
 	| "r-pc++" // DR = read(PC++); // Second cycle of multi-byte instructions
 	| "r-pc" // DR = read(PC++); // Second cycle of single-byte instructions
+	| "r-brk" // DR = read(PC); advance PC only on a software BRK, not a hardware interrupt
 	| "r-ar" // DR = read(AR); // Generic memory read
 	| "r-ar++" // DR = read(AR++); // Generic memory read (no carry)
 	| "r-dr++" // AL = read(DR++); // For indexing
@@ -38,6 +48,7 @@ export type InternalOp =
 	| "ar=fffe"
 	| "ar=ffff"
 	| "ar=vector"
+	| "nmi-hold" // At the end of an interrupt sequence, drop a pending NMI if its line has gone inactive
 	| "ar=sp"
 	| "ar=dr"
 	| "ar+=x"

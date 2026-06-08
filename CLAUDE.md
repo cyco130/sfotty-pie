@@ -10,13 +10,18 @@ Markdown in this repo is not manually wrapped. Write one paragraph per line and 
 - `examples/*` — consumers of the packages. Not published. Designed to be cloned standalone (e.g. via `degit`), so **dependencies on workspace packages must use real version pins, never `workspace:*`**. The `./version` script keeps those pins in sync with the latest package versions; pnpm still links them locally during dev because of `linkWorkspacePackages: true` in [pnpm-workspace.yaml](pnpm-workspace.yaml).
 - `packages/_template/` and `examples/_template/` — scaffolds. They're real workspace members named `@<projname>/template-package` and `@<projname>/template-example` (both `private: true`) so Renovate keeps their deps current. Both `src/` files are stubs (a single `console.log`) — they don't import or export anything, on purpose: a real working consumer would break the moment the package's API changes. The example template still **declares** a dep on the main published package (`@<projname>/<projname>`) — `init` rewrites this dep when bootstrapping — so degit-cloned starters arrive with the dep wired up. Common scripts (`dev`/`build`/`test`/`ci`) filter the templates out via `!@<projname>/template-*` so they don't fan into normal work.
 
-The root `readme.md` is a symlink into the primary package's readme. Edit the symlink target, not the symlink.
+The root `readme.md` is its own file — an index of the package readmes plus the license/credits section — not a symlink. Keep its package list in sync when adding or removing a package.
+
+A package may carry a `design.md` next to its `readme.md` documenting its inner workings — the approach and moving parts, for people working _on_ the package rather than _with_ it. Keep `readme.md` user-facing, `CONTRIBUTING.md` repo-scoped, and `design.md` package-internals-scoped. See [packages/sfotty/design.md](packages/sfotty/design.md) for the worked example.
 
 ## Adding a new package
 
 1. Copy `packages/_template` to `packages/<name>`.
-2. In its `package.json`: rename `@<projname>/template-package` to `@<projname>/<name>`, drop `"private": true`, and update `description`/`repository`.
-3. `pnpm install` from the root.
+2. In its `package.json`: rename `@<projname>/template-package` to `@<projname>/<name>`, drop `"private": true`, and update `description`/`keywords`/`repository`.
+3. Resolve the `TODO:` placeholders in `readme.md` (heading and description paragraph).
+4. `pnpm install` from the root.
+
+`/new-package <name>` (Claude Code) does all of this in one step.
 
 Do not start a new package by copying an existing one — `_template` is the canonical scaffold and stays current.
 

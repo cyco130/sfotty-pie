@@ -2,7 +2,15 @@
   "name": "@sfotty-pie/a8",
   "version": "0.0.0",
   "description": "A (for now headless) Atari 8-bit emulator.",
-  "keywords": [],
+  "keywords": [
+    "atari",
+    "atari-8-bit",
+    "atari-800",
+    "6502",
+    "emulator",
+    "emulation",
+    "retro"
+  ],
   "license": "MIT",
   "repository": "github:cyco130/sfotty-pie",
   "files": [

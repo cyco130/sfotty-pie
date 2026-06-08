@@ -2,15 +2,14 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Sfotty } from "./index.ts";
-import { GENERATED_OPCODES } from "./nmos-step.ts";
 
 // Runs the SingleStepTests/65x02 vectors against Sfotty, comparing final
-// registers, touched RAM, and per-cycle bus activity. By default it tests every
-// opcode the generator has implemented (GENERATED_OPCODES); pass hex opcodes as
-// arguments to test a specific subset, e.g. `harte a9 a5`.
+// registers, touched RAM, and per-cycle bus activity. By default it tests all
+// 256 opcodes; pass hex opcodes as arguments to test a specific subset, e.g.
+// `harte a9 a5`.
 //
 // Vector files are fetched on demand into external.local/ (gitignored) and
-// cached, so the suite grows automatically as more opcodes are implemented.
+// cached.
 
 interface State {
 	pc: number;
@@ -72,7 +71,6 @@ function runTest(test: SingleStepTest): string | null {
 		{ withoutUndocumented: false },
 	);
 
-	sfotty.resetPending = false;
 	sfotty.PC = test.initial.pc;
 	sfotty.S = test.initial.s;
 	sfotty.A = test.initial.a;
@@ -121,7 +119,7 @@ function runTest(test: SingleStepTest): string | null {
 const args = process.argv.slice(2);
 const opcodes = args.length
 	? args.map((arg) => parseInt(arg.replace(/^0x/i, ""), 16))
-	: [...GENERATED_OPCODES].sort((a, b) => a - b);
+	: Array.from({ length: 256 }, (_, i) => i);
 
 let totalFailures = 0;
 for (const opcode of opcodes) {

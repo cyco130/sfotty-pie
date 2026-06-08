@@ -2,7 +2,14 @@
   "name": "@sfotty-pie/cli",
   "version": "0.0.0",
   "description": "An emulator for a hypothetical 6502 system for writing CLI programs.",
-  "keywords": [],
+  "keywords": [
+    "6502",
+    "emulator",
+    "emulation",
+    "cli",
+    "virtual-machine",
+    "retro"
+  ],
   "license": "MIT",
   "repository": "github:cyco130/sfotty-pie",
   "files": [

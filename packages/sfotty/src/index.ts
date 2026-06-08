@@ -1,5 +1,5 @@
 export { Sfotty, type SfottyOptions } from "./sfotty.ts";
-export { ReadOptions, TRAP, type Memory } from "./interface.ts";
+export { ReadOptions, type Memory } from "./interface.ts";
 export { DECODE } from "./microcode.ts";
 export {
 	disassemble,

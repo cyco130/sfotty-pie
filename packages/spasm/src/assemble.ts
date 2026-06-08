@@ -246,12 +246,16 @@ function collectContent(
 			return location + BigInt(bytes.length);
 		}
 
-		// Parsed in step 3.1; the segment/OUTPUT engine that gives these meaning
-		// lands in step 3.2b. Until then they're inert (flat mode is unaffected).
+		// Segment directives are routed by `collect`, never reaching here; the
+		// module directives are inert until step 4.3 (module scoping). Both are
+		// listed so the switch stays exhaustive.
 		case "define-segment":
 		case "segment":
 		case "emit":
 		case "emplace":
+		case "import":
+		case "export":
+		case "global":
 			return location;
 	}
 }

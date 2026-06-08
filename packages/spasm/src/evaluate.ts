@@ -77,6 +77,10 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return prefix(expr, env);
 		case "infix-expression":
 			return infix(expr, env);
+		case "global":
+		case "member-expression":
+			// Resolved in step 4.3 (module scoping / the `.global` ambient dict).
+			return undefined;
 	}
 }
 

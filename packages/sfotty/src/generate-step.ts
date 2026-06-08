@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import prettier from "prettier";
 import { NMOS_INSTRUCTIONS } from "./nmos.ts";
 
@@ -380,7 +380,7 @@ ${table.join("\n")}
 ];
 `;
 
-const outPath = fileURLToPath(new URL("./nmos-step.ts", import.meta.url));
+const outPath = join(import.meta.dirname, "nmos-step.ts");
 const config = await prettier.resolveConfig(outPath);
 const formatted = await prettier.format(source, {
 	...config,

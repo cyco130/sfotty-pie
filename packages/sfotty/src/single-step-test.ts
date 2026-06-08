@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 import fs from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { Sfotty } from "./index.ts";
 
 // Runs the SingleStepTests/65x02 vectors against Sfotty, comparing final
@@ -28,14 +28,15 @@ interface SingleStepTest {
 	cycles: [number, number, "read" | "write"][];
 }
 
-const VECTOR_DIR = fileURLToPath(
-	new URL("../../../external.local/65x02/6502/v1/", import.meta.url),
+const VECTOR_DIR = join(
+	import.meta.dirname,
+	"../../../external.local/65x02/6502/v1",
 );
 const BASE_URL =
 	"https://raw.githubusercontent.com/SingleStepTests/65x02/main/6502/v1";
 
 async function loadVectors(hex: string): Promise<SingleStepTest[]> {
-	const file = `${VECTOR_DIR}${hex}.json`;
+	const file = join(VECTOR_DIR, `${hex}.json`);
 	if (!fs.existsSync(file)) {
 		console.log(`Fetching ${hex}.json`);
 		const response = await fetch(`${BASE_URL}/${hex}.json`);

@@ -8,13 +8,11 @@ import {
 } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { Atari800 } from "./machine.ts";
 
 function loadRom(name: string): Uint8Array {
-	const path = fileURLToPath(
-		new URL(`../../../roms.local/${name}`, import.meta.url),
-	);
+	const path = join(import.meta.dirname, "../../../roms.local", name);
 	return new Uint8Array(fs.readFileSync(path));
 }
 

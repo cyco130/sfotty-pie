@@ -100,6 +100,16 @@ describe("segments", () => {
 		expect(messages).toContain('Unknown segment "NOPE"');
 	});
 
+	test("a circular .emit is reported, not looped", () => {
+		const { messages } = asm(
+			'.define_segment "A"\n.define_segment "B"\n' +
+				'.segment "OUTPUT"\n.emit "A"\n' +
+				'.segment "A"\n.emit "B"\n' +
+				'.segment "B"\n.emit "A"\n',
+		);
+		expect(messages).toContain('Circular .emit of segment "A"');
+	});
+
 	// The lib.s-inlined hello, exercising the whole engine: cross-segment refs
 	// (vectors → CODE's `start`, `lda message` → RODATA), `.org`, emit/emplace.
 	// OUTPUT emits CODE before RODATA, so start=$0400 and message follows the code.

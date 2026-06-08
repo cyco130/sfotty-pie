@@ -40,6 +40,25 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 					getExpressionLocation(expr),
 				),
 			);
+		case "character": {
+			const decoded = decodeStringLiteral(expr.text, (escape) =>
+				env.report(
+					`Unknown escape sequence "\\${escape}"`,
+					getExpressionLocation(expr),
+				),
+			);
+			// A character literal is a single byte in the target encoding (UTF-8
+			// for now, like `.byte` strings), so multi-byte chars such as 'ü' fail.
+			const bytes = new TextEncoder().encode(decoded);
+			if (bytes.length !== 1) {
+				env.report(
+					"A character literal must be a single byte",
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			return BigInt(bytes[0]!);
+		}
 		case "identifier": {
 			const value = env.resolve(expr.text);
 			if (value === undefined && env.strict) {

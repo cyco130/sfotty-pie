@@ -47,6 +47,21 @@ describe("literals", () => {
 		expect(val('"a\\"b"')).toBe('a"b'); // embedded escaped quote
 		expect(val('"x\\ny"')).toBe("x\ny"); // \n -> newline
 	});
+
+	test("character literals", () => {
+		expect(val("'A'")).toBe(65n);
+		expect(val("' '")).toBe(32n);
+		expect(val("'\\n'")).toBe(10n);
+	});
+
+	test("a character literal must be a single byte", () => {
+		const oneByte = {
+			value: undefined,
+			reports: ["A character literal must be a single byte"],
+		};
+		expect(evalSrc("'ab'")).toEqual(oneByte); // multiple characters
+		expect(evalSrc("'ü'")).toEqual(oneByte); // one codepoint, two UTF-8 bytes
+	});
 });
 
 describe("symbols and location counter", () => {

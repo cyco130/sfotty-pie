@@ -1,7 +1,11 @@
 import type { Value } from "./value.ts";
 
+/** A label is address-valued (`name:` / `name := expr`); a constant is `name = expr`. */
+export type SymbolKind = "label" | "constant";
+
 interface Entry {
 	value: Value | undefined;
+	kind: SymbolKind;
 	definedAt: readonly [number, number];
 }
 
@@ -26,17 +30,22 @@ export class SymbolTable {
 	define(
 		name: string,
 		value: Value | undefined,
+		kind: SymbolKind,
 		definedAt: readonly [number, number],
 	): readonly [number, number] | undefined {
 		const prior = this.#entries.get(name);
 		if (this.#definedThisPass.has(name)) return prior!.definedAt;
 		this.#definedThisPass.add(name);
-		this.#entries.set(name, { value, definedAt });
+		this.#entries.set(name, { value, kind, definedAt });
 		return undefined;
 	}
 
 	resolve(name: string): Value | undefined {
 		return this.#entries.get(name)?.value;
+	}
+
+	kindOf(name: string): SymbolKind | undefined {
+		return this.#entries.get(name)?.kind;
 	}
 
 	/** Snapshot of values, for fixpoint detection. */

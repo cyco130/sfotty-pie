@@ -106,13 +106,14 @@ class Parser {
 				const identifier = token;
 				this.#consume();
 
-				const possibleEqualsToken = this.#token;
-				if (possibleEqualsToken.type === "=") {
+				// `=` defines a constant, `:=` defines a label (an address).
+				const operator = this.#token;
+				if (operator.type === "=" || operator.type === ":=") {
 					this.#consume();
 					return {
 						type: "assignment",
 						identifier,
-						equalsToken: possibleEqualsToken,
+						operatorToken: operator,
 						expression: this.#expression(1),
 					};
 				}
@@ -148,6 +149,42 @@ class Parser {
 					type: "word",
 					wordToken: token,
 					list: this.#expressionList(),
+				};
+			}
+
+			case "define_segment": {
+				this.#consume();
+				return {
+					type: "define-segment",
+					defineSegmentToken: token,
+					nameToken: this.#expect("string"),
+				};
+			}
+
+			case "segment": {
+				this.#consume();
+				return {
+					type: "segment",
+					segmentToken: token,
+					nameToken: this.#expect("string"),
+				};
+			}
+
+			case "emit": {
+				this.#consume();
+				return {
+					type: "emit",
+					emitToken: token,
+					nameToken: this.#expect("string"),
+				};
+			}
+
+			case "emplace": {
+				this.#consume();
+				return {
+					type: "emplace",
+					emplaceToken: token,
+					nameToken: this.#expect("string"),
 				};
 			}
 		}
@@ -373,6 +410,7 @@ class Parser {
 			case "decimal":
 			case "hexadecimal":
 			case "string":
+			case "character":
 			case "*": {
 				this.#consume();
 				return token;
@@ -562,6 +600,7 @@ export function getExpressionLocation(
 		case "hexadecimal":
 		case "identifier":
 		case "string":
+		case "character":
 		case "*":
 			return [expression.start, expression.end];
 		case "grouped-expression":
@@ -633,12 +672,21 @@ export interface Statement {
 	newline: Token<"newline"> | null;
 }
 
-export type StatementContent = Instruction | Org | Byte | Word | Assignment;
+export type StatementContent =
+	| Instruction
+	| Org
+	| Byte
+	| Word
+	| Assignment
+	| DefineSegment
+	| Segment
+	| Emit
+	| Emplace;
 
 export interface Assignment {
 	type: "assignment";
 	identifier: Token<"identifier">;
-	equalsToken: Token<"=">;
+	operatorToken: Token<"=" | ":=">;
 	expression: Expression;
 }
 
@@ -729,9 +777,34 @@ export interface Word {
 	list: [Expression, Token<",">?][];
 }
 
+export interface DefineSegment {
+	type: "define-segment";
+	defineSegmentToken: Token<"define_segment">;
+	nameToken: Token<"string">;
+}
+
+export interface Segment {
+	type: "segment";
+	segmentToken: Token<"segment">;
+	nameToken: Token<"string">;
+}
+
+export interface Emit {
+	type: "emit";
+	emitToken: Token<"emit">;
+	nameToken: Token<"string">;
+}
+
+export interface Emplace {
+	type: "emplace";
+	emplaceToken: Token<"emplace">;
+	nameToken: Token<"string">;
+}
+
 export type Expression =
 	| Token<"identifier">
 	| Token<"string">
+	| Token<"character">
 	| Token<"*">
 	| IntegerLiteral
 	| GroupedExpression

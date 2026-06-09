@@ -28,13 +28,15 @@ Steps 1–4 happen once; step 5 iterates.
 
 Everything exported lives in [src/index.ts](src/index.ts):
 
-- `assemble(source, name?)` — assemble a single source string (no imports).
-- `assemble(entry, host)` — assemble a project rooted at module id `entry`, reaching other modules through a `Host`.
+- `assemble(source, name?): AssembleResult` — assemble a single source string (no imports). **Synchronous** (no `Host`, so no I/O).
+- `assemble(entry, host): Promise<AssembleResult>` — assemble a project rooted at module id `entry`, reaching other modules through a `Host`. **Asynchronous**, because the host is.
 - `AssembleResult` — `{ output: Uint8Array, symbols: Map<string, Value>, diagnostics: Message[] }`. `output` is meaningful only when `diagnostics` is empty.
-- `Host` — `{ resolve(specifier, fromId): string; read(id): string }` (re-exported from the loader). Both may throw; the loader turns that into a diagnostic.
+- `Host` — `{ resolve(specifier, fromId): string | Promise<string>; read(id): string | Promise<string> }` (re-exported from the loader). Both may throw (or reject); the loader turns that into a diagnostic.
 - `Message`, `Value` — the diagnostic and value types.
 
-The single-string overload is just sugar: it builds a one-module `Host` and calls the project path, so there is one code path underneath.
+**Sync core, async edge.** The `Host` is the only I/O and is consulted entirely upfront — `loadModules` (the loader) is the single async boundary, awaiting `resolve`/`read` while building the module graph. Everything after the graph is built (macro expansion, the multipass) is synchronous and shared by both entry points; the single-source overload just builds a one-module graph by parsing in-process, with no async at all. This keeps lexer/parser/evaluator/encoder sync and ready to port to a web or URL-backed host by swapping the `Host` alone.
+
+A thin CLI ships too ([src/cli.ts](src/cli.ts), `bin: spasm`): `spasm INPUT -o OUTPUT`, parsing args with `node:util` `parseArgs` over an async `node:fs/promises` host.
 
 ## The multipass fixpoint
 
@@ -113,7 +115,7 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built:
 - **Relocation** — symbolic `.base()`/`.reloc`, and the `.base`/`.startof`/`.sizeof` builtins.
 - **Richer modules** — named/aliased/namespace imports (`name = .import`, `.import "m": a, b`), `name::sym` on a namespace, `.global X = expr` / `.global X:`, and `.export` of anything but an assignment.
 - **Richer macros** — multi-argument and operand-typed params, and exported/imported macros (today: 0- or 1-arg macros, called in instruction position).
-- **A CLI** and standing end-to-end (run-in-the-core) tests — execution is currently spot-checked with throwaway scripts.
+- **Nicer diagnostics** — `Message` carries raw offsets with no module id, so the CLI prints messages without `file:line:col`; multi-module span formatting is unbuilt. (The CLI and standing run-in-the-core sample tests now exist — see `@sfotty-pie/cli`'s `build:samples` and `samples.test.ts`.)
 - **Cyclic _definition_ detection** — `A = B` / `B = A` converges to undefined and reports "undefined symbol" (no hang), not a precise cycle error.
 
 ## File map
@@ -134,4 +136,5 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built:
 | [src/macros.ts](src/macros.ts)                     | `expandMacros` — static, per-module macro expansion with label hygiene.                     |
 | [src/layout.ts](src/layout.ts)                     | `Segment` and `render` — the segment/OUTPUT layout engine.                                  |
 | [src/assemble.ts](src/assemble.ts)                 | The orchestrator: `assemble()`, `collect`, and the multipass loop.                          |
+| [src/cli.ts](src/cli.ts)                           | The `spasm` CLI (`bin`): `spasm INPUT -o OUTPUT` over an async fs host.                     |
 | [src/index.ts](src/index.ts)                       | Public API.                                                                                 |

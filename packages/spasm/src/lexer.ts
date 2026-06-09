@@ -53,6 +53,12 @@ export const DOT_KEYWORDS = [
 	"import",
 	"export",
 	"global",
+	"res",
+	"code",
+	"rodata",
+	"data",
+	"bss",
+	"zeropage",
 ] as const;
 
 const REGISTER_NAMES = ["a", "x", "y"] as const;

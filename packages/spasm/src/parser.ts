@@ -214,6 +214,20 @@ class Parser {
 					nameToken: this.#expect("identifier"),
 				};
 			}
+
+			case "res": {
+				this.#consume();
+				return { type: "res", resToken: token, count: this.#expression(1) };
+			}
+
+			case "code":
+			case "rodata":
+			case "data":
+			case "bss":
+			case "zeropage": {
+				this.#consume();
+				return { type: "segment-shorthand", keyword: token };
+			}
 		}
 
 		return null;
@@ -734,7 +748,9 @@ export type StatementContent =
 	| Emplace
 	| Import
 	| Export
-	| Global;
+	| Global
+	| Res
+	| SegmentShorthand;
 
 export interface Assignment {
 	type: "assignment";
@@ -870,6 +886,17 @@ export interface Global {
 	type: "global";
 	globalToken: Token<"global">;
 	nameToken: Token<"identifier">;
+}
+
+export interface Res {
+	type: "res";
+	resToken: Token<"res">;
+	count: Expression;
+}
+
+export interface SegmentShorthand {
+	type: "segment-shorthand";
+	keyword: Token<"code" | "rodata" | "data" | "bss" | "zeropage">;
 }
 
 export type Expression =

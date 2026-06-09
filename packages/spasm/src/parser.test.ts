@@ -81,6 +81,8 @@ function content(c: StatementContent): string {
 			return `.res ${expr(c.count)}`;
 		case "segment-shorthand":
 			return c.keyword.text;
+		case "macro":
+			return `.macro ${c.nameToken.text}${c.params.map((p) => ` ${p.text}`).join("")}`;
 	}
 }
 
@@ -234,6 +236,19 @@ describe("directives", () => {
 		expect(dump(".code")).toEqual([".code"]);
 		expect(dump(".rodata")).toEqual([".rodata"]);
 		expect(dump(".zeropage")).toEqual([".zeropage"]);
+	});
+
+	test("macro definition with params and a body", () => {
+		const [s] = parseOk(
+			".macro mprint str\n\t.rodata\n\t.byte str, 0\n.endmacro\n",
+		);
+		const m = s!.content;
+		expect(m?.type).toBe("macro");
+		if (m?.type === "macro") {
+			expect(m.nameToken.text).toBe("mprint");
+			expect(m.params.map((p) => p.text)).toEqual(["str"]);
+			expect(m.body).toHaveLength(2); // .rodata, .byte
+		}
 	});
 
 	test("trailing comma is accepted and preserved", () => {

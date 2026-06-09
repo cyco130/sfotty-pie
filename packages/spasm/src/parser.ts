@@ -228,6 +228,26 @@ class Parser {
 				this.#consume();
 				return { type: "segment-shorthand", keyword: token };
 			}
+
+			case "macro": {
+				this.#consume();
+				const nameToken = this.#expect("identifier");
+				const params: Token<"identifier">[] = [];
+				while (this.#token.type === "identifier") {
+					params.push(this.#token);
+					this.#consume();
+				}
+				this.#expect("newline");
+				const body: Statement[] = [];
+				while (
+					this.#token.type !== "endmacro" &&
+					(this.#token.type as TokenType) !== "eof"
+				) {
+					body.push(this.#statement());
+				}
+				this.#expect("endmacro");
+				return { type: "macro", macroToken: token, nameToken, params, body };
+			}
 		}
 
 		return null;
@@ -750,7 +770,8 @@ export type StatementContent =
 	| Export
 	| Global
 	| Res
-	| SegmentShorthand;
+	| SegmentShorthand
+	| Macro;
 
 export interface Assignment {
 	type: "assignment";
@@ -897,6 +918,14 @@ export interface Res {
 export interface SegmentShorthand {
 	type: "segment-shorthand";
 	keyword: Token<"code" | "rodata" | "data" | "bss" | "zeropage">;
+}
+
+export interface Macro {
+	type: "macro";
+	macroToken: Token<"macro">;
+	nameToken: Token<"identifier">;
+	params: Token<"identifier">[];
+	body: Statement[];
 }
 
 export type Expression =

@@ -59,6 +59,8 @@ export const DOT_KEYWORDS = [
 	"data",
 	"bss",
 	"zeropage",
+	"macro",
+	"endmacro",
 ] as const;
 
 const REGISTER_NAMES = ["a", "x", "y"] as const;

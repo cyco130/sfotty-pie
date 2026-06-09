@@ -384,3 +384,38 @@ end:
 		expect(r.symbols.get("message")).toBe(0x0411n);
 	});
 });
+
+describe("macros", () => {
+	test("expands a call, substituting the parameter", () => {
+		const { bytes } = asm(
+			".macro twice v\n\t.byte v, v\n.endmacro\ntwice $42\ntwice $43\n",
+		);
+		expect(bytes).toEqual([0x42, 0x42, 0x43, 0x43]);
+	});
+
+	test("body-local labels are unique per expansion", () => {
+		const { bytes } = asm(
+			".macro lbl\nloc:\n\t.byte <loc, >loc\n.endmacro\n.org $0300\nlbl\nlbl\n",
+		);
+		// loc is $0300 in the first expansion, $0302 in the second.
+		expect(bytes).toEqual([0x00, 0x03, 0x02, 0x03]);
+	});
+
+	test("a switching macro emits into another segment (the mprint pattern)", () => {
+		const { bytes, symbols } = asm(
+			'.define_segment "CODE"\n.define_segment "RODATA"\n' +
+				".macro mprint s\n\t.rodata\nmsg:\n\t.byte s, 0\n\t.code\n\tlda #<msg\n.endmacro\n" +
+				'.segment "OUTPUT"\n.org $0400\n.emit "CODE"\n.emit "RODATA"\n' +
+				'.segment "CODE"\nstart:\n\tmprint "hi"\n',
+		);
+		expect(symbols.get("start")).toBe(0x0400n);
+		// CODE: lda #<msg (2 bytes) -> msg lands at $0402 in RODATA.
+		expect(bytes).toEqual([0xa9, 0x02, 0x68, 0x69, 0x00]);
+	});
+
+	test("an argument-count mismatch is reported", () => {
+		expect(asm(".macro one v\n\t.byte v\n.endmacro\none\n").messages).toContain(
+			'Macro "one" expects 1 argument(s), got 0',
+		);
+	});
+});

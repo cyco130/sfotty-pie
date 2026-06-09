@@ -1,7 +1,8 @@
-.include "lib/vars.s"
-.export start
+.import "./lib.s"
 
-.code
+.global start
+
+.segment "CODE"
 
 start:
 	; Copy args to the stdout
@@ -29,4 +30,7 @@ exit:
 	; Print new line
 	lda #$0a
 	sta STDOUT
+
+	; Exit with code 0
+	lda #0
 	sta EXIT

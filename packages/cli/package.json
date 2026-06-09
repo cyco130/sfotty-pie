@@ -34,13 +34,15 @@
     "test:unit": "vitest run",
     "test:typecheck": "tsc -p tsconfig.json",
     "test:lint": "eslint . --max-warnings 0",
-    "test:package": "publint"
+    "test:package": "publint",
+    "build:samples": "node src/build-samples.ts"
   },
   "dependencies": {
     "@sfotty-pie/sfotty": "workspace:*"
   },
   "devDependencies": {
     "@cyco130/eslint-config": "^9.0.1",
+    "@sfotty-pie/spasm": "workspace:*",
     "@types/node": "^22.19.19",
     "eslint": "^10.4.1",
     "publint": "^0.3.21",

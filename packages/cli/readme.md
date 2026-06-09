@@ -36,7 +36,7 @@ Executing an undocumented opcode ends the program with exit code 2.
 
 ## Sample programs
 
-Executables for the sample programs are in the `samples` directory. The sources are available in `src/samples`. You need the `ca65` assembler from the [`cc65` package](https://github.com/cc65/cc65) to build them.
+Executables for the sample programs are in the `samples` directory, assembled from the sources in `src/samples` with [`@sfotty-pie/spasm`](../spasm). Rebuild them with `pnpm --filter @sfotty-pie/cli build:samples` (after building spasm).
 
 | Name    | Description                       |
 | ------- | --------------------------------- |

@@ -1,12 +1,13 @@
-.include "lib/vars.s"
-.export start
+.import "./lib.s"
 
-.rodata
+.global start
+
+.segment "RODATA"
 
 message:
 	.byte "Hello world!", $0a, 0
 
-.code
+.segment "CODE"
 
 start:
 	ldx #0
@@ -17,5 +18,6 @@ loop:
 	inx
 	jmp loop
 end:
+	; A is 0 here, so this will exit with code 0.
 	sta EXIT
 

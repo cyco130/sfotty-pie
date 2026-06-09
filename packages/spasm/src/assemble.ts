@@ -2,6 +2,7 @@ import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
 import { render, Segment } from "./layout.ts";
 import { loadModules, type Host, type LoadedModule } from "./loader.ts";
+import { expandMacros } from "./macros.ts";
 import { Scopes } from "./scopes.ts";
 import {
 	getExpressionLocation,
@@ -48,7 +49,19 @@ export function assemble(
 
 function assembleProject(entryId: string, host: Host): AssembleResult {
 	const loadDiagnostics: Message[] = [];
-	const modules = loadModules(entryId, host, loadDiagnostics);
+	const report: Reporter = (message, span) => {
+		loadDiagnostics.push({
+			type: "error",
+			start: span[0],
+			end: span[1],
+			message,
+		});
+	};
+	// Macro expansion is static and runs once, before the multipass.
+	const modules = loadModules(entryId, host, loadDiagnostics).map((module) => ({
+		...module,
+		statements: expandMacros(module.statements, report),
+	}));
 
 	const scopes = new Scopes(modules);
 	let output: number[] = [];

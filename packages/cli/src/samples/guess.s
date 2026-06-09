@@ -1,9 +1,8 @@
-.include "lib/vars.s"
-.export start
+.import "./lib.s"
 
-.feature string_escapes
+.global start
 
-.zeropage
+.segment "ZEROPAGE"
 	low: .res 1
 	high: .res 1
 	max: .res 1
@@ -13,17 +12,16 @@
 	number: .res 1
 	ptr: .res 2
 
-.data
+.segment "DATA"
 	num_buffer: .byte "00", 0
 
-.bss
+.segment "BSS"
 	input_buffer: .res 128
 
-.rodata
+.segment "RODATA"
 	buf_100: .byte "100", 0
 
 .macro mprint str
-	.local message
 	.rodata
 		message:
 		.byte str, 0
@@ -33,11 +31,10 @@
 		jsr print
 .endmacro
 
-.code
+.segment "CODE"
 start:
 	cld
 
-new_game:
 	; Initialize high and low
 	lda #1
 	sta low
@@ -160,25 +157,25 @@ way_too_low:
 found:
 	mprint "You got it!\n"
 
-exit:
 	lda #0
 	sta EXIT
 
-.proc print
+; Print subroutine
+print:
 		sta ptr
 		stx ptr+1
 		ldy #0
-	loop:
+	print_loop:
 		lda (ptr),y
-		beq exit
+		beq print_exit
 		sta STDOUT
 		iny
-		bne loop
-	exit:
+		bne print_loop
+	print_exit:
 		rts
-.endproc
 
-.proc print_number
+; Print number subroutine
+print_number:
 	; Special case for 100
 		sta tmp
 		cmp #100
@@ -189,11 +186,11 @@ exit:
 	not_100:
 		lda tmp
 		ldy #$ff
-	loop:
+	print_number_loop:
 		iny
 		sec
 		sbc #10
-		bcs loop
+		bcs print_number_loop
 		; Add back the extra 10 we subtracted, and the ASCII 0
 		adc #10 + '0'
 		sta num_buffer+1
@@ -211,8 +208,3 @@ exit:
 		inx
 	do_print:
 		jmp print
-
-.endproc
-
-.rodata
-

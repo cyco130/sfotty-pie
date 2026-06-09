@@ -1,7 +1,8 @@
-.include "lib/vars.s"
-.export start
+.import "./lib.s"
 
-.code
+.global start
+
+.segment "CODE"
 
 start:
 	; Copy stdin to stdout
@@ -12,4 +13,5 @@ start:
 	jmp start
 
 exit:
+	lda #0
 	sta EXIT

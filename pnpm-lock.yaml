@@ -92,6 +92,9 @@ importers:
       '@cyco130/eslint-config':
         specifier: ^9.0.1
         version: 9.0.1(@typescript-eslint/utils@8.59.4(eslint@10.4.1)(typescript@6.0.3))(eslint@10.4.1)(typescript@6.0.3)
+      '@sfotty-pie/spasm':
+        specifier: workspace:*
+        version: link:../spasm
       '@types/node':
         specifier: ^22.19.19
         version: 22.19.19

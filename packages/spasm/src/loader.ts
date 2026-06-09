@@ -16,6 +16,8 @@ export interface LoadedModule {
 	id: string;
 	sourceFile: SourceFile;
 	statements: Statement[];
+	/** Resolved ids of the modules this one `.import`s (for splat scoping). */
+	imports: string[];
 }
 
 /**
@@ -52,6 +54,7 @@ export function loadModules(
 			const { module, errors } = parse(sourceFile);
 			diagnostics.push(...errors);
 
+			const imports: string[] = [];
 			for (const statement of module.statements) {
 				if (statement.content?.type === "import") {
 					const { specToken } = statement.content;
@@ -66,11 +69,19 @@ export function loadModules(
 					} catch {
 						report(diagnostics, span, `Cannot resolve module "${specifier}"`);
 					}
-					if (depId !== undefined) load(depId, span);
+					if (depId !== undefined) {
+						imports.push(depId);
+						load(depId, span);
+					}
 				}
 			}
 
-			loaded.set(id, { id, sourceFile, statements: module.statements });
+			loaded.set(id, {
+				id,
+				sourceFile,
+				statements: module.statements,
+				imports,
+			});
 			order.push(loaded.get(id)!);
 		}
 

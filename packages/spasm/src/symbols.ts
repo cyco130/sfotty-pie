@@ -44,6 +44,11 @@ export class SymbolTable {
 		return this.#entries.get(name)?.value;
 	}
 
+	/** Whether `name` is defined (in any prior pass), regardless of its value. */
+	has(name: string): boolean {
+		return this.#entries.has(name);
+	}
+
 	kindOf(name: string): SymbolKind | undefined {
 		return this.#entries.get(name)?.kind;
 	}

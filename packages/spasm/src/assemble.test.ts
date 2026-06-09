@@ -243,15 +243,38 @@ end:
 	});
 });
 
-describe("modules (flat merge)", () => {
-	test("an imported module's symbols are visible", () => {
+describe("modules", () => {
+	test("an exported symbol is visible to a splat importer", () => {
 		const host = memHost({
 			main: '.import "consts"\n.byte FOO\n',
-			consts: "FOO = $42\n",
+			consts: ".export FOO = $42\n",
 		});
 		const r = assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		expect([...r.output]).toEqual([0x42]);
+	});
+
+	test("a non-exported symbol stays private", () => {
+		const host = memHost({
+			main: '.import "consts"\n.byte FOO\n',
+			consts: "FOO = $42\n", // not exported
+		});
+		const r = assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Undefined symbol "FOO"',
+		);
+	});
+
+	test(".global publishes to the ambient scope; .global:: reads it", () => {
+		const host = memHost({
+			main: '.import "sys"\nstart:\n\tnop\n.global start\n',
+			sys: "entry := .global::start\n.byte <entry, >entry\n",
+		});
+		const r = assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		// sys emits start's address (lo, hi); start ($0002) follows sys's 2 bytes,
+		// then the nop.
+		expect([...r.output]).toEqual([0x02, 0x00, 0xea]);
 	});
 
 	test("a module shared by a diamond loads once", () => {
@@ -277,5 +300,72 @@ describe("modules (flat merge)", () => {
 		const host = memHost({ a: '.import "b"\n', b: '.import "a"\n' });
 		const r = assemble("a", host);
 		expect(r.diagnostics.some((d) => d.message.includes("cycle"))).toBe(true);
+	});
+
+	// The capstone: hello split into a program module + an imported system
+	// module (lib). Exercises splat import (STDOUT/EXIT), `.export`, the
+	// `.global start` <-> `.global::start` entry-point handshake, and segments
+	// living in lib while CODE/RODATA are filled by the program. Same 47 bytes
+	// as the single-file inlined golden.
+	const LIB = `start := .global::start
+.export EXIT := $0200
+.export STDOUT := $0202
+.define_segment "CODE"
+.define_segment "RODATA"
+.define_segment "DATA"
+.define_segment "BSS"
+.define_segment "ZEROPAGE"
+.segment "OUTPUT"
+\t.byte "SFOTTY", 0, 0, 0, 0
+\t.word 0
+\t.word start
+\t.word 0
+\t.org $0000
+\t.emplace "ZEROPAGE"
+\t.org $0400
+\t.emit "CODE"
+\t.emit "RODATA"
+\t.emit "DATA"
+\t.emplace "BSS"
+`;
+	const HELLO = `.import "./lib.s"
+.global start
+.segment "RODATA"
+message:
+\t.byte "Hello world!", $0a, 0
+.segment "CODE"
+start:
+\tldx #0
+loop:
+\tlda message,x
+\tbeq end
+\tsta STDOUT
+\tinx
+\tjmp loop
+end:
+\tsta EXIT
+`;
+
+	test("two-file hello assembles across modules", () => {
+		const host = memHost({ "hello.s": HELLO, "./lib.s": LIB });
+		const r = assemble("hello.s", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		// prettier-ignore
+		expect([...r.output]).toEqual([
+			0x53, 0x46, 0x4f, 0x54, 0x54, 0x59, 0x00, 0x00, 0x00, 0x00, // "SFOTTY" + padding
+			0x00, 0x00,                                                 // NMI
+			0x00, 0x04,                                                 // reset = start ($0400)
+			0x00, 0x00,                                                 // IRQ
+			0xa2, 0x00,                                                 // ldx #0
+			0xbd, 0x11, 0x04,                                           // lda message,x ($0411)
+			0xf0, 0x07,                                                 // beq end
+			0x8d, 0x02, 0x02,                                           // sta STDOUT
+			0xe8,                                                       // inx
+			0x4c, 0x02, 0x04,                                           // jmp loop ($0402)
+			0x8d, 0x00, 0x02,                                           // sta EXIT
+			0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x21, 0x0a, 0x00, // "Hello world!\n\0"
+		]);
+		expect(r.symbols.get("start")).toBe(0x0400n);
+		expect(r.symbols.get("message")).toBe(0x0411n);
 	});
 });

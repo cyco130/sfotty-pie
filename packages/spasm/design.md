@@ -108,7 +108,7 @@ This covers what guess needs: 0- or 1-argument macros called in instruction posi
 
 ## What's deferred
 
-All four samples (hello/echo/cat/guess) now assemble and run. Not yet built:
+All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (roughly in priority order — **nicer diagnostics** is the highest-value next step now that there's a CLI):
 
 - **`.if`/`.elseif`/`.else`/`.endif` + `.error`** — layout-time conditionals.
 - **Segment attributes** (`.define_segment "X", type:…, executable:…`) — the kind/exec flags and their keyword-arg syntax; emit-vs-reserve is currently chosen by `.emit`/`.emplace` alone.
@@ -117,6 +117,7 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built:
 - **Richer macros** — multi-argument and operand-typed params, and exported/imported macros (today: 0- or 1-arg macros, called in instruction position).
 - **Nicer diagnostics** — `Message` carries raw offsets with no module id, so the CLI prints messages without `file:line:col`; multi-module span formatting is unbuilt. (The CLI and standing run-in-the-core sample tests now exist — see `@sfotty-pie/cli`'s `build:samples` and `samples.test.ts`.)
 - **Cyclic _definition_ detection** — `A = B` / `B = A` converges to undefined and reports "undefined symbol" (no hang), not a precise cycle error.
+- **A pretty-printer / formatter** — the parser keeps every token and its trivia precisely so the AST can round-trip back to source; nothing consumes that yet.
 
 ## File map
 

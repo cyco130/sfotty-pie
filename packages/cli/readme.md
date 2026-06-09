@@ -45,6 +45,21 @@ Executables for the sample programs are in the `samples` directory, assembled fr
 | `echo`  | Prints the arguments to stdout.   |
 | `guess` | Guess the number game.            |
 
+Run a built sample by passing its executable to the `sfotty` command (installed as a bin):
+
+```sh
+npx sfotty node_modules/@sfotty-pie/cli/samples/hello.65
+npx sfotty node_modules/@sfotty-pie/cli/samples/echo.65 hello world
+echo "meow" | npx sfotty node_modules/@sfotty-pie/cli/samples/cat.65
+```
+
+The sources are in `node_modules/@sfotty-pie/cli/src/samples/`. Assemble one yourself with the [`spasm`](https://www.npmjs.com/package/@sfotty-pie/spasm) assembler:
+
+```sh
+npx @sfotty-pie/spasm node_modules/@sfotty-pie/cli/src/samples/hello.s -o hello.65
+npx sfotty hello.65
+```
+
 ## Ideas for future versions
 
 - Provide a [`lib6502`](http://www.6502.org/users/andre/osa/lib6502.html) implementation (file I/O and more)

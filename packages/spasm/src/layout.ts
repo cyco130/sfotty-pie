@@ -10,6 +10,7 @@ export type Item =
 	| { kind: "org"; addr: bigint }
 	| {
 			kind: "label";
+			moduleId: string;
 			name: string;
 			symbolKind: SymbolKind;
 			span: readonly [number, number];
@@ -30,6 +31,7 @@ export class Segment {
 }
 
 export type DefineLabel = (
+	moduleId: string,
 	name: string,
 	value: bigint,
 	kind: SymbolKind,
@@ -77,7 +79,7 @@ export function render(
 					lc = item.addr;
 					break;
 				case "label":
-					defineLabel(item.name, lc, item.symbolKind, item.span);
+					defineLabel(item.moduleId, item.name, lc, item.symbolKind, item.span);
 					break;
 				case "emit":
 				case "emplace": {

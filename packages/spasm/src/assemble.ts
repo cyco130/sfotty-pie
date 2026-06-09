@@ -171,6 +171,10 @@ function collect(
 				case "segment":
 					current = getSegment(segmentName(content.nameToken, report));
 					break;
+				case "segment-shorthand":
+					// `.code` -> "CODE", `.rodata` -> "RODATA", etc.
+					current = getSegment(content.keyword.text.slice(1).toUpperCase());
+					break;
 				case "emit":
 				case "emplace":
 					current.items.push({
@@ -320,6 +324,23 @@ function collectContent(
 				emitData(expr, env, bytes, size, report);
 			output.items.push({ kind: "bytes", bytes });
 			return location + BigInt(bytes.length);
+		}
+
+		case "res": {
+			// Reserve N zero bytes. In an emplaced segment they're never written
+			// (emplace renders for size only); in an emitted segment they're real.
+			const value = evaluate(content.count, env);
+			if (value === undefined) return location; // count resolves later
+			if (typeof value !== "bigint" || value < 0n) {
+				report(
+					"`.res` requires a non-negative count",
+					getExpressionLocation(content.count),
+				);
+				return location;
+			}
+			const count = Number(value);
+			output.items.push({ kind: "bytes", bytes: new Array(count).fill(0) });
+			return location + value;
 		}
 
 		case "instruction": {

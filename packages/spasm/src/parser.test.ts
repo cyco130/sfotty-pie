@@ -77,6 +77,10 @@ function content(c: StatementContent): string {
 			return `.export ${content(c.content)}`;
 		case "global":
 			return `.global ${c.nameToken.text}`;
+		case "res":
+			return `.res ${expr(c.count)}`;
+		case "segment-shorthand":
+			return c.keyword.text;
 	}
 }
 
@@ -223,6 +227,13 @@ describe("directives", () => {
 	test("scope resolution with ::", () => {
 		expect(dump("sym := .global::start")).toEqual(["sym := .global::start"]);
 		expect(dump("lda #foo::bar")).toEqual(["lda #foo::bar"]);
+	});
+
+	test(".res and segment shorthands", () => {
+		expect(dump(".res 2")).toEqual([".res 2"]);
+		expect(dump(".code")).toEqual([".code"]);
+		expect(dump(".rodata")).toEqual([".rodata"]);
+		expect(dump(".zeropage")).toEqual([".zeropage"]);
 	});
 
 	test("trailing comma is accepted and preserved", () => {

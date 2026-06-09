@@ -112,6 +112,21 @@ describe("segments", () => {
 		expect(messages).toContain('Unknown segment "NOPE"');
 	});
 
+	test(".res reserves zero bytes", () => {
+		expect(asm(".byte $11\n.res 3\n.byte $22\n").bytes).toEqual([
+			0x11, 0, 0, 0, 0x22,
+		]);
+	});
+
+	test("a segment shorthand switches the current segment", () => {
+		const { bytes, symbols } = asm(
+			'.define_segment "CODE"\n.segment "OUTPUT"\n.org $0400\n.emit "CODE"\n' +
+				".code\nstart:\n\tnop\n",
+		);
+		expect(symbols.get("start")).toBe(0x0400n);
+		expect(bytes).toEqual([0xea]);
+	});
+
 	test("a circular .emit is reported, not looped", () => {
 		const { messages } = asm(
 			'.define_segment "A"\n.define_segment "B"\n' +

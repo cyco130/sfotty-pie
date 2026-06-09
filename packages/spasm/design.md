@@ -19,9 +19,10 @@ source -> lex -> parse -> ┌───────────── multipass l
 1. **Lex** ([src/lexer.ts](src/lexer.ts)) — a single big anchored regex turns source into tokens.
 2. **Parse** ([src/parser.ts](src/parser.ts)) — recursive descent for statements, a Pratt parser for expressions, producing a CST-ish AST that keeps its tokens (and trivia) for a future pretty-printer.
 3. **Load** ([src/loader.ts](src/loader.ts)) — resolve and parse the `.import` closure into a module graph.
-4. **Assemble** ([src/assemble.ts](src/assemble.ts)) — the multipass loop: each pass _collects_ content into segments (evaluating expressions and encoding instructions) and then _renders_ the OUTPUT segment to bytes, until the symbol table reaches a fixpoint.
+4. **Expand macros** ([src/macros.ts](src/macros.ts)) — a static, per-module rewrite of each module's statements before assembly.
+5. **Assemble** ([src/assemble.ts](src/assemble.ts)) — the multipass loop: each pass _collects_ content into segments (evaluating expressions and encoding instructions) and then _renders_ the OUTPUT segment to bytes, until the symbol table reaches a fixpoint.
 
-Steps 1–3 happen once; step 4 iterates.
+Steps 1–4 happen once; step 5 iterates.
 
 ## Public API surface
 
@@ -84,6 +85,14 @@ Scoping ([src/scopes.ts](src/scopes.ts)) layers per-module scopes and one ambien
 
 Because labels are defined during _render_ (when addresses are known) but belong to a specific module's scope, each label item carries its `moduleId`, and render defines it via `scopes.defineLocal(moduleId, …)`.
 
+## Macros
+
+Macros are a static, syntactic step ([src/macros.ts](src/macros.ts)) that runs once per module _before_ the multipass — `expandMacros` is mapped over each loaded module's statements. It collects `.macro name params … .endmacro` definitions (removing them from the stream), then replaces each call — an instruction whose mnemonic names a macro — with the body.
+
+Expansion is hygienic: the body is `structuredClone`d per call (so the template isn't mutated), params are substituted by their argument expressions, and labels _defined_ in the body (plus `:=`/`=` names) are renamed with a per-expansion suffix (`name@N`) so repeated calls don't collide — while names merely _referenced_ (a shared `print` subroutine, say) are left alone. Nested calls expand recursively under a depth cap. Because it's purely syntactic and pre-multipass, the renamed labels just become ordinary module-scoped symbols.
+
+This covers what guess needs: 0- or 1-argument macros called in instruction position — the mprint pattern (switch to RODATA, emit a string under a body-local label, switch back to CODE, load its address), expanded once per call site with distinct labels.
+
 ## Syntax decisions worth knowing
 
 - **`=` vs `:=`.** `name = expr` defines a _constant_; `name := expr` (and `name:`) defines a _label_ (address-valued). The kind is recorded on the symbol; it carries no behavior yet but is the hook for future address attributes.
@@ -97,13 +106,13 @@ Because labels are defined during _render_ (when addresses are known) but belong
 
 ## What's deferred
 
-The implemented language is the subset the flat-mode samples (hello/echo/cat) need. Not yet built:
+All four samples (hello/echo/cat/guess) now assemble and run. Not yet built:
 
-- **Macros** (`.macro`/`.endmacro`, hygiene, params), **`.res`**, and segment-name **shorthands** (`.code`/`.rodata`) — "Tier B," needed by guess.
 - **`.if`/`.elseif`/`.else`/`.endif` + `.error`** — layout-time conditionals.
 - **Segment attributes** (`.define_segment "X", type:…, executable:…`) — the kind/exec flags and their keyword-arg syntax; emit-vs-reserve is currently chosen by `.emit`/`.emplace` alone.
 - **Relocation** — symbolic `.base()`/`.reloc`, and the `.base`/`.startof`/`.sizeof` builtins.
 - **Richer modules** — named/aliased/namespace imports (`name = .import`, `.import "m": a, b`), `name::sym` on a namespace, `.global X = expr` / `.global X:`, and `.export` of anything but an assignment.
+- **Richer macros** — multi-argument and operand-typed params, and exported/imported macros (today: 0- or 1-arg macros, called in instruction position).
 - **A CLI** and standing end-to-end (run-in-the-core) tests — execution is currently spot-checked with throwaway scripts.
 - **Cyclic _definition_ detection** — `A = B` / `B = A` converges to undefined and reports "undefined symbol" (no hang), not a precise cycle error.
 
@@ -122,6 +131,7 @@ The implemented language is the subset the flat-mode samples (hello/echo/cat) ne
 | [src/symbols.ts](src/symbols.ts)                   | `SymbolTable`: define-once, label/constant kind, persist-across-passes, fixpoint snapshot.  |
 | [src/scopes.ts](src/scopes.ts)                     | Per-module + ambient scopes over `SymbolTable` via qualified keys.                          |
 | [src/loader.ts](src/loader.ts)                     | `Host` contract and the module-graph loader (dedup, cycles, dependency order).              |
+| [src/macros.ts](src/macros.ts)                     | `expandMacros` — static, per-module macro expansion with label hygiene.                     |
 | [src/layout.ts](src/layout.ts)                     | `Segment` and `render` — the segment/OUTPUT layout engine.                                  |
 | [src/assemble.ts](src/assemble.ts)                 | The orchestrator: `assemble()`, `collect`, and the multipass loop.                          |
 | [src/index.ts](src/index.ts)                       | Public API.                                                                                 |

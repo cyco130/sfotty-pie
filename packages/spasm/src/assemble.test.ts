@@ -259,61 +259,61 @@ end:
 });
 
 describe("modules", () => {
-	test("an exported symbol is visible to a splat importer", () => {
+	test("an exported symbol is visible to a splat importer", async () => {
 		const host = memHost({
 			main: '.import "consts"\n.byte FOO\n',
 			consts: ".export FOO = $42\n",
 		});
-		const r = assemble("main", host);
+		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		expect([...r.output]).toEqual([0x42]);
 	});
 
-	test("a non-exported symbol stays private", () => {
+	test("a non-exported symbol stays private", async () => {
 		const host = memHost({
 			main: '.import "consts"\n.byte FOO\n',
 			consts: "FOO = $42\n", // not exported
 		});
-		const r = assemble("main", host);
+		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toContain(
 			'Undefined symbol "FOO"',
 		);
 	});
 
-	test(".global publishes to the ambient scope; .global:: reads it", () => {
+	test(".global publishes to the ambient scope; .global:: reads it", async () => {
 		const host = memHost({
 			main: '.import "sys"\nstart:\n\tnop\n.global start\n',
 			sys: "entry := .global::start\n.byte <entry, >entry\n",
 		});
-		const r = assemble("main", host);
+		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		// sys emits start's address (lo, hi); start ($0002) follows sys's 2 bytes,
 		// then the nop.
 		expect([...r.output]).toEqual([0x02, 0x00, 0xea]);
 	});
 
-	test("a module shared by a diamond loads once", () => {
+	test("a module shared by a diamond loads once", async () => {
 		const host = memHost({
 			a: '.import "b"\n.import "c"\n',
 			b: '.import "d"\n',
 			c: '.import "d"\n',
 			d: ".byte $11\n",
 		});
-		const r = assemble("a", host);
+		const r = await assemble("a", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		expect([...r.output]).toEqual([0x11]); // d's byte once, not twice
 	});
 
-	test("an unreadable module is reported", () => {
-		const r = assemble("main", memHost({ main: '.import "nope"\n' }));
+	test("an unreadable module is reported", async () => {
+		const r = await assemble("main", memHost({ main: '.import "nope"\n' }));
 		expect(r.diagnostics.map((d) => d.message)).toContain(
 			'Cannot read module "nope"',
 		);
 	});
 
-	test("an import cycle is reported, not looped", () => {
+	test("an import cycle is reported, not looped", async () => {
 		const host = memHost({ a: '.import "b"\n', b: '.import "a"\n' });
-		const r = assemble("a", host);
+		const r = await assemble("a", host);
 		expect(r.diagnostics.some((d) => d.message.includes("cycle"))).toBe(true);
 	});
 
@@ -361,9 +361,9 @@ end:
 \tsta EXIT
 `;
 
-	test("two-file hello assembles across modules", () => {
+	test("two-file hello assembles across modules", async () => {
 		const host = memHost({ "hello.s": HELLO, "./lib.s": LIB });
-		const r = assemble("hello.s", host);
+		const r = await assemble("hello.s", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		// prettier-ignore
 		expect([...r.output]).toEqual([

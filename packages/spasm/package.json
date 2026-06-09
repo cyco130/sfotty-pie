@@ -21,6 +21,9 @@
   "exports": {
     ".": "./dist/index.js"
   },
+  "bin": {
+    "spasm": "./dist/cli.js"
+  },
   "publishConfig": {
     "access": "public"
   },

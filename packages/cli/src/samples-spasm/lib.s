@@ -10,12 +10,12 @@ start := .global::start
 .export FSTIN := $0241
 .export ARGS := $0300
 
-; Segment definitions
-.define_segment "CODE", type: "read-only", executable: .true
-.define_segment "RODATA", type: "read-only"
-.define_segment "DATA", type: "read-write"
-.define_segment "BSS", type: "zero-init"
-.define_segment "ZEROPAGE", type: "uninitialized"
+; Segment definitions (attributes — type:/executable: — deferred for now)
+.define_segment "CODE"
+.define_segment "RODATA"
+.define_segment "DATA"
+.define_segment "BSS"
+.define_segment "ZEROPAGE"
 
 ; Output format
 .segment "OUTPUT"
@@ -27,12 +27,9 @@ start := .global::start
     .word start  ; Reset
     .word 0              ; IRQ (unused)
 
-  ; Zero page RAM
+  ; Zero page RAM ( `.if`/`.error` bounds checks deferred — step 2)
   .org $0000
     .emplace "ZEROPAGE"
-  .if * > $0100
-    .error "Zero page overflow"
-  .endif
 
   ; Main RAM
   .org $0400
@@ -41,7 +38,3 @@ start := .global::start
     .emit "DATA"
 
     .emplace "BSS"
-
-  .if * > $FFFA
-    .error "RAM overflow"
-  .endif

@@ -8,8 +8,8 @@ import { decodeStringLiteral } from "./value.ts";
  * module's source. Both may throw — the loader turns that into a diagnostic.
  */
 export interface Host {
-	resolve(specifier: string, fromId: string): string;
-	read(id: string): string;
+	resolve(specifier: string, fromId: string): string | Promise<string>;
+	read(id: string): string | Promise<string>;
 }
 
 export interface LoadedModule {
@@ -25,16 +25,19 @@ export interface LoadedModule {
  * (each module loads once, even in diamonds), returned in dependency order —
  * imports before importers. Import cycles are reported, not followed.
  */
-export function loadModules(
+export async function loadModules(
 	entryId: string,
 	host: Host,
 	diagnostics: Message[],
-): LoadedModule[] {
+): Promise<LoadedModule[]> {
 	const loaded = new Map<string, LoadedModule>();
 	const onStack = new Set<string>();
 	const order: LoadedModule[] = [];
 
-	const load = (id: string, importedAt?: readonly [number, number]): void => {
+	const load = async (
+		id: string,
+		importedAt?: readonly [number, number],
+	): Promise<void> => {
 		if (loaded.has(id)) return; // already loaded (dedup)
 		if (onStack.has(id)) {
 			report(diagnostics, importedAt, `Import cycle through "${id}"`);
@@ -44,7 +47,7 @@ export function loadModules(
 
 		let source: string | undefined;
 		try {
-			source = host.read(id);
+			source = await host.read(id);
 		} catch {
 			report(diagnostics, importedAt, `Cannot read module "${id}"`);
 		}
@@ -65,13 +68,13 @@ export function loadModules(
 					const specifier = decodeStringLiteral(specToken.text, () => {});
 					let depId: string | undefined;
 					try {
-						depId = host.resolve(specifier, id);
+						depId = await host.resolve(specifier, id);
 					} catch {
 						report(diagnostics, span, `Cannot resolve module "${specifier}"`);
 					}
 					if (depId !== undefined) {
 						imports.push(depId);
-						load(depId, span);
+						await load(depId, span);
 					}
 				}
 			}
@@ -88,7 +91,7 @@ export function loadModules(
 		onStack.delete(id);
 	};
 
-	load(entryId);
+	await load(entryId);
 	return order;
 }
 

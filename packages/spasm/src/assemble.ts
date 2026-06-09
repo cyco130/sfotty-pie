@@ -6,6 +6,7 @@ import { expandMacros } from "./macros.ts";
 import { Scopes } from "./scopes.ts";
 import {
 	getExpressionLocation,
+	parse,
 	type Assignment,
 	type Expression,
 	type Global,
@@ -13,6 +14,7 @@ import {
 	type Operand,
 	type StatementContent,
 } from "./parser.ts";
+import { SourceFile } from "./source-file.ts";
 import { decodeStringLiteral, type Value } from "./value.ts";
 
 export interface AssembleResult {
@@ -23,44 +25,67 @@ export interface AssembleResult {
 
 type Reporter = (message: string, span: readonly [number, number]) => void;
 
-/** Assemble a single source string (no module imports). */
+/**
+ * Assemble a single source string (no module imports). Synchronous — there is
+ * no `Host` to consult, so nothing async can happen.
+ */
 export function assemble(source: string, name?: string): AssembleResult;
-/** Assemble a project rooted at `entry`, reaching modules through `host`. */
-export function assemble(entry: string, host: Host): AssembleResult;
+/**
+ * Assemble a project rooted at `entry`, reaching other modules through `host`.
+ * Asynchronous: the host (the only I/O) is consulted upfront while loading the
+ * module graph; everything after that is the synchronous core.
+ */
+export function assemble(entry: string, host: Host): Promise<AssembleResult>;
 export function assemble(
 	sourceOrEntry: string,
 	nameOrHost: string | Host = "input",
-): AssembleResult {
+): AssembleResult | Promise<AssembleResult> {
 	if (typeof nameOrHost === "object") {
 		return assembleProject(sourceOrEntry, nameOrHost);
 	}
+	// Single source: one module with no imports, assembled synchronously.
 	const name = nameOrHost;
-	const host: Host = {
-		read: (id) => {
-			if (id === name) return sourceOrEntry;
-			throw new Error(`no module "${id}"`);
-		},
-		resolve: (specifier) => {
-			throw new Error(`cannot resolve "${specifier}"`);
-		},
-	};
-	return assembleProject(name, host);
+	const diagnostics: Message[] = [];
+	const sourceFile = new SourceFile(name, sourceOrEntry);
+	const { module, errors } = parse(sourceFile);
+	diagnostics.push(...errors);
+	const modules: LoadedModule[] = [
+		{ id: name, sourceFile, statements: module.statements, imports: [] },
+	];
+	return assembleModules(modules, name, diagnostics);
 }
 
-function assembleProject(entryId: string, host: Host): AssembleResult {
+async function assembleProject(
+	entryId: string,
+	host: Host,
+): Promise<AssembleResult> {
 	const loadDiagnostics: Message[] = [];
-	const report: Reporter = (message, span) => {
-		loadDiagnostics.push({
+	const modules = await loadModules(entryId, host, loadDiagnostics);
+	return assembleModules(modules, entryId, loadDiagnostics);
+}
+
+/**
+ * The synchronous core: expand macros, then run the multipass collect→render
+ * loop over the (already loaded) modules. `priorDiagnostics` are the load/parse
+ * diagnostics gathered before this point.
+ */
+function assembleModules(
+	loaded: readonly LoadedModule[],
+	entryId: string,
+	priorDiagnostics: Message[],
+): AssembleResult {
+	// Macro expansion is static and runs once, before the multipass.
+	const expandReport: Reporter = (message, span) => {
+		priorDiagnostics.push({
 			type: "error",
 			start: span[0],
 			end: span[1],
 			message,
 		});
 	};
-	// Macro expansion is static and runs once, before the multipass.
-	const modules = loadModules(entryId, host, loadDiagnostics).map((module) => ({
+	const modules = loaded.map((module) => ({
 		...module,
-		statements: expandMacros(module.statements, report),
+		statements: expandMacros(module.statements, expandReport),
 	}));
 
 	const scopes = new Scopes(modules);
@@ -123,7 +148,7 @@ function assembleProject(entryId: string, host: Host): AssembleResult {
 	return {
 		output: new Uint8Array(output),
 		symbols: scopes.resolvedFor(entryId),
-		diagnostics: [...loadDiagnostics, ...diagnostics],
+		diagnostics: [...priorDiagnostics, ...diagnostics],
 	};
 }
 

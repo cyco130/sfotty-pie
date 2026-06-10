@@ -11,7 +11,8 @@
     "test:lint": "eslint . --max-warnings 0"
   },
   "dependencies": {
-    "@sfotty-pie/a8": "workspace:*"
+    "@sfotty-pie/a8": "workspace:*",
+    "@sfotty-pie/sfotty": "workspace:*"
   },
   "devDependencies": {
     "@cyco130/eslint-config": "^9.0.1",

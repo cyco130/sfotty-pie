@@ -26,6 +26,9 @@ importers:
       '@sfotty-pie/a8':
         specifier: workspace:*
         version: link:../../packages/a8
+      '@sfotty-pie/sfotty':
+        specifier: workspace:*
+        version: link:../../packages/sfotty
     devDependencies:
       '@cyco130/eslint-config':
         specifier: ^9.0.1

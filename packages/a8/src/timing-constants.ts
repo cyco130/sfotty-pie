@@ -1,5 +1,10 @@
 export const CYCLES_PER_LINE = 114; // 94 visible cycles (17..111) + 20 horizontal blank
 
+// The framebuffer AnticGtia.afterCpu renders into: one Atari color byte per
+// hi-res pixel.
+export const FRAME_BUFFER_WIDTH = 376; // 94 visible cycles x 4 hi-res pixels
+export const FRAME_BUFFER_HEIGHT = 240;
+
 export const NTSC_MASTER_CLOCK_RATE = 14_318_180;
 export const NTSC_CYCLES_PER_SECOND = NTSC_MASTER_CLOCK_RATE / 8; // 1_789_772.5, slightly off from the exact (5 * 7 * 9) / (16 * 11) MHz ~= 1_789_772.73
 export const NTSC_LINES_PER_FRAME = 262; // 240 visible lines (8..247) + 22 vertical blank

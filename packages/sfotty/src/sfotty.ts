@@ -99,7 +99,9 @@ export class Sfotty {
 	 * The NMI input line (positive logic here: `true` = asserted). Edge-triggered
 	 * — a false→true transition latches a pending NMI, serviced at the next
 	 * instruction boundary regardless of the I flag. The host must wired-OR all
-	 * its NMI sources into this single boolean. Not yet honored by run().
+	 * its NMI sources into this single boolean. The edge detector samples inside
+	 * run(), so the host must hold the line asserted across cycles where the CPU
+	 * is halted (e.g. ANTIC DMA) or the edge is lost.
 	 */
 	NMI = false;
 

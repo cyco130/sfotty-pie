@@ -105,12 +105,12 @@ const NEED_INPUT = Symbol("need-input");
 // routine) or false if it only observed (let the ROM code run).
 const traps = new Map<number, () => boolean>();
 
-// E: PUTBYT — write the ATASCII character in A to stdout, then return.
+// E: PUTBYT — copy the ATASCII character in A to stdout, then let the real ROM
+// routine run too, so the text also lands in screen RAM (and the framebuffer).
 function editorPutByte(): boolean {
 	const c = cpu.A & 0xff;
 	fs.writeSync(1, Buffer.from([c === 0x9b ? 0x0a : c])); // EOL → newline
-	returnStatus(0x01);
-	return true;
+	return false;
 }
 
 // E: GETBYT — return the next stdin byte in A (as ATASCII), waiting if needed.
@@ -175,20 +175,47 @@ traps.set(0xe459, () => {
 	return true;
 });
 
-// --- Stuck-loop watchdog + fake VBLANK RTCLOK tick. ---
+// --- Stuck-loop watchdog. ---
 const WINDOW = 10_000;
 const FEW_PCS = 64;
 const FEW_ADDRESSES = 32;
 const STUCK_LIMIT = 2_000_000; // generous: past multi-frame OS startup delays
 const LIMIT = 50_000_000;
-const FRAME = 29868; // NTSC cycles per frame
 
 const fetchCount = new Uint32Array(0x10000);
 const seenPcs = new Set<number>();
 let windowStart = 0;
 let loopCycles = 0;
 let cycles = 0;
-let nextVblank = FRAME;
+
+// The framebuffer ANTIC/GTIA renders into: 240 lines of 376 hi-res pixels (94
+// visible cycles x 4), one Atari color byte each.
+const frame = new Uint8Array(376 * 240);
+
+if (process.argv.includes("--dump-frame")) {
+	// Render the last frame as ASCII art on exit. Hooked on the exit event
+	// because the normal exit path is process.exit() inside the GETBYT trap.
+	process.on("exit", dumpFrame);
+}
+
+function dumpFrame(): void {
+	// Call the most frequent color the background.
+	const counts = new Uint32Array(256);
+	for (const value of frame) counts[value]!++;
+	let bg = 0;
+	for (let i = 1; i < 256; i++) {
+		if (counts[i]! > counts[bg]!) bg = i;
+	}
+
+	process.stderr.write(`\nFrame dump (" " = $${hex(bg, 2)}):\n`);
+	for (let y = 0; y < 240; y += 4) {
+		let line = "";
+		for (let x = 0; x < 376; x += 2) {
+			line += frame[y * 376 + x] === bg ? " " : "#";
+		}
+		process.stderr.write(line + "\n");
+	}
+}
 
 function dumpRegisters(): void {
 	process.stderr.write(
@@ -230,9 +257,19 @@ function reportHotspots(): void {
 }
 
 async function run(): Promise<void> {
+	const ag = machine.anticGtia;
+
 	while (cycles < LIMIT) {
+		ag.beforeCpu();
+		cpu.NMI = ag.nmi;
+		cpu.RDY = ag.rdy;
+
 		let trapped = false;
-		if (cpu.state === DECODE) {
+
+		// Traps fire on an opcode fetch the CPU will actually perform — not on
+		// halted cycles (the CPU is frozen), and not while a WSYNC stall is
+		// repeating the fetch (the trap would fire once per stalled cycle).
+		if (!ag.halt && cpu.RDY && cpu.state === DECODE) {
 			fetchCount[cpu.PC] = (fetchCount[cpu.PC] ?? 0) + 1;
 			seenPcs.add(cpu.PC);
 			if (trace) process.stderr.write(traceLine(cpu, peek) + "\n");
@@ -242,38 +279,25 @@ async function run(): Promise<void> {
 				try {
 					trapped = trap();
 				} catch (error) {
-					if (error === NEED_INPUT) {
-						await new Promise<void>((resolve) => {
-							onStdin = resolve;
-						});
-						continue;
-					}
-					throw error;
+					if (error !== NEED_INPUT) throw error;
+					// Keep beforeCpu/afterCpu paired for this cycle, then wait
+					// for input and retry the same instruction.
+					ag.afterCpu(frame, machine.busData);
+					cycles++;
+					await new Promise<void>((resolve) => {
+						onStdin = resolve;
+					});
+					continue;
 				}
 			}
 		}
 
-		if (!trapped) {
-			machine.cycle = cycles;
+		if (!trapped && !ag.halt) {
 			cpu.run();
 		}
-		cycles++;
 
-		if (cycles >= nextVblank) {
-			nextVblank += FRAME;
-			const lsb = (machine.read(0x14, ReadOptions.NONE) + 1) & 0xff;
-			machine.write(0x14, lsb);
-			if (lsb === 0) {
-				const mid = (machine.read(0x13, ReadOptions.NONE) + 1) & 0xff;
-				machine.write(0x13, mid);
-				if (mid === 0) {
-					machine.write(
-						0x12,
-						(machine.read(0x12, ReadOptions.NONE) + 1) & 0xff,
-					);
-				}
-			}
-		}
+		ag.afterCpu(frame, machine.busData);
+		cycles++;
 
 		if (cpu.crashed) {
 			process.stderr.write(`\nCRASHED: ${cpu.describeState()}\n`);

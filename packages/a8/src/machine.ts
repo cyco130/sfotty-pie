@@ -1,77 +1,67 @@
-import { ReadOptions, type Memory } from "@sfotty-pie/sfotty";
+import { type Memory, type ReadOptions } from "@sfotty-pie/sfotty";
+import { Antic } from "./antic.ts";
+import { AtariBus } from "./bus-manager.ts";
+import { Cartridge } from "./cartridge.ts";
+import { Gtia } from "./gtia.ts";
+import { Pbi } from "./pbi.ts";
+import { Pia } from "./pia.ts";
+import { Pokey } from "./pokey.ts";
 
-export interface Roms {
-	/** OS-B ROM, 10K, mapped at $D800. */
+export type AtariModel = "800" | "800XL";
+
+export interface MachineConfig {
+	/** Which machine to emulate. */
+	model: AtariModel;
+	/** OS ROM: OS-B (10K) for the 800, XL OS (16K) for the 800XL. */
 	os: Uint8Array;
-	/** BASIC ROM, 8K, mapped at $A000. */
+	/** BASIC ROM (8K): an $A000 cartridge on the 800, built-in on the 800XL. */
 	basic: Uint8Array;
 }
 
 /**
- * Atari 800 (NTSC, OS-B) with the BASIC cartridge inserted.
+ * An Atari 8-bit machine (NTSC) built on the real {@link AtariBus} plus chip
+ * stubs (GTIA/POKEY/PIA/ANTIC/PBI).
  *
- * Memory map:
- * ```
- *   $0000-$9FFF  RAM
- *   $A000-$BFFF  BASIC ROM        (writes ignored)
- *   $C000-$CFFF  not connected    (reads $FF, writes ignored)
- *   $D000-$D7FF  hardware I/O      (GTIA/POKEY/PIA/ANTIC)
- *   $D800-$FFFF  OS ROM           (writes ignored)
- * ```
+ * - `"800"` — OS-B, 48K, no PORTB banking; BASIC is a standard $A000 8K cart.
+ * - `"800XL"` — XL OS, 64K, PORTB banking; BASIC is built in and banked via
+ *   PORTB (the OS enables it unless OPTION is held).
  */
-export class Atari800 implements Memory {
-	// One flat image: RAM in low memory, ROMs loaded at their addresses.
-	readonly #mem = new Uint8Array(0x10000);
-
+export class Atari implements Memory {
 	/** Master clock in CPU cycles; drives time-based registers like VCOUNT. */
 	cycle = 0;
 
-	constructor(roms: Roms) {
-		this.#mem.set(roms.basic, 0xa000);
-		this.#mem.set(roms.os, 0xd800);
+	readonly #bus: AtariBus;
+
+	constructor(config: MachineConfig) {
+		const { model, os, basic } = config;
+		const xl = model === "800XL";
+
+		this.#bus = new AtariBus({
+			portbBanking: xl,
+			conventionalRamSize: xl ? 64 : 48,
+			xeBankCount: 0,
+			separateAnticAccess: false,
+			osRom: os,
+			// 800XL: built-in BASIC, banked in via PORTB. 800: BASIC as a cart.
+			basicRom: xl ? basic : undefined,
+			cartridge: xl ? undefined : new Cartridge(basic),
+			gtia: new Gtia(),
+			pokey: new Pokey(),
+			pia: new Pia(),
+			antic: new Antic({ cycle: () => this.cycle }),
+			pbi: new Pbi(),
+		});
 	}
 
 	read(address: number, options: ReadOptions): number {
-		if (address >= 0xd000 && address < 0xd800) {
-			return this.#readRegister(address, options);
-		}
-		if (address >= 0xc000 && address < 0xd000) {
-			return 0xff; // not connected
-		}
-		return this.#mem[address]!;
+		return this.#bus.read(address, options);
 	}
 
 	write(address: number, value: number): void {
-		if (address < 0xa000) {
-			this.#mem[address] = value; // RAM
-		}
-		// $A000-$BFFF, $C000-$CFFF, $D800-$FFFF: ROM / unconnected — ignored.
-		// $D000-$D7FF: hardware writes — TODO: shim as the boot needs them.
+		this.#bus.write(address, value);
 	}
 
-	// Hardware register reads. Only what the boot has needed so far is shimmed;
-	// everything else reads back 0 until a stuck loop tells us otherwise.
-	#readRegister(address: number, options: ReadOptions): number {
-		if ((options & ReadOptions.PEEK) !== 0) return 0; // no side effects
-
-		// GTIA $D000-$D0FF (32 registers, mirrored every $20).
-		if (address >= 0xd000 && address < 0xd100 && (address & 0x1f) === 0x1f) {
-			// CONSOL: bits 0-2 are START/SELECT/OPTION, 0 = pressed. Report all
-			// released, else the OS reads "START held" and boots the cassette.
-			return 0x07;
-		}
-
-		// POKEY $D200-$D2FF (16 registers, mirrored every $10).
-		if (address >= 0xd200 && address < 0xd300 && (address & 0x0f) === 0x0a) {
-			return (Math.random() * 256) | 0; // RANDOM
-		}
-
-		// ANTIC $D400-$D4FF (16 registers, mirrored every $10).
-		if (address >= 0xd400 && address < 0xd500 && (address & 0x0f) === 0x0b) {
-			// VCOUNT: scan line / 2 — increments every 2 lines (228 cycles), 0..130.
-			return Math.floor(this.cycle / 228) % 131;
-		}
-
-		return 0;
+	reset(cold: boolean): void {
+		this.#bus.reset(cold);
 	}
 }

@@ -9,17 +9,24 @@ import {
 import fs from "node:fs";
 import readline from "node:readline";
 import { join } from "node:path";
-import { Atari800 } from "./machine.ts";
+import { Atari } from "./machine.ts";
 
 function loadRom(name: string): Uint8Array {
 	const path = join(import.meta.dirname, "../../../roms.local", name);
 	return new Uint8Array(fs.readFileSync(path));
 }
 
-const machine = new Atari800({
-	os: loadRom("800-b-ntsc.rom"),
-	basic: loadRom("basic-c.rom"),
-});
+const machine = process.argv.includes("--xl")
+	? new Atari({
+			model: "800XL",
+			os: loadRom("xl-02.rom"),
+			basic: loadRom("basic-c.rom"),
+		})
+	: new Atari({
+			model: "800",
+			os: loadRom("800-b-ntsc.rom"),
+			basic: loadRom("basic-c.rom"),
+		});
 
 // Record every bus address touched in the current window so the watchdog can
 // tell a real stuck loop from a legitimately long loop (e.g. the RAM test).
@@ -39,11 +46,9 @@ const cpu = new Sfotty(bus, { withoutUndocumented: false });
 
 const peek = (address: number) => machine.read(address, ReadOptions.PEEK);
 
-// Power-on reset: jump to the reset vector with interrupts disabled.
-cpu.resetPending = false;
-cpu.S = 0xff;
-cpu.iFlag = true;
-cpu.PC = peek(0xfffc) | (peek(0xfffd) << 8);
+// Power-on reset: the seven-cycle RES sequence runs on the first run() calls
+// and lands at the reset vector.
+cpu.reset(true);
 
 const trace = process.argv.includes("--trace");
 

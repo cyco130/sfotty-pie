@@ -1,1 +1,1 @@
-export { Atari800, type Roms } from "./machine.ts";
+export { Atari, type AtariModel, type MachineConfig } from "./machine.ts";

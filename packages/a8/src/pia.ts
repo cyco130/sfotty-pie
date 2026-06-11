@@ -40,6 +40,18 @@ import { Signal } from "./signal.ts";
  * (inputs), CA2 = motor control and CB2 = command (outputs).
  */
 export class Pia implements Memory {
+	/**
+	 * The port A external input pins (1 = open/pulled up, 0 = pulled low).
+	 * On the Atari these are joysticks 0 (low nibble) and 1 (high).
+	 */
+	readonly portaIn = new Signal(0xff);
+
+	/**
+	 * The port B external input pins. On the Atari these are joysticks 2/3
+	 * (400/800 only — nothing external connects to port B on XL/XE).
+	 */
+	readonly portbIn = new Signal(0xff);
+
 	/** The port A pin levels (DDR-aware, external pulls included). */
 	readonly portaOut = new Signal(0xff);
 
@@ -72,24 +84,35 @@ export class Pia implements Memory {
 	#ddrB = 0;
 	#ctrlB = 0;
 
-	// External pin levels (1 = open/pulled up, 0 = pulled low by a switch).
-	#inA = 0xff;
-	#inB = 0xff;
+	// The CA2/CB2 *pin* level (driven in output modes, external in input
+	// mode) and the pending-edge latch: a rising pin edge in any output mode
+	// except pulse latches it; a falling edge or pulse mode clears it; and
+	// entering input mode converts it into the IRQ2 status bit. Pinned by
+	// Acid800 pia_irq's transition tables (ported below as unit tests).
+	#ca2Pin = true;
+	#ca2Pending = false;
+	#cb2Pin = true;
+	#cb2Pending = false;
 
 	constructor() {
+		this.portaIn.watch(() => this.#updatePortaOut());
+		this.portbIn.watch(() => this.#updatePortbOut());
+
 		this.ca1In.watch((old) => {
 			if (this.#activeEdge(old, this.ca1In.value, this.#ctrlA & 0x02)) {
 				this.#ctrlA |= 0x80;
 				// A read handshake ends on the next active CA1 transition.
 				if ((this.#ctrlA & 0x38) === 0x20) {
 					this.ca2Out.value = true;
+					this.#ca2OutputEdge();
 				}
 				this.#updateIrqA();
 			}
 		});
 
 		this.ca2In.watch((old) => {
-			if (this.#ctrlA & 0x20) return; // output mode: transitions ignored
+			if (this.#ctrlA & 0x20) return; // output mode: the pin is driven
+			this.#ca2Pin = this.ca2In.value;
 			if (this.#activeEdge(old, this.ca2In.value, this.#ctrlA & 0x10)) {
 				this.#ctrlA |= 0x40;
 				this.#updateIrqA();
@@ -102,6 +125,7 @@ export class Pia implements Memory {
 				// A write handshake ends on the next active CB1 transition.
 				if ((this.#ctrlB & 0x38) === 0x20) {
 					this.cb2Out.value = true;
+					this.#cb2OutputEdge();
 				}
 				this.#updateIrqB();
 			}
@@ -109,6 +133,7 @@ export class Pia implements Memory {
 
 		this.cb2In.watch((old) => {
 			if (this.#ctrlB & 0x20) return;
+			this.#cb2Pin = this.cb2In.value;
 			if (this.#activeEdge(old, this.cb2In.value, this.#ctrlB & 0x10)) {
 				this.#ctrlB |= 0x40;
 				this.#updateIrqB();
@@ -120,21 +145,6 @@ export class Pia implements Memory {
 	// otherwise. (Signal watchers only fire on real changes.)
 	#activeEdge(old: boolean, value: boolean, risingSelect: number): boolean {
 		return risingSelect ? !old && value : old && !value;
-	}
-
-	/** Drive the port A input pins: joysticks 0 (low nibble) and 1 (high). */
-	setInputA(value: number): void {
-		this.#inA = value & 0xff;
-		this.#updatePortaOut();
-	}
-
-	/**
-	 * Drive the port B input pins: joysticks 2/3 on the 400/800. On XL/XE
-	 * nothing external connects to port B; leave it at $FF there.
-	 */
-	setInputB(value: number): void {
-		this.#inB = value & 0xff;
-		this.#updatePortbOut();
 	}
 
 	/**
@@ -160,11 +170,12 @@ export class Pia implements Memory {
 					this.#updateIrqA();
 					if ((this.#ctrlA & 0x30) === 0x20) {
 						this.ca2Out.value = false;
+						this.#ca2OutputEdge();
 					}
 				}
 				// Port A reads the pins, so an external switch pulls even an
 				// output-driven bit low.
-				return this.#readPort(this.#outA, this.#ddrA) & this.#inA;
+				return this.#readPort(this.#outA, this.#ddrA) & this.portaIn.value;
 			case 0x01:
 				if (!(this.#ctrlB & 0x04)) {
 					return this.#ddrB;
@@ -174,7 +185,7 @@ export class Pia implements Memory {
 					this.#updateIrqB();
 				}
 				// Port B reads the output latch for output bits, pins for inputs.
-				return (this.#outB & this.#ddrB) | (this.#inB & ~this.#ddrB);
+				return (this.#outB & this.#ddrB) | (this.portbIn.value & ~this.#ddrB);
 			case 0x02:
 				return this.#ctrlA;
 			default:
@@ -195,6 +206,7 @@ export class Pia implements Memory {
 					// Writing the data port fires the CB2 write strobes.
 					if ((this.#ctrlB & 0x30) === 0x20) {
 						this.cb2Out.value = false;
+						this.#cb2OutputEdge();
 					}
 				} else {
 					this.#ddrB = value;
@@ -205,11 +217,21 @@ export class Pia implements Memory {
 				// The status bits are read-only.
 				this.#ctrlA = (this.#ctrlA & 0xc0) | (value & 0x3f);
 				if (this.#ctrlA & 0x20) {
-					// CA2 turned output: the IRQ2 status clears, and the
-					// manual modes drive the line directly.
+					// CA2 turned output: the IRQ2 status clears. The manual
+					// modes drive the line directly; handshake and pulse
+					// idle it high. A rising pin edge latches the pending
+					// flag (except under pulse, which also clears it).
 					this.#ctrlA &= 0xbf;
-					if ((this.#ctrlA & 0x18) === 0x10) this.ca2Out.value = false;
-					if ((this.#ctrlA & 0x18) === 0x18) this.ca2Out.value = true;
+					this.ca2Out.value = (this.#ctrlA & 0x18) !== 0x10;
+					this.#ca2OutputEdge();
+					if ((this.#ctrlA & 0x38) === 0x28) {
+						this.#ca2Pending = false;
+					}
+				} else {
+					// CA2 turned input: a pending edge — or a pin snap from
+					// the driven level to the pulled-up external line that
+					// matches the edge select — becomes the IRQ2 status.
+					this.#ca2InputEntry();
 				}
 				// Enable-bit changes take effect immediately, both ways.
 				this.#updateIrqA();
@@ -218,8 +240,13 @@ export class Pia implements Memory {
 				this.#ctrlB = (this.#ctrlB & 0xc0) | (value & 0x3f);
 				if (this.#ctrlB & 0x20) {
 					this.#ctrlB &= 0xbf;
-					if ((this.#ctrlB & 0x18) === 0x10) this.cb2Out.value = false;
-					if ((this.#ctrlB & 0x18) === 0x18) this.cb2Out.value = true;
+					this.cb2Out.value = (this.#ctrlB & 0x18) !== 0x10;
+					this.#cb2OutputEdge();
+					if ((this.#ctrlB & 0x38) === 0x28) {
+						this.#cb2Pending = false;
+					}
+				} else {
+					this.#cb2InputEntry();
 				}
 				this.#updateIrqB();
 				break;
@@ -238,6 +265,9 @@ export class Pia implements Memory {
 		this.#ctrlA = this.#ctrlB = 0;
 		this.ca2Out.value = true;
 		this.cb2Out.value = true;
+		this.#ca2Pending = this.#cb2Pending = false;
+		this.#ca2Pin = this.ca2In.value; // input mode: the pin is external
+		this.#cb2Pin = this.cb2In.value;
 		this.#updateIrqA();
 		this.#updateIrqB();
 		this.#updatePortaOut();
@@ -249,13 +279,67 @@ export class Pia implements Memory {
 		return (out & ddr) | (~ddr & 0xff);
 	}
 
+	// Track a CA2 pin change while it is driven: rising edges latch the
+	// pending flag (except in pulse mode), falling edges clear it.
+	#ca2OutputEdge(): void {
+		const pin = this.ca2Out.value;
+		if (pin === this.#ca2Pin) return;
+		this.#ca2Pin = pin;
+		if (pin) {
+			if ((this.#ctrlA & 0x38) !== 0x28) this.#ca2Pending = true;
+		} else {
+			this.#ca2Pending = false;
+		}
+	}
+
+	#cb2OutputEdge(): void {
+		const pin = this.cb2Out.value;
+		if (pin === this.#cb2Pin) return;
+		this.#cb2Pin = pin;
+		if (pin) {
+			if ((this.#ctrlB & 0x38) !== 0x28) this.#cb2Pending = true;
+		} else {
+			this.#cb2Pending = false;
+		}
+	}
+
+	// Entering input mode: the pin snaps from the driven level to the
+	// external line. A pending edge converts to the IRQ2 status
+	// unconditionally; the snap itself counts only if it matches the edge
+	// select (bit 4).
+	#ca2InputEntry(): void {
+		const pin = this.ca2In.value;
+		if (
+			this.#ca2Pending ||
+			this.#activeEdge(this.#ca2Pin, pin, this.#ctrlA & 0x10)
+		) {
+			this.#ctrlA |= 0x40;
+		}
+		this.#ca2Pending = false;
+		this.#ca2Pin = pin;
+	}
+
+	#cb2InputEntry(): void {
+		const pin = this.cb2In.value;
+		if (
+			this.#cb2Pending ||
+			this.#activeEdge(this.#cb2Pin, pin, this.#ctrlB & 0x10)
+		) {
+			this.#ctrlB |= 0x40;
+		}
+		this.#cb2Pending = false;
+		this.#cb2Pin = pin;
+	}
+
 	#updatePortaOut(): void {
-		this.portaOut.value = this.#readPort(this.#outA, this.#ddrA) & this.#inA;
+		this.portaOut.value =
+			this.#readPort(this.#outA, this.#ddrA) & this.portaIn.value;
 	}
 
 	#updatePortbOut(): void {
 		// The banking logic sees the pins, external pulls included.
-		this.portbOut.value = this.#readPort(this.#outB, this.#ddrB) & this.#inB;
+		this.portbOut.value =
+			this.#readPort(this.#outB, this.#ddrB) & this.portbIn.value;
 	}
 
 	// The enables gate the IRQ outputs: bit 0 for IRQ1, and bit 3 for IRQ2 —

@@ -148,12 +148,18 @@ function makeMachine(model: AtariModel) {
 test("the 800 Reset key drives the RNMI line, not the reset line", () => {
 	const machine = makeMachine("800");
 
+	// Set up some PIA state: it must survive, since nothing pulses the
+	// 400/800 hardware reset line — the Reset key is only an NMI source.
+	machine.write(0xd302, 0x3c); // PACTL: CA2 manual high, data register
+	machine.write(0xd300, 0xa5); // PORTA output latch
+
 	machine.resetButtonDown();
 	expect(machine.anticGtia.rnmi).toBe(true);
 	expect(machine.resetAsserted).toBe(false);
 
 	machine.resetButtonUp();
 	expect(machine.anticGtia.rnmi).toBe(false);
+	expect(machine.read(0xd302, ReadOptions.NONE)).toBe(0x3c);
 });
 
 test("the XL Reset button resets components and holds the reset line", () => {

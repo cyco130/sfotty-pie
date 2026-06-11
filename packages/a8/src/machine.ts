@@ -40,9 +40,10 @@ export interface MachineConfig {
  * ```
  *
  * Keyboard input goes through the `pokeyKeyDown`/`pokeyKeyUp` family of
- * methods. The machine knows nothing about host key assignments — mapping
- * host keys to matrix codes (layouts, special key bindings) is entirely the
- * host's business.
+ * methods, joystick input through the `joystick*` family. The machine knows
+ * nothing about host key assignments — mapping host keys to matrix codes or
+ * joystick lines (layouts, special key bindings) is entirely the host's
+ * business.
  */
 export class Atari implements Memory {
 	readonly anticGtia: AnticGtia;
@@ -178,6 +179,69 @@ export class Atari implements Memory {
 	/** Release console keys. Takes the same mask as {@link consoleKeyDown}. */
 	consoleKeyUp(mask: number): void {
 		this.anticGtia.console |= mask & 0x07;
+	}
+
+	/**
+	 * Press joystick directions. `port` is 0-1 on the XL (two jacks) and 0-3
+	 * on the 800, whose ports 2/3 live on PIA port B; presses on ports the
+	 * machine doesn't have are ignored. `mask` is a set of direction bits:
+	 * 1 = up, 2 = down, 4 = left, 8 = right. The PIA lines are active low;
+	 * the mask here is "1 = press". The hardware can't stop opposite
+	 * directions being pressed at once; avoiding them is the host's call.
+	 */
+	joystickDown(port: number, mask: number): void {
+		if (!this.#hasJoystickPort(port)) return;
+		this.#moveStick(port, this.#sticks[port]! | (mask & 0x0f));
+	}
+
+	/** Release joystick directions. Takes the same mask as
+	 * {@link joystickDown}. */
+	joystickUp(port: number, mask: number): void {
+		if (!this.#hasJoystickPort(port)) return;
+		this.#moveStick(port, this.#sticks[port]! & ~mask);
+	}
+
+	/** Press the joystick trigger on `port` (drives the GTIA TRIG line low). */
+	joystickTriggerDown(port: number): void {
+		this.#setTrigger(port, 0);
+	}
+
+	/** Release the joystick trigger on `port`. */
+	joystickTriggerUp(port: number): void {
+		this.#setTrigger(port, 1);
+	}
+
+	// Pressed-direction masks per port; the inverse of the PIA nibbles.
+	readonly #sticks = [0, 0, 0, 0];
+
+	#hasJoystickPort(port: number): boolean {
+		return port >= 0 && port < (this.#xl ? 2 : 4);
+	}
+
+	#moveStick(port: number, mask: number): void {
+		this.#sticks[port] = mask;
+		if (port < 2) {
+			this.#pia.setInputA(~((this.#sticks[1]! << 4) | this.#sticks[0]!) & 0xff);
+		} else {
+			this.#pia.setInputB(~((this.#sticks[3]! << 4) | this.#sticks[2]!) & 0xff);
+		}
+	}
+
+	#setTrigger(port: number, value: number): void {
+		if (!this.#hasJoystickPort(port)) return;
+		switch (port) {
+			case 0:
+				this.anticGtia.trig0 = value;
+				break;
+			case 1:
+				this.anticGtia.trig1 = value;
+				break;
+			case 2:
+				this.anticGtia.trig2 = value;
+				break;
+			default:
+				this.anticGtia.trig3 = value;
+		}
 	}
 
 	/**

@@ -1,0 +1,92 @@
+import { expect, test } from "vitest";
+import { ReadOptions } from "@sfotty-pie/sfotty";
+import { Atari, type AtariModel } from "./machine.ts";
+
+const TRIG0 = 0xd010;
+const TRIG2 = 0xd012;
+const TRIG3 = 0xd013;
+const PORTA = 0xd300;
+const PORTB = 0xd301;
+const PACTL = 0xd302;
+const PBCTL = 0xd303;
+
+function makeMachine(model: AtariModel) {
+	// On the 800, BASIC goes through cartridge image sniffing: give the dummy
+	// ROM a valid $A000 cart trailer (init address $A000, start unused).
+	const basic = new Uint8Array(8192);
+	basic[8191] = 0xa0;
+
+	return new Atari({
+		model,
+		os: new Uint8Array(model === "800XL" ? 16384 : 10240),
+		basic,
+	});
+}
+
+test("joystick 0/1 directions drive PORTA, active low", () => {
+	const machine = makeMachine("800");
+	machine.write(PACTL, 0x04);
+	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xff);
+
+	machine.joystickDown(0, 0x05); // up+left
+	machine.joystickDown(1, 0x08); // right
+	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0x7a);
+
+	machine.joystickUp(0, 0x01); // release up, left stays held
+	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0x7b);
+
+	machine.joystickUp(0, 0x04);
+	machine.joystickUp(1, 0x08);
+	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xff);
+});
+
+test("the 800 has joysticks 2/3 on PORTB", () => {
+	const machine = makeMachine("800");
+	machine.write(PBCTL, 0x04);
+
+	machine.joystickDown(2, 0x02); // down
+	machine.joystickDown(3, 0x01); // up
+	expect(machine.read(PORTB, ReadOptions.NONE)).toBe(0xed);
+});
+
+test("triggers drive the GTIA TRIG lines", () => {
+	const machine = makeMachine("800");
+	expect(machine.read(TRIG0, ReadOptions.NONE)).toBe(1);
+
+	machine.joystickTriggerDown(0);
+	machine.joystickTriggerDown(2);
+	expect(machine.read(TRIG0, ReadOptions.NONE)).toBe(0);
+	expect(machine.read(TRIG2, ReadOptions.NONE)).toBe(0);
+
+	machine.joystickTriggerUp(0);
+	expect(machine.read(TRIG0, ReadOptions.NONE)).toBe(1);
+	expect(machine.read(TRIG2, ReadOptions.NONE)).toBe(0);
+});
+
+test("the XL has no ports 2/3", () => {
+	const machine = makeMachine("800XL");
+	machine.write(PBCTL, 0x04);
+
+	machine.joystickDown(2, 0x0f);
+	machine.joystickTriggerDown(3);
+	expect(machine.read(PORTB, ReadOptions.NONE)).toBe(0xff);
+	expect(machine.read(TRIG3, ReadOptions.NONE)).toBe(1);
+});
+
+test("a stick switch pulls even an output-driven PORTA pin low", () => {
+	const machine = makeMachine("800");
+	machine.write(PORTA, 0xff); // PACTL bit 2 is 0 after power-on: sets DDRA
+	machine.write(PACTL, 0x04);
+	machine.write(PORTA, 0xff); // the output latch
+
+	machine.joystickDown(0, 0x01);
+	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xfe);
+});
+
+test("joystick state survives a reset (switches are physical)", () => {
+	const machine = makeMachine("800");
+	machine.joystickDown(0, 0x08);
+	machine.reset(false);
+	machine.write(PACTL, 0x04);
+	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xf7);
+});

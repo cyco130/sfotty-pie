@@ -15,6 +15,12 @@ export interface MachineConfig {
 	os: Uint8Array;
 	/** BASIC ROM (8K): an $A000 cartridge on the 800, built-in on the 800XL. */
 	basic: Uint8Array;
+	/**
+	 * Cartridge in the (left) slot. On the 800 it takes the slot otherwise
+	 * occupied by the BASIC cartridge; on the XL it shadows the built-in
+	 * BASIC at $A000.
+	 */
+	cartridge?: Cartridge;
 	/** Debug log sink (used by ANTIC's display list disassembler). */
 	log?: (message: string) => void;
 }
@@ -55,7 +61,7 @@ export class Atari implements Memory {
 	#resetHeld = false;
 
 	constructor(config: MachineConfig) {
-		const { model, os, basic, log } = config;
+		const { model, os, basic, cartridge, log } = config;
 		const xl = model === "800XL";
 		this.#xl = xl;
 
@@ -78,9 +84,10 @@ export class Atari implements Memory {
 			xeBankCount: 0,
 			separateAnticAccess: false,
 			osRom: os,
-			// 800XL: built-in BASIC, banked in via PORTB. 800: BASIC as a cart.
+			// 800XL: built-in BASIC, banked in via PORTB. 800: BASIC as a cart —
+			// displaced when a game cartridge is in the slot.
 			basicRom: xl ? basic : undefined,
-			cartridge: xl ? undefined : new Cartridge(basic),
+			cartridge: cartridge ?? (xl ? undefined : new Cartridge(basic)),
 			gtia: this.anticGtia,
 			pokey: this.#pokey,
 			pia: this.#pia,

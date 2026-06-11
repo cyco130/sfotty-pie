@@ -21,6 +21,7 @@
 
 ; OS vectors
 .export SIOV := $E459		; serial I/O entry
+.export BLKBDV := $E471	; blackboard (Memo Pad) entry
 
 ; SIO commands
 .export SIO_READ = $52

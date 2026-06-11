@@ -21,10 +21,11 @@ function loadRom(name: string): Uint8Array {
 	return new Uint8Array(fs.readFileSync(path));
 }
 
-// Usage: boot.ts [--xl] [--trace] [--dump-frame] [file]
+// Usage: boot.ts [--xl | --xe] [--trace] [--dump-frame] [file]
 // `file` is an XEX, ATR, or cartridge image; like the web emulator's Load,
 // booting a file is boot-image semantics — the 800's BASIC cart comes out.
-const xl = process.argv.includes("--xl");
+const xe = process.argv.includes("--xe");
+const xl = xe || process.argv.includes("--xl");
 const filePath = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
 
 let cartridge: Cartridge | undefined;
@@ -52,7 +53,7 @@ if (filePath) {
 }
 
 const machine = new Atari({
-	model: xl ? "800XL" : "800",
+	model: xe ? "130XE" : xl ? "800XL" : "800",
 	os: loadRom(xl ? "xl-02.rom" : "800-b-ntsc.rom"),
 	...(xl || !filePath ? { basic: loadRom("basic-c.rom") } : {}),
 	...(cartridge ? { cartridge } : {}),

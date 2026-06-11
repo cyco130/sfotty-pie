@@ -585,7 +585,7 @@ export class AnticGtia implements Memory {
 					break;
 
 				case 0x0e:
-					// NMIEN Enable NMI
+					// NMIEN Enable NMI (the reset NMI is not maskable)
 					this.dliEnabled = !!(value & 0x80);
 					this.vbiEnabled = !!(value & 0x40);
 					break;
@@ -609,6 +609,14 @@ export class AnticGtia implements Memory {
 
 	/** ANTIC's NMI output line. Copy to the CPU's NMI input every cycle. */
 	nmi = false;
+
+	/**
+	 * The RNMI input line: the 400/800 Reset key (not wired up on XL/XE,
+	 * where the Reset button pulses the system reset line instead). Sampled
+	 * at the VBLANK NMI point — the reset NMI fires alongside the VBI, never
+	 * mid-frame — and cannot be masked through NMIEN; NMIST bit 5 reports it.
+	 */
+	rnmi = false;
 
 	/**
 	 * True when ANTIC owns the bus this cycle (DMA fetch or DRAM refresh): the
@@ -640,8 +648,9 @@ export class AnticGtia implements Memory {
 				this.nmi = true;
 			}
 
-			if (this.vcount === 248 && this.vbiEnabled) {
-				this.vbi = true;
+			if (this.vcount === 248 && (this.vbiEnabled || this.rnmi)) {
+				if (this.vbiEnabled) this.vbi = true;
+				if (this.rnmi) this.res = true;
 				this.dli = false;
 				this.nmi = true;
 			}

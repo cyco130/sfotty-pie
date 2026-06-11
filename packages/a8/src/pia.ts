@@ -72,8 +72,11 @@ export class Pia implements Memory {
 		}
 	}
 
+	// The 6520 has a reset pin, so it reinitializes on warm resets too (on
+	// XL/XE this is what banks the OS ROM and BASIC back in: DDRB clears, so
+	// PORTB floats to all-inputs and reads $FF).
 	reset(cold: boolean): void {
-		if (!cold) return;
+		void cold;
 		this.#outA = this.#outB = 0xff;
 		this.#ddrA = this.#ddrB = 0x00;
 		this.#ctrlA = this.#ctrlB = 0x00;

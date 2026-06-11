@@ -32,20 +32,31 @@ export interface MachineConfig {
  * ```ts
  * machine.anticGtia.beforeCpu();
  * cpu.NMI = machine.anticGtia.nmi;
+ * cpu.IRQ = machine.irq;
  * cpu.RDY = machine.anticGtia.rdy;
- * if (!machine.anticGtia.halt) cpu.run();
+ * if (machine.resetAsserted) cpu.reset(false);
+ * else if (!machine.anticGtia.halt) cpu.run();
  * machine.anticGtia.afterCpu(frame, machine.busData);
  * ```
+ *
+ * Keyboard input goes through the `pokeyKeyDown`/`pokeyKeyUp` family of
+ * methods. The machine knows nothing about host key assignments — mapping
+ * host keys to matrix codes (layouts, special key bindings) is entirely the
+ * host's business.
  */
 export class Atari implements Memory {
 	readonly anticGtia: AnticGtia;
 
 	readonly #bus: AtariBus;
 	readonly #pia: Pia;
+	readonly #pokey: Pokey;
+	readonly #xl: boolean;
+	#resetHeld = false;
 
 	constructor(config: MachineConfig) {
 		const { model, os, basic, log } = config;
 		const xl = model === "800XL";
+		this.#xl = xl;
 
 		// The dmaRead closure reads #bus lazily, resolving the chip/bus
 		// construction cycle.
@@ -58,6 +69,7 @@ export class Atari implements Memory {
 		);
 
 		this.#pia = new Pia();
+		this.#pokey = new Pokey();
 
 		this.#bus = new AtariBus({
 			portbBanking: xl,
@@ -69,7 +81,7 @@ export class Atari implements Memory {
 			basicRom: xl ? basic : undefined,
 			cartridge: xl ? undefined : new Cartridge(basic),
 			gtia: this.anticGtia,
-			pokey: new Pokey(),
+			pokey: this.#pokey,
 			pia: this.#pia,
 			antic: this.anticGtia,
 			pbi: new Pbi(),
@@ -93,5 +105,105 @@ export class Atari implements Memory {
 		this.#bus.reset(cold);
 		this.anticGtia.reset(cold);
 		this.#pia.reset(cold);
+		this.#pokey.reset(cold);
+	}
+
+	/**
+	 * The IRQ output line (POKEY only for now; the PIA will wire-OR in
+	 * later). Copy to the CPU's IRQ input every cycle.
+	 */
+	get irq(): boolean {
+		return this.#pokey.irq;
+	}
+
+	/**
+	 * True while the Reset button holds the XL/XE system reset line. The host
+	 * must keep the CPU in reset — `cpu.reset(false)` instead of `run()` —
+	 * every cycle while this is set. Always false on the 800, whose Reset key
+	 * is an NMI instead (see {@link resetButtonDown}).
+	 */
+	get resetAsserted(): boolean {
+		return this.#resetHeld;
+	}
+
+	/**
+	 * Press a keyboard matrix key. `code` is the full KBCODE byte: the 6-bit
+	 * matrix scan code with bit 6 (Shift) and bit 7 (Ctrl) composed by the
+	 * host. The key registers update and the keyboard IRQ fires immediately —
+	 * there is no scan timing yet.
+	 */
+	pokeyKeyDown(code: number): void {
+		this.#pokey.keyDown(code);
+	}
+
+	/**
+	 * Release the keyboard matrix key. POKEY only tracks one key, so with
+	 * several host keys held, call this when the last one is released.
+	 */
+	pokeyKeyUp(): void {
+		this.#pokey.keyUp();
+	}
+
+	/**
+	 * Press the Shift key. Drives the SKSTAT shift sense only — the Shift bit
+	 * inside KBCODE comes from {@link pokeyKeyDown}'s `code`, and the two may
+	 * disagree, just like on real hardware mid-scan.
+	 */
+	shiftKeyDown(): void {
+		this.#pokey.shiftKeyDown();
+	}
+
+	/** Release the Shift key. */
+	shiftKeyUp(): void {
+		this.#pokey.shiftKeyUp();
+	}
+
+	/**
+	 * Press the Break key. There is no key-up: a Break release is not
+	 * observable by software.
+	 */
+	breakKeyDown(): void {
+		this.#pokey.breakKeyDown();
+	}
+
+	/**
+	 * Press console keys. `mask` is a set of CONSOL bits: 1 = Start,
+	 * 2 = Select, 4 = Option. Several can be pressed at once (CONSOL itself
+	 * is active low; the mask here is "1 = press").
+	 */
+	consoleKeyDown(mask: number): void {
+		this.anticGtia.console &= ~mask;
+	}
+
+	/** Release console keys. Takes the same mask as {@link consoleKeyDown}. */
+	consoleKeyUp(mask: number): void {
+		this.anticGtia.console |= mask & 0x07;
+	}
+
+	/**
+	 * Press the Reset key/button.
+	 *
+	 * On the 800 it drives ANTIC's RNMI line: a non-maskable NMI fires at the
+	 * next VBLANK with NMIST bit 5 set, the OS warmstarts in software, and
+	 * nothing is hardware-reset.
+	 *
+	 * On the XL it pulses the system reset line: the soft-resettable
+	 * components reset immediately (notably the PIA, which banks the OS ROM
+	 * and BASIC back in) and {@link resetAsserted} stays true until
+	 * {@link resetButtonUp} so the host holds the CPU's RES line.
+	 */
+	resetButtonDown(): void {
+		if (this.#xl) {
+			this.reset(false);
+			this.#resetHeld = true;
+		} else {
+			this.anticGtia.rnmi = true;
+		}
+	}
+
+	/** Release the Reset key/button. */
+	resetButtonUp(): void {
+		this.#resetHeld = false;
+		this.anticGtia.rnmi = false;
 	}
 }

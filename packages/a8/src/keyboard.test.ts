@@ -121,7 +121,8 @@ test("the Reset key NMI fires at the VBLANK point and ignores NMIEN", () => {
 	ag.beforeCpu();
 	expect(ag.nmi).toBe(true);
 	expect(ag.res).toBe(true);
-	expect(ag.vbi).toBe(false); // the VBI itself stays masked
+	// The VBI NMI stays masked, but its NMIST status bit latches anyway.
+	expect(ag.vbi).toBe(true);
 	expect(ag.read(NMIRES_NMIST) & 0x20).toBe(0x20);
 });
 

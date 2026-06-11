@@ -608,13 +608,24 @@ export class AnticGtia implements Memory {
 					// NMIEN Enable NMI (the reset NMI is not maskable)
 					this.dliEnabled = !!(value & 0x80);
 					this.vbiEnabled = !!(value & 0x40);
+					// On the hardware the write lands two cycles before the
+					// NMI pull, so an enable on the latch cycle still fires
+					// this cycle's NMI (Acid800 checks this).
+					if (
+						(this.dliEnabled && this.#justLatched & 0x80) ||
+						(this.vbiEnabled && this.#justLatched & 0x40)
+					) {
+						this.nmi = true;
+					}
 					break;
 
 				case 0x0f:
-					// NMIRES Reset NMI status
-					this.res = false;
-					this.vbi = false;
-					this.dli = false;
+					// NMIRES Reset NMI status. A status bit that latched on
+					// this very cycle survives the reset — on the hardware
+					// the set wins the race (Acid800 checks this).
+					this.res = !!(this.#justLatched & 0x20);
+					this.vbi = !!(this.#justLatched & 0x40);
+					this.dli = !!(this.#justLatched & 0x80);
 					break;
 			}
 		}
@@ -629,6 +640,10 @@ export class AnticGtia implements Memory {
 
 	/** ANTIC's NMI output line. Copy to the CPU's NMI input every cycle. */
 	nmi = false;
+
+	// NMIST bits that latched during the current cycle's beforeCpu — a
+	// same-cycle NMIRES write must not clear them.
+	#justLatched = 0;
 
 	/**
 	 * The RNMI input line: the 400/800 Reset key (not wired up on XL/XE,
@@ -652,6 +667,8 @@ export class AnticGtia implements Memory {
 	beforeCpu(): void {
 		const i = this.hpos;
 
+		this.#justLatched = 0;
+
 		if (i === 8) {
 			// ANTIC pulls NMI at cycle 8, right after the display list and P/M
 			// DMA slots, and holds it for two cycles (8 and 9). Both cycles are
@@ -659,20 +676,29 @@ export class AnticGtia implements Memory {
 			// detector samples inside run() — is always running (or
 			// WSYNC-stalled, which still ticks the detector) while the line is
 			// up. That's what makes the skip-run()-on-halt model safe.
+			// The NMIST status bits latch whenever their event occurs — NMIEN
+			// only gates the NMI line, so software can poll NMIST with NMIs
+			// disabled. The DLI and VBI bits report the most recent event:
+			// each clears the other; NMIRES clears everything.
 			if (
-				this.dliEnabled &&
 				this.instruction & 0x80 &&
 				this.modeLineNo === this.modeLineHeight - 1
 			) {
 				this.dli = true;
-				this.nmi = true;
+				this.vbi = false;
+				this.#justLatched |= 0x80;
+				if (this.dliEnabled) this.nmi = true;
 			}
 
-			if (this.vcount === 248 && (this.vbiEnabled || this.rnmi)) {
-				if (this.vbiEnabled) this.vbi = true;
-				if (this.rnmi) this.res = true;
+			if (this.vcount === 248) {
+				this.vbi = true;
+				this.#justLatched |= 0x40;
+				if (this.rnmi) {
+					this.res = true;
+					this.#justLatched |= 0x20;
+				}
 				this.dli = false;
-				this.nmi = true;
+				if (this.vbiEnabled || this.rnmi) this.nmi = true;
 			}
 		} else if (i === 10) {
 			this.nmi = false;
@@ -1148,15 +1174,13 @@ export class AnticGtia implements Memory {
 			this.playfieldFetchRate = 0;
 			this.hires = false;
 		} else if (mode === 0x01) {
-			// Jump
+			// Jump. Bit 6 (wait for VBI) is acted on in #fetchThirdByte once
+			// the jump target has been fetched — setting it here would stop
+			// this line's remaining display list DMA and lose the target.
 			this.modeLineHeight = 1;
 			this.charFetchRate = 0;
 			this.playfieldFetchRate = 0;
 			this.hires = false;
-
-			if (this.instruction & 0x40) {
-				this.waitingForVbi = true;
-			}
 		} else {
 			// Actual mode
 			this.hires = false;
@@ -1196,6 +1220,9 @@ export class AnticGtia implements Memory {
 			// Jump
 			this.displayListAddress =
 				(this.#dmaRead(this.displayListAddress) << 8) | this.#temp;
+			if (this.instruction & 0x40) {
+				this.waitingForVbi = true;
+			}
 			return true;
 		} else if ((this.instruction & 0x0f) > 0x01 && this.instruction & 0x40) {
 			// LMS

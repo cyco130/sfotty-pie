@@ -8,25 +8,55 @@ import {
 } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { AtrImage } from "./atr.ts";
+import { Cartridge } from "./cartridge.ts";
+import { detectFileFormat } from "./detect-file-format.ts";
 import { Atari } from "./machine.ts";
+import { createSioHandler, SIOV } from "./sio.ts";
+import { buildBootDisk } from "./xex-boot.ts";
 
 function loadRom(name: string): Uint8Array {
 	const path = join(import.meta.dirname, "../../../roms.local", name);
 	return new Uint8Array(fs.readFileSync(path));
 }
 
-const machine = process.argv.includes("--xl")
-	? new Atari({
-			model: "800XL",
-			os: loadRom("xl-02.rom"),
-			basic: loadRom("basic-c.rom"),
-		})
-	: new Atari({
-			model: "800",
-			os: loadRom("800-b-ntsc.rom"),
-			basic: loadRom("basic-c.rom"),
-		});
+// Usage: boot.ts [--xl] [--trace] [--dump-frame] [file]
+// `file` is an XEX, ATR, or cartridge image; like the web emulator's Load,
+// booting a file is boot-image semantics — the 800's BASIC cart comes out.
+const xl = process.argv.includes("--xl");
+const filePath = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
+
+let cartridge: Cartridge | undefined;
+let disk: AtrImage | undefined;
+
+if (filePath) {
+	const contents = new Uint8Array(fs.readFileSync(filePath));
+	switch (detectFileFormat(contents, basename(filePath))) {
+		case "atr":
+			disk = new AtrImage(contents);
+			break;
+		case "xex":
+			disk = buildBootDisk(contents);
+			break;
+		case "cart":
+		case "raw-cart-8k-8000-9fff":
+		case "raw-cart-8k-a000-bfff":
+		case "raw-cart-16k":
+			cartridge = new Cartridge(contents, basename(filePath));
+			break;
+		default:
+			process.stderr.write(`${filePath}: not a loadable file format\n`);
+			process.exit(1);
+	}
+}
+
+const machine = new Atari({
+	model: xl ? "800XL" : "800",
+	os: loadRom(xl ? "xl-02.rom" : "800-b-ntsc.rom"),
+	...(xl || !filePath ? { basic: loadRom("basic-c.rom") } : {}),
+	...(cartridge ? { cartridge } : {}),
+});
 
 // Record every bus address touched in the current window so the watchdog can
 // tell a real stuck loop from a legitimately long loop (e.g. the RAM test).
@@ -95,8 +125,6 @@ function hex(value: number, width: number): string {
 	return value.toString(16).toUpperCase().padStart(width, "0");
 }
 
-const SIO_TIMEOUT = 0x8a; // "device timeout" — no peripheral responded
-
 // Thrown by the GETBYT trap when the stdin line buffer is empty: the run loop
 // catches it, awaits the next line, and retries the same instruction.
 const NEED_INPUT = Symbol("need-input");
@@ -156,10 +184,6 @@ function installEditorTraps(): void {
 	const putByte = (word(6) + 1) & 0xffff;
 	traps.set(getByte, editorGetByte);
 	traps.set(putByte, editorPutByte);
-	process.stderr.write(
-		`E: handler @ $${hex(table, 4)}  GETBYT=$${hex(getByte, 4)}  ` +
-			`PUTBYT=$${hex(putByte, 4)}\n`,
-	);
 }
 
 traps.set(0xe456, () => {
@@ -168,19 +192,48 @@ traps.set(0xe456, () => {
 	installEditorTraps();
 	return false;
 });
-traps.set(0xe459, () => {
-	// SIOV: no peripherals → report a timeout so the OS abandons disk boot.
-	machine.write(0x0303, SIO_TIMEOUT); // DSTATS
-	returnStatus(SIO_TIMEOUT);
+// SIOV: serve D1: from the attached image (trap-based SIO); everything else
+// times out, so without a disk the OS abandons the disk boot like before. The
+// handler returns a substitute RTS opcode for the bus-trap style; here we
+// perform the RTS ourselves.
+const sio = createSioHandler({
+	machine,
+	cpu,
+	getDisk: (unit) => (unit === 1 ? disk : undefined),
+});
+traps.set(SIOV, () => {
+	sio(SIOV);
+	rts();
 	return true;
+});
+
+traps.set(0xe471, () => {
+	// BLKBDV, the Memo Pad ("blackboard") entry: the OS jumps here when there
+	// is nothing left to run — e.g. a booted executable returned. Session over.
+	process.exit(0);
 });
 
 // --- Stuck-loop watchdog. ---
 const WINDOW = 10_000;
 const FEW_PCS = 64;
 const FEW_ADDRESSES = 32;
-const STUCK_LIMIT = 2_000_000; // generous: past multi-frame OS startup delays
-const LIMIT = 50_000_000;
+// Generous: past multi-frame OS startup delays AND test-suite deadman
+// timeouts (Acid800's serial-input test spins for many emulated seconds
+// before its own timeout gives up).
+const STUCK_LIMIT = 30_000_000;
+const LIMIT = 1_000_000_000;
+
+// With --nudge: when a small loop persists, the program is often polling for
+// a keypress (e.g. Acid800's "press any key" does BIT $D20E) — that bypasses
+// the E: traps, so press Return through the real keyboard matrix before
+// declaring it stuck. Off by default: Acid800's standalone tests *rerun* on a
+// keypress, where stopping at the wait loop is the better outcome.
+const nudgeEnabled = process.argv.includes("--nudge");
+const NUDGE_AT = 500_000; // spin cycles before the first nudge (then doubled)
+const NUDGE_HOLD = 30_000; // ~2 frames of key-down
+const MAX_NUDGES = 3;
+let nudges = 0;
+let keyUpAt = 0;
 
 const fetchCount = new Uint32Array(0x10000);
 const seenPcs = new Set<number>();
@@ -262,6 +315,7 @@ async function run(): Promise<void> {
 	while (cycles < LIMIT) {
 		ag.beforeCpu();
 		cpu.NMI = ag.nmi;
+		cpu.IRQ = machine.irq;
 		cpu.RDY = ag.rdy;
 
 		let trapped = false;
@@ -305,16 +359,31 @@ async function run(): Promise<void> {
 			break;
 		}
 
+		if (keyUpAt !== 0 && cycles >= keyUpAt) {
+			machine.pokeyKeyUp();
+			keyUpAt = 0;
+		}
+
 		if (cycles - windowStart >= WINDOW) {
 			const small = seenPcs.size <= FEW_PCS && touched.size <= FEW_ADDRESSES;
 			if (small) {
 				loopCycles += cycles - windowStart;
+				if (
+					nudgeEnabled &&
+					nudges < MAX_NUDGES &&
+					loopCycles >= NUDGE_AT << nudges
+				) {
+					nudges++;
+					machine.pokeyKeyDown(0x0c); // Return
+					keyUpAt = cycles + NUDGE_HOLD;
+				}
 				if (loopCycles >= STUCK_LIMIT) {
 					reportStuck();
 					break;
 				}
 			} else {
 				loopCycles = 0;
+				nudges = 0;
 			}
 			seenPcs.clear();
 			touched.clear();

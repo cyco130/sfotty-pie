@@ -100,7 +100,7 @@ read_chunk:
 	; short final chunk as an error either, and some XEX files rely on it.)
 	pla
 	pla
-	jmp (RUNAD)
+	jmp run
 
 read_ok:
 	; If the buffer is not empty, use those bytes
@@ -223,12 +223,20 @@ chunk_ok:
 	ora file_size + 2
 	bne next_chunk
 
-	; Done, jump to the RUNAD vector
-	jmp (RUNAD)
+run:
+	; Done, run the executable. If it ever returns, there is nothing left to
+	; run — enter the blackboard (Memo Pad) through its public vector, which
+	; also lets a host harness trap BLKBDV to end the session.
+	jsr go_run
+	jmp BLKBDV
 
 	; Jump to the INITAD vector
 go_init:
 	jmp (INITAD)
+
+	; Jump to the RUNAD vector
+go_run:
+	jmp (RUNAD)
 
 ; -------------------------------------------------------------------------
 

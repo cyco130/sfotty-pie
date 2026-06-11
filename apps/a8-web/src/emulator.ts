@@ -1,12 +1,15 @@
 import {
 	Atari,
+	createSioHandler,
 	CYCLES_PER_LINE,
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
 	NTSC_CYCLES_PER_SECOND,
+	SIOV,
+	type AtrImage,
 	type MachineConfig,
 } from "@sfotty-pie/a8";
-import { DECODE, ReadOptions, Sfotty } from "@sfotty-pie/sfotty";
+import { Sfotty } from "@sfotty-pie/sfotty";
 
 const MS_PER_SCANLINE = (1000 * CYCLES_PER_LINE) / NTSC_CYCLES_PER_SECOND;
 
@@ -19,8 +22,10 @@ const YIELD_INTERVAL = 257;
 // spiral of death.
 const MAX_LAG_MS = 100;
 
-const SIOV = 0xe459;
-const SIO_TIMEOUT = 0x8a; // "device timeout" — no peripheral responded
+export interface EmulatorConfig extends MachineConfig {
+	/** Disk in drive D1: (read-only; served by the trap-based SIO). */
+	disk?: AtrImage;
+}
 
 /**
  * Drives an {@link Atari} machine in real time, paced against
@@ -47,10 +52,22 @@ export class Emulator {
 	#scanlines = 0;
 	#epoch = 0;
 
-	constructor(config: MachineConfig) {
+	constructor(config: EmulatorConfig) {
 		this.machine = new Atari(config);
 		this.#cpu = new Sfotty(this.machine, { withoutUndocumented: false });
 		this.#cpu.reset(true);
+
+		// Trap-based SIO: disk requests are served from the ATR image in the
+		// host; everything else times out so the OS moves on with its boot.
+		const { disk } = config;
+		this.machine.addExecuteTrap(
+			SIOV,
+			createSioHandler({
+				machine: this.machine,
+				cpu: this.#cpu,
+				getDisk: (unit) => (unit === 1 ? disk : undefined),
+			}),
+		);
 	}
 
 	start(): void {
@@ -117,14 +134,7 @@ export class Emulator {
 				// line — the sequence completes once the button is released.
 				cpu.reset(false);
 			} else if (!ag.halt) {
-				// SIOV trap: no peripherals — report a device timeout so the OS
-				// abandons the disk boot. Only on a real opcode fetch (not while
-				// a WSYNC stall repeats it).
-				if (cpu.RDY && cpu.state === DECODE && cpu.PC === SIOV) {
-					this.#sioTimeout();
-				} else {
-					cpu.run();
-				}
+				cpu.run();
 			}
 
 			ag.afterCpu(back, this.machine.busData);
@@ -136,29 +146,6 @@ export class Emulator {
 			this.#back ^= 1;
 			this.frameCount++;
 		}
-	}
-
-	#sioTimeout(): void {
-		const cpu = this.#cpu;
-		this.machine.write(0x0303, SIO_TIMEOUT); // DSTATS
-		cpu.Y = SIO_TIMEOUT;
-		cpu.nFlag = true;
-		cpu.zFlag = false;
-		this.#rts();
-	}
-
-	#rts(): void {
-		const cpu = this.#cpu;
-		const lo = this.machine.read(
-			0x0100 | ((cpu.S + 1) & 0xff),
-			ReadOptions.NONE,
-		);
-		const hi = this.machine.read(
-			0x0100 | ((cpu.S + 2) & 0xff),
-			ReadOptions.NONE,
-		);
-		cpu.S = (cpu.S + 2) & 0xff;
-		cpu.PC = (((hi << 8) | lo) + 1) & 0xffff;
 	}
 }
 

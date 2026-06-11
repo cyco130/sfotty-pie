@@ -1,4 +1,5 @@
 import {
+	AtrImage,
 	Cartridge,
 	detectFileFormat,
 	FRAME_BUFFER_HEIGHT,
@@ -70,15 +71,13 @@ function unsupportedMessage(format: AtariFileFormat | null): string | null {
 	switch (format) {
 		case "xex":
 			return "XEX binaries aren't supported yet";
-		case "atr":
-			return "ATR disk images aren't supported yet";
 		case "os-rom-10k":
 		case "os-rom-16k":
-			return "that looks like an OS ROM, not a cartridge";
+			return "that looks like an OS ROM, not a cartridge or disk";
 		case null:
 			return "unrecognized file format";
 		default:
-			return null; // a cartridge format
+			return null; // a cartridge or disk format
 	}
 }
 
@@ -117,7 +116,7 @@ async function main(): Promise<void> {
 
 	const filePicker = document.createElement("input");
 	filePicker.type = "file";
-	filePicker.accept = ".rom,.bin,.raw,.car";
+	filePicker.accept = ".rom,.bin,.raw,.car,.atr";
 	filePicker.style.display = "none";
 
 	const status = document.createElement("span");
@@ -146,18 +145,24 @@ async function main(): Promise<void> {
 			return;
 		}
 
-		let cartridge: Cartridge;
+		let attachment: { cartridge: Cartridge } | { disk: AtrImage };
 		try {
-			cartridge = new Cartridge(contents, file.name);
+			attachment =
+				format === "atr"
+					? { disk: new AtrImage(contents) }
+					: { cartridge: new Cartridge(contents, file.name) };
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			setStatus(`${file.name}: ${message}`, true);
 			return;
 		}
 
-		// Inserting a cartridge is a power cycle, like on real hardware.
+		// Load is "boot image": a power cycle with only the loaded thing
+		// attached — on the 800, the BASIC cart comes out of the slot. (On
+		// the XL BASIC is built in; disabling it there is a future concern.)
 		emulator.stop();
-		emulator = new Emulator({ model, os, basic, cartridge });
+		const base = xl ? { model, os, basic } : { model, os };
+		emulator = new Emulator({ ...base, ...attachment });
 		emulator.start();
 		setStatus(file.name);
 		focusKeyboard();

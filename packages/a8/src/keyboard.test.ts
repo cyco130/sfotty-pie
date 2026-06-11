@@ -179,6 +179,8 @@ test("the XL Reset button resets components and holds the reset line", () => {
 test("console keys drive the CONSOL register (active low)", () => {
 	const machine = makeMachine("800");
 	const CONSOL = 0xd01f;
+	// Release the power-on written latch first, like the OS does.
+	machine.write(CONSOL, 0x08);
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
 
 	machine.consoleKeyDown(4); // Option

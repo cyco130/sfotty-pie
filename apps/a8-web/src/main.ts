@@ -1,5 +1,6 @@
 import {
 	AtrImage,
+	buildBootDisk,
 	Cartridge,
 	detectFileFormat,
 	FRAME_BUFFER_HEIGHT,
@@ -69,15 +70,13 @@ function setupKeyboard(
 /** Why a detected-but-not-loadable file can't be loaded (yet). */
 function unsupportedMessage(format: AtariFileFormat | null): string | null {
 	switch (format) {
-		case "xex":
-			return "XEX binaries aren't supported yet";
 		case "os-rom-10k":
 		case "os-rom-16k":
-			return "that looks like an OS ROM, not a cartridge or disk";
+			return "that looks like an OS ROM, not something loadable";
 		case null:
 			return "unrecognized file format";
 		default:
-			return null; // a cartridge or disk format
+			return null; // a cartridge, disk, or executable
 	}
 }
 
@@ -116,7 +115,7 @@ async function main(): Promise<void> {
 
 	const filePicker = document.createElement("input");
 	filePicker.type = "file";
-	filePicker.accept = ".rom,.bin,.raw,.car,.atr";
+	filePicker.accept = ".rom,.bin,.raw,.car,.atr,.xex,.exe,.com,.obx";
 	filePicker.style.display = "none";
 
 	const status = document.createElement("span");
@@ -150,7 +149,11 @@ async function main(): Promise<void> {
 			attachment =
 				format === "atr"
 					? { disk: new AtrImage(contents) }
-					: { cartridge: new Cartridge(contents, file.name) };
+					: format === "xex"
+						? // XEX files boot from a generated in-memory disk whose
+							// boot sectors are the XEX loader.
+							{ disk: buildBootDisk(contents) }
+						: { cartridge: new Cartridge(contents, file.name) };
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			setStatus(`${file.name}: ${message}`, true);

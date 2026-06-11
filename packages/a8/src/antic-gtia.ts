@@ -107,15 +107,17 @@ export class AnticGtia implements Memory {
 	p2pf = 0;
 	p3pf = 0;
 
-	m0pl = 0;
-	m1pl = 0;
-	m2pl = 0;
-	m3pl = 0;
+	// The player collision latches power on all-set (minus the self bits);
+	// the playfield ones power on clear. Observed behavior (Altirra).
+	m0pl = 0x0f;
+	m1pl = 0x0f;
+	m2pl = 0x0f;
+	m3pl = 0x0f;
 
-	p0pl = 0;
-	p1pl = 0;
-	p2pl = 0;
-	p3pl = 0;
+	p0pl = 0x0e;
+	p1pl = 0x0d;
+	p2pl = 0x0b;
+	p3pl = 0x07;
 
 	prior = 0x0f;
 
@@ -129,9 +131,17 @@ export class AnticGtia implements Memory {
 	console = 7;
 	forceConsole: number | null = null; // Option
 	consoleSpeaker = 0;
+	// The written CONSOL latch: bits 0-2 actively pull the (open-collector)
+	// switch lines low. It powers on all-set, so CONSOL reads 0 until the OS
+	// writes CONSOL.
+	consolWritten = 0x07;
 
-	// Triggers
+	// Triggers (inputs, pulled up). TODO: trig3 should track the cartridge
+	// sense line (RD5) on XL/XE instead of staying constant.
 	trig0 = 1;
+	trig1 = 1;
+	trig2 = 1;
+	trig3 = 1;
 
 	anticLineCount: number;
 	#gtiaPal: number;
@@ -254,14 +264,14 @@ export class AnticGtia implements Memory {
 		this.p1pf = 0;
 		this.p2pf = 0;
 		this.p3pf = 0;
-		this.m0pl = 0;
-		this.m1pl = 0;
-		this.m2pl = 0;
-		this.m3pl = 0;
-		this.p0pl = 0;
-		this.p1pl = 0;
-		this.p2pl = 0;
-		this.p3pl = 0;
+		this.m0pl = 0x0f;
+		this.m1pl = 0x0f;
+		this.m2pl = 0x0f;
+		this.m3pl = 0x0f;
+		this.p0pl = 0x0e;
+		this.p1pl = 0x0d;
+		this.p2pl = 0x0b;
+		this.p3pl = 0x07;
 
 		this.prior = 0x0f;
 		this.vdelay = 0x0f;
@@ -271,6 +281,7 @@ export class AnticGtia implements Memory {
 		this.enableMissiles = false;
 
 		this.consoleSpeaker = 0;
+		this.consolWritten = 0x07;
 
 		this.#sizeP0 = 1;
 		this.#sizeP0Counter = 0;
@@ -357,21 +368,25 @@ export class AnticGtia implements Memory {
 
 				case 0x10:
 					return this.trig0;
+				case 0x11:
+					return this.trig1;
+				case 0x12:
+					return this.trig2;
 				case 0x13:
-					// TRIG3
-					return 0; // No cartridge
+					return this.trig3;
 				case 0x14:
 					// PAL
 					return this.#gtiaPal;
 				case 0x1f:
-					// CONSOL
+					// CONSOL: the written latch pulls switch lines low.
 					if (this.forceConsole !== null) {
 						return this.forceConsole;
 					}
 
-					return this.console;
+					return this.console & ~this.consolWritten & 0x07;
 				default:
-					return 0x0;
+					// $D015-$D01E have no read register and return $0F.
+					return 0x0f;
 			}
 		} else {
 			// ANTIC
@@ -536,6 +551,7 @@ export class AnticGtia implements Memory {
 					this.p3pl = 0;
 					break;
 				case 0x1f:
+					this.consolWritten = value & 0x07;
 					if (value & 0x8) {
 						this.consoleSpeaker = 0;
 					} else {

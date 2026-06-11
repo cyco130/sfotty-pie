@@ -14,6 +14,10 @@ interface AnticGtiaOptions {
 	gtiaTvSystem: "ntsc" | "pal";
 }
 
+// What the GTIA color registers hold at power-on: a dark brown (hue $F,
+// minimum luminance). Observed behavior, not documented.
+const POWER_ON_COLOR = 0xf0;
+
 export class AnticGtia implements Memory {
 	// NMIEN bits
 	vbiEnabled = false;
@@ -65,15 +69,15 @@ export class AnticGtia implements Memory {
 	refreshPending = false;
 
 	// Color registers
-	colpm0 = 0;
-	colpm1 = 0;
-	colpm2 = 0;
-	colpm3 = 0;
-	colpf0 = 0;
-	colpf1 = 0;
-	colpf2 = 0;
-	colpf3 = 0;
-	colbk = 0xf;
+	colpm0 = POWER_ON_COLOR;
+	colpm1 = POWER_ON_COLOR;
+	colpm2 = POWER_ON_COLOR;
+	colpm3 = POWER_ON_COLOR;
+	colpf0 = POWER_ON_COLOR;
+	colpf1 = POWER_ON_COLOR;
+	colpf2 = POWER_ON_COLOR;
+	colpf3 = POWER_ON_COLOR;
+	colbk = POWER_ON_COLOR;
 
 	// P/M Horizontal positions
 	hposp0 = 0;
@@ -217,15 +221,15 @@ export class AnticGtia implements Memory {
 	// Keep the assignments in sync with the field initializers. Inputs (console
 	// keys, triggers) reflect physical switches and are left alone.
 	#resetGtia(): void {
-		this.colpm0 = 0;
-		this.colpm1 = 0;
-		this.colpm2 = 0;
-		this.colpm3 = 0;
-		this.colpf0 = 0;
-		this.colpf1 = 0;
-		this.colpf2 = 0;
-		this.colpf3 = 0;
-		this.colbk = 0xf;
+		this.colpm0 = POWER_ON_COLOR;
+		this.colpm1 = POWER_ON_COLOR;
+		this.colpm2 = POWER_ON_COLOR;
+		this.colpm3 = POWER_ON_COLOR;
+		this.colpf0 = POWER_ON_COLOR;
+		this.colpf1 = POWER_ON_COLOR;
+		this.colpf2 = POWER_ON_COLOR;
+		this.colpf3 = POWER_ON_COLOR;
+		this.colbk = POWER_ON_COLOR;
 
 		this.hposp0 = 0;
 		this.hposp1 = 0;

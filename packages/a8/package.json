@@ -14,7 +14,8 @@
   "license": "MIT",
   "repository": "github:cyco130/sfotty-pie",
   "files": [
-    "dist"
+    "dist",
+    "atari-src"
   ],
   "type": "module",
   "sideEffects": false,
@@ -25,7 +26,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsdown --clean",
+    "build": "pnpm build:loader && tsdown --clean",
+    "build:loader": "node src/build-loader.ts",
     "dev": "tsdown --watch",
     "prepack": "pnpm build",
     "test": "pnpm run /^test:/",
@@ -40,6 +42,7 @@
   },
   "devDependencies": {
     "@cyco130/eslint-config": "^9.0.1",
+    "@sfotty-pie/spasm": "workspace:*",
     "@types/node": "^22.19.19",
     "eslint": "^10.4.1",
     "publint": "^0.3.21",

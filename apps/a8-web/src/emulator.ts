@@ -63,6 +63,12 @@ export class Emulator {
 		this.#running = false;
 	}
 
+	/** Power cycle: cold-reset the machine and the CPU. */
+	coldStart(): void {
+		this.machine.reset(true);
+		this.#cpu.reset(true);
+	}
+
 	async #loop(): Promise<void> {
 		const yieldMacrotask = makeMacrotaskYield();
 		this.#epoch = performance.now() - this.#scanlines * MS_PER_SCANLINE;
@@ -102,9 +108,15 @@ export class Emulator {
 		for (let cycle = 0; cycle < CYCLES_PER_LINE; cycle++) {
 			ag.beforeCpu();
 			cpu.NMI = ag.nmi;
+			cpu.IRQ = this.machine.irq;
 			cpu.RDY = ag.rdy;
 
-			if (!ag.halt) {
+			if (this.machine.resetAsserted) {
+				// The XL Reset button holds the system reset line; restarting
+				// the CPU's reset sequence every cycle models the held RES
+				// line — the sequence completes once the button is released.
+				cpu.reset(false);
+			} else if (!ag.halt) {
 				// SIOV trap: no peripherals — report a device timeout so the OS
 				// abandons the disk boot. Only on a real opcode fetch (not while
 				// a WSYNC stall repeats it).

@@ -12,6 +12,10 @@ const TAP_MS = 50;
  * they produce, so the user's native layout works; special keys and the `Mod`
  * (Alt/Option) Ctrl layer are resolved from keydown events.
  *
+ * The arrow keys are joystick 0 and Left Shift is its trigger; the Atari
+ * cursor keys live on Ctrl+Arrows (which is what they are on the real
+ * keyboard) and Right Shift is the Atari Shift key.
+ *
  * Keystrokes are observed on an (offscreen) input element rather than the
  * window so that dead-key composition works — the composed character arrives
  * via `compositionend`.
@@ -58,8 +62,13 @@ export class Keyboard {
 	}
 
 	#keyDown(event: KeyboardEvent): void {
-		// Cmd combos belong to the browser/OS; the emulator never binds Meta.
-		if (event.metaKey) return;
+		// Cmd combos belong to the browser/OS; the emulator never binds Meta —
+		// except Cmd+Arrow on macOS, standing in for the Atari cursor keys
+		// because the OS reserves Ctrl+Arrows for Mission Control.
+		if (event.metaKey) {
+			if (this.#isMac) this.#cmdArrow(event);
+			return;
+		}
 
 		// The emulated OS does its own key repeat off the held-key senses;
 		// host auto-repeat would stack a second repeat on top of it.
@@ -69,7 +78,15 @@ export class Keyboard {
 		}
 
 		if (event.key === "Shift") {
-			this.#dispatch("PRESS_SHIFT");
+			// Left Shift is the joystick 0 trigger; Right Shift is the Atari
+			// Shift key (the hardware senses Shift via SKSTAT, so games and
+			// Shift+Reset need a real one). Typing is unaffected either way —
+			// the Shift bit inside KBCODE comes from the produced character.
+			if (event.code === "ShiftLeft") {
+				this.#pressHeld(event, "PRESS_JOY0_TRIGGER", "RELEASE_JOY0_TRIGGER");
+			} else {
+				this.#pressHeld(event, "PRESS_SHIFT", "RELEASE_SHIFT");
+			}
 			return;
 		}
 		if (event.key === "Control" || event.key === "Alt") return;
@@ -117,8 +134,20 @@ export class Keyboard {
 	}
 
 	#keyUp(event: KeyboardEvent): void {
-		if (event.key === "Shift" && !event.getModifierState("Shift")) {
-			this.#dispatch("RELEASE_SHIFT");
+		// macOS browsers swallow keyups for other keys while Cmd is held, so
+		// a Cmd+Arrow matrix press may never see its arrow keyup — release
+		// held arrows when Cmd itself is released instead.
+		if (event.key === "Meta") {
+			let changed = false;
+			for (const code of this.#matrixHeld) {
+				if (code.startsWith("Arrow")) {
+					this.#matrixHeld.delete(code);
+					changed = true;
+				}
+			}
+			if (changed && this.#matrixHeld.size === 0) {
+				this.#dispatch("RELEASE_POKEY_KEY");
+			}
 			return;
 		}
 
@@ -131,6 +160,23 @@ export class Keyboard {
 		if (this.#matrixHeld.delete(event.code) && this.#matrixHeld.size === 0) {
 			this.#dispatch("RELEASE_POKEY_KEY");
 		}
+	}
+
+	/**
+	 * Cmd+Arrow on macOS: the Atari cursor keys (with Shift passing through).
+	 * Repeats are suppressed like everywhere else — the emulated OS repeats
+	 * off the held key sense, which works here because the matrix key stays
+	 * held until the arrow (or Cmd, see {@link #keyUp}) is released.
+	 */
+	#cmdArrow(event: KeyboardEvent): void {
+		if (event.ctrlKey || event.altKey) return;
+		const base = CMD_ARROW_MAPPINGS[event.key];
+		if (!base) return;
+		if (event.repeat) {
+			event.preventDefault();
+			return;
+		}
+		this.#pressComposed(event, base, true, event.shiftKey);
 	}
 
 	/** Special keys: console keys, Reset, Break, and the matrix specials. */
@@ -188,22 +234,29 @@ export class Keyboard {
 				return this.#pressComposed(event, "GREATER_THAN", !shift, shift);
 			case "Home":
 				return this.#pressComposed(event, "LESS_THAN", true, false); // Clear
+			// Plain arrows are joystick 0; the Atari cursor keys are on
+			// Ctrl+Arrows (note: macOS reserves those for Mission Control by
+			// default — the canonical Ctrl+-/=/+/* bindings always work).
 			case "ArrowUp":
-				return mod
-					? this.#pressComposed(event, "F1", ctrl, shift)
-					: this.#pressComposed(event, "MINUS", true, shift);
+				if (mod) return this.#pressComposed(event, "F1", ctrl, shift);
+				if (ctrl) return this.#pressComposed(event, "MINUS", true, shift);
+				this.#pressHeld(event, "PRESS_JOY0_UP", "RELEASE_JOY0_UP");
+				return true;
 			case "ArrowDown":
-				return mod
-					? this.#pressComposed(event, "F2", ctrl, shift)
-					: this.#pressComposed(event, "EQUALS", true, shift);
+				if (mod) return this.#pressComposed(event, "F2", ctrl, shift);
+				if (ctrl) return this.#pressComposed(event, "EQUALS", true, shift);
+				this.#pressHeld(event, "PRESS_JOY0_DOWN", "RELEASE_JOY0_DOWN");
+				return true;
 			case "ArrowLeft":
-				return mod
-					? this.#pressComposed(event, "F3", ctrl, shift)
-					: this.#pressComposed(event, "PLUS", true, shift);
+				if (mod) return this.#pressComposed(event, "F3", ctrl, shift);
+				if (ctrl) return this.#pressComposed(event, "PLUS", true, shift);
+				this.#pressHeld(event, "PRESS_JOY0_LEFT", "RELEASE_JOY0_LEFT");
+				return true;
 			case "ArrowRight":
-				return mod
-					? this.#pressComposed(event, "F4", ctrl, shift)
-					: this.#pressComposed(event, "ASTERISK", true, shift);
+				if (mod) return this.#pressComposed(event, "F4", ctrl, shift);
+				if (ctrl) return this.#pressComposed(event, "ASTERISK", true, shift);
+				this.#pressHeld(event, "PRESS_JOY0_RIGHT", "RELEASE_JOY0_RIGHT");
+				return true;
 		}
 		return false;
 	}
@@ -340,6 +393,14 @@ export class Keyboard {
 		return digit ? digit[1]! : null;
 	}
 }
+
+/** Cmd+Arrow (macOS) → the Atari cursor key matrix bases. */
+const CMD_ARROW_MAPPINGS: Record<string, string> = {
+	ArrowUp: "MINUS",
+	ArrowDown: "EQUALS",
+	ArrowLeft: "PLUS",
+	ArrowRight: "ASTERISK",
+};
 
 /**
  * The character → command map for layout-aware mode. Keyed by the character

@@ -1,11 +1,11 @@
 import { describe, test, expect } from "vitest";
 import { Sfotty } from "./sfotty.ts";
 import { DECODE } from "./microcode.ts";
-import { type Memory } from "./interface.ts";
+import { type Memory } from "./bus.ts";
 
 /**
  * A flat 64K RAM that also tallies how many times each address is read/written
- * — the access counts back the RDY tests. The Harte suite covers instruction
+ * — the access counts back the RDY tests. The single-step tests cover instruction
  * behavior; these tests cover what it doesn't: the config flags and RDY.
  */
 class Ram implements Memory {
@@ -39,12 +39,21 @@ function runInstruction(cpu: Sfotty): void {
 	} while (cpu.state !== DECODE);
 }
 
+/**
+ * Seed PC directly and skip the power-on reset sequence (a new CPU starts
+ * mid-cold-reset), jumping straight to the opcode fetch.
+ */
+function jumpTo(cpu: Sfotty, pc: number): void {
+	cpu.PC = pc;
+	cpu.state = DECODE;
+}
+
 describe("withoutDecimal", () => {
 	test("decimal mode is honored by default — ADC produces BCD", () => {
 		const ram = new Ram();
 		load(ram, 0x0200, 0x69, 0x01); // ADC #$01
 		const cpu = new Sfotty(ram);
-		cpu.PC = 0x0200;
+		jumpTo(cpu, 0x0200);
 		cpu.A = 0x09;
 		cpu.dFlag = true;
 		cpu.cFlag = false;
@@ -58,7 +67,7 @@ describe("withoutDecimal", () => {
 		const ram = new Ram();
 		load(ram, 0x0200, 0x69, 0x01); // ADC #$01
 		const cpu = new Sfotty(ram, { withoutDecimal: true });
-		cpu.PC = 0x0200;
+		jumpTo(cpu, 0x0200);
 		cpu.A = 0x09;
 		cpu.dFlag = true;
 		cpu.cFlag = false;
@@ -71,12 +80,12 @@ describe("withoutDecimal", () => {
 });
 
 describe("withoutUndocumented", () => {
-	test("undocumented opcodes execute when disabled", () => {
+	test("undocumented opcodes execute by default", () => {
 		const ram = new Ram();
 		load(ram, 0x0200, 0xa7, 0x05); // LAX $05 (undocumented)
 		ram.bytes[0x05] = 0x42;
-		const cpu = new Sfotty(ram, { withoutUndocumented: false });
-		cpu.PC = 0x0200;
+		const cpu = new Sfotty(ram);
+		jumpTo(cpu, 0x0200);
 
 		runInstruction(cpu);
 
@@ -85,28 +94,30 @@ describe("withoutUndocumented", () => {
 		expect(cpu.crashed).toBe(false);
 	});
 
-	test("undocumented opcodes crash by default", () => {
+	test("undocumented opcodes jam like CIM when enabled", () => {
 		const ram = new Ram();
 		load(ram, 0x0200, 0xa7, 0x05); // LAX $05
 		ram.bytes[0x05] = 0x42;
-		const cpu = new Sfotty(ram); // withoutUndocumented defaults on
-		cpu.PC = 0x0200;
+		const cpu = new Sfotty(ram, { withoutUndocumented: true });
+		jumpTo(cpu, 0x0200);
 
-		cpu.run(); // fetch the opcode
-		cpu.run(); // lands on the patched crash step
+		// The opcode runs CIM's microcode: dummy reads of $FFFF/$FFFE for several
+		// cycles, then the crash on `cc--`. Every cycle stays bus-visible.
+		for (let i = 0; i < 10 && !cpu.crashed; i++) cpu.run();
 
 		expect(cpu.crashed).toBe(true);
 		expect(cpu.A).toBe(0); // never loaded — the op did not run
+		expect(ram.reads[0xffff]).toBeGreaterThan(0); // the jam preamble's reads
+		expect(ram.reads[0xfffe]).toBe(2);
 	});
 
-	test("a CIM opcode still crashes via its own microcode when undocumented are enabled", () => {
+	test("a CIM opcode crashes via its own microcode even by default", () => {
 		const ram = new Ram();
 		load(ram, 0x0200, 0x02); // CIM
-		const cpu = new Sfotty(ram, { withoutUndocumented: false });
-		cpu.PC = 0x0200;
+		const cpu = new Sfotty(ram);
+		jumpTo(cpu, 0x0200);
 
-		// Its real microcode dummy-reads for several cycles, then crashes on `cc--`
-		// (unlike the default path, which patches the first cycle to crash).
+		// Its real microcode dummy-reads for several cycles, then crashes on `cc--`.
 		for (let i = 0; i < 10 && !cpu.crashed; i++) cpu.run();
 
 		expect(cpu.crashed).toBe(true);
@@ -118,7 +129,7 @@ describe("RDY", () => {
 		const ram = new Ram();
 		ram.bytes[0x0200] = 0xea; // NOP
 		const cpu = new Sfotty(ram);
-		cpu.PC = 0x0200;
+		jumpTo(cpu, 0x0200);
 
 		cpu.RDY = false;
 		for (let i = 0; i < 3; i++) cpu.run();
@@ -140,7 +151,7 @@ describe("RDY", () => {
 		const ram = new Ram();
 		load(ram, 0x0200, 0x85, 0x05); // STA $05
 		const cpu = new Sfotty(ram);
-		cpu.PC = 0x0200;
+		jumpTo(cpu, 0x0200);
 		cpu.A = 0x42;
 
 		// Fetch + operand read with RDY high, leaving us on the write cycle.
@@ -160,7 +171,7 @@ describe("RDY", () => {
 		const ram = new Ram();
 		load(ram, 0x0200, 0xa9, 0x11); // LDA #$11
 		const cpu = new Sfotty(ram);
-		cpu.PC = 0x0200;
+		jumpTo(cpu, 0x0200);
 
 		cpu.run(); // fetch the opcode (RDY high)
 
@@ -181,6 +192,21 @@ describe("RDY", () => {
 });
 
 describe("reset", () => {
+	test("a new CPU powers on into the cold-reset sequence", () => {
+		const ram = new Ram();
+		ram.bytes[0xfffc] = 0x00;
+		ram.bytes[0xfffd] = 0x03;
+		const cpu = new Sfotty(ram);
+
+		// No reset() call — construction itself is the power-on.
+		for (let i = 0; i < 7; i++) cpu.run();
+
+		expect(cpu.PC).toBe(0x0300);
+		expect(cpu.S).toBe(0xfd);
+		expect(cpu.iFlag).toBe(true);
+		expect(cpu.state).toBe(DECODE);
+	});
+
 	test("cold reset wipes registers, sets I, loads PC from $FFFC, leaves S = $FD", () => {
 		const ram = new Ram();
 		ram.bytes[0xfffc] = 0x34;
@@ -253,7 +279,7 @@ describe("reset", () => {
 		ram.bytes[0xfffd] = 0x03;
 		load(ram, 0x0300, 0xa9, 0x55); // LDA #$55 at the reset vector
 		const cpu = new Sfotty(ram);
-		cpu.PC = 0x0200;
+		jumpTo(cpu, 0x0200);
 
 		for (let i = 0; i < 8 && !cpu.crashed; i++) cpu.run();
 		expect(cpu.crashed).toBe(true);

@@ -1,4 +1,4 @@
-import { NMOS_INSTRUCTIONS } from "./nmos.ts";
+import { NMOS_INSTRUCTIONS } from "./nmos-instructions.generated.ts";
 import type { Sfotty } from "./sfotty.ts";
 
 /** A side-effect-free byte reader (read with {@link ReadOptions.PEEK}). */

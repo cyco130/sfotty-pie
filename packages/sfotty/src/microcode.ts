@@ -1,5 +1,5 @@
 import type { Opcode } from "./nmos-opcodes.ts";
-import type { Sfotty } from "./sfotty.ts";
+import type { SfottyCore } from "./sfotty-core.ts";
 
 /**
  * A microstate is a single CPU cycle, encoded as `(opcode << 3) | cycle`, where
@@ -22,10 +22,10 @@ export const RESET = 0x801;
  * One CPU cycle. It performs the cycle's single bus access (which may throw to
  * interrupt the CPU), applies the internal register transfers, and writes the
  * next microstate last — so a throw unwinds with the CPU untouched and the cycle
- * is retried on the next `run()`. Lives in the {@link Sfotty}-indexed dispatch
- * table emitted by `generate-step.ts`.
+ * is retried on the next `run()`. Lives in the {@link SfottyCore}-indexed dispatch
+ * table emitted by `generate-steps.ts`.
  */
-export type Step = (cpu: Sfotty) => void;
+export type Step = (cpu: SfottyCore) => void;
 
 export type BusOp =
 	| "r-t1" // IR = fetch(PC++); // First cycle of every instruction

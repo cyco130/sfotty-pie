@@ -6,7 +6,7 @@ import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
 
-export type AtariModel = "800" | "800XL";
+export type AtariModel = "800" | "800XL" | "130XE";
 
 export interface MachineConfig {
 	/** Which machine to emulate. */
@@ -35,6 +35,9 @@ export interface MachineConfig {
  * - `"800"` — OS-B, 48K, no PORTB banking; BASIC is a standard $A000 8K cart.
  * - `"800XL"` — XL OS, 64K, PORTB banking; BASIC is built in and banked via
  *   PORTB (the OS enables it unless OPTION is held).
+ * - `"130XE"` — the XL plus 64K of extended RAM (four 16K banks at
+ *   $4000-$7FFF via PORTB bits 2-3) with separate CPU/ANTIC access
+ *   (bits 4/5).
  *
  * The host drives the machine one cycle at a time:
  *
@@ -65,7 +68,7 @@ export class Atari implements Memory {
 
 	constructor(config: MachineConfig) {
 		const { model, os, basic, cartridge, log } = config;
-		const xl = model === "800XL";
+		const xl = model !== "800"; // XL and XE share the XL architecture
 		this.#xl = xl;
 
 		if (xl && !basic) {
@@ -88,8 +91,8 @@ export class Atari implements Memory {
 		this.#bus = new AtariBus({
 			portbBanking: xl,
 			conventionalRamSize: xl ? 64 : 48,
-			xeBankCount: 0,
-			separateAnticAccess: false,
+			xeBankCount: model === "130XE" ? 4 : 0,
+			separateAnticAccess: model === "130XE",
 			osRom: os,
 			// 800XL: built-in BASIC, banked in via PORTB. 800: BASIC as a cart —
 			// displaced when a game cartridge is in the slot.

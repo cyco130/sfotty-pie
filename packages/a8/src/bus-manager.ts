@@ -401,7 +401,10 @@ export class AtariBus implements Memory {
 					// 5000..7FFF
 					if (address < 0x5800) {
 						// 5000..57FF
-						if (this.#isSelfTestEnabled) {
+						// The self-test window only appears while the OS ROM
+						// is also enabled — the self-test lives on the OS ROM
+						// chip (Acid800's mmu_xlbanking checks this).
+						if (this.#isSelfTestEnabled && this.#isOsRomEnabled) {
 							return this.#osRom;
 						}
 

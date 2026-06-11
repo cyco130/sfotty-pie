@@ -1,5 +1,7 @@
 export { AnticGtia } from "./antic-gtia.ts";
+export { AtrImage } from "./atr.ts";
 export { Cartridge } from "./cartridge.ts";
+export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
 export {
 	detectFileFormat,
 	type AtariFileFormat,

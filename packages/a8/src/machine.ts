@@ -13,8 +13,11 @@ export interface MachineConfig {
 	model: AtariModel;
 	/** OS ROM: OS-B (10K) for the 800, XL OS (16K) for the 800XL. */
 	os: Uint8Array;
-	/** BASIC ROM (8K): an $A000 cartridge on the 800, built-in on the 800XL. */
-	basic: Uint8Array;
+	/**
+	 * BASIC ROM (8K): an $A000 cartridge on the 800 — omit it to leave the
+	 * slot empty — and built-in (so required) on the 800XL.
+	 */
+	basic?: Uint8Array;
 	/**
 	 * Cartridge in the (left) slot. On the 800 it takes the slot otherwise
 	 * occupied by the BASIC cartridge; on the XL it shadows the built-in
@@ -65,6 +68,10 @@ export class Atari implements Memory {
 		const xl = model === "800XL";
 		this.#xl = xl;
 
+		if (xl && !basic) {
+			throw new Error("The 800XL requires a BASIC ROM — it's built in");
+		}
+
 		// The dmaRead closure reads #bus lazily, resolving the chip/bus
 		// construction cycle.
 		this.anticGtia = new AnticGtia(
@@ -87,7 +94,7 @@ export class Atari implements Memory {
 			// 800XL: built-in BASIC, banked in via PORTB. 800: BASIC as a cart —
 			// displaced when a game cartridge is in the slot.
 			basicRom: xl ? basic : undefined,
-			cartridge: cartridge ?? (xl ? undefined : new Cartridge(basic)),
+			cartridge: cartridge ?? (!xl && basic ? new Cartridge(basic) : undefined),
 			gtia: this.anticGtia,
 			pokey: this.#pokey,
 			pia: this.#pia,
@@ -186,6 +193,21 @@ export class Atari implements Memory {
 	/** Release console keys. Takes the same mask as {@link consoleKeyDown}. */
 	consoleKeyUp(mask: number): void {
 		this.anticGtia.console |= mask & 0x07;
+	}
+
+	/**
+	 * Register an execute trap: when the CPU fetches an opcode from
+	 * `address`, `callback` runs first. It may perform host-side work and
+	 * return a substitute opcode (typically $60, RTS) — or `undefined` to
+	 * fall through to the real memory. One trap per address; used for OS
+	 * entry points like SIOV (see `createSioHandler`). A WSYNC stall can
+	 * repeat the trapped fetch, so callbacks must be idempotent.
+	 */
+	addExecuteTrap(
+		address: number,
+		callback: (address: number) => number | undefined,
+	): void {
+		this.#bus.addTrap(address, callback);
 	}
 
 	/**

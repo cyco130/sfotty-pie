@@ -250,9 +250,11 @@ export class Atari implements Memory {
 	#moveStick(port: number, mask: number): void {
 		this.#sticks[port] = mask;
 		if (port < 2) {
-			this.#pia.setInputA(~((this.#sticks[1]! << 4) | this.#sticks[0]!) & 0xff);
+			this.#pia.portaIn.value =
+				~((this.#sticks[1]! << 4) | this.#sticks[0]!) & 0xff;
 		} else {
-			this.#pia.setInputB(~((this.#sticks[3]! << 4) | this.#sticks[2]!) & 0xff);
+			this.#pia.portbIn.value =
+				~((this.#sticks[3]! << 4) | this.#sticks[2]!) & 0xff;
 		}
 	}
 

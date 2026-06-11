@@ -118,7 +118,7 @@ test("the port pin signals track DDR, latch, and external pulls", () => {
 	pia.write(PORTA, 0xa5); // latch
 	expect(pia.portaOut.value).toBe(0xf5); // outputs $5, inputs pulled up
 
-	pia.setInputA(0x7f); // an external pull drags an input bit low
+	pia.portaIn.value = 0x7f; // an external pull drags an input bit low
 	expect(pia.portaOut.value).toBe(0x75);
 });
 
@@ -128,7 +128,7 @@ test("reset clears registers, IRQs, and strobes — but not the pins", () => {
 	pia.ca1In.value = false;
 	expect(pia.irqA).toBe(true);
 	expect(pia.ca2Out.value).toBe(false);
-	pia.setInputA(0xfe);
+	pia.portaIn.value = 0xfe;
 
 	pia.reset(false);
 	expect(pia.irqA).toBe(false);
@@ -138,4 +138,68 @@ test("reset clears registers, IRQs, and strobes — but not the pins", () => {
 
 	pia.write(PACTL, 0x04);
 	expect(pia.read(PORTA)).toBe(0xfe); // the input pins survived
+});
+
+// Acid800 pia_irq's control-line transition tables, verbatim: four control
+// writes, then the expected control value and IRQ line. State deliberately
+// carries from row to row, as in the original test.
+type Vector = [number, number, number, number, number, number];
+
+const TESTVEC_B: Vector[] = [
+	// A $34→$3C transition sets the pending flag, which turns into IRQB2 on
+	// entering input mode; the choice of input mode doesn't matter.
+	[0x34, 0x3c, 0x3c, 0x04, 0x44, 0],
+	[0x34, 0x3c, 0x3c, 0x0c, 0x4c, 1],
+	[0x34, 0x3c, 0x04, 0x04, 0x44, 0],
+	// Any output mode clears IRQB2.
+	[0x34, 0x3c, 0x04, 0x24, 0x24, 0],
+	// Handshake mode can sit between the 34:3C sequence; pulse mode and
+	// input modes cannot.
+	[0x34, 0x24, 0x3c, 0x04, 0x44, 0],
+	[0x34, 0x28, 0x3c, 0x04, 0x04, 0],
+	[0x34, 0x04, 0x3c, 0x04, 0x04, 0],
+	// A high-low-high sequence does not work; low-high does.
+	[0x34, 0x3c, 0x34, 0x04, 0x04, 0],
+	[0x3c, 0x34, 0x3c, 0x04, 0x44, 0],
+];
+
+const TESTVEC_A: Vector[] = [
+	// IRQA2 sets if the line was forced low and the next input mode selects
+	// rising edges; temporary highs don't matter.
+	[0x3c, 0x3c, 0x3c, 0x14, 0x14, 0],
+	[0x3c, 0x3c, 0x34, 0x14, 0x54, 0],
+	[0x3c, 0x34, 0x3c, 0x14, 0x54, 0],
+	[0x3c, 0x34, 0x3c, 0x1c, 0x5c, 1],
+	[0x34, 0x34, 0x34, 0x04, 0x04, 0],
+	// Pulse mode clears the pending transition; handshake does not.
+	[0x34, 0x34, 0x2c, 0x14, 0x14, 0],
+	[0x34, 0x34, 0x24, 0x14, 0x54, 0],
+	// Any output mode clears IRQA2.
+	[0x34, 0x34, 0x14, 0x34, 0x34, 0],
+];
+
+function runVectors(
+	vectors: Vector[],
+	ctl: number,
+	irqOf: (pia: Pia) => boolean,
+) {
+	const pia = new Pia();
+	pia.write(ctl, 0x3c); // the state the original test enters its loop with
+
+	vectors.forEach(([w0, w1, w2, w3, expected, irq], index) => {
+		pia.write(ctl, w0);
+		pia.write(ctl, w1);
+		pia.write(ctl, w2);
+		pia.write(ctl, w3);
+		expect(pia.read(ctl), `entry ${index} control`).toBe(expected);
+		expect(irqOf(pia), `entry ${index} irq`).toBe(irq !== 0);
+	});
+}
+
+test("the Acid800 pia_irq CA2 transition table", () => {
+	runVectors(TESTVEC_A, PACTL, (pia) => pia.irqA);
+});
+
+test("the Acid800 pia_irq CB2 transition table", () => {
+	runVectors(TESTVEC_B, PBCTL, (pia) => pia.irqB);
 });

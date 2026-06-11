@@ -32,6 +32,17 @@ test("a cartridge takes the 800's BASIC slot", () => {
 	expect(machine.read(0xa000, ReadOptions.NONE)).toBe(0x42);
 });
 
+test("the 800's cartridge slot can be left empty", () => {
+	const machine = new Atari({ model: "800", os: new Uint8Array(10240) });
+	expect(machine.read(0xa000, ReadOptions.NONE)).toBe(0x00); // RAM
+});
+
+test("the XL requires its built-in BASIC ROM", () => {
+	expect(
+		() => new Atari({ model: "800XL", os: new Uint8Array(16384) }),
+	).toThrow("BASIC ROM");
+});
+
 test("a cartridge shadows the XL's built-in BASIC", () => {
 	const machine = makeMachine("800XL", makeCart(0x42));
 

@@ -75,21 +75,30 @@ function makeAnticGtia() {
 const NMIEN = 0xd40e;
 const NMIRES_NMIST = 0xd40f;
 
+// Run cycles 7 and 8 of the current line: the NMIST status latch (7) and
+// the NMI line pull (8).
+function latchAndPull(ag: AnticGtia): void {
+	ag.hpos = 7;
+	ag.beforeCpu();
+	ag.beforeCpu();
+}
+
 test("NMIST latches the VBI bit even with NMIs disabled in NMIEN", () => {
 	const ag = makeAnticGtia();
 	ag.write(NMIRES_NMIST, 0); // clear the power-on reset status
 	expect(ag.read(NMIRES_NMIST) & 0xe0).toBe(0);
 
 	ag.vcount = 248;
-	ag.hpos = 8;
+	ag.hpos = 7;
 	ag.beforeCpu();
-	expect(ag.nmi).toBe(false); // the line stays low...
-	expect(ag.read(NMIRES_NMIST) & 0x40).toBe(0x40); // ...the status latches
+	expect(ag.read(NMIRES_NMIST) & 0x40).toBe(0x40); // the status latches...
 
 	// A same-cycle NMIRES loses to the latch; a later one clears it.
 	ag.write(NMIRES_NMIST, 0);
 	expect(ag.read(NMIRES_NMIST) & 0x40).toBe(0x40);
 	ag.beforeCpu();
+	ag.beforeCpu(); // ...and the cycle-8 pull leaves the line low
+	expect(ag.nmi).toBe(false);
 	ag.write(NMIRES_NMIST, 0);
 	expect(ag.read(NMIRES_NMIST) & 0x40).toBe(0);
 });
@@ -103,18 +112,49 @@ test("NMIST latches the DLI bit even with DLIs disabled in NMIEN", () => {
 	ag.modeLineHeight = 8;
 	ag.modeLineNo = 7;
 	ag.vcount = 100;
-	ag.hpos = 8;
-	ag.beforeCpu();
+	latchAndPull(ag);
 	expect(ag.nmi).toBe(false);
 	expect(ag.read(NMIRES_NMIST) & 0x80).toBe(0x80);
 
 	// With the DLI enabled, the same point also pulls the NMI line.
 	ag.write(NMIRES_NMIST, 0);
 	ag.write(NMIEN, 0x80);
-	ag.hpos = 8;
-	ag.beforeCpu();
+	latchAndPull(ag);
 	expect(ag.nmi).toBe(true);
 	expect(ag.read(NMIRES_NMIST) & 0x80).toBe(0x80);
+});
+
+test("NMIEN gates the pull at the latch cycle, set-dominant", () => {
+	const ag = makeAnticGtia();
+	ag.write(NMIRES_NMIST, 0);
+	ag.vcount = 248;
+
+	// A disable landing before the latch cycle blocks the pull...
+	ag.write(NMIEN, 0x40);
+	ag.write(NMIEN, 0x00);
+	latchAndPull(ag);
+	expect(ag.nmi).toBe(false);
+	expect(ag.read(NMIRES_NMIST) & 0x40).toBe(0x40); // status latches anyway
+
+	// ...a disable after the latch cycle is too late to block...
+	ag.write(NMIRES_NMIST, 0);
+	ag.write(NMIEN, 0x40);
+	ag.hpos = 7;
+	ag.beforeCpu(); // cycle 7: latch and arm
+	ag.write(NMIEN, 0x00); // too late
+	ag.beforeCpu(); // cycle 8: the pull fires anyway
+	expect(ag.nmi).toBe(true);
+
+	// ...and an enable after the latch cycle still fires the pull.
+	ag.hpos = 10;
+	ag.beforeCpu(); // the line drops
+	expect(ag.nmi).toBe(false);
+	ag.write(NMIRES_NMIST, 0);
+	ag.hpos = 7;
+	ag.beforeCpu(); // latch with NMIs disabled
+	ag.write(NMIEN, 0x40); // enable between latch and pull
+	ag.beforeCpu();
+	expect(ag.nmi).toBe(true);
 });
 
 test("the VBI clears the DLI status bit", () => {
@@ -125,12 +165,12 @@ test("the VBI clears the DLI status bit", () => {
 	ag.modeLineHeight = 8;
 	ag.modeLineNo = 7;
 	ag.vcount = 100;
-	ag.hpos = 8;
+	ag.hpos = 7;
 	ag.beforeCpu();
 	expect(ag.read(NMIRES_NMIST) & 0xc0).toBe(0x80);
 
 	ag.vcount = 248;
-	ag.hpos = 8;
+	ag.hpos = 7;
 	ag.beforeCpu();
 	expect(ag.read(NMIRES_NMIST) & 0xc0).toBe(0x40);
 });
@@ -164,4 +204,41 @@ test("a JVB display list reloads its target every frame", () => {
 	// Both DLIs latch on every frame — the JVB jump target loads even
 	// though the wait-for-VBI flag stops the rest of the line's DMA.
 	expect(latchLines).toEqual([39, 47, 39, 47, 39, 47]);
+});
+
+test("VCOUNT increments at cycle 111 and rolls over a cycle late", () => {
+	const ag = makeAnticGtia();
+
+	// State as the CPU would see it while executing during `cycle`.
+	const readDuring = (line: number, cycle: number) => {
+		ag.vcount = line;
+		ag.hpos = cycle;
+		ag.beforeCpu();
+		return ag.read(0xd40b);
+	};
+
+	// Mid-frame: the new line becomes readable during cycle 111.
+	expect(readDuring(99, 110)).toBe(49);
+	expect(readDuring(99, 111)).toBe(50);
+	expect(readDuring(99, 113)).toBe(50);
+	expect(readDuring(100, 0)).toBe(50);
+
+	// Last line: one cycle of "overflow" before the late rollover.
+	expect(readDuring(261, 110)).toBe(130);
+	expect(readDuring(261, 111)).toBe(131); // $83 — the 262 window
+	expect(readDuring(261, 112)).toBe(0);
+	expect(readDuring(261, 113)).toBe(0);
+	expect(readDuring(0, 0)).toBe(0);
+});
+
+test("the PAL VCOUNT overflow window reads $9C", () => {
+	const ag = new AnticGtia(
+		{ dmaRead: () => 0, log: () => {} },
+		{ anticTvSystem: "pal", gtiaTvSystem: "pal" },
+	);
+
+	ag.vcount = 311;
+	ag.hpos = 111;
+	ag.beforeCpu();
+	expect(ag.read(0xd40b)).toBe(156);
 });

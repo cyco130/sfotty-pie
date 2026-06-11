@@ -395,8 +395,7 @@ export class AnticGtia implements Memory {
 			switch (address) {
 				case 0x0b:
 					// VCOUNT Vertical count Vertical counter bits 8-1
-					// this.#log((this.vcount >> 1).toString());
-					return this.vcount >> 1;
+					return this.#vcountRead();
 				case 0x0f:
 					// NMIST NMI status
 					return (
@@ -605,18 +604,12 @@ export class AnticGtia implements Memory {
 					break;
 
 				case 0x0e:
-					// NMIEN Enable NMI (the reset NMI is not maskable)
+					// NMIEN Enable NMI (the reset NMI is not maskable). The
+					// NMI pull samples it at cycle 8, two cycles after the
+					// status latch — so writes through cycle 7 affect the
+					// current line's NMI either way (Acid800 checks this).
 					this.dliEnabled = !!(value & 0x80);
 					this.vbiEnabled = !!(value & 0x40);
-					// On the hardware the write lands two cycles before the
-					// NMI pull, so an enable on the latch cycle still fires
-					// this cycle's NMI (Acid800 checks this).
-					if (
-						(this.dliEnabled && this.#justLatched & 0x80) ||
-						(this.vbiEnabled && this.#justLatched & 0x40)
-					) {
-						this.nmi = true;
-					}
 					break;
 
 				case 0x0f:
@@ -645,6 +638,11 @@ export class AnticGtia implements Memory {
 	// same-cycle NMIRES write must not clear them.
 	#justLatched = 0;
 
+	// This line's latched bits and the NMI pull decision, armed at the latch
+	// cycle (7) and acted on at the pull cycle (8).
+	#lineLatched = 0;
+	#armedNmi = false;
+
 	/**
 	 * The RNMI input line: the 400/800 Reset key (not wired up on XL/XE,
 	 * where the Reset button pulses the system reset line instead). Sampled
@@ -664,22 +662,46 @@ export class AnticGtia implements Memory {
 	/** The RDY output line: false while a WSYNC stall is in effect. */
 	rdy = true;
 
+	/**
+	 * The VCOUNT register value as the CPU sees it mid-cycle. The hardware
+	 * line counter increments at the end of cycle 110 but only rolls over at
+	 * the end of cycle 111 — so on the last line of the frame there is a
+	 * one-cycle window (cycle 111) where it reads the full line count
+	 * (262 NTSC / 312 PAL, i.e. $83/$9C after the >> 1).
+	 */
+	#vcountRead(): number {
+		// Reconstruct the cycle index and its line: during a CPU cycle, hpos
+		// has already advanced past the index — and at the line boundary
+		// (cycle 113), vcount has advanced too.
+		let line = this.vcount;
+		let cycle = this.hpos - 1;
+		if (cycle < 0) {
+			cycle = 113;
+			line = line === 0 ? this.anticLineCount - 1 : line - 1;
+		}
+
+		if (cycle >= 111) {
+			line++;
+			if (line === this.anticLineCount && cycle >= 112) {
+				line = 0;
+			}
+		}
+
+		return (line >> 1) & 0xff;
+	}
+
 	beforeCpu(): void {
 		const i = this.hpos;
 
 		this.#justLatched = 0;
 
-		if (i === 8) {
-			// ANTIC pulls NMI at cycle 8, right after the display list and P/M
-			// DMA slots, and holds it for two cycles (8 and 9). Both cycles are
-			// free of DMA contention by design, so the CPU — whose edge
-			// detector samples inside run() — is always running (or
-			// WSYNC-stalled, which still ticks the detector) while the line is
-			// up. That's what makes the skip-run()-on-halt model safe.
-			// The NMIST status bits latch whenever their event occurs — NMIEN
-			// only gates the NMI line, so software can poll NMIST with NMIs
-			// disabled. The DLI and VBI bits report the most recent event:
-			// each clears the other; NMIRES clears everything.
+		if (i === 7) {
+			// The NMIST status bits latch at cycle 7 — one cycle before the
+			// NMI line pull — whenever their event occurs; NMIEN only gates
+			// the pull, so software can poll NMIST with NMIs disabled. The
+			// DLI and VBI bits report the most recent event: each clears the
+			// other; NMIRES clears everything (but loses a same-cycle race).
+			// The cycle is pinned by Acid800's cycle-counted NMIST samples.
 			if (
 				this.instruction & 0x80 &&
 				this.modeLineNo === this.modeLineHeight - 1
@@ -687,18 +709,40 @@ export class AnticGtia implements Memory {
 				this.dli = true;
 				this.vbi = false;
 				this.#justLatched |= 0x80;
-				if (this.dliEnabled) this.nmi = true;
 			}
 
 			if (this.vcount === 248) {
 				this.vbi = true;
-				this.#justLatched |= 0x40;
+				// The VBI displaces a stale DLI latch entirely.
+				this.#justLatched = (this.#justLatched & ~0x80) | 0x40;
 				if (this.rnmi) {
 					this.res = true;
 					this.#justLatched |= 0x20;
 				}
 				this.dli = false;
-				if (this.vbiEnabled || this.rnmi) this.nmi = true;
+			}
+
+			// Arm the cycle-8 pull with NMIEN as of now: a disable landing
+			// after this cycle is too late to block (set-dominant), while an
+			// enable landing before the pull still fires — both per Acid800.
+			this.#lineLatched = this.#justLatched;
+			this.#armedNmi =
+				(this.dliEnabled && !!(this.#lineLatched & 0x80)) ||
+				(this.vbiEnabled && !!(this.#lineLatched & 0x40)) ||
+				!!(this.#lineLatched & 0x20);
+		} else if (i === 8) {
+			// ANTIC pulls NMI at cycle 8, right after the display list and P/M
+			// DMA slots, and holds it for two cycles (8 and 9). Both cycles are
+			// free of DMA contention by design, so the CPU — whose edge
+			// detector samples inside run() — is always running (or
+			// WSYNC-stalled, which still ticks the detector) while the line is
+			// up. That's what makes the skip-run()-on-halt model safe.
+			if (
+				this.#armedNmi ||
+				(this.dliEnabled && this.#lineLatched & 0x80) ||
+				(this.vbiEnabled && this.#lineLatched & 0x40)
+			) {
+				this.nmi = true;
 			}
 		} else if (i === 10) {
 			this.nmi = false;
@@ -735,7 +779,10 @@ export class AnticGtia implements Memory {
 			this.refreshPending = true;
 		}
 
-		if (this.wsync && i === 105) {
+		// The stalled fetch completes at cycle 104 (the next instruction's
+		// remaining cycles run from 105) — verified against Acid800's
+		// cycle-counted VCOUNT samples.
+		if (this.wsync && i === 104) {
 			this.wsync = false;
 		}
 

@@ -108,17 +108,23 @@ test("the Reset key NMI fires at the VBLANK point and ignores NMIEN", () => {
 
 	ag.rnmi = true;
 
-	// Mid-frame: nothing happens, even at the NMI cycle.
+	// Run the status latch (cycle 7) through the NMI pull (cycle 8).
+	const latchAndPull = () => {
+		ag.hpos = 7;
+		ag.beforeCpu();
+		ag.beforeCpu();
+		ag.beforeCpu();
+	};
+
+	// Mid-frame: nothing happens, even at the NMI cycles.
 	ag.vcount = 100;
-	ag.hpos = 8;
-	ag.beforeCpu();
+	latchAndPull();
 	expect(ag.nmi).toBe(false);
 	expect(ag.res).toBe(false);
 
 	// VBLANK point: fires with NMIEN fully disabled.
 	ag.vcount = 248;
-	ag.hpos = 8;
-	ag.beforeCpu();
+	latchAndPull();
 	expect(ag.nmi).toBe(true);
 	expect(ag.res).toBe(true);
 	// The VBI NMI stays masked, but its NMIST status bit latches anyway.

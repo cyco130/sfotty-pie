@@ -3,7 +3,9 @@ import {
 	FRAME_BUFFER_WIDTH,
 	NTSC_PIXEL_ASPECT_RATIO,
 } from "@sfotty-pie/a8";
+import { commands } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
+import { Keyboard } from "./keyboard.ts";
 import { buildNtscPalette } from "./palette.ts";
 
 const SCALE = 2;
@@ -19,18 +21,35 @@ async function loadRom(name: string): Promise<Uint8Array> {
 	return new Uint8Array(await response.arrayBuffer());
 }
 
-// F2/F3/F4 = START/SELECT/OPTION console keys (CONSOL bits, 0 = pressed).
-function setupConsoleKeys(emulator: Emulator): void {
-	const bits: Record<string, number> = { F2: 0x01, F3: 0x02, F4: 0x04 };
-	const update = (event: KeyboardEvent, pressed: boolean) => {
-		const bit = bits[event.key];
-		if (bit === undefined) return;
+function setupKeyboard(emulator: Emulator, root: HTMLElement): void {
+	// Keystrokes are captured through an offscreen input element so dead-key
+	// composition works; display:none would stop the events, so it's merely
+	// invisible.
+	const input = document.createElement("input");
+	input.type = "text";
+	input.autocapitalize = "off";
+	input.autocomplete = "off";
+	input.spellcheck = false;
+	input.style.position = "fixed";
+	input.style.top = "0";
+	input.style.left = "0";
+	input.style.width = "1px";
+	input.style.height = "1px";
+	input.style.opacity = "0";
+	input.style.border = "none";
+	input.style.padding = "0";
+	document.body.append(input);
+
+	const keyboard = new Keyboard((command) => commands[command]({ emulator }));
+	keyboard.attach(input);
+
+	// Keep the input focused so it sees every keystroke.
+	input.focus();
+	root.addEventListener("pointerdown", (event) => {
 		event.preventDefault();
-		const ag = emulator.machine.anticGtia;
-		ag.console = pressed ? ag.console & ~bit : ag.console | bit;
-	};
-	window.addEventListener("keydown", (event) => update(event, true));
-	window.addEventListener("keyup", (event) => update(event, false));
+		input.focus();
+	});
+	window.addEventListener("blur", () => keyboard.releaseAll());
 }
 
 async function main(): Promise<void> {
@@ -91,7 +110,7 @@ async function main(): Promise<void> {
 	};
 	requestAnimationFrame(present);
 
-	setupConsoleKeys(emulator);
+	setupKeyboard(emulator, root);
 	emulator.start();
 }
 

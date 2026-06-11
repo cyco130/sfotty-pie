@@ -331,6 +331,18 @@ export const commands = {
 	// Break
 	PRESS_BREAK: ({ emulator }) => emulator.machine.breakKeyDown(),
 
+	// Joystick 0 (direction masks: 1 = up, 2 = down, 4 = left, 8 = right)
+	PRESS_JOY0_UP: ({ emulator }) => emulator.machine.joystickDown(0, 1),
+	RELEASE_JOY0_UP: ({ emulator }) => emulator.machine.joystickUp(0, 1),
+	PRESS_JOY0_DOWN: ({ emulator }) => emulator.machine.joystickDown(0, 2),
+	RELEASE_JOY0_DOWN: ({ emulator }) => emulator.machine.joystickUp(0, 2),
+	PRESS_JOY0_LEFT: ({ emulator }) => emulator.machine.joystickDown(0, 4),
+	RELEASE_JOY0_LEFT: ({ emulator }) => emulator.machine.joystickUp(0, 4),
+	PRESS_JOY0_RIGHT: ({ emulator }) => emulator.machine.joystickDown(0, 8),
+	RELEASE_JOY0_RIGHT: ({ emulator }) => emulator.machine.joystickUp(0, 8),
+	PRESS_JOY0_TRIGGER: ({ emulator }) => emulator.machine.joystickTriggerDown(0),
+	RELEASE_JOY0_TRIGGER: ({ emulator }) => emulator.machine.joystickTriggerUp(0),
+
 	// TODO: settings commands (TOGGLE_KEYBOARD_LAYOUT_MODE and friends) come
 	// back when raw mode and an options store exist.
 } satisfies Record<string, (ctx: CommandContext) => void>;
@@ -672,6 +684,17 @@ export const descriptions: Record<keyof typeof commands, string> = {
 	RELEASE_START: "Release Start",
 
 	PRESS_BREAK: "Press Break",
+
+	PRESS_JOY0_UP: "Push joystick 0 up",
+	RELEASE_JOY0_UP: "Release joystick 0 up",
+	PRESS_JOY0_DOWN: "Push joystick 0 down",
+	RELEASE_JOY0_DOWN: "Release joystick 0 down",
+	PRESS_JOY0_LEFT: "Push joystick 0 left",
+	RELEASE_JOY0_LEFT: "Release joystick 0 left",
+	PRESS_JOY0_RIGHT: "Push joystick 0 right",
+	RELEASE_JOY0_RIGHT: "Release joystick 0 right",
+	PRESS_JOY0_TRIGGER: "Press joystick 0 trigger",
+	RELEASE_JOY0_TRIGGER: "Release joystick 0 trigger",
 };
 
 /*

@@ -124,11 +124,11 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * The IRQ output line (POKEY only for now; the PIA will wire-OR in
-	 * later). Copy to the CPU's IRQ input every cycle.
+	 * The IRQ output line: POKEY and the PIA's two IRQ outputs, wire-ORed
+	 * like the hardware. Copy to the CPU's IRQ input every cycle.
 	 */
 	get irq(): boolean {
-		return this.#pokey.irq;
+		return this.#pokey.irq || this.#pia.irqA || this.#pia.irqB;
 	}
 
 	/**

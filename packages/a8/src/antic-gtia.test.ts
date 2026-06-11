@@ -242,3 +242,22 @@ test("the PAL VCOUNT overflow window reads $9C", () => {
 	ag.beforeCpu();
 	expect(ag.read(0xd40b)).toBe(156);
 });
+
+test("direct GRAF writes survive when GRACTL has latching off", () => {
+	const ag = makeAnticGtia();
+	const frame = new Uint8Array(376 * 240);
+
+	ag.write(0xd00d, 0xff); // GRAFP0, written by the CPU — no P/M DMA
+	for (let i = 0; i < 114 * 30; i++) {
+		ag.beforeCpu();
+		ag.afterCpu(frame, 0x20); // bus noise must not clobber it
+	}
+	expect(ag.grafP0).toBe(0xff);
+
+	ag.write(0xd01d, 0x02); // GRACTL: latch player data
+	for (let i = 0; i < 114 * 30; i++) {
+		ag.beforeCpu();
+		ag.afterCpu(frame, 0x20);
+	}
+	expect(ag.grafP0).toBe(0x20); // now the bus byte latches, like DMA
+});

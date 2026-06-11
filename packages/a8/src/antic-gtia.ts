@@ -840,26 +840,31 @@ export class AnticGtia implements Memory {
 
 			const isOddScanline = y & 1;
 
+			// The GRAF registers latch the bus during the P/M DMA slots only
+			// when GRACTL enables it — with GRACTL off, direct GRAF writes
+			// persist (the GTIA collision tests rely on that).
 			if (y < 224) {
-				if (i === 0) {
-					// TODO: VDELAY
+				if (i === 0 && this.enableMissiles) {
+					// TODO: VDELAY for missiles (bits 0-3)
 					this.grafM = busData;
 				}
 
-				if (i === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
-					this.grafP0 = busData;
-				}
+				if (this.enablePlayers) {
+					if (i === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
+						this.grafP0 = busData;
+					}
 
-				if (i === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
-					this.grafP1 = busData;
-				}
+					if (i === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
+						this.grafP1 = busData;
+					}
 
-				if (i === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
-					this.grafP2 = busData;
-				}
+					if (i === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
+						this.grafP2 = busData;
+					}
 
-				if (i === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
-					this.grafP3 = busData;
+					if (i === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
+						this.grafP3 = busData;
+					}
 				}
 			}
 		}
@@ -1079,11 +1084,12 @@ export class AnticGtia implements Memory {
 		const p = pm >> 4;
 		const m = pm & 0xf;
 
-		// Player to player
-		if (p & 1) this.p0pl |= p;
-		if (p & 2) this.p1pl |= p;
-		if (p & 4) this.p2pl |= p;
-		if (p & 8) this.p3pl |= p;
+		// Player to player. A player never collides with itself — the self
+		// bits stay clear (matching the $0E/$0D/$0B/$07 power-on pattern).
+		if (p & 1) this.p0pl |= p & 0x0e;
+		if (p & 2) this.p1pl |= p & 0x0d;
+		if (p & 4) this.p2pl |= p & 0x0b;
+		if (p & 8) this.p3pl |= p & 0x07;
 
 		// Missile to player
 		if (m & 1) this.m0pl |= p;

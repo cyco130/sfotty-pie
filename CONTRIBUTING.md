@@ -1,16 +1,18 @@
 # Contributing
 
-Thanks for considering a contribution. For non-obvious conventions and the project's quirks, see [AGENTS.md](./AGENTS.md).
+Thanks for considering a contribution.
+
+## Prerequisites
+
+- **Git**.
+- **Node** — the latest minor of the most recent LTS. Published packages support a broader range — every LTS plus every Current Node release still maintained upstream, pinned in `engines.node` of each `packages/*/package.json` — but dev/build scripts may rely on features that landed in recent LTS minors.
+- **pnpm** — the version pinned in the root `package.json`'s `packageManager` field. `corepack enable` picks it up automatically; otherwise any pnpm of the same major should work.
 
 ## Setup
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 ```
-
-Local development expects the latest minor of the most recent Node LTS, and a recent pnpm. Published packages support a broader range — every LTS plus every Current Node release still maintained upstream — but dev/build scripts may rely on features that landed in recent LTS minors.
-
-Concrete pins live in `engines.node` (`package.json`, the published support range) and the `pnpm/action-setup` step in `.github/workflows/*.yml` (pnpm version). Renovate keeps both current.
 
 ## Layout
 
@@ -18,7 +20,7 @@ Concrete pins live in `engines.node` (`package.json`, the published support rang
 - `examples/*` — degit-cloneable consumer demos.
 - `packages/_template/` and `examples/_template/` — scaffolds; copy from these when adding new packages.
 
-Some packages carry a `design.md` next to their `readme.md` that explains how they work internally — start there when working on a package's guts. Not every package has one yet; more will get them over time.
+Some packages carry a `design.md` next to their `readme.md` that explains how they work internally — start there when working on a package's guts.
 
 ## Common commands
 
@@ -37,17 +39,18 @@ Copy `packages/_template/` to `packages/<name>/`, rename `@<projname>/template-p
 
 ## Code style and commits
 
-Prettier and ESLint are authoritative — running `pnpm format` and `pnpm test:lint` should leave nothing to argue about. Pre-commit hooks (husky + lint-staged) auto-format staged files.
+We use Prettier and ESLint, running `pnpm format` and `pnpm test:lint` should leave nothing to argue about. Pre-commit hooks (husky + lint-staged) auto-format staged files.
 
 If you'd rather run formatters by hand, opt out of the hooks per-commit with `git commit --no-verify` (or `-n`), or for the whole shell session with `export HUSKY=0`. Either is fine — just make sure CI is green before you push.
 
-Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `release:`.
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `release:`, etc.
 
 ## Pull requests
 
-- One logical change per PR.
+- AI use is fine as long and is subject to the same review standards as human-written code.
+- Small, focused, and well-described PRs are welcome.
+- For large or complex changes, open an issue first to discuss the approach before investing time in implementation.
 - Code-quality CI (`.github/workflows/cq.yml`) must pass.
-- A maintainer will review and merge.
 
 ## Releases
 

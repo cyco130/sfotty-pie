@@ -1,12 +1,12 @@
 /* eslint-disable no-console */
 import fs from "node:fs";
 import { join } from "node:path";
-import { Sfotty } from "./index.ts";
+import { DECODE, Sfotty } from "./index.ts";
 
 // Runs the SingleStepTests/65x02 vectors against Sfotty, comparing final
 // registers, touched RAM, and per-cycle bus activity. By default it tests all
 // 256 opcodes; pass hex opcodes as arguments to test a specific subset, e.g.
-// `harte a9 a5`.
+// `pnpm single-step-tests a9 a5`.
 //
 // Vector files are fetched on demand into external.local/ (gitignored) and
 // cached.
@@ -55,22 +55,19 @@ function runTest(test: SingleStepTest): string | null {
 	for (const [address, value] of test.initial.ram) ram[address] = value;
 
 	const cycles: [number, number, "read" | "write"][] = [];
-	const sfotty = new Sfotty(
-		{
-			read(address) {
-				const value = ram[address]!;
-				cycles.push([address, value, "read"]);
-				return value;
-			},
-			write(address, value) {
-				cycles.push([address, value, "write"]);
-				ram[address] = value;
-			},
+	// The default options match the vectors' real NMOS hardware: undocumented
+	// opcodes execute rather than crash.
+	const sfotty = new Sfotty({
+		read(address) {
+			const value = ram[address]!;
+			cycles.push([address, value, "read"]);
+			return value;
 		},
-		// Harte vectors are real NMOS hardware, so run with undocumented opcodes
-		// enabled (they execute rather than crash).
-		{ withoutUndocumented: false },
-	);
+		write(address, value) {
+			cycles.push([address, value, "write"]);
+			ram[address] = value;
+		},
+	});
 
 	sfotty.PC = test.initial.pc;
 	sfotty.S = test.initial.s;
@@ -78,6 +75,7 @@ function runTest(test: SingleStepTest): string | null {
 	sfotty.X = test.initial.x;
 	sfotty.Y = test.initial.y;
 	sfotty.setP(test.initial.p);
+	sfotty.state = DECODE; // skip the power-on reset; the vector seeds the CPU
 
 	// One run past the instruction; PC is captured at the nominal boundary while
 	// registers settle on the trailing decode (see the commit-timing note).

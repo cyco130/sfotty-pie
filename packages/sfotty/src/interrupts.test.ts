@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { Sfotty } from "./sfotty.ts";
-import { type Memory } from "./interface.ts";
+import { DECODE } from "./microcode.ts";
+import { type Memory } from "./bus.ts";
 
 // Specs for the seven interrupt-recognition behaviors of the NMOS 6502.
 //
@@ -48,6 +49,7 @@ function newCpu(): { cpu: Sfotty; ram: Ram } {
 	const cpu = new Sfotty(ram);
 	cpu.PC = 0x0200;
 	cpu.S = 0xff;
+	cpu.state = DECODE; // skip the power-on reset; the CPU is seeded directly
 	return { cpu, ram };
 }
 

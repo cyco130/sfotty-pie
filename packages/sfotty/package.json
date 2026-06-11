@@ -34,9 +34,9 @@
     "test:typecheck": "tsc -p tsconfig.json",
     "test:lint": "eslint . --max-warnings 0",
     "test:package": "publint",
-    "harte": "node src/single-step-test.ts",
-    "generate:opcodes": "node src/generate.ts",
-    "generate:step": "node src/generate-step.ts"
+    "single-step-tests": "node src/single-step-tests.ts",
+    "generate:instructions": "node src/generate-instructions.ts",
+    "generate:steps": "node src/generate-steps.ts"
   },
   "devDependencies": {
     "@cyco130/eslint-config": "^9.0.1",

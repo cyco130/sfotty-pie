@@ -183,6 +183,47 @@ test("SEROC is a level, not a latch", () => {
 	expect(pokey.irq).toBe(false);
 });
 
+test("the serial transmitter ships bytes LSB-first with framing", () => {
+	const pokey = new Pokey();
+	const sent: number[] = [];
+	pokey.serialOutByte = (byte) => sent.push(byte);
+
+	// Timer 4 as transmit clock (SKCTL %010), 64KHz, AUDF4=0: the clock
+	// fires every 28 cycles, two fires per bit, 10 bits per byte.
+	pokey.write(SKCTL, 0x23);
+	pokey.write(AUDCTL, 0x00);
+	pokey.write(0x06, 0); // AUDF4
+	pokey.write(0x0d, 0x5a); // SEROUT
+
+	// SEROC reads complete until the shifter loads, busy after.
+	pokey.write(IRQEN_IRQST, 0x18); // SEROR + SEROC enables
+	expect(pokey.read(IRQEN_IRQST) & 0x08).toBe(0);
+
+	let cycles = 0;
+	while ((pokey.read(IRQEN_IRQST) & 0x08) === 0 && cycles < 100) {
+		pokey.cycle();
+		cycles++;
+	}
+	expect(cycles).toBeLessThan(100); // the load happened (SEROC busy)
+	expect(pokey.read(IRQEN_IRQST) & 0x10).toBe(0); // SEROR latched
+
+	// The byte completes after 10 bits = 20 clock fires.
+	for (let i = 0; i < 20 * 28; i++) pokey.cycle();
+	expect(sent).toEqual([0x5a]);
+	expect(pokey.read(IRQEN_IRQST) & 0x08).toBe(0); // complete again
+});
+
+test("a stopped transmit clock never loads the shifter", () => {
+	const pokey = new Pokey();
+	pokey.write(SKCTL, 0x03); // external clock (%000)
+	pokey.write(IRQEN_IRQST, 0x10);
+	pokey.write(0x0d, 0xff);
+
+	for (let i = 0; i < 5000; i++) pokey.cycle();
+	expect(pokey.read(IRQEN_IRQST) & 0x10).toBe(0x10); // no SEROR
+	expect(pokey.read(IRQEN_IRQST) & 0x08).toBe(0); // still complete
+});
+
 test("init mode does not touch IRQ state or fast channels", () => {
 	const pokey = new Pokey();
 	pokey.write(SKCTL, 0x03);

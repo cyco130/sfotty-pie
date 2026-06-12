@@ -145,16 +145,38 @@ test("NMIEN gates the pull at the latch cycle, set-dominant", () => {
 	ag.beforeCpu(); // cycle 8: the pull fires anyway
 	expect(ag.nmi).toBe(true);
 
-	// ...and an enable after the latch cycle still fires the pull.
-	ag.hpos = 10;
-	ag.beforeCpu(); // the line drops
+	ag.beforeCpu(); // cycle 9: still held
+	expect(ag.nmi).toBe(true);
+	ag.beforeCpu(); // cycle 10: the line drops
 	expect(ag.nmi).toBe(false);
+
+	// ...and an enable landing at cycle 7 — after the arm sampled — fires
+	// a *delayed* NMI two cycles after the write, not at the cycle-8 pull.
 	ag.write(NMIRES_NMIST, 0);
 	ag.hpos = 7;
-	ag.beforeCpu(); // latch with NMIs disabled
-	ag.write(NMIEN, 0x40); // enable between latch and pull
-	ag.beforeCpu();
+	ag.beforeCpu(); // cycle 7: latch with NMIs disabled
+	ag.write(NMIEN, 0x40); // lands at cycle 7, after the arm
+	ag.beforeCpu(); // cycle 8: the pull does not fire
+	expect(ag.nmi).toBe(false);
+	ag.beforeCpu(); // cycle 9: the delayed rise
 	expect(ag.nmi).toBe(true);
+
+	ag.beforeCpu(); // cycle 10: still held
+	expect(ag.nmi).toBe(true);
+	ag.beforeCpu(); // cycle 11: drops
+	expect(ag.nmi).toBe(false);
+
+	// An enable landing at cycle 8 or later is too late entirely.
+	ag.write(NMIEN, 0x00);
+	ag.write(NMIRES_NMIST, 0);
+	ag.hpos = 7;
+	ag.beforeCpu(); // cycle 7: latch with NMIs disabled
+	ag.beforeCpu(); // cycle 8
+	ag.write(NMIEN, 0x40); // lands at cycle 8
+	for (let i = 0; i < 8; i++) {
+		ag.beforeCpu();
+		expect(ag.nmi).toBe(false);
+	}
 });
 
 test("the VBI clears the DLI status bit", () => {

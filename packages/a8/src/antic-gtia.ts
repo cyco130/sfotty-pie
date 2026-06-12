@@ -51,6 +51,26 @@ export class AnticGtia implements Memory {
 
 	hscrol = 0;
 
+	// Vertical scrolling (VSCROL + the display list's bit 5). The first
+	// line of a VS region starts the row counter at VSCROL; the first
+	// instruction after the region (its bit 5 clear) is the exit line and
+	// ends when the row counter reaches VSCROL — shorter *or longer* than
+	// the mode's natural height (the 4-bit counter wraps through 15).
+	// Acid800 antic_vscroll pins all of it, including the wrap.
+	vscrol = 0;
+	#vsRegion = false; // the previous mode line carried the VS bit
+	#vsExit = false; // the current instruction ends at VSCROL
+
+	// The current scanline is an instruction's first: display list and
+	// character-name DMA happen here. Distinct from modeLineNo === 0 — a
+	// VS entry starts the row counter at VSCROL on its first line.
+	#newInstruction = true;
+
+	// Armed at cycle 6: this scanline is its instruction's last. The DLI
+	// latch at cycle 7 uses this — a VSCROL write by cycle 5 still
+	// changes the decision, a cycle later doesn't (antic_vscroldli).
+	#lastLineArmed = false;
+
 	// CHBASE
 	chbase = 0;
 
@@ -211,6 +231,12 @@ export class AnticGtia implements Memory {
 		this.#temp = 0;
 
 		this.hscrol = 0;
+		this.vscrol = 0;
+		this.#vsRegion = false;
+		this.#vsExit = false;
+		this.#newInstruction = true;
+		this.#lastLineArmed = false;
+		this.#pfFineDelay = 0;
 		this.chbase = 0;
 		this.pmbase = 0;
 		this.msc = 0;
@@ -595,7 +621,12 @@ export class AnticGtia implements Memory {
 
 				case 0x04:
 					// HSCROL
-					this.hscrol = value;
+					this.hscrol = value & 0x0f;
+					break;
+
+				case 0x05:
+					// VSCROL
+					this.vscrol = value & 0x0f;
 					break;
 
 				case 0x07:
@@ -743,17 +774,22 @@ export class AnticGtia implements Memory {
 			this.#nmiDelay.schedule(2, OP_NMI_DROP);
 		}
 
-		if (i === 7) {
+		if (i === 6) {
+			// The "is this the instruction's last scanline" decision is made
+			// here, one cycle before the NMIST latch — a VSCROL write
+			// completing by cycle 5 still changes it, a cycle later
+			// doesn't (antic_vscroldli pins both sides).
+			this.#lastLineArmed =
+				this.modeLineNo ===
+				(this.#vsExit ? this.vscrol : this.modeLineHeight - 1);
+		} else if (i === 7) {
 			// The NMIST status bits latch at cycle 7 — one cycle before the
 			// NMI line pull — whenever their event occurs; NMIEN only gates
 			// the pull, so software can poll NMIST with NMIs disabled. The
 			// DLI and VBI bits report the most recent event: each clears the
 			// other; NMIRES clears everything (but loses a same-cycle race).
 			// The cycle is pinned by Acid800's cycle-counted NMIST samples.
-			if (
-				this.instruction & 0x80 &&
-				this.modeLineNo === this.modeLineHeight - 1
-			) {
+			if (this.instruction & 0x80 && this.#lastLineArmed) {
 				this.dli = true;
 				this.vbi = false;
 				this.#justLatched |= 0x80;
@@ -804,9 +840,27 @@ export class AnticGtia implements Memory {
 				this.vcount = 0;
 			}
 
-			this.modeLineNo++;
-			if (this.modeLineNo >= this.modeLineHeight) {
+			// The row counter: an instruction ends when the counter reaches
+			// the line end — VSCROL (live) on a vertical-scroll exit line,
+			// height-1 otherwise. A non-match keeps counting through the
+			// 4-bit wrap (antic_vscroll's VSCROL-9-on-height-8 case). The
+			// counter only runs for display-region lines; the vertical
+			// blank closes any open instruction and the next one starts at
+			// the top of the next frame (a VS region spanning the blank
+			// continues there — antic_vscroll's last check).
+			if (this.vcount > 8 && this.vcount < 248) {
+				const lineEnd = this.#vsExit ? this.vscrol : this.modeLineHeight - 1;
+				if (this.modeLineNo === lineEnd) {
+					this.modeLineNo = 0;
+					this.#newInstruction = true;
+				} else {
+					this.modeLineNo = (this.modeLineNo + 1) & 15;
+					this.#newInstruction = false;
+				}
+			} else if (this.vcount === 248) {
 				this.modeLineNo = 0;
+				this.#newInstruction = true;
+				this.#vsExit = false;
 			}
 		}
 
@@ -963,9 +1017,24 @@ export class AnticGtia implements Memory {
 	#sizeM3Counter = 0;
 	#shiftM3 = 0;
 
+	// HSCROL's odd bit: the fetch start shifts in whole cycles (2 color
+	// clocks); the remaining color clock is a one-pixel delay here.
+	#pfFineDelay = 0;
+
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
 	#drawPlayfield2(): number {
-		return this.pfCounter ? this.pfPixels[--this.pfCounter]! : 0;
+		const pixel = this.pfCounter ? this.pfPixels[--this.pfCounter]! : 0;
+		if (
+			(this.instruction & 0x0f) > 1 &&
+			this.instruction & 0x10 &&
+			this.hscrol & 1
+		) {
+			const delayed = this.#pfFineDelay;
+			this.#pfFineDelay = pixel;
+			return delayed;
+		}
+		this.#pfFineDelay = pixel;
+		return pixel;
 	}
 
 	// 1 bit for each player or missile. 1 means active, 0 means inactive
@@ -1255,7 +1324,7 @@ export class AnticGtia implements Memory {
 	}
 
 	#fetchFirstByte(): boolean {
-		if (this.modeLineNo !== 0) {
+		if (!this.#newInstruction) {
 			return false;
 		}
 
@@ -1288,11 +1357,23 @@ export class AnticGtia implements Memory {
 			this.hires = PLAYFIELD_HI_RES[mode]!;
 		}
 
+		// Vertical scrolling: only real modes carry the VS bit (it's a
+		// height bit on blanks and unused on jumps), but the *exit* applies
+		// to whatever instruction follows the region — antic_vscroldli
+		// exits into a blank line.
+		const vs = mode > 1 && (this.instruction & 0x20) !== 0;
+		this.#vsExit = this.#vsRegion && !vs;
+		if (vs && !this.#vsRegion) {
+			// The entry line starts the row counter at VSCROL.
+			this.modeLineNo = this.vscrol;
+		}
+		this.#vsRegion = vs;
+
 		return this.displayListDmaEnabled;
 	}
 
 	#fetchSecondByte(): boolean {
-		if (!this.displayListDmaEnabled || this.modeLineNo !== 0) return false;
+		if (!this.displayListDmaEnabled || !this.#newInstruction) return false;
 
 		if ((this.instruction & 0x0f) === 0x01) {
 			// Jump
@@ -1312,7 +1393,7 @@ export class AnticGtia implements Memory {
 	}
 
 	#fetchThirdByte(): boolean {
-		if (!this.displayListDmaEnabled || this.modeLineNo !== 0) return false;
+		if (!this.displayListDmaEnabled || !this.#newInstruction) return false;
 
 		if ((this.instruction & 0x0f) === 0x01) {
 			// Jump
@@ -1403,7 +1484,7 @@ export class AnticGtia implements Memory {
 	}
 
 	#fetchCharacter(cycle: number) {
-		if (!this.playfieldWidth || !this.charFetchRate || this.modeLineNo !== 0) {
+		if (!this.playfieldWidth || !this.charFetchRate || !this.#newInstruction) {
 			return false;
 		}
 

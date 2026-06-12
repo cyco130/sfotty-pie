@@ -1023,17 +1023,29 @@ export class AnticGtia implements Memory {
 
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
 	#drawPlayfield2(): number {
-		const pixel = this.pfCounter ? this.pfPixels[--this.pfCounter]! : 0;
-		if (
-			(this.instruction & 0x0f) > 1 &&
-			this.instruction & 0x10 &&
-			this.hscrol & 1
-		) {
+		let pixel = this.pfCounter ? this.pfPixels[--this.pfCounter]! : 0;
+		const scrolled =
+			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
+		if (scrolled && this.hscrol & 1) {
 			const delayed = this.#pfFineDelay;
 			this.#pfFineDelay = pixel;
-			return delayed;
+			pixel = delayed;
+		} else {
+			this.#pfFineDelay = pixel;
 		}
-		this.#pfFineDelay = pixel;
+		if (scrolled) {
+			// The widened fetch's margin pixels are never displayed: the
+			// window stays at the unwidened width, and ANTIC masks its
+			// output outside it (the FIFO is still consumed above). Without
+			// this, memory just left of the LMS window — typically the
+			// previous row's right edge — bleeds into the left border.
+			const cycle = this.hpos - 1;
+			const start = ([0, 29, 21, 13] as const)[this.playfieldWidth];
+			const width = ([0, 64, 80, 96] as const)[this.playfieldWidth];
+			if (cycle < start || cycle >= start + width) {
+				return 0;
+			}
+		}
 		return pixel;
 	}
 

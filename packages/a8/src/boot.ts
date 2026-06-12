@@ -315,6 +315,7 @@ async function run(): Promise<void> {
 
 	while (cycles < LIMIT) {
 		ag.beforeCpu();
+		machine.cycle();
 		cpu.NMI = ag.nmi;
 		cpu.IRQ = machine.irq;
 		cpu.RDY = ag.rdy;

@@ -124,6 +124,7 @@ export class Emulator {
 
 		for (let cycle = 0; cycle < CYCLES_PER_LINE; cycle++) {
 			ag.beforeCpu();
+			this.machine.cycle(); // audio output unused until sound lands
 			cpu.NMI = ag.nmi;
 			cpu.IRQ = this.machine.irq;
 			cpu.RDY = ag.rdy;

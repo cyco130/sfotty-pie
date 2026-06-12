@@ -27,9 +27,10 @@ const OP_FIRE4 = 0x20;
  * POKEY. 16 registers mirrored every $10 across $D200-$D2FF.
  *
  * Modeled: the four audio channels (AUDF/AUDC/AUDCTL with 16-bit linking and
- * 1.79MHz clocking), the polynomial counters and RANDOM, and the
- * keyboard-facing registers — KBCODE, the keyboard/Break bits of IRQEN/IRQST,
- * and the key/Shift sense bits of SKSTAT.
+ * 1.79MHz clocking) with cycle-exact timers, STIMER, and timer IRQs; the
+ * polynomial counters and RANDOM; and the keyboard-facing registers —
+ * KBCODE, the keyboard/Break bits of IRQEN/IRQST, and the key/Shift sense
+ * bits of SKSTAT.
  *
  * The host clocks the chip by calling {@link cycle} once per machine cycle;
  * the return value is the summed audio output (0-60), for the host to sample
@@ -38,10 +39,9 @@ const OP_FIRE4 = 0x20;
  * There is no keyboard scan timing yet: key events latch the registers and
  * raise the IRQ line immediately.
  *
- * TODO: timer IRQs, STIMER, serial I/O, high-pass filters, two-tone mode,
- * SKCTL (including init mode and the keyboard scan/debounce modes), exact
- * timer phase/reload behavior (Acid800's POKEY suite), POT scanning, and
- * real keyboard scan timing.
+ * TODO: serial I/O, high-pass filters, two-tone mode, SKCTL (including init
+ * mode and the keyboard scan/debounce modes), the IRQEN→IRQ-line
+ * propagation delay, POT scanning, and real keyboard scan timing.
  */
 export class Pokey implements Memory {
 	// IRQST latches are active low (0 = interrupt occurred). An event only

@@ -1,7 +1,7 @@
 {
   "name": "@sfotty-pie/a8",
   "version": "0.0.0",
-  "description": "A (for now headless) Atari 8-bit emulator.",
+  "description": "A headless Atari 8-bit emulator — bring your own display, audio, and input.",
   "keywords": [
     "atari",
     "atari-8-bit",

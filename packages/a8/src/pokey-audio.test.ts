@@ -158,6 +158,31 @@ test("init mode locks RANDOM at $FF and freezes the slow clocks", () => {
 	expect(runUntilIrq(500)).toBeLessThan(500);
 });
 
+test("SEROC is a level, not a latch", () => {
+	const pokey = new Pokey();
+
+	// With the transmitter idle, the IRQST bit reads pending even with the
+	// IRQ disabled — the enable only gates the IRQ line.
+	expect(pokey.read(IRQEN_IRQST) & 0x08).toBe(0);
+	expect(pokey.irq).toBe(false);
+
+	// Enabling asserts the line immediately.
+	pokey.write(IRQEN_IRQST, 0x08);
+	expect(pokey.read(IRQEN_IRQST) & 0x08).toBe(0);
+	expect(pokey.irq).toBe(true);
+
+	// It can't be acknowledged while the condition holds: re-writing the
+	// enable bit (the usual latch-clear gesture) changes nothing.
+	pokey.write(IRQEN_IRQST, 0x08);
+	expect(pokey.read(IRQEN_IRQST) & 0x08).toBe(0);
+	expect(pokey.irq).toBe(true);
+
+	// Disabling drops the line; the status bit stays pending.
+	pokey.write(IRQEN_IRQST, 0x00);
+	expect(pokey.read(IRQEN_IRQST) & 0x08).toBe(0);
+	expect(pokey.irq).toBe(false);
+});
+
 test("init mode does not touch IRQ state or fast channels", () => {
 	const pokey = new Pokey();
 	pokey.write(SKCTL, 0x03);
@@ -165,7 +190,7 @@ test("init mode does not touch IRQ state or fast channels", () => {
 	pokey.keyDown(0x3f); // latch the keyboard IRQ
 
 	pokey.write(SKCTL, 0x00); // back into init
-	expect(pokey.read(IRQEN_IRQST)).toBe(0xbf); // the latch survives
+	expect(pokey.read(IRQEN_IRQST)).toBe(0xb7); // the latch survives
 	expect(pokey.irq).toBe(true);
 
 	// A 1.79MHz channel keeps counting — it runs on the machine clock.

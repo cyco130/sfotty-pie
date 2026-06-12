@@ -4,6 +4,7 @@ import { DelayLine } from "./delay-line.ts";
 // IRQEN/IRQST bits (only the ones modeled so far).
 const IRQ_BREAK = 0x80;
 const IRQ_KEYBOARD = 0x40;
+const IRQ_SEROC = 0x08;
 const IRQ_TIMER1 = 0x01;
 const IRQ_TIMER2 = 0x02;
 const IRQ_TIMER4 = 0x04;
@@ -29,9 +30,10 @@ const OP_FIRE4 = 0x20;
  * Modeled: the four audio channels (AUDF/AUDC/AUDCTL with 16-bit linking and
  * 1.79MHz clocking) with cycle-exact timers, STIMER, and timer IRQs; the
  * polynomial counters and RANDOM; SKCTL initialization mode with the two
- * free-running slow clocks; and the keyboard-facing registers — KBCODE, the
- * keyboard/Break bits of IRQEN/IRQST, and the key/Shift sense bits of
- * SKSTAT.
+ * free-running slow clocks; the SEROC IRQ's level semantics (the
+ * transmitter itself is unmodeled, so serial output is permanently
+ * complete); and the keyboard-facing registers — KBCODE, the keyboard/Break
+ * bits of IRQEN/IRQST, and the key/Shift sense bits of SKSTAT.
  *
  * The host clocks the chip by calling {@link cycle} once per machine cycle;
  * the return value is the summed audio output (0-60), for the host to sample
@@ -137,7 +139,17 @@ export class Pokey implements Memory {
 
 	/** The IRQ output line (true = asserted). */
 	get irq(): boolean {
-		return (this.#irqen & ~this.#irqst) !== 0;
+		return (this.#irqen & ~this.#serocLevel(this.#irqst)) !== 0;
+	}
+
+	// SEROC (IRQST bit 3) is a level, not a latch: it directly reflects
+	// "transmitter idle" regardless of IRQEN (the enable only gates the IRQ
+	// line), and can't be acknowledged while the condition holds. With no
+	// transmitter modeled yet, serial output is permanently complete, so
+	// the bit always reads pending (Acid800 pokey_seroc pins both the
+	// enabled and disabled reads).
+	#serocLevel(irqst: number): number {
+		return irqst & ~IRQ_SEROC;
 	}
 
 	/**
@@ -460,9 +472,9 @@ export class Pokey implements Memory {
 			// $FF while init mode holds the counter in reset.
 			case 0x0a:
 				return this.#usePoly9 ? this.#poly9.random() : this.#poly17.random();
-			// IRQST ($D20E)
+			// IRQST ($D20E). Bit 3 (SEROC) is composed in as a level.
 			case 0x0e:
-				return this.#irqst;
+				return this.#serocLevel(this.#irqst);
 			// SKSTAT ($D20F): unmodeled bits (serial state etc.) read 1.
 			case 0x0f:
 				return (

@@ -16,7 +16,8 @@ test("keyboard IRQ latches while enabled and clears via IRQEN", () => {
 
 	pokey.keyDown(0x3f);
 	expect(pokey.read(KBCODE)).toBe(0x3f);
-	expect(pokey.read(IRQEN_IRQST)).toBe(0xbf);
+	// Bit 3 (SEROC) always reads pending while the transmitter is idle.
+	expect(pokey.read(IRQEN_IRQST)).toBe(0xb7);
 	expect(pokey.irq).toBe(true);
 
 	// Re-writing the enable bit as 1 does not clear the latch...
@@ -25,7 +26,7 @@ test("keyboard IRQ latches while enabled and clears via IRQEN", () => {
 
 	// ...writing it as 0 does.
 	pokey.write(IRQEN_IRQST, 0x80);
-	expect(pokey.read(IRQEN_IRQST)).toBe(0xff);
+	expect(pokey.read(IRQEN_IRQST)).toBe(0xf7);
 	expect(pokey.irq).toBe(false);
 });
 
@@ -34,7 +35,7 @@ test("key events are lost while the keyboard IRQ is disabled", () => {
 
 	pokey.keyDown(0x3f);
 	expect(pokey.irq).toBe(false);
-	expect(pokey.read(IRQEN_IRQST)).toBe(0xff);
+	expect(pokey.read(IRQEN_IRQST)).toBe(0xf7);
 
 	// ...but KBCODE and the key sense still update.
 	expect(pokey.read(KBCODE)).toBe(0x3f);
@@ -59,7 +60,7 @@ test("Break IRQ latches while enabled and clears via IRQEN", () => {
 	pokey.write(IRQEN_IRQST, 0x80);
 
 	pokey.breakKeyDown();
-	expect(pokey.read(IRQEN_IRQST)).toBe(0x7f);
+	expect(pokey.read(IRQEN_IRQST)).toBe(0x77);
 	expect(pokey.irq).toBe(true);
 
 	pokey.write(IRQEN_IRQST, 0x00);
@@ -91,7 +92,7 @@ test("only a power cycle clears POKEY", () => {
 
 	pokey.reset(true);
 	expect(pokey.irq).toBe(false);
-	expect(pokey.read(IRQEN_IRQST)).toBe(0xff);
+	expect(pokey.read(IRQEN_IRQST)).toBe(0xf7);
 });
 
 function makeAnticGtia() {
@@ -218,5 +219,5 @@ test("the keyboard facade reaches POKEY through the bus", () => {
 	machine.shiftKeyUp();
 	machine.breakKeyDown(); // Break enable is off: lost, like real hardware
 	expect(machine.read(SKSTAT, ReadOptions.NONE) & 0x0c).toBe(0x0c);
-	expect(machine.read(IRQEN_IRQST, ReadOptions.NONE)).toBe(0xbf);
+	expect(machine.read(IRQEN_IRQST, ReadOptions.NONE)).toBe(0xb7);
 });

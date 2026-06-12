@@ -1,8 +1,14 @@
 import type { Memory } from "@sfotty-pie/sfotty";
+import { DelayLine } from "./delay-line.ts";
 import {
 	NTSC_LINES_PER_FRAME,
 	PAL_LINES_PER_FRAME,
 } from "./timing-constants.ts";
+
+// NMI delay-line ops: the line drop two cycles after a rise, and the
+// delayed rise from a late NMIEN enable.
+const OP_NMI_DROP = 0x01;
+const OP_NMI_RISE = 0x02;
 
 interface AnticGtiaConfig {
 	dmaRead: (address: number) => number;
@@ -228,6 +234,7 @@ export class AnticGtia implements Memory {
 
 		// Output lines
 		this.nmi = false;
+		this.#nmiDelay.reset();
 		this.halt = false;
 		this.rdy = true;
 	}
@@ -609,14 +616,33 @@ export class AnticGtia implements Memory {
 					this.wsync = true;
 					break;
 
-				case 0x0e:
+				case 0x0e: {
 					// NMIEN Enable NMI (the reset NMI is not maskable). The
-					// NMI pull samples it at cycle 8, two cycles after the
-					// status latch — so writes through cycle 7 affect the
-					// current line's NMI either way (Acid800 checks this).
+					// cycle-7 arm samples it before any same-cycle write
+					// lands, so a write must complete by cycle 6 to make the
+					// line's normal cycle-8 pull. An enable landing exactly
+					// at cycle 7 — too late for the arm but catching the
+					// just-latched status — still fires, as a delayed NMI
+					// two cycles after the write; writes from cycle 8 on are
+					// too late entirely, and a stale NMIST bit from an
+					// earlier line never retriggers (Acid800 dlitiming's
+					// delay tests, nmist's cycle-7 check, and blockednmi
+					// pin all three).
+					const hadDli = this.dliEnabled;
+					const hadVbi = this.vbiEnabled;
 					this.dliEnabled = !!(value & 0x80);
 					this.vbiEnabled = !!(value & 0x40);
+					// hpos has already advanced past the write cycle.
+					const writeCycle = this.hpos === 0 ? 113 : this.hpos - 1;
+					if (
+						writeCycle === 7 &&
+						((!hadDli && this.dliEnabled && this.#lineLatched & 0x80) ||
+							(!hadVbi && this.vbiEnabled && this.#lineLatched & 0x40))
+					) {
+						this.#nmiDelay.schedule(2, OP_NMI_RISE);
+					}
 					break;
+				}
 
 				case 0x0f:
 					// NMIRES Reset NMI status. A status bit that latched on
@@ -648,6 +674,11 @@ export class AnticGtia implements Memory {
 	// cycle (7) and acted on at the pull cycle (8).
 	#lineLatched = 0;
 	#armedNmi = false;
+
+	// NMI line events: every rise schedules its drop two cycles later
+	// (ANTIC holds the line for two cycles), and a late NMIEN enable
+	// schedules a delayed rise.
+	#nmiDelay = new DelayLine(8);
 
 	/**
 	 * The RNMI input line: the 400/800 Reset key (not wired up on XL/XE,
@@ -701,6 +732,17 @@ export class AnticGtia implements Memory {
 
 		this.#justLatched = 0;
 
+		// NMI line events. The rise is processed after the drop so that a
+		// same-cycle race keeps the line up.
+		const nmiOps = this.#nmiDelay.tick();
+		if (nmiOps & OP_NMI_DROP) {
+			this.nmi = false;
+		}
+		if (nmiOps & OP_NMI_RISE) {
+			this.nmi = true;
+			this.#nmiDelay.schedule(2, OP_NMI_DROP);
+		}
+
 		if (i === 7) {
 			// The NMIST status bits latch at cycle 7 — one cycle before the
 			// NMI line pull — whenever their event occurs; NMIEN only gates
@@ -743,15 +785,10 @@ export class AnticGtia implements Memory {
 			// detector samples inside run() — is always running (or
 			// WSYNC-stalled, which still ticks the detector) while the line is
 			// up. That's what makes the skip-run()-on-halt model safe.
-			if (
-				this.#armedNmi ||
-				(this.dliEnabled && this.#lineLatched & 0x80) ||
-				(this.vbiEnabled && this.#lineLatched & 0x40)
-			) {
+			if (this.#armedNmi) {
 				this.nmi = true;
+				this.#nmiDelay.schedule(2, OP_NMI_DROP);
 			}
-		} else if (i === 10) {
-			this.nmi = false;
 		}
 
 		this.hpos++;

@@ -43,6 +43,7 @@ export interface MachineConfig {
  *
  * ```ts
  * machine.anticGtia.beforeCpu();
+ * machine.cycle(); // returns the audio level, for hosts producing sound
  * cpu.NMI = machine.anticGtia.nmi;
  * cpu.IRQ = machine.irq;
  * cpu.RDY = machine.anticGtia.rdy;
@@ -124,6 +125,15 @@ export class Atari implements Memory {
 		this.anticGtia.reset(cold);
 		this.#pia.reset(cold);
 		this.#pokey.reset(cold);
+	}
+
+	/**
+	 * Advance the per-cycle chips (currently POKEY) one machine cycle — call
+	 * once per cycle alongside the ANTIC `beforeCpu`/`afterCpu` pair. Returns
+	 * POKEY's summed audio output (0-60) for hosts that produce sound.
+	 */
+	cycle(): number {
+		return this.#pokey.cycle();
 	}
 
 	/**

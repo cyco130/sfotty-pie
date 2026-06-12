@@ -10,8 +10,16 @@ import {
 	type MachineConfig,
 } from "@sfotty-pie/a8";
 import { Sfotty } from "@sfotty-pie/sfotty";
+import { AntiAliasFilter } from "./audio-filter.ts";
+import type { AudioOutput } from "./audio.ts";
 
 const MS_PER_SCANLINE = (1000 * CYCLES_PER_LINE) / NTSC_CYCLES_PER_SECOND;
+
+// Audio chunking and pacing: ~21ms chunks, ~50ms of queue as the pacing
+// target, and a bounded scanline batch per wake so the UI stays responsive.
+const CHUNK_SAMPLES = 1024;
+const TARGET_BUFFER_SECONDS = 0.05;
+const SCANLINE_BATCH = 64;
 
 // Yield cadence in scanlines. Coprime to both frame lengths (262 and 312) so
 // the yield point drifts across the frame instead of aliasing to a fixed line.
@@ -25,6 +33,8 @@ const MAX_LAG_MS = 100;
 export interface EmulatorConfig extends MachineConfig {
 	/** Disk in drive D1: (read-only; served by the trap-based SIO). */
 	disk?: AtrImage;
+	/** Audio sink. When its context runs, the audio clock paces emulation. */
+	audio?: AudioOutput;
 }
 
 /**
@@ -52,10 +62,29 @@ export class Emulator {
 	#scanlines = 0;
 	#epoch = 0;
 
+	// The audio pipeline: per-cycle POKEY+speaker level → anti-alias filter
+	// → nearest-neighbor decimation → DC blocker → fixed-size chunks.
+	#audio: AudioOutput | null;
+	#filter = new AntiAliasFilter();
+	#cyclesPerSample = 0;
+	#targetBuffer = 0;
+	#phase = 0;
+	#chunk = new Float32Array(CHUNK_SAMPLES);
+	#chunkLength = 0;
+	#dcIn = 0;
+	#dcOut = 0;
+
 	constructor(config: EmulatorConfig) {
 		this.machine = new Atari(config);
 		this.#cpu = new Sfotty(this.machine, { withoutUndocumented: false });
 		this.#cpu.reset(true);
+
+		this.#audio = config.audio ?? null;
+		if (this.#audio) {
+			const rate = this.#audio.context.sampleRate;
+			this.#cyclesPerSample = NTSC_CYCLES_PER_SECOND / rate;
+			this.#targetBuffer = Math.round(rate * TARGET_BUFFER_SECONDS);
+		}
 
 		// Trap-based SIO: disk requests are served from the ATR image in the
 		// host; everything else times out so the OS moves on with its boot.
@@ -92,9 +121,33 @@ export class Emulator {
 
 		while (this.#running) {
 			if (document.hidden) {
+				this.#audio?.clear();
 				await waitForVisible();
 				// The hidden interval is lost time, not work to replay.
 				this.#epoch = performance.now() - this.#scanlines * MS_PER_SCANLINE;
+			}
+
+			const audio = this.#audio;
+			if (audio?.running) {
+				// The audio clock is master: run scanlines to keep the queue
+				// near the target, in bounded batches so the UI stays alive.
+				if (audio.buffered() < this.#targetBuffer) {
+					for (
+						let i = 0;
+						i < SCANLINE_BATCH && audio.buffered() < this.#targetBuffer;
+						i++
+					) {
+						this.#runScanline();
+						this.#scanlines++;
+					}
+					await yieldMacrotask();
+				} else {
+					await sleep(4);
+				}
+				// Keep the wall clock rebased for a clean handoff if the
+				// audio context ever stops.
+				this.#epoch = performance.now() - this.#scanlines * MS_PER_SCANLINE;
+				continue;
 			}
 
 			this.#runScanline();
@@ -124,7 +177,7 @@ export class Emulator {
 
 		for (let cycle = 0; cycle < CYCLES_PER_LINE; cycle++) {
 			ag.beforeCpu();
-			this.machine.cycle(); // audio output unused until sound lands
+			this.#collectAudio(this.machine.cycle(), ag.consoleSpeaker);
 			cpu.NMI = ag.nmi;
 			cpu.IRQ = this.machine.irq;
 			cpu.RDY = ag.rdy;
@@ -146,6 +199,32 @@ export class Emulator {
 			this.frame = back;
 			this.#back ^= 1;
 			this.frameCount++;
+		}
+	}
+
+	// Per machine cycle: mix POKEY (0-60) with the console speaker, filter at
+	// the machine rate, then pick one sample per audio frame (the filter has
+	// already removed everything above ~18kHz) and DC-block it.
+	#collectAudio(pokeyLevel: number, speaker: number): void {
+		const audio = this.#audio;
+		if (!audio?.running) return;
+
+		const filtered = this.#filter.apply(
+			(pokeyLevel / 60) * 0.2 + speaker * 0.2,
+		);
+
+		if (++this.#phase < this.#cyclesPerSample) return;
+		this.#phase -= this.#cyclesPerSample;
+
+		const blocked = filtered - this.#dcIn + 0.999 * this.#dcOut;
+		this.#dcIn = filtered;
+		this.#dcOut = blocked;
+
+		this.#chunk[this.#chunkLength++] = blocked;
+		if (this.#chunkLength === CHUNK_SAMPLES) {
+			audio.push(this.#chunk); // transfers the buffer away
+			this.#chunk = new Float32Array(CHUNK_SAMPLES);
+			this.#chunkLength = 0;
 		}
 	}
 }

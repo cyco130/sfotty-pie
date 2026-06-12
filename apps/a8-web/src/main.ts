@@ -8,6 +8,7 @@ import {
 	NTSC_PIXEL_ASPECT_RATIO,
 	type AtariFileFormat,
 } from "@sfotty-pie/a8";
+import { AudioOutput } from "./audio.ts";
 import { commands } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { Keyboard } from "./keyboard.ts";
@@ -101,7 +102,16 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	let emulator = new Emulator({ model, os, basic });
+	// One audio sink for the page; emulators come and go across Loads.
+	// Browsers keep the context suspended until a user gesture.
+	const audio = await AudioOutput.create().catch(() => null);
+	if (audio) {
+		const resume = () => audio.resume();
+		window.addEventListener("pointerdown", resume);
+		window.addEventListener("keydown", resume);
+	}
+
+	let emulator = new Emulator({ model, os, basic, ...(audio && { audio }) });
 
 	// Toolbar: the Load button, its hidden file picker, and a status line.
 	const toolbar = document.createElement("div");
@@ -164,8 +174,13 @@ async function main(): Promise<void> {
 		// attached — on the 800, the BASIC cart comes out of the slot. (On
 		// the XL BASIC is built in; disabling it there is a future concern.)
 		emulator.stop();
+		audio?.clear();
 		const base = xl ? { model, os, basic } : { model, os };
-		emulator = new Emulator({ ...base, ...attachment });
+		emulator = new Emulator({
+			...base,
+			...attachment,
+			...(audio && { audio }),
+		});
 		emulator.start();
 		setStatus(file.name);
 		focusKeyboard();

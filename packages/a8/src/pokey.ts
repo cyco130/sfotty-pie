@@ -4,6 +4,7 @@ import { DelayLine } from "./delay-line.ts";
 // IRQEN/IRQST bits (only the ones modeled so far).
 const IRQ_BREAK = 0x80;
 const IRQ_KEYBOARD = 0x40;
+const IRQ_SEROR = 0x10;
 const IRQ_SEROC = 0x08;
 const IRQ_TIMER1 = 0x01;
 const IRQ_TIMER2 = 0x02;
@@ -16,13 +17,17 @@ const SKSTAT_KEY_HELD = 0x04;
 // AUDC bits
 const AUDC_VOLUME_ONLY = 0x10;
 
-// Delay-line ops: the timer fire pipelines (see the comments in `cycle`).
+// Delay-line ops: the timer fire pipelines (see the comments in `cycle`),
+// and the serial transmit-clock edge, which trails its timer's fire by
+// two cycles (Acid800 sertiming pins the load two cycles after the fire).
 const OP_COMMIT1 = 0x01;
 const OP_FIRE1 = 0x02;
 const OP_COMMIT3 = 0x04;
 const OP_FIRE3 = 0x08;
 const OP_FIRE2 = 0x10;
 const OP_FIRE4 = 0x20;
+const OP_SERIAL_TICK = 0x40;
+const OP_TWOTONE_RESYNC = 0x80;
 
 /**
  * POKEY. 16 registers mirrored every $10 across $D200-$D2FF.
@@ -30,10 +35,11 @@ const OP_FIRE4 = 0x20;
  * Modeled: the four audio channels (AUDF/AUDC/AUDCTL with 16-bit linking and
  * 1.79MHz clocking) with cycle-exact timers, STIMER, and timer IRQs; the
  * polynomial counters and RANDOM; SKCTL initialization mode with the two
- * free-running slow clocks; the SEROC IRQ's level semantics (the
- * transmitter itself is unmodeled, so serial output is permanently
- * complete); and the keyboard-facing registers — KBCODE, the keyboard/Break
- * bits of IRQEN/IRQST, and the key/Shift sense bits of SKSTAT.
+ * free-running slow clocks; the serial transmitter (SEROUT, the 10-bit
+ * shifter clocked by the SKCTL-selected timer, the SEROR latch and SEROC
+ * level IRQs, byte delivery via {@link serialOutByte}); and the
+ * keyboard-facing registers — KBCODE, the keyboard/Break bits of
+ * IRQEN/IRQST, and the key/Shift sense bits of SKSTAT.
  *
  * The host clocks the chip by calling {@link cycle} once per machine cycle;
  * the return value is the summed audio output (0-60), for the host to sample
@@ -42,9 +48,8 @@ const OP_FIRE4 = 0x20;
  * There is no keyboard scan timing yet: key events latch the registers and
  * raise the IRQ line immediately.
  *
- * TODO: serial I/O, high-pass filters, two-tone mode, SKCTL's keyboard
- * scan/debounce gating and serial clocking bits, the IRQEN→IRQ-line
- * propagation delay, POT scanning, and real keyboard scan timing.
+ * TODO: serial input, high-pass filters, SKCTL's keyboard scan/debounce
+ * gating, POT scanning, and real keyboard scan timing.
  */
 export class Pokey implements Memory {
 	// IRQST latches are active low (0 = interrupt occurred). An event only
@@ -81,11 +86,11 @@ export class Pokey implements Memory {
 	#clock64 = 0;
 	#clock15 = 0;
 
-	// SKCTL ($D20F write) bits 0-1 clear = initialization mode. Power-on
+	// SKCTL ($D20F write). Bits 0-1 clear = initialization mode. Power-on
 	// biases to init (the chip has no reset line; this is the benign
 	// corner of its indeterminate power-up space, and it's what makes
-	// RANDOM deterministic from boot). Only the init-mode state is kept;
-	// the other SKCTL bits are unmodeled for now.
+	// RANDOM deterministic from boot).
+	#skctl = 0;
 	#initMode = true;
 	// The cycle carrying the init-entry write still shifts the 9/17-bit
 	// poly normally; the ones-fill starts the cycle after (pokey_noise's
@@ -137,19 +142,54 @@ export class Pokey implements Memory {
 	#poly9 = new PolyCounter(5, 9);
 	#poly17 = new PolyCounter(5, 17);
 
+	// Serial output. A byte written to SEROUT waits in the holding register
+	// until the 10-bit shifter (start + 8 data + stop, LSB first) is empty,
+	// then transfers on a transmit-clock edge — raising the SEROR IRQ. The
+	// transmit clock is the selected timer's fire, two fires per bit (the
+	// output square wave's two edges). Init mode halts the shifter but
+	// does not clear it (Acid800 timertiming relies on pushing a byte
+	// through to reset the output state).
+	#serout: number | null = null; // holding register
+	#shiftData = 0; // remaining bits, next-out in bit 0
+	#shiftBitsLeft = 0; // 0 = shifter empty (SEROC's level)
+	#serialOutBit = 1; // the output data bit; idles at mark
+	#serialHalfBit = false; // divide-by-two phase within a bit cell
+
+	/**
+	 * Host hook: called with each fully shifted-out byte. Bytes are
+	 * delivered at the end of their stop bit. (A callback rather than a
+	 * Signal: bytes are events, and repeated values must still notify.)
+	 */
+	serialOutByte: ((byte: number) => void) | null = null;
+
+	// Two-tone mode (SKCTL bit 3): the serial output line carries an FSK
+	// square wave instead of data levels — timer 1's tone for a 1 bit,
+	// timer 2's for a 0. A "used" timer fire (timer 2 always; timer 1
+	// only while the output data bit is 1 and force break is off) toggles
+	// the output flip-flop and resyncs both timers two cycles after the
+	// triggering timer's reload. The flip-flop itself isn't modeled until
+	// something can observe the line level; the resync is the part the
+	// timers (and Acid800) see.
+	#twoTone = false;
+	#forceBreak = false;
+
 	/** The IRQ output line (true = asserted). */
 	get irq(): boolean {
 		return (this.#irqen & ~this.#serocLevel(this.#irqst)) !== 0;
 	}
 
 	// SEROC (IRQST bit 3) is a level, not a latch: it directly reflects
-	// "transmitter idle" regardless of IRQEN (the enable only gates the IRQ
-	// line), and can't be acknowledged while the condition holds. With no
-	// transmitter modeled yet, serial output is permanently complete, so
-	// the bit always reads pending (Acid800 pokey_seroc pins both the
-	// enabled and disabled reads).
+	// "not shifting" regardless of IRQEN (the enable only gates the IRQ
+	// line), and can't be acknowledged while the condition holds (Acid800
+	// pokey_seroc pins both the enabled and disabled reads). A byte
+	// waiting in the holding register doesn't count — complete stays
+	// active until shifting actually starts — and a shifter frozen by a
+	// stopped transmit clock or init mode also reads complete (Acid800
+	// serclock's external-clock check).
 	#serocLevel(irqst: number): number {
-		return irqst & ~IRQ_SEROC;
+		const shifting =
+			this.#shiftBitsLeft > 0 && this.#transmitClock !== 0 && !this.#initMode;
+		return shifting ? irqst | IRQ_SEROC : irqst & ~IRQ_SEROC;
 	}
 
 	/**
@@ -221,8 +261,16 @@ export class Pokey implements Memory {
 		this.#shadowAudf1 = this.#shadowAudf2 = 0;
 		this.#shadowAudf3 = this.#shadowAudf4 = 0;
 		this.#clock64 = this.#clock15 = 0;
+		this.#skctl = 0;
 		this.#initMode = true;
 		this.#initFillDelay = false;
+		this.#serout = null;
+		this.#shiftData = 0;
+		this.#shiftBitsLeft = 0;
+		this.#serialOutBit = 1;
+		this.#serialHalfBit = false;
+		this.#twoTone = false;
+		this.#forceBreak = false;
 		this.#delay.reset();
 		this.#inFlight1 = this.#inFlight2 = false;
 		this.#inFlight3 = this.#inFlight4 = false;
@@ -272,6 +320,68 @@ export class Pokey implements Memory {
 			this.#irqst &= ~bit;
 		}
 	}
+
+	// The transmit clock source per SKCTL bits 4-6: %11x = timer 2,
+	// %01x/%10x = timer 4, %00x = external (no clock — the shifter never
+	// advances; Acid800 serclock pins all three).
+	get #transmitClock(): 0 | 2 | 4 {
+		const mode = (this.#skctl >> 4) & 0x07;
+		if (mode >= 6) return 2;
+		if (mode >= 2) return 4;
+		return 0;
+	}
+
+	// A "used" two-tone timer fired: toggle the FSK flip-flop and schedule
+	// the timer 1+2 resync — two cycles after the triggering timer's
+	// reload, which is fire+1 for the 1.79MHz pipeline and fire+2 for the
+	// slow clocks (where the delay is absorbed into the next tick anyway).
+	#twoToneFire(fast: boolean): void {
+		this.#delay.schedule(fast ? 1 : 2, OP_TWOTONE_RESYNC);
+	}
+
+	// Whether timer 1's fires drive the two-tone output: only for a 1
+	// data bit, and force break pins the data bit to 0.
+	get #twoToneUsesTimer1(): boolean {
+		return this.#serialOutBit === 1 && !this.#forceBreak;
+	}
+
+	// One transmit-clock edge (the selected timer fired). Two edges per
+	// bit cell — the output square wave's halves; the bit-cell phase
+	// restarts at each load, which happens on the first edge with the
+	// shifter empty and a byte waiting (Acid800 sertiming pins the load
+	// to the first clock edge after the SEROUT write).
+	#serialClockTick(): void {
+		if (this.#shiftBitsLeft > 0) {
+			this.#serialHalfBit = !this.#serialHalfBit;
+			if (!this.#serialHalfBit) {
+				// A full bit boundary: the current bit completes.
+				this.#shiftBitsLeft--;
+				if (this.#shiftBitsLeft === 0) {
+					// The stop bit shipped; the line idles at mark and the
+					// byte is done (SEROC's level goes complete).
+					this.#serialOutBit = 1;
+					this.serialOutByte?.(this.#lastShiftedByte);
+				} else {
+					this.#serialOutBit = this.#shiftData & 1;
+					this.#shiftData >>= 1;
+				}
+			}
+		}
+
+		if (this.#shiftBitsLeft === 0 && this.#serout !== null) {
+			// Load: holding register → shifter. The start bit (0) goes out
+			// now; SEROR reports the holding register free.
+			this.#lastShiftedByte = this.#serout;
+			this.#shiftData = this.#serout | 0x100; // data LSB first, stop high
+			this.#shiftBitsLeft = 10;
+			this.#serialOutBit = 0;
+			this.#serialHalfBit = false;
+			this.#serout = null;
+			this.#raiseIrq(IRQ_SEROR);
+		}
+	}
+
+	#lastShiftedByte = 0;
 
 	// Reload values, in each channel's clock-domain ticks. The 1.79MHz
 	// periods carry the hardware's reload pipeline: N+4 for one byte, N+7
@@ -339,8 +449,31 @@ export class Pokey implements Memory {
 		this.#underflowed1 = false;
 		this.#underflowed3 = false;
 
-		const due = this.#delay.tick();
+		let due = this.#delay.tick();
 		if (due) {
+			// The two-tone resync goes first: it preempts a timer 1 fire
+			// landing on the resync cycle itself (a fire one cycle earlier
+			// survives — Acid800's cancellation tests and the AHRM's
+			// "up to one cycle later" rule agree).
+			if (due & OP_TWOTONE_RESYNC) {
+				due &= ~(OP_COMMIT1 | OP_FIRE1);
+				this.#delay.cancel(OP_COMMIT1 | OP_FIRE1);
+				this.#inFlight1 = false;
+				if (this.#link12) {
+					// -1: the channel logic below decrements the fresh
+					// counter this same cycle.
+					this.#delay.cancel(OP_FIRE2);
+					this.#inFlight2 = false;
+					this.#counter2 = this.#reload12() - 1;
+				} else {
+					// Like a timer commit, the resync reads the live AUDF —
+					// timertiming pins the same write deadline for both. +1
+					// on the fast path because the channel logic below
+					// decrements the fresh counter this same cycle.
+					this.#counter1 = this.#audf1 + (this.#fastClock1 ? 2 : 1);
+					this.#counter2 = this.#audf2 + 1;
+				}
+			}
 			// Commits read the *live* AUDF — that's the write deadline.
 			if (due & OP_COMMIT1) {
 				this.#counter1 = this.#audf1 + 1;
@@ -349,6 +482,9 @@ export class Pokey implements Memory {
 				this.#inFlight1 = false;
 				this.#out1 = this.#flip(this.#out1, this.#audc1, 0x80 >> 1);
 				this.#raiseIrq(IRQ_TIMER1);
+				if (this.#twoTone && this.#twoToneUsesTimer1) {
+					this.#twoToneFire(true);
+				}
 			}
 			if (due & OP_COMMIT3) {
 				this.#counter3 = this.#audf3 + 1;
@@ -362,17 +498,27 @@ export class Pokey implements Memory {
 			// still affects the next period ("the late reset from channel
 			// 2"). -3 for the late commit, +1 because the channel logic
 			// below already decrements the fresh counter this same cycle.
+			if (due & OP_SERIAL_TICK && !this.#initMode) {
+				this.#serialClockTick();
+			}
 			if (due & OP_FIRE2) {
 				this.#inFlight2 = false;
 				this.#out2 = this.#flip(this.#out2, this.#audc2, 0x80 >> 2);
 				this.#raiseIrq(IRQ_TIMER2);
 				this.#counter2 = this.#reload12() - (this.#fastClock1 ? 2 : 0);
+				if (!this.#initMode && this.#transmitClock === 2) {
+					this.#delay.schedule(2, OP_SERIAL_TICK);
+				}
+				if (this.#twoTone) this.#twoToneFire(this.#fastClock1);
 			}
 			if (due & OP_FIRE4) {
 				this.#inFlight4 = false;
 				this.#out4 = this.#flip(this.#out4, this.#audc4, 0x80 >> 4);
 				this.#raiseIrq(IRQ_TIMER4);
 				this.#counter4 = this.#reload34() - (this.#fastClock3 ? 2 : 0);
+				if (!this.#initMode && this.#transmitClock === 4) {
+					this.#delay.schedule(2, OP_SERIAL_TICK);
+				}
 			}
 		}
 
@@ -402,11 +548,18 @@ export class Pokey implements Memory {
 				this.#counter1 = this.#reload1();
 				this.#out1 = this.#flip(this.#out1, this.#audc1, 0x80 >> 1);
 				this.#raiseIrq(IRQ_TIMER1);
+				if (this.#twoTone && this.#twoToneUsesTimer1) {
+					this.#twoToneFire(false);
+				}
 			}
 			if (slowTick && --this.#counter2 <= 0) {
 				this.#counter2 = this.#reload2();
 				this.#out2 = this.#flip(this.#out2, this.#audc2, 0x80 >> 2);
 				this.#raiseIrq(IRQ_TIMER2);
+				if (this.#transmitClock === 2) {
+					this.#delay.schedule(2, OP_SERIAL_TICK);
+				}
+				if (this.#twoTone) this.#twoToneFire(false);
 			}
 		}
 
@@ -434,6 +587,9 @@ export class Pokey implements Memory {
 				this.#counter4 = this.#reload4();
 				this.#out4 = this.#flip(this.#out4, this.#audc4, 0x80 >> 4);
 				this.#raiseIrq(IRQ_TIMER4);
+				if (this.#transmitClock === 4) {
+					this.#delay.schedule(2, OP_SERIAL_TICK);
+				}
 			}
 		}
 
@@ -556,6 +712,12 @@ export class Pokey implements Memory {
 				this.#out3 = this.#out4 = 1;
 				break;
 			}
+			case 0x0d:
+				// SEROUT: the holding register. Overwrites any byte still
+				// waiting; the transfer to the shifter happens on a
+				// transmit-clock edge.
+				this.#serout = value;
+				break;
 			case 0x0e:
 				// IRQEN: writing 0 to a bit both disables the source and
 				// clears its IRQST latch.
@@ -572,17 +734,22 @@ export class Pokey implements Memory {
 				// cycles after this write; our offsets carry one extra
 				// cycle for the write-to-tick ordering (Acid800
 				// inittiming pins all four phase cases).
-				// TODO: keyboard scan/debounce gating (bits 0-1), two-tone
-				// mode (bit 3), serial clocking modes (bits 4-6).
+				// TODO: keyboard scan/debounce gating (bits 0-1).
 				const wasInit = this.#initMode;
+				this.#skctl = value;
 				this.#initMode = (value & 0x03) === 0;
+				this.#twoTone = (value & 0x08) !== 0;
+				this.#forceBreak = (value & 0x80) !== 0;
 				if (this.#initMode) {
 					// The 9/17-bit counter is not reset here — it fills
 					// gradually, one fillCycle() per machine cycle,
-					// starting the cycle after this write.
+					// starting the cycle after this write. The serial
+					// shifter is halted but keeps its contents; only the
+					// bit-cell phase resets.
 					if (!wasInit) this.#initFillDelay = true;
 					this.#poly4.reset();
 					this.#poly5.reset();
+					this.#serialHalfBit = false;
 				} else if (wasInit) {
 					this.#initFillDelay = false;
 					this.#clock64 = 25;

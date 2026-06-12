@@ -56,6 +56,9 @@ export class AnticGtia implements Memory {
 
 	// wsync
 	wsync = false;
+	// A WSYNC write landing while the stall is already armed (an RMW
+	// instruction's double write) pushes the release one cycle later.
+	wsyncLate = false;
 
 	// Internal
 	instruction: number = 0;
@@ -207,6 +210,7 @@ export class AnticGtia implements Memory {
 		this.msc = 0;
 
 		this.wsync = false;
+		this.wsyncLate = false;
 
 		this.instruction = 0;
 		this.hires = false;
@@ -598,8 +602,10 @@ export class AnticGtia implements Memory {
 					break;
 
 				case 0x0a:
-					// WSYNC
-					// console.log("WSYNC", this.vcount, this.hpos);
+					// WSYNC. A second write while the stall is already
+					// armed (an RMW instruction's double write) delays the
+					// release a cycle — Acid800 antic_wsync's INC check.
+					if (this.wsync) this.wsyncLate = true;
 					this.wsync = true;
 					break;
 
@@ -781,9 +787,11 @@ export class AnticGtia implements Memory {
 
 		// The stalled fetch completes at cycle 104 (the next instruction's
 		// remaining cycles run from 105) — verified against Acid800's
-		// cycle-counted VCOUNT samples.
-		if (this.wsync && i === 104) {
+		// cycle-counted VCOUNT samples. A double-armed WSYNC completes one
+		// cycle later.
+		if (this.wsync && i === (this.wsyncLate ? 105 : 104)) {
 			this.wsync = false;
+			this.wsyncLate = false;
 		}
 
 		this.rdy = !this.wsync;

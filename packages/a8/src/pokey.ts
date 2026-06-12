@@ -28,9 +28,10 @@ const OP_FIRE4 = 0x20;
  *
  * Modeled: the four audio channels (AUDF/AUDC/AUDCTL with 16-bit linking and
  * 1.79MHz clocking) with cycle-exact timers, STIMER, and timer IRQs; the
- * polynomial counters and RANDOM; and the keyboard-facing registers —
- * KBCODE, the keyboard/Break bits of IRQEN/IRQST, and the key/Shift sense
- * bits of SKSTAT.
+ * polynomial counters and RANDOM; SKCTL initialization mode with the two
+ * free-running slow clocks; and the keyboard-facing registers — KBCODE, the
+ * keyboard/Break bits of IRQEN/IRQST, and the key/Shift sense bits of
+ * SKSTAT.
  *
  * The host clocks the chip by calling {@link cycle} once per machine cycle;
  * the return value is the summed audio output (0-60), for the host to sample
@@ -39,8 +40,8 @@ const OP_FIRE4 = 0x20;
  * There is no keyboard scan timing yet: key events latch the registers and
  * raise the IRQ line immediately.
  *
- * TODO: serial I/O, high-pass filters, two-tone mode, SKCTL (including init
- * mode and the keyboard scan/debounce modes), the IRQEN→IRQ-line
+ * TODO: serial I/O, high-pass filters, two-tone mode, SKCTL's keyboard
+ * scan/debounce gating and serial clocking bits, the IRQEN→IRQ-line
  * propagation delay, POT scanning, and real keyboard scan timing.
  */
 export class Pokey implements Memory {
@@ -71,10 +72,23 @@ export class Pokey implements Memory {
 	#counter3 = 0;
 	#counter4 = 0;
 
-	// The shared base divider for the 64KHz/15KHz clock that all
-	// non-1.79MHz channels tick on. TODO: exact power-on/init phase
-	// (SKCTL init resets it; Acid800's inittiming measures it).
-	#baseDivider = 0;
+	// The two free-running slow clocks; AUDCTL bit 0 picks which one the
+	// slow channels listen to. Each counts down to its next tick. SKCTL
+	// init mode holds both in reset; leaving init restarts them at fixed
+	// offsets (calibrated against Acid800's inittiming).
+	#clock64 = 0;
+	#clock15 = 0;
+
+	// SKCTL ($D20F write) bits 0-1 clear = initialization mode. Power-on
+	// biases to init (the chip has no reset line; this is the benign
+	// corner of its indeterminate power-up space, and it's what makes
+	// RANDOM deterministic from boot). Only the init-mode state is kept;
+	// the other SKCTL bits are unmodeled for now.
+	#initMode = true;
+	// The cycle carrying the init-entry write still shifts the 9/17-bit
+	// poly normally; the ones-fill starts the cycle after (pokey_noise's
+	// hot-stop samples sit exactly on this boundary).
+	#initFillDelay = false;
 
 	// The timer fire pipelines, as delay-line events. Fast (1.79MHz)
 	// unlinked channels: underflow, then 3 cycles later the counter reloads
@@ -118,8 +132,8 @@ export class Pokey implements Memory {
 
 	#poly4 = new LinearFeedbackShiftRegister(0xc);
 	#poly5 = new LinearFeedbackShiftRegister(0x14);
-	#poly9 = new LinearFeedbackShiftRegister(0x108);
-	#poly17 = new LinearFeedbackShiftRegister(0x10800);
+	#poly9 = new PolyCounter(5, 9);
+	#poly17 = new PolyCounter(5, 17);
 
 	/** The IRQ output line (true = asserted). */
 	get irq(): boolean {
@@ -194,7 +208,9 @@ export class Pokey implements Memory {
 		this.#counter1 = this.#counter2 = this.#counter3 = this.#counter4 = 0;
 		this.#shadowAudf1 = this.#shadowAudf2 = 0;
 		this.#shadowAudf3 = this.#shadowAudf4 = 0;
-		this.#baseDivider = 0;
+		this.#clock64 = this.#clock15 = 0;
+		this.#initMode = true;
+		this.#initFillDelay = false;
 		this.#delay.reset();
 		this.#inFlight1 = this.#inFlight2 = false;
 		this.#inFlight3 = this.#inFlight4 = false;
@@ -280,17 +296,32 @@ export class Pokey implements Memory {
 	 * the four channels, 0-60 (each channel contributes its 0-15 volume).
 	 */
 	cycle(): number {
-		this.#poly4.cycle();
-		this.#poly5.cycle();
-		this.#poly9.cycle();
-		this.#poly17.cycle();
-
-		// The shared 64KHz/15KHz base clock (AUDCTL bit 0 picks the rate
-		// for every channel not running at 1.79MHz).
+		// Init mode holds the polynomial counters and both slow clocks in
+		// reset. The 1.79MHz channels run on — that's the machine clock.
 		let slowTick = false;
-		if (++this.#baseDivider >= this.#slowDivisor) {
-			this.#baseDivider = 0;
-			slowTick = true;
+		if (this.#initMode) {
+			if (this.#initFillDelay) {
+				this.#initFillDelay = false;
+				this.#poly9.cycle();
+				this.#poly17.cycle();
+			} else {
+				this.#poly9.fillCycle();
+				this.#poly17.fillCycle();
+			}
+		} else {
+			this.#poly4.cycle();
+			this.#poly5.cycle();
+			this.#poly9.cycle();
+			this.#poly17.cycle();
+
+			if (--this.#clock64 <= 0) {
+				this.#clock64 = 28;
+				if (this.#slowDivisor === 28) slowTick = true;
+			}
+			if (--this.#clock15 <= 0) {
+				this.#clock15 = 114;
+				if (this.#slowDivisor === 114) slowTick = true;
+			}
 		}
 
 		this.#underflowed1 = false;
@@ -424,13 +455,11 @@ export class Pokey implements Memory {
 			// KBCODE ($D209): the last latched key code.
 			case 0x09:
 				return this.#kbcode;
-			// RANDOM ($D20A): the *inverted* high bits of the free-running
-			// 17-bit polynomial counter (9-bit with AUDCTL bit 7).
+			// RANDOM ($D20A): the top eight bits of the free-running
+			// 17-bit polynomial counter (9-bit with AUDCTL bit 7). Reads
+			// $FF while init mode holds the counter in reset.
 			case 0x0a:
-				return (
-					~(this.#usePoly9 ? this.#poly9.register : this.#poly17.register) &
-					0xff
-				);
+				return this.#usePoly9 ? this.#poly9.random() : this.#poly17.random();
 			// IRQST ($D20E)
 			case 0x0e:
 				return this.#irqst;
@@ -521,22 +550,103 @@ export class Pokey implements Memory {
 				this.#irqen = value;
 				this.#irqst |= ~value & 0xff;
 				break;
+			case 0x0f: {
+				// SKCTL. Clearing bits 0-1 enters initialization mode: the
+				// slow clocks and polynomial counters are held in reset
+				// (RANDOM locks at $FF). Timers, IRQ state, KBCODE, the
+				// audio registers, and the outputs are NOT reset. Leaving
+				// init restarts the clocks at fixed offsets — the hardware
+				// fires a period-0 timer IRQ 24 (64KHz) / 83 (15KHz)
+				// cycles after this write; our offsets carry one extra
+				// cycle for the write-to-tick ordering (Acid800
+				// inittiming pins all four phase cases).
+				// TODO: keyboard scan/debounce gating (bits 0-1), two-tone
+				// mode (bit 3), serial clocking modes (bits 4-6).
+				const wasInit = this.#initMode;
+				this.#initMode = (value & 0x03) === 0;
+				if (this.#initMode) {
+					// The 9/17-bit counter is not reset here — it fills
+					// gradually, one fillCycle() per machine cycle,
+					// starting the cycle after this write.
+					if (!wasInit) this.#initFillDelay = true;
+					this.#poly4.reset();
+					this.#poly5.reset();
+				} else if (wasInit) {
+					this.#initFillDelay = false;
+					this.#clock64 = 25;
+					this.#clock15 = 84;
+				}
+				break;
+			}
 		}
 	}
 }
 
+/**
+ * The 9/17-bit polynomial counter: a right-shifting Fibonacci LFSR with XOR
+ * feedback from bit 0 and one tap (bit 5 in both widths — the 17-bit poly
+ * is x^17+x^12+1, the 9-bit x^9+x^4+1; both maximal). RANDOM reads the top
+ * eight bits uninverted, matching the Altirra Hardware Reference's
+ * published 9-bit progression. SKCTL init fills the register with ones
+ * from the top (see fillCycle), saturating at all-ones except bit 0 — the
+ * all-ones state's predecessor — which both locks RANDOM at $FF and lands
+ * Acid800 pokey_noise's post-init samples ($95 and $08) on our
+ * exit-write-to-read cycle count.
+ */
+class PolyCounter {
+	#tap: number;
+	#top: number;
+	#windowShift: number;
+	#resetState: number;
+
+	state: number;
+
+	constructor(tap: number, width: number) {
+		this.#tap = tap;
+		this.#top = width - 1;
+		this.#windowShift = width - 8;
+		this.#resetState = ((1 << width) - 1) & ~1;
+		this.state = this.#resetState;
+	}
+
+	cycle(): void {
+		const feedback = (this.state ^ (this.state >> this.#tap)) & 1;
+		this.state = (this.state >> 1) | (feedback << this.#top);
+	}
+
+	/**
+	 * One init-mode cycle: ones shift in from the top with bit 0 held low,
+	 * saturating at the reset state after `width` cycles. Acid800
+	 * pokey_noise's hot-stop samples ($E9/$F0 three cycles into init) pin
+	 * this gradual fill — re-entering init does not snap RANDOM to $FF.
+	 */
+	fillCycle(): void {
+		this.state = ((this.state >> 1) | (1 << this.#top)) & ~1;
+	}
+
+	/** RANDOM: the register's top eight bits. */
+	random(): number {
+		return (this.state >> this.#windowShift) & 0xff;
+	}
+
+	/** Low bits for the audio channels' noise sampling. */
+	get register(): number {
+		return this.state & 0xff;
+	}
+
+	reset(): void {
+		this.state = this.#resetState;
+	}
+}
+
 class LinearFeedbackShiftRegister {
-	// The XOR feedback taps: $C for 4-bit, $14 for 5-bit, $108 for 9-bit,
-	// $10800 for 17-bit.
+	// The XOR feedback taps: $C for 4-bit, $14 for 5-bit.
 	readonly #mask: number;
 
 	// Internal counter state.
 	#state = 0x1;
 
-	/**
-	 * The output stream's last 8 bits — what the CPU sees through RANDOM and
-	 * what the channels sample.
-	 */
+	/** The output stream's last 8 bits — what the channels sample. */
 	register = 0;
 
 	constructor(mask: number) {

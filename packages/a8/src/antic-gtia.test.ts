@@ -75,10 +75,12 @@ function makeAnticGtia() {
 const NMIEN = 0xd40e;
 const NMIRES_NMIST = 0xd40f;
 
-// Run cycles 7 and 8 of the current line: the NMIST status latch (7) and
-// the NMI line pull (8).
+// Run cycles 5 through 8 of the current line: the last-line arm (5), the
+// NMIST status latch (7), and the NMI line pull (8).
 function latchAndPull(ag: AnticGtia): void {
-	ag.hpos = 7;
+	ag.hpos = 5;
+	ag.beforeCpu();
+	ag.beforeCpu();
 	ag.beforeCpu();
 	ag.beforeCpu();
 }
@@ -187,8 +189,10 @@ test("the VBI clears the DLI status bit", () => {
 	ag.modeLineHeight = 8;
 	ag.modeLineNo = 7;
 	ag.vcount = 100;
-	ag.hpos = 7;
+	ag.hpos = 5;
+	ag.beforeCpu(); // arm the last-line decision
 	ag.beforeCpu();
+	ag.beforeCpu(); // cycle 7: the latch
 	expect(ag.read(NMIRES_NMIST) & 0xc0).toBe(0x80);
 
 	ag.vcount = 248;

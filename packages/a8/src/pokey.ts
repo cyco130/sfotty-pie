@@ -1,4 +1,5 @@
 import type { Memory } from "@sfotty-pie/sfotty";
+import { DelayLine } from "./delay-line.ts";
 
 // IRQEN/IRQST bits (only the ones modeled so far).
 const IRQ_BREAK = 0x80;
@@ -13,6 +14,14 @@ const SKSTAT_KEY_HELD = 0x04;
 
 // AUDC bits
 const AUDC_VOLUME_ONLY = 0x10;
+
+// Delay-line ops: the timer fire pipelines (see the comments in `cycle`).
+const OP_COMMIT1 = 0x01;
+const OP_FIRE1 = 0x02;
+const OP_COMMIT3 = 0x04;
+const OP_FIRE3 = 0x08;
+const OP_FIRE2 = 0x10;
+const OP_FIRE4 = 0x20;
 
 /**
  * POKEY. 16 registers mirrored every $10 across $D200-$D2FF.
@@ -67,18 +76,23 @@ export class Pokey implements Memory {
 	// (SKCTL init resets it; Acid800's inittiming measures it).
 	#baseDivider = 0;
 
-	// Fast (1.79MHz) unlinked channels fire through a 4-cycle pipeline:
-	// underflow, then 3 cycles later the counter reloads (from the live
-	// AUDF — that's the write deadline), and the flip/IRQ lands one cycle
-	// after that. This derives the N+4 period, the fire-2 AUDF deadline,
-	// and the STIMER preemption boundary, all per Acid800.
-	#pendingFire1 = 0;
-	#pendingFire3 = 0;
+	// The timer fire pipelines, as delay-line events. Fast (1.79MHz)
+	// unlinked channels: underflow, then 3 cycles later the counter reloads
+	// (from the live AUDF — that's the write deadline), and the flip/IRQ
+	// lands one cycle after that — deriving the N+4 period, the fire-2 AUDF
+	// deadline, and the STIMER preemption boundary, all per Acid800. In
+	// 16-bit linked mode the high half fires (and reloads, late) 3 cycles
+	// after the underflow.
+	#delay = new DelayLine(8);
 
-	// In 16-bit linked mode the high half fires 3 machine cycles after the
-	// low borrow that wraps it (Acid800's timing table).
-	#pendingFire2 = 0;
-	#pendingFire4 = 0;
+	// A channel's counter holds still while its fire is in flight; the
+	// this-cycle underflow flags resolve the STIMER write race.
+	#inFlight1 = false;
+	#inFlight2 = false;
+	#inFlight3 = false;
+	#inFlight4 = false;
+	#underflowed1 = false;
+	#underflowed3 = false;
 
 	// Reloads sample AUDF one cycle behind the CPU's view: a write landing
 	// two cycles before a fire still affects its reload, one cycle before
@@ -181,8 +195,10 @@ export class Pokey implements Memory {
 		this.#shadowAudf1 = this.#shadowAudf2 = 0;
 		this.#shadowAudf3 = this.#shadowAudf4 = 0;
 		this.#baseDivider = 0;
-		this.#pendingFire1 = this.#pendingFire3 = 0;
-		this.#pendingFire2 = this.#pendingFire4 = 0;
+		this.#delay.reset();
+		this.#inFlight1 = this.#inFlight2 = false;
+		this.#inFlight3 = this.#inFlight4 = false;
+		this.#underflowed1 = this.#underflowed3 = false;
 		this.#out1 = this.#out2 = this.#out3 = this.#out4 = 0;
 		this.#usePoly9 = false;
 		this.#fastClock1 = false;
@@ -277,37 +293,44 @@ export class Pokey implements Memory {
 			slowTick = true;
 		}
 
-		if (this.#pendingFire1 > 0) {
-			if (--this.#pendingFire1 === 1) {
-				this.#counter1 = this.#audf1 + 1; // live: writes to fire-2 count
-			} else if (this.#pendingFire1 === 0) {
+		this.#underflowed1 = false;
+		this.#underflowed3 = false;
+
+		const due = this.#delay.tick();
+		if (due) {
+			// Commits read the *live* AUDF — that's the write deadline.
+			if (due & OP_COMMIT1) {
+				this.#counter1 = this.#audf1 + 1;
+			}
+			if (due & OP_FIRE1) {
+				this.#inFlight1 = false;
 				this.#out1 = this.#flip(this.#out1, this.#audc1, 0x80 >> 1);
 				this.#raiseIrq(IRQ_TIMER1);
 			}
-		}
-		if (this.#pendingFire3 > 0) {
-			if (--this.#pendingFire3 === 1) {
+			if (due & OP_COMMIT3) {
 				this.#counter3 = this.#audf3 + 1;
-			} else if (this.#pendingFire3 === 0) {
+			}
+			if (due & OP_FIRE3) {
+				this.#inFlight3 = false;
 				this.#out3 = this.#flip(this.#out3, this.#audc3, 0x80 >> 3);
 			}
-		}
-
-		// Delayed high-half fires from earlier 16-bit underflows. The
-		// counter reload also commits here — 3 cycles late — so an AUDF
-		// write landing just after the underflow still affects the next
-		// period (Acid800: "the late reset from channel 2").
-		if (this.#pendingFire2 > 0 && --this.#pendingFire2 === 0) {
-			this.#out2 = this.#flip(this.#out2, this.#audc2, 0x80 >> 2);
-			this.#raiseIrq(IRQ_TIMER2);
-			// -3 for the late commit, +1 because the channel logic below
-			// already decrements the fresh counter this same cycle.
-			this.#counter2 = this.#reload12() - (this.#fastClock1 ? 2 : 0);
-		}
-		if (this.#pendingFire4 > 0 && --this.#pendingFire4 === 0) {
-			this.#out4 = this.#flip(this.#out4, this.#audc4, 0x80 >> 4);
-			this.#raiseIrq(IRQ_TIMER4);
-			this.#counter4 = this.#reload34() - (this.#fastClock3 ? 2 : 0);
+			// The linked high halves fire and reload together — the late
+			// reload is why an AUDF write landing just after the underflow
+			// still affects the next period ("the late reset from channel
+			// 2"). -3 for the late commit, +1 because the channel logic
+			// below already decrements the fresh counter this same cycle.
+			if (due & OP_FIRE2) {
+				this.#inFlight2 = false;
+				this.#out2 = this.#flip(this.#out2, this.#audc2, 0x80 >> 2);
+				this.#raiseIrq(IRQ_TIMER2);
+				this.#counter2 = this.#reload12() - (this.#fastClock1 ? 2 : 0);
+			}
+			if (due & OP_FIRE4) {
+				this.#inFlight4 = false;
+				this.#out4 = this.#flip(this.#out4, this.#audc4, 0x80 >> 4);
+				this.#raiseIrq(IRQ_TIMER4);
+				this.#counter4 = this.#reload34() - (this.#fastClock3 ? 2 : 0);
+			}
 		}
 
 		if (this.#link12) {
@@ -317,16 +340,20 @@ export class Pokey implements Memory {
 			// forced low. Pinned by Acid800's timer-timing asserts — its
 			// comment table disagrees with its own asserts here.
 			this.#out1 = 0;
-			if (this.#pendingFire2 === 0 && (this.#fastClock1 || slowTick)) {
+			if (!this.#inFlight2 && (this.#fastClock1 || slowTick)) {
 				if (--this.#counter2 <= 0) {
 					this.#raiseIrq(IRQ_TIMER1);
-					this.#pendingFire2 = 3; // reload happens there
+					this.#inFlight2 = true;
+					this.#delay.schedule(3, OP_FIRE2); // reload happens there
 				}
 			}
 		} else {
 			if (this.#fastClock1) {
-				if (this.#pendingFire1 === 0 && --this.#counter1 <= 0) {
-					this.#pendingFire1 = 4;
+				if (!this.#inFlight1 && --this.#counter1 <= 0) {
+					this.#inFlight1 = true;
+					this.#underflowed1 = true;
+					this.#delay.schedule(3, OP_COMMIT1);
+					this.#delay.schedule(4, OP_FIRE1);
 				}
 			} else if (slowTick && --this.#counter1 <= 0) {
 				this.#counter1 = this.#reload1();
@@ -342,15 +369,19 @@ export class Pokey implements Memory {
 
 		if (this.#link34) {
 			this.#out3 = 0;
-			if (this.#pendingFire4 === 0 && (this.#fastClock3 || slowTick)) {
+			if (!this.#inFlight4 && (this.#fastClock3 || slowTick)) {
 				if (--this.#counter4 <= 0) {
-					this.#pendingFire4 = 3; // reload happens there
+					this.#inFlight4 = true;
+					this.#delay.schedule(3, OP_FIRE4); // reload happens there
 				}
 			}
 		} else {
 			if (this.#fastClock3) {
-				if (this.#pendingFire3 === 0 && --this.#counter3 <= 0) {
-					this.#pendingFire3 = 4;
+				if (!this.#inFlight3 && --this.#counter3 <= 0) {
+					this.#inFlight3 = true;
+					this.#underflowed3 = true;
+					this.#delay.schedule(3, OP_COMMIT3);
+					this.#delay.schedule(4, OP_FIRE3);
 				}
 			} else if (slowTick && --this.#counter3 <= 0) {
 				this.#counter3 = this.#reload3();
@@ -471,9 +502,15 @@ export class Pokey implements Memory {
 					? this.#reload34() + (this.#fastClock3 ? 1 : 0)
 					: this.#reload4();
 				// A STIMER landing on the underflow cycle itself still
-				// cancels the fire (pending === 4 means "set this cycle").
-				if (this.#pendingFire1 === 4) this.#pendingFire1 = 0;
-				if (this.#pendingFire3 === 4) this.#pendingFire3 = 0;
+				// cancels that fire; one cycle later it's in flight to stay.
+				if (this.#underflowed1) {
+					this.#delay.cancel(OP_COMMIT1 | OP_FIRE1);
+					this.#inFlight1 = false;
+				}
+				if (this.#underflowed3) {
+					this.#delay.cancel(OP_COMMIT3 | OP_FIRE3);
+					this.#inFlight3 = false;
+				}
 				this.#out1 = this.#out2 = 0;
 				this.#out3 = this.#out4 = 1;
 				break;

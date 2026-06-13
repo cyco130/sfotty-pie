@@ -6,7 +6,8 @@ export type AtariFileFormat =
 	| "raw-cart-16k"
 	| "cart"
 	| "os-rom-10k"
-	| "os-rom-16k";
+	| "os-rom-16k"
+	| "xegs-rom-32k";
 
 export function detectFileFormat(
 	contents: Uint8Array,
@@ -37,6 +38,20 @@ export function detectFileFormat(
 
 	if ((!name || name.match(/\.(?:rom|bin)$/i)) && isOsRom(contents)) {
 		return contents.length === 16384 ? "os-rom-16k" : "os-rom-10k";
+	}
+
+	// The XEGS internal ROM is a 32K dump laid out as two 8K $A000-$BFFF carts
+	// (the built-in game and BASIC) followed by the 16K XL/XE OS. Detect it
+	// structurally from its pieces rather than by signature.
+	if (
+		(!name || name.match(/\.(?:rom|bin|raw)$/i)) &&
+		contents.length === 32768 &&
+		getRawCartType(contents.subarray(0, 0x2000)) === "raw-cart-8k-a000-bfff" &&
+		getRawCartType(contents.subarray(0x2000, 0x4000)) ===
+			"raw-cart-8k-a000-bfff" &&
+		isOsRom(contents.subarray(0x4000, 0x8000))
+	) {
+		return "xegs-rom-32k";
 	}
 
 	if (

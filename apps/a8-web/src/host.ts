@@ -301,11 +301,12 @@ export class EmulatorHost {
 		this.staged.value = { ...this.staged.value, basicDisabled };
 	}
 
-	/** Apply the staged config: adopt it and power-cycle into it. */
+	/** Apply the staged config: adopt it, power-cycle into it, close the menu. */
 	applyConfig(): void {
 		if (!this.dirty.value) return;
 		this.config.value = this.staged.value;
 		this.#rebuild();
+		this.closeMenu();
 	}
 
 	/** Discard staged edits, snapping back to the running config. */

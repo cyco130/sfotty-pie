@@ -804,11 +804,11 @@ function rmwZeropageX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 function rmwZeropageY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 	// 1     PC      R  fetch opcode, increment PC
 	// 2     PC      R  fetch address, increment PC
-	// 3   address   R  read from address, add index register X to it
-	// 4  address+X* R  read from effective address
-	// 5  address+X* W  write the value back to effective address,
+	// 3   address   R  read from address, add index register Y to it
+	// 4  address+Y* R  read from effective address
+	// 5  address+Y* W  write the value back to effective address,
 	//                  and do the operation on it
-	// 6  address+X* W  write the new value to effective address
+	// 6  address+Y* W  write the new value to effective address
 
 	// * The high byte of the effective address is always zero,
 	//   i.e. page boundary crossings are not handled.
@@ -851,14 +851,14 @@ function rmwAbsoluteY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 	// 1    PC       R  fetch opcode, increment PC
 	// 2    PC       R  fetch low byte of address, increment PC
 	// 3    PC       R  fetch high byte of address,
-	//                  add index register X to low address byte,
+	//                  add index register Y to low address byte,
 	//                  increment PC
-	// 4  address+X* R  read from effective address,
+	// 4  address+Y* R  read from effective address,
 	//                  fix the high byte of effective address
-	// 5  address+X  R  re-read from effective address
-	// 6  address+X  W  write the value back to effective address,
+	// 5  address+Y  R  re-read from effective address
+	// 6  address+Y  W  write the value back to effective address,
 	//                  and do the operation on it
-	// 7  address+X  W  write the new value to effective address
+	// 7  address+Y  W  write the new value to effective address
 
 	// * The high byte of the effective address may be invalid
 	//   at this time, i.e. it may be smaller by $100.

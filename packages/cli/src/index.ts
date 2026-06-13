@@ -16,7 +16,7 @@ async function main() {
 		process.exit(1);
 	}
 
-	// Read the first 6 bytes of the file to determine the file type
+	// Read the file; its 6-byte magic determines whether it's a valid image.
 	const buffer = await fs.promises.readFile(filename);
 
 	const expected = Buffer.from("SFOTTY");
@@ -198,7 +198,7 @@ class BufferEmptyError extends Error {
 
 class BreakError extends Error {
 	constructor() {
-		super("Buffer is empty");
+		super("BRK encountered");
 		this.name = "BreakError";
 		Object.setPrototypeOf(this, new.target.prototype);
 	}

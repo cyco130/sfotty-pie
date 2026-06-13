@@ -564,8 +564,8 @@ export class AnticGtia implements Memory {
 					break;
 				case 0x1d:
 					// GRACTL
-					this.enableMissiles = !!(value & 0x01);
 					this.enablePlayers = !!(value & 0x02);
+					this.enableMissiles = !!(value & 0x01);
 					break;
 				case 0x1e:
 					// HITCLR
@@ -1457,40 +1457,8 @@ export class AnticGtia implements Memory {
 			offset = 512 + n * 128;
 		}
 
-		switch (n) {
-			case 0:
-				{
-					const addr = this.pmbase * 256 + offset;
-					this.#dmaRead(
-						addr + Math.floor(this.vcount / this.verticalPmResolution),
-					);
-				}
-				break;
-			case 1:
-				{
-					const addr = this.pmbase * 256 + offset;
-					this.#dmaRead(
-						addr + Math.floor(this.vcount / this.verticalPmResolution),
-					);
-				}
-				break;
-			case 2:
-				{
-					const addr = this.pmbase * 256 + offset;
-					this.#dmaRead(
-						addr + Math.floor(this.vcount / this.verticalPmResolution),
-					);
-				}
-				break;
-			case 3:
-				{
-					const addr = this.pmbase * 256 + offset;
-					this.#dmaRead(
-						addr + Math.floor(this.vcount / this.verticalPmResolution),
-					);
-				}
-				break;
-		}
+		const addr = this.pmbase * 256 + offset;
+		this.#dmaRead(addr + Math.floor(this.vcount / this.verticalPmResolution));
 
 		return true;
 	}
@@ -1532,8 +1500,6 @@ export class AnticGtia implements Memory {
 
 		this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
 	}
-
-	printed = 0;
 
 	#fetchPlayfield(cycle: number): boolean {
 		if (!this.playfieldWidth || !this.playfieldFetchRate) {

@@ -1,7 +1,7 @@
 {
   "name": "@sfotty-pie/spasm",
   "version": "0.0.0",
-  "description": "Multipass 6502 assembler.",
+  "description": "A work-in-progress 6502 cross-assembler/linker.",
   "keywords": [
     "6502",
     "assembler",

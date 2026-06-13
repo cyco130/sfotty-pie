@@ -1,6 +1,6 @@
 # `@sfotty-pie/sfotty`
 
-**Sfotty** is a cycle-exact 6502 (**S**ixty **F**ive **O**h **T**wo) emulator that can run on Node.js or in the browser. [MOS Technology 6502](https://en.wikipedia.org/wiki/MOS_Technology_6502) is an 8-bit microprocessor introduced in 1975 that powered many classic consoles and home computers such as Atari 2600, Atari 8-bit family, Apple II, Nintendo Entertainment System, Commodore 64, Atari Lynx, and BBC Micro.
+**Sfotty** is a cycle-exact 6502 (**S**ixty **F**ive **O**h **T**wo) emulator. [MOS Technology 6502](https://en.wikipedia.org/wiki/MOS_Technology_6502) is an 8-bit microprocessor introduced in 1975 that powered many classic consoles and home computers such as Atari 2600, Atari 8-bit family, Apple II, Nintendo Entertainment System, Commodore 64, Atari Lynx, and BBC Micro.
 
 Sfotty implements all documented and undocumented opcodes, and is verified cycle by cycle against the [SingleStepTests/65x02](https://github.com/SingleStepTests/65x02) test suite.
 

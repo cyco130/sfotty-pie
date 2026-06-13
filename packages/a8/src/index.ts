@@ -7,6 +7,16 @@ export {
 	detectFileFormat,
 	type AtariFileFormat,
 } from "./detect-file-format.ts";
-export { detectFirmware, type FirmwareInfo } from "./detect-firmware.ts";
+export {
+	detectFirmware,
+	type FirmwareInfo,
+	type FirmwareKey,
+	type FirmwareType,
+} from "./detect-firmware.ts";
+export {
+	preferredOsKeys,
+	preferredBasicKeys,
+	type FirmwareContext,
+} from "./firmware-preferences.ts";
 export { Atari, type AtariModel, type MachineConfig } from "./machine.ts";
 export * from "./timing-constants.ts";

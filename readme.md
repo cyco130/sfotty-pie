@@ -15,9 +15,9 @@ Currently, Sfotty Pie consists of the following packages:
 
 ## Apps
 
-| App                              | Description                                                    |
-| -------------------------------- | -------------------------------------------------------------- |
-| [Sfotty Pie A8 Web](apps/a8-web) | A browser-based Atari 8-bit emulator built on `@sfotty-pie/a8` |
+| App                                        | Description                                                    |
+| ------------------------------------------ | -------------------------------------------------------------- |
+| [Sfotty Pie A8 Web](apps/a8-web/readme.md) | A browser-based Atari 8-bit emulator built on `@sfotty-pie/a8` |
 
 ## License and credits
 

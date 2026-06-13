@@ -165,8 +165,8 @@ export class AnticGtia implements Memory {
 	// writes CONSOL.
 	consolWritten = 0x07;
 
-	// Triggers (inputs, pulled up). TODO: trig3 should track the cartridge
-	// sense line (RD5) on XL/XE instead of staying constant.
+	// Triggers (inputs, pulled up). On XL/XE the machine drives trig3 from the
+	// cartridge sense line (RD5): 1 = cartridge present, 0 = empty slot.
 	trig0 = 1;
 	trig1 = 1;
 	trig2 = 1;

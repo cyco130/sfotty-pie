@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
+import { Cartridge } from "./cartridge.ts";
 import { Atari, type AtariModel } from "./machine.ts";
 
 const TRIG0 = 0xd010;
@@ -70,7 +71,23 @@ test("the XL has no ports 2/3", () => {
 	machine.joystickDown(2, 0x0f);
 	machine.joystickTriggerDown(3);
 	expect(machine.read(PORTB, ReadOptions.NONE)).toBe(0xff);
-	expect(machine.read(TRIG3, ReadOptions.NONE)).toBe(1);
+	// TRIG3 is the cartridge sense on XL/XE (0 with no cart), not a trigger,
+	// so the joystick-3 press leaves it untouched.
+	expect(machine.read(TRIG3, ReadOptions.NONE)).toBe(0);
+});
+
+test("XL/XE TRIG3 senses the cartridge (RD5)", () => {
+	expect(makeMachine("800XL").read(TRIG3, ReadOptions.NONE)).toBe(0);
+
+	const cart = new Uint8Array(8192);
+	cart[8191] = 0xa0; // valid $A000 cart trailer
+	const withCart = new Atari({
+		model: "800XL",
+		os: new Uint8Array(16384),
+		basic: new Uint8Array(8192),
+		cartridge: new Cartridge(cart),
+	});
+	expect(withCart.read(TRIG3, ReadOptions.NONE)).toBe(1);
 });
 
 test("a stick switch pulls even an output-driven PORTA pin low", () => {

@@ -109,6 +109,17 @@ export class Atari implements Memory {
 			antic: this.anticGtia,
 			pbi: new Pbi(),
 		});
+
+		// On XL/XE, TRIG3 ($D013) senses the cartridge line (RD5): 1 = a
+		// cartridge is in the slot, 0 = empty. The OS reads it (against the
+		// stored GINTLK) to cold-start on a hot swap, and to skip the
+		// cartridge checksum entirely when the slot is empty — without this
+		// (TRIG3 stuck at 1) every Reset runs that checksum, which then fails
+		// on the BASIC/RAM banking and forces a cold start. On the 800 TRIG3
+		// is joystick 4's trigger and stays as-is.
+		if (xl) {
+			this.anticGtia.trig3 = cartridge ? 1 : 0;
+		}
 	}
 
 	/** The last value driven on the data bus (see {@link AtariBus.busData}). */

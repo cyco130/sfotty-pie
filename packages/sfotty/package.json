@@ -1,6 +1,6 @@
 {
   "name": "@sfotty-pie/sfotty",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Cycle-exact 6502 emulator.",
   "keywords": [
     "6502",

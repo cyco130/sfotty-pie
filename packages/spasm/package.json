@@ -1,6 +1,6 @@
 {
   "name": "@sfotty-pie/spasm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A work-in-progress 6502 cross-assembler/linker.",
   "keywords": [
     "6502",

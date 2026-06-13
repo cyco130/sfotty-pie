@@ -1,19 +1,56 @@
 import crc32 from "crc-32";
 
+/** A stable identifier for a known firmware, used by the preference ranking. */
+export type FirmwareKey =
+	| "altirra-os-800"
+	| "altirra-os-xlxe"
+	| "altirra-basic"
+	| "atarixx-os"
+	| "atarixx-basic"
+	| "os-a-ntsc"
+	| "os-a-pal"
+	| "os-b-ntsc"
+	| "os-b-ntsc-xformer"
+	| "os-b-pal"
+	| "os-1200xl-rev10"
+	| "os-1200xl-rev11"
+	| "xlxe-os-rev1"
+	| "xlxe-os-rev2"
+	| "xlxe-os-rev3"
+	| "xlxe-os-rev4-xegs"
+	| "xlxe-os-arabic-1987"
+	| "xlxe-os-arabic-1988"
+	| "basic-a"
+	| "basic-b"
+	| "basic-c"
+	| "xegs-missile-command"
+	| "xegs-combined";
+
+export type FirmwareType =
+	| "ntsc"
+	| "pal"
+	| "ntsc/pal"
+	| "xl/xe"
+	| "basic"
+	| "game"
+	| "combined";
+
 export interface FirmwareInfo {
+	key: FirmwareKey;
 	name: string;
 	origin: string;
 	notes?: string;
-	type: "ntsc" | "pal" | "ntsc/pal" | "xl/xe" | "basic" | "game" | "combined";
+	type: FirmwareType;
 }
 
 interface FirmwareDetectionInfo {
+	key: FirmwareKey;
 	size: number;
 	check: number | ((rom: Uint8Array) => boolean);
 	name: string | ((rom: Uint8Array) => string);
 	origin: string;
 	notes?: string;
-	type: "ntsc" | "pal" | "ntsc/pal" | "xl/xe" | "basic" | "game" | "combined";
+	type: FirmwareType;
 }
 
 const ALTIRRA_OS_BANNER = "AltirraOS ";
@@ -70,6 +107,7 @@ function getAtariPpBasicVersion(rom: Uint8Array): string | undefined {
 
 const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 	{
+		key: "altirra-os-800",
 		name: (rom) =>
 			`AltirraOS for 400/800 v${String.fromCharCode(
 				...rom.subarray(
@@ -89,6 +127,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "ntsc/pal",
 	},
 	{
+		key: "altirra-os-xlxe",
 		name: (rom) =>
 			`AltirraOS for XL/XE/XEGS v${String.fromCharCode(
 				...rom.subarray(0x17f8, 0x17f8 + 4),
@@ -103,6 +142,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "altirra-basic",
 		name: (rom) => `Altirra BASIC v${getAltirraBasicVersion(rom)}`,
 		size: 8192,
 		check: (rom) => !!getAltirraBasicVersion(rom),
@@ -112,6 +152,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "basic",
 	},
 	{
+		key: "atarixx-os",
 		name: (rom) => `Atari++ OS v${getAtariPpOsVersion(rom)}`,
 		size: 16384,
 		check: (rom) => getAtariPpOsVersion(rom) !== undefined,
@@ -120,6 +161,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "atarixx-basic",
 		name: (rom) => `Atari++ BASIC v${getAtariPpBasicVersion(rom)}`,
 		size: 8192,
 		check: (rom) => getAtariPpBasicVersion(rom) !== undefined,
@@ -128,6 +170,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "basic",
 	},
 	{
+		key: "os-a-ntsc",
 		name: "400/800 OS-A NTSC",
 		size: 10240,
 		check: 0xc1b3bb02,
@@ -135,6 +178,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "ntsc",
 	},
 	{
+		key: "os-a-pal",
 		name: "400/800 OS-A PAL",
 		size: 10240,
 		check: 0x72b3fed4,
@@ -142,6 +186,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "pal",
 	},
 	{
+		key: "os-b-ntsc",
 		name: "400/800 OS-B NTSC",
 		size: 10240,
 		check: 0xe86d61d,
@@ -151,6 +196,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "ntsc",
 	},
 	{
+		key: "os-b-ntsc-xformer",
 		name: "400/800 OS-B NTSC (Xformer patch)",
 		size: 10240,
 		check: 0x3e28a1fe,
@@ -160,6 +206,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "ntsc",
 	},
 	{
+		key: "os-b-pal",
 		name: "400/800 OS-B PAL",
 		size: 10240,
 		check: 0xc913dfc,
@@ -170,6 +217,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "pal",
 	},
 	{
+		key: "os-1200xl-rev10",
 		name: "1200XL OS revision 10",
 		size: 16384,
 		check: 0xc5c11546,
@@ -177,6 +225,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "os-1200xl-rev11",
 		name: "1200XL OS revision 11",
 		size: 16384,
 		check: 0x1a1d7b1b,
@@ -186,6 +235,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "xlxe-os-rev1",
 		name: "XL/XE OS revision 1",
 		size: 16384,
 		check: 0x643bcc98,
@@ -193,6 +243,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "xlxe-os-rev2",
 		name: "XL/XE OS revision 2",
 		size: 16384,
 		check: 0x1f9cd270,
@@ -200,6 +251,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "xlxe-os-rev3",
 		name: "XL/XE OS revision 3",
 		size: 16384,
 		check: 0x29f133f7,
@@ -207,6 +259,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "xlxe-os-rev4-xegs",
 		name: "XL/XE OS revision 4 for XEGS",
 		size: 16384,
 		check: 0x1eaf4002,
@@ -214,6 +267,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "xlxe-os-arabic-1987",
 		name: "XL/XE OS Arabic revision 1987",
 		size: 16384,
 		check: 0x45f47988,
@@ -221,6 +275,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "xlxe-os-arabic-1988",
 		name: "XL/XE OS Arabic revision 1988",
 		size: 16384,
 		check: 0xf0a236d3,
@@ -228,6 +283,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "xl/xe",
 	},
 	{
+		key: "basic-a",
 		name: "BASIC revision A",
 		size: 8192,
 		check: 0x4bec4de2,
@@ -236,6 +292,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "basic",
 	},
 	{
+		key: "basic-b",
 		name: "BASIC revision B",
 		size: 8192,
 		check: 0xf0202fb3,
@@ -244,6 +301,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "basic",
 	},
 	{
+		key: "basic-c",
 		name: "BASIC revision C",
 		size: 8192,
 		check: 0x7d684184,
@@ -253,6 +311,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "basic",
 	},
 	{
+		key: "xegs-missile-command",
 		name: "XEGS Missile Command",
 		size: 8192,
 		check: 0xbdca01fb,
@@ -260,6 +319,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		type: "game",
 	},
 	{
+		key: "xegs-combined",
 		name: "XEGS combined ROM",
 		size: 32768,
 		check: 0xd50260d1,
@@ -300,6 +360,7 @@ export function detectFirmware(rom: Uint8Array): FirmwareInfo | null {
 	}
 
 	return {
+		key: found.key,
 		name: typeof found.name === "function" ? found.name(rom) : found.name,
 		origin: found.origin,
 		notes: found.notes,

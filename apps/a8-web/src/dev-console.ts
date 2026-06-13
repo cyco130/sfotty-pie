@@ -2,6 +2,7 @@
 import { disassemble, ReadOptions } from "@sfotty-pie/sfotty";
 import { setCommandTrace } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
+import { builtinLibrary } from "./library.ts";
 
 function hex(value: number, width: number): string {
 	return value.toString(16).padStart(width, "0");
@@ -40,6 +41,10 @@ export function installDevConsole(host: EmulatorHost): void {
 				pc = (pc + length) & 0xffff;
 			}
 			console.log(lines.join("\n"));
+		},
+		// The built-in image library (merged committed + local folders).
+		get library() {
+			return builtinLibrary;
 		},
 		trace: {
 			cpu: (enabled: boolean) => host.setCpuTrace(enabled),

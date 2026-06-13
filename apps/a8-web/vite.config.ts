@@ -40,6 +40,9 @@ export default defineConfig({
 	// prompt in the browser. `host: true` exposes the server on the LAN so the
 	// device can reach it in the first place.
 	plugins: [preact(), tailwindcss(), basicSsl(), serveLocalRoms()],
+	// Treat ROM/image files as binary assets so the library's `?url` glob emits
+	// them as hashed assets instead of trying to parse them as source.
+	assetsInclude: ["**/*.rom"],
 	server: { host: true },
 	// @sfotty-pie/a8 is a linked workspace package built to dist. Excluding it
 	// from dep pre-bundling lets Vite pick up its rebuilds (from the root

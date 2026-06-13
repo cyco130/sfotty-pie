@@ -160,6 +160,28 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 					<KeyRow keys="F9" action="Break" />
 				</dl>
 			</section>
+
+			<section>
+				<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+					About
+				</h2>
+				<p class="text-sm text-neutral-600">
+					Sfotty Pie — an Atari 8-bit emulator. MIT-licensed.
+				</p>
+				<p class="mt-1 text-sm text-neutral-600">
+					Bundled firmware (AltirraOS, Altirra BASIC, Atari++) is used under its
+					own license.{" "}
+					<a
+						class="text-neutral-800 underline hover:text-black"
+						href="/legal/THIRD-PARTY-LICENSES.md"
+						target="_blank"
+						rel="noreferrer"
+					>
+						Third-party licenses
+					</a>
+					.
+				</p>
+			</section>
 		</aside>
 	);
 }

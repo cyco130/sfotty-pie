@@ -2,7 +2,10 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta
+			name="viewport"
+			content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+		/>
 		<title>Sfotty Pie — Atari 8-bit</title>
 		<style>
 			html,
@@ -11,6 +14,17 @@
 				margin: 0;
 				height: 100%;
 				background: #000;
+			}
+			html,
+			body {
+				/* It's an app, not a document: no rubber-band scroll, no
+				   pull-to-refresh, no double-tap zoom, no iOS font inflation,
+				   no tap-highlight flash on the touch controls. */
+				overflow: hidden;
+				overscroll-behavior: none;
+				touch-action: manipulation;
+				-webkit-text-size-adjust: 100%;
+				-webkit-tap-highlight-color: transparent;
 			}
 		</style>
 	</head>

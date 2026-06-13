@@ -92,10 +92,13 @@ export function App({ host }: { host: EmulatorHost }) {
 				}}
 			/>
 
-			{/* Offscreen: captures keystrokes (incl. dead-key composition). */}
+			{/* Offscreen: captures keystrokes (incl. dead-key composition).
+			    `inputmode=none` keeps it focusable for a physical keyboard
+			    without raising the on-screen keyboard on touch devices. */}
 			<input
 				ref={keyInput}
 				type="text"
+				inputmode="none"
 				autocapitalize="off"
 				autocomplete="off"
 				spellcheck={false}

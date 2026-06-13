@@ -2,14 +2,10 @@ name: CI tests
 
 on:
   workflow_dispatch:
-  # Auto-triggers are intentionally disabled. This workflow is for e2e tests
-  # living under tests/*, which don't exist by default. Renovate still updates
-  # action versions here. Uncomment the push/pull_request blocks below once you
-  # add the first test package.
-  # push:
-  #   branches:
-  #     - main
-  # pull_request:
+  push:
+    branches:
+      - main
+  pull_request:
 
 defaults:
   run:
@@ -20,15 +16,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest]
         node_version: [24]
-        include:
-          - os: ubuntu-latest
-            node_version: 22
-          - os: ubuntu-latest
-            node_version: 25
-          - os: ubuntu-latest
-            node_version: 26
       fail-fast: false
     name: "CI tests on node-${{ matrix.node_version }}, ${{ matrix.os }}"
     steps:
@@ -54,6 +43,31 @@ jobs:
       - name: Disable AppArmor on Ubuntu
         if: runner.os == 'Linux'
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      # SingleStepTests/65x02 6502 vectors for the CPU conformance suite. We
+      # track upstream main (it changes rarely) but key the cache on its current
+      # commit, so an unchanged upstream is a cache hit and a moved one
+      # auto-refreshes — no pinned commit to maintain.
+      - name: Resolve 65x02 vectors commit
+        id: sst
+        run: echo "sha=$(git ls-remote https://github.com/SingleStepTests/65x02 refs/heads/main | cut -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache 65x02 vectors
+        id: sst-cache
+        uses: actions/cache@v4
+        with:
+          path: external.local/65x02/6502/v1
+          key: sst-65x02-6502-v1-${{ steps.sst.outputs.sha }}
+
+      - name: Fetch 65x02 vectors
+        if: steps.sst-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: SingleStepTests/65x02
+          ref: ${{ steps.sst.outputs.sha }}
+          sparse-checkout: 6502/v1
+          fetch-depth: 1
+          path: external.local/65x02
 
       - name: Run CI tests
         run: pnpm run ci

@@ -83,7 +83,7 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 	return (
 		<aside class="flex max-h-[60vh] w-full shrink-0 flex-col gap-6 overflow-y-auto bg-white p-4 text-neutral-800 sm:h-full sm:max-h-none sm:w-72">
 			<div class="flex items-center justify-between">
-				<span class="text-lg font-semibold">Sfotty Pie</span>
+				<span class="text-lg font-semibold">Sfotty Pie A8 Web</span>
 				<button
 					type="button"
 					class="px-1 text-neutral-500 hover:text-neutral-900"
@@ -192,7 +192,7 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 					About
 				</h2>
 				<p class="text-sm text-neutral-600">
-					Sfotty Pie — an Atari 8-bit emulator. MIT-licensed.
+					Sfotty Pie A8 Web — an Atari 8-bit emulator. MIT-licensed.
 				</p>
 				<p class="mt-1 text-sm text-neutral-600">
 					Bundled firmware (AltirraOS, Altirra BASIC, Atari++) is used under its

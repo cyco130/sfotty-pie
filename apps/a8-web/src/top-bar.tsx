@@ -50,8 +50,11 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 			<div class="ml-auto flex items-center gap-2 text-neutral-400 sm:gap-4">
 				<button
 					type="button"
-					class="hover:text-white disabled:cursor-default disabled:opacity-50"
-					disabled={audio === "unavailable"}
+					class={
+						audio === "unavailable"
+							? "opacity-50 hover:text-white"
+							: "hover:text-white"
+					}
 					onClick={() => host.dispatch("AUDIO_TOGGLE")}
 				>
 					{AUDIO_LABEL[audio]}

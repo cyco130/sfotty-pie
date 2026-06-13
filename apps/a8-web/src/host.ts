@@ -25,6 +25,8 @@ export interface HostConfig {
 	osXl: Uint8Array;
 	basic: Uint8Array;
 	audio: AudioOutput | null;
+	/** Why audio is unavailable, if it failed to initialize (shown on tap). */
+	audioError?: string | null;
 }
 
 /**
@@ -109,6 +111,7 @@ export class EmulatorHost {
 	readonly #osXl: Uint8Array;
 	readonly #basic: Uint8Array;
 	readonly #audio: AudioOutput | null;
+	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
 
 	#emulator: Emulator;
@@ -118,11 +121,12 @@ export class EmulatorHost {
 	// The currently mounted image (kept across reboots; replaced by a Load).
 	#attachment: { cartridge: Cartridge } | { disk: AtrImage } | null = null;
 
-	constructor({ model, os800, osXl, basic, audio }: HostConfig) {
+	constructor({ model, os800, osXl, basic, audio, audioError }: HostConfig) {
 		this.#os800 = os800;
 		this.#osXl = osXl;
 		this.#basic = basic;
 		this.#audio = audio;
+		this.#audioError = audioError ?? null;
 		this.config.value = { model, tv: "ntsc", basicDisabled: false };
 		this.staged.value = this.config.peek();
 
@@ -241,7 +245,13 @@ export class EmulatorHost {
 	 */
 	toggleAudio(): void {
 		const audio = this.#audio;
-		if (!audio) return;
+		if (!audio) {
+			// No audio sink — surface why (it's the only feedback the user gets).
+			this.alert.value = this.#audioError
+				? `Audio unavailable: ${this.#audioError}`
+				: "Audio is unavailable in this browser.";
+			return;
+		}
 		if (!audio.running) {
 			audio.resume();
 			return; // the statechange listener updates the indicator

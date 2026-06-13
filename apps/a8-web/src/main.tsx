@@ -3,36 +3,20 @@ import { App } from "./app.tsx";
 import { AudioOutput } from "./audio.ts";
 import { installDevConsole } from "./dev-console.ts";
 import { EmulatorHost } from "./host.ts";
+import { loadFirmwareLibrary } from "./library.ts";
 import "./index.css";
-
-async function loadRom(name: string): Promise<Uint8Array> {
-	const response = await fetch(`/roms/${name}`);
-	if (!response.ok) {
-		throw new Error(
-			`Failed to load /roms/${name} — put the ROM images in roms.local/ ` +
-				`at the repo root`,
-		);
-	}
-	return new Uint8Array(await response.arrayBuffer());
-}
 
 async function main(): Promise<void> {
 	const root = document.querySelector<HTMLElement>("#app");
 	if (!root) return;
 
-	root.textContent = "Loading ROMs…";
+	root.textContent = "Loading firmware…";
 
-	// Both OS ROMs are loaded so the menu can switch machine type at runtime
-	// (the 800 runs OS-B; XL/XE run the XL OS).
-	let os800: Uint8Array;
-	let osXl: Uint8Array;
-	let basic: Uint8Array;
+	// The OS and BASIC ROMs come from the built-in library now; the host ranks
+	// and picks the best match for the running machine.
+	let firmware;
 	try {
-		[os800, osXl, basic] = await Promise.all([
-			loadRom("800-b-ntsc.rom"),
-			loadRom("xl-02.rom"),
-			loadRom("basic-c.rom"),
-		]);
+		firmware = await loadFirmwareLibrary();
 	} catch (error) {
 		root.textContent = String(error);
 		return;
@@ -49,14 +33,14 @@ async function main(): Promise<void> {
 		audioError = String(error);
 	}
 
-	const host = new EmulatorHost({
-		model: "800XL",
-		os800,
-		osXl,
-		basic,
-		audio,
-		audioError,
-	});
+	let host: EmulatorHost;
+	try {
+		host = new EmulatorHost({ model: "800XL", firmware, audio, audioError });
+	} catch (error) {
+		// e.g. no compatible OS ROM in the library for the default machine.
+		root.textContent = String(error);
+		return;
+	}
 	installDevConsole(host);
 
 	root.textContent = "";

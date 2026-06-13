@@ -381,10 +381,17 @@ export const commands = {
 	// back when raw mode and an options store exist.
 } satisfies Record<string, (ctx: CommandContext) => void>;
 
+let traceCommands = false;
+
+/** Toggle command-dispatch logging (a dev-console aid). Off by default. */
+export function setCommandTrace(enabled: boolean): void {
+	traceCommands = enabled;
+}
+
 for (const [key, value] of Object.entries(commands)) {
 	commands[key as keyof typeof commands] = (ctx) => {
 		// eslint-disable-next-line no-console -- command tracing is a debug aid
-		console.log("COMMAND", key);
+		if (traceCommands) console.log("COMMAND", key);
 		value(ctx);
 	};
 }

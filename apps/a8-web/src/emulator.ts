@@ -10,9 +10,23 @@ import {
 	type AtrImage,
 	type MachineConfig,
 } from "@sfotty-pie/a8";
-import { Sfotty } from "@sfotty-pie/sfotty";
+import { DECODE, ReadOptions, Sfotty, traceLine } from "@sfotty-pie/sfotty";
 import { AntiAliasFilter } from "./audio-filter.ts";
 import type { AudioOutput } from "./audio.ts";
+
+// The CPU trace ring: the last this many executed instructions, kept for the
+// dev console. Captured as formatted lines so a later dump is unaffected by
+// memory changes (e.g. the bank switches around a reset).
+const TRACE_RING_SIZE = 8192;
+
+// On a reset, capture this many (loop-compressed) instructions of the boot
+// that follows, then freeze — the warm/cold decision is near the start, so
+// this keeps it from being evicted by the post-boot idle loop.
+const RESET_TRACE_CAPTURE = 4096;
+
+// Tight loops up to this many distinct instructions are recorded once, not
+// every iteration (see #recentPcs).
+const LOOP_WINDOW = 64;
 
 // Audio chunking and pacing: ~21ms chunks, ~50ms of queue as the pacing
 // target, and a bounded scanline batch per wake so the UI stays responsive.
@@ -69,6 +83,53 @@ export class Emulator {
 	/** True once the CPU has jammed on a CIM (KIL/JAM) instruction. */
 	get crashed(): boolean {
 		return this.#cpu.crashed;
+	}
+
+	/** The CPU, for the dev console (inspection only). */
+	get cpu(): Sfotty {
+		return this.#cpu;
+	}
+
+	#trace = false;
+	#traceRing: (string | undefined)[] = new Array(TRACE_RING_SIZE);
+	#traceCount = 0;
+	// A reset clears the ring and captures the boot, then freezes (so the
+	// post-boot idle loop can't evict it). -1 = capture freely.
+	#traceFreezeAt = -1;
+	#wasResetAsserted = false;
+	// Loop compression: skip recording a PC seen in the last this-many
+	// recorded instructions, so tight loops (the XL coldstart's ~71k-iteration
+	// delay, RAM clears) collapse and the ring spans real control flow.
+	#recentPcs = new Int32Array(LOOP_WINDOW).fill(-1);
+	readonly #peek = (address: number): number =>
+		this.machine.read(address & 0xffff, ReadOptions.PEEK);
+
+	/** Enable/disable the CPU instruction trace ring. */
+	setTrace(enabled: boolean): void {
+		this.#trace = enabled;
+		this.#traceFreezeAt = -1;
+	}
+
+	/** Clear the trace ring. */
+	clearTrace(): void {
+		this.#traceCount = 0;
+		this.#traceFreezeAt = -1;
+	}
+
+	/** Traced instructions, oldest first — the last `count`, or all of them. */
+	dumpTrace(count?: number): string[] {
+		const total = this.#traceCount;
+		const start = Math.max(
+			0,
+			total - (count ?? total),
+			total - TRACE_RING_SIZE,
+		);
+		const lines: string[] = [];
+		for (let i = start; i < total; i++) {
+			const line = this.#traceRing[i % TRACE_RING_SIZE];
+			if (line !== undefined) lines.push(line);
+		}
+		return lines;
 	}
 
 	#running = false;
@@ -220,12 +281,42 @@ export class Emulator {
 			cpu.IRQ = this.machine.irq;
 			cpu.RDY = ag.rdy;
 
-			if (this.machine.resetAsserted) {
+			// On the XL Reset line's release, start a fresh trace capture of
+			// the boot that follows (the 800's Reset is an NMI, captured in
+			// normal flow).
+			const resetAsserted = this.machine.resetAsserted;
+			if (this.#trace && this.#wasResetAsserted && !resetAsserted) {
+				this.#traceCount = 0;
+				this.#traceFreezeAt = RESET_TRACE_CAPTURE;
+				this.#recentPcs.fill(-1);
+			}
+			this.#wasResetAsserted = resetAsserted;
+
+			if (resetAsserted) {
 				// The XL Reset button holds the system reset line; restarting
 				// the CPU's reset sequence every cycle models the held RES
 				// line — the sequence completes once the button is released.
 				cpu.reset(false);
 			} else if (!ag.halt) {
+				// Record each instruction at its opcode fetch (RDY excludes
+				// WSYNC-stalled re-fetches), skipping tight-loop repeats.
+				if (this.#trace && cpu.RDY && cpu.state === DECODE) {
+					const pc = cpu.PC;
+					if (!this.#recentPcs.includes(pc)) {
+						this.#traceRing[this.#traceCount % TRACE_RING_SIZE] = traceLine(
+							cpu,
+							this.#peek,
+						);
+						this.#recentPcs[this.#traceCount % LOOP_WINDOW] = pc;
+						this.#traceCount++;
+						if (
+							this.#traceFreezeAt >= 0 &&
+							this.#traceCount >= this.#traceFreezeAt
+						) {
+							this.#trace = false; // ring now holds the boot; freeze it
+						}
+					}
+				}
 				cpu.run();
 			}
 

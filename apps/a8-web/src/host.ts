@@ -114,6 +114,7 @@ export class EmulatorHost {
 	#emulator: Emulator;
 	#keyInput: HTMLInputElement | null = null;
 	#bootImagePicker: (() => void) | null = null;
+	#cpuTrace = false; // persists across reboots; reapplied to each emulator
 	// The currently mounted image (kept across reboots; replaced by a Load).
 	#attachment: { cartridge: Cartridge } | { disk: AtrImage } | null = null;
 
@@ -152,7 +153,7 @@ export class EmulatorHost {
 		const cartMounted =
 			this.#attachment !== null && "cartridge" in this.#attachment;
 		const includeBasic = xl || (!basicDisabled && !cartMounted);
-		return new Emulator({
+		const emulator = new Emulator({
 			model,
 			os: xl ? this.#osXl : this.#os800,
 			tvSystem: tv,
@@ -161,6 +162,27 @@ export class EmulatorHost {
 			...this.#attachment,
 			...(this.#audio && { audio: this.#audio }),
 		});
+		emulator.setTrace(this.#cpuTrace);
+		return emulator;
+	}
+
+	/** The live emulator (swaps on reboot) — for the dev console. */
+	get emulator(): Emulator {
+		return this.#emulator;
+	}
+
+	/** Toggle the CPU instruction trace (persists across reboots). */
+	setCpuTrace(enabled: boolean): void {
+		this.#cpuTrace = enabled;
+		this.#emulator.setTrace(enabled);
+	}
+
+	dumpCpuTrace(count?: number): string[] {
+		return this.#emulator.dumpTrace(count);
+	}
+
+	clearCpuTrace(): void {
+		this.#emulator.clearTrace();
 	}
 
 	// Swap in a fresh emulator for the current config + attachment.

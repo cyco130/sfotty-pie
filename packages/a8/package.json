@@ -38,7 +38,8 @@
     "boot": "node src/boot.ts"
   },
   "dependencies": {
-    "@sfotty-pie/sfotty": "workspace:*"
+    "@sfotty-pie/sfotty": "workspace:*",
+    "crc-32": "^1.2.2"
   },
   "devDependencies": {
     "@cyco130/eslint-config": "^9.0.1",

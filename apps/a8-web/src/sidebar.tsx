@@ -76,7 +76,7 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 	const dirty = host.dirty.value;
 
 	return (
-		<aside class="flex h-full w-72 shrink-0 flex-col gap-6 overflow-y-auto bg-white p-4 text-neutral-800">
+		<aside class="flex max-h-[60vh] w-full shrink-0 flex-col gap-6 overflow-y-auto bg-white p-4 text-neutral-800 sm:h-full sm:max-h-none sm:w-72">
 			<div class="flex items-center justify-between">
 				<span class="text-lg font-semibold">Sfotty Pie</span>
 				<button
@@ -144,7 +144,11 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 				</button>
 			</section>
 
-			<section>
+			{/* The key-mappings help is moot without a physical keyboard. Gate
+			    on pointer capability, not width: a phone in landscape is wide
+			    enough to trip `sm:`, but `any-pointer: fine` (a mouse/trackpad,
+			    which travels with a keyboard) stays false on touch-only. */}
+			<section class="hidden any-pointer-fine:block">
 				<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
 					Keys
 				</h2>

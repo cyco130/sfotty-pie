@@ -38,8 +38,16 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	// One audio sink for the page; emulators come and go across Loads.
-	const audio = await AudioOutput.create().catch(() => null);
+	// One audio sink for the page; emulators come and go across Loads. If setup
+	// throws (e.g. iOS Safari's worklet/gesture restrictions), keep the reason
+	// so the host can show it when the user taps the "No audio" indicator.
+	let audio: AudioOutput | null = null;
+	let audioError: string | null = null;
+	try {
+		audio = await AudioOutput.create();
+	} catch (error) {
+		audioError = String(error);
+	}
 
 	const host = new EmulatorHost({
 		model: "800XL",
@@ -47,6 +55,7 @@ async function main(): Promise<void> {
 		osXl,
 		basic,
 		audio,
+		audioError,
 	});
 	installDevConsole(host);
 

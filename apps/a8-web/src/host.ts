@@ -7,23 +7,24 @@ import {
 	FRAME_BUFFER_WIDTH,
 	NTSC_PIXEL_ASPECT_RATIO,
 	PAL_PIXEL_ASPECT_RATIO,
+	preferredBasicKeys,
+	preferredOsKeys,
 	type AtariFileFormat,
 	type AtariModel,
+	type FirmwareKey,
 } from "@sfotty-pie/a8";
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { Keyboard } from "./keyboard.ts";
+import { type LoadedFirmware } from "./library.ts";
 import { buildNtscPalette, buildPalPalette } from "./palette.ts";
 
 export interface HostConfig {
 	model: AtariModel;
-	/** The 800's OS-B ROM (10K). */
-	os800: Uint8Array;
-	/** The XL/XE OS ROM (16K), shared by 800XL and 130XE. */
-	osXl: Uint8Array;
-	basic: Uint8Array;
+	/** The identified firmware library; the host ranks/picks OS + BASIC. */
+	firmware: LoadedFirmware[];
 	audio: AudioOutput | null;
 	/** Why audio is unavailable, if it failed to initialize (shown on tap). */
 	audioError?: string | null;
@@ -107,9 +108,8 @@ export class EmulatorHost {
 	/** Whether the menu sidebar is open. */
 	readonly menuOpen = signal(false);
 
-	readonly #os800: Uint8Array;
-	readonly #osXl: Uint8Array;
-	readonly #basic: Uint8Array;
+	// Identified firmware, indexed by key for ranked selection.
+	readonly #firmware: Map<FirmwareKey, LoadedFirmware>;
 	readonly #audio: AudioOutput | null;
 	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
@@ -121,10 +121,10 @@ export class EmulatorHost {
 	// The currently mounted image (kept across reboots; replaced by a Load).
 	#attachment: { cartridge: Cartridge } | { disk: AtrImage } | null = null;
 
-	constructor({ model, os800, osXl, basic, audio, audioError }: HostConfig) {
-		this.#os800 = os800;
-		this.#osXl = osXl;
-		this.#basic = basic;
+	constructor({ model, firmware, audio, audioError }: HostConfig) {
+		// Later firmware of the same key wins; the library is already merged
+		// (local over committed), so order is preserved here.
+		this.#firmware = new Map(firmware.map((f) => [f.key, f]));
 		this.#audio = audio;
 		this.#audioError = audioError ?? null;
 		this.config.value = { model, tv: "ntsc", basicDisabled: false };
@@ -159,21 +159,46 @@ export class EmulatorHost {
 		machine.joystickDown(0, mask);
 	}
 
-	// Build an emulator for the running config + the mounted image. On the
-	// 800 the BASIC cart shares the slot, so it's present only when not
-	// disabled and no cartridge is mounted. The XL/XE always wire BASIC in
-	// (its "disable" is the OPTION-hold at boot).
+	// The best-ranked firmware present in the library for a list of keys.
+	#pick(keys: readonly FirmwareKey[]): LoadedFirmware | null {
+		for (const key of keys) {
+			const firmware = this.#firmware.get(key);
+			if (firmware) return firmware;
+		}
+		return null;
+	}
+
+	// Build an emulator for the running config + the mounted image. The OS and
+	// BASIC ROMs are picked from the library by the model's preference ranking.
+	// On the 800 the BASIC cart shares the slot, so it's present only when not
+	// disabled and no cartridge is mounted. The XL/XE always wire BASIC in (its
+	// "disable" is the OPTION-hold at boot).
 	#makeEmulator(): Emulator {
 		const { model, tv, basicDisabled } = this.config.value;
 		const xl = model !== "800";
 		const cartMounted =
 			this.#attachment !== null && "cartridge" in this.#attachment;
 		const includeBasic = xl || (!basicDisabled && !cartMounted);
+
+		const os = this.#pick(preferredOsKeys({ model, tv }));
+		if (!os) {
+			throw new Error(
+				`No compatible OS ROM in the library for ${model} (${tv.toUpperCase()}).`,
+			);
+		}
+		const basic = includeBasic ? this.#pick(preferredBasicKeys()) : null;
+
+		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
+		console.log(
+			`Firmware for ${model} ${tv.toUpperCase()}: OS "${os.name}"` +
+				(basic ? `, BASIC "${basic.name}"` : ", no BASIC"),
+		);
+
 		const emulator = new Emulator({
 			model,
-			os: xl ? this.#osXl : this.#os800,
+			os: os.bytes,
 			tvSystem: tv,
-			...(includeBasic && { basic: this.#basic }),
+			...(basic && { basic: basic.bytes }),
 			...(xl && basicDisabled && { holdOption: true }),
 			...this.#attachment,
 			...(this.#audio && { audio: this.#audio }),

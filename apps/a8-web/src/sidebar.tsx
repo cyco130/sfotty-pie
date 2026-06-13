@@ -192,7 +192,16 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 					About
 				</h2>
 				<p class="text-sm text-neutral-600">
-					Sfotty Pie A8 Web — an Atari 8-bit emulator. MIT-licensed.
+					Sfotty Pie A8 Web — an Atari 8-bit emulator. MIT-licensed.{" "}
+					<a
+						class="text-neutral-800 underline hover:text-black"
+						href="https://github.com/cyco130/sfotty-pie"
+						target="_blank"
+						rel="noreferrer"
+					>
+						Source on GitHub
+					</a>
+					.
 				</p>
 				<p class="mt-1 text-sm text-neutral-600">
 					Bundled firmware (AltirraOS, Altirra BASIC, Atari++) is used under its

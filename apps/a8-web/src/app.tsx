@@ -54,12 +54,13 @@ export function App({ host }: { host: EmulatorHost }) {
 	return (
 		<div
 			ref={rootRef}
-			class="flex h-full bg-black text-neutral-300 select-none"
+			class="flex h-full flex-col bg-black text-neutral-300 select-none sm:flex-row"
 		>
-			{/* The menu pushes the screen aside rather than overlaying it. */}
+			{/* The menu pushes the screen aside (left on desktop, top on
+			    mobile) rather than overlaying it. */}
 			<Sidebar host={host} />
 
-			<div class="flex h-full flex-1 flex-col overflow-hidden">
+			<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 				<TopBar host={host} />
 
 				{/* The screen: canvas centered, sized by the host, letterboxed. */}

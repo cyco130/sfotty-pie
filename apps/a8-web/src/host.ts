@@ -443,15 +443,19 @@ export class EmulatorHost {
 		};
 	}
 
-	/** Resume the audio context on the first user gesture. */
+	/**
+	 * Resume the audio context on the first user gesture anywhere. iOS Safari
+	 * only unlocks audio on a *completed* gesture (pointerup/touchend/click),
+	 * not pointerdown — so listen on pointerup and keydown.
+	 */
 	enableAudioResume(): () => void {
 		const audio = this.#audio;
 		if (!audio) return () => {};
 		const resume = () => audio.resume();
-		window.addEventListener("pointerdown", resume);
+		window.addEventListener("pointerup", resume);
 		window.addEventListener("keydown", resume);
 		return () => {
-			window.removeEventListener("pointerdown", resume);
+			window.removeEventListener("pointerup", resume);
 			window.removeEventListener("keydown", resume);
 		};
 	}

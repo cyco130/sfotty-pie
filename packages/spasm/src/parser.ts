@@ -86,8 +86,8 @@ class Parser {
 		const content = this.#statementContent();
 
 		// Newline after any other statement is mandatory
-		const possibleMewline = this.#expect("newline", "eof");
-		const newline = possibleMewline.type === "newline" ? possibleMewline : null;
+		const possibleNewline = this.#expect("newline", "eof");
+		const newline = possibleNewline.type === "newline" ? possibleNewline : null;
 
 		// TODO: Report labels on unlabelable statements
 		return {
@@ -495,7 +495,7 @@ class Parser {
 				};
 			}
 
-			// Grouping parantheses
+			// Grouping parentheses
 			case "(": {
 				const openingBracketToken = token;
 				this.#consume();

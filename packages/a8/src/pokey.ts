@@ -6,9 +6,9 @@ const IRQ_BREAK = 0x80;
 const IRQ_KEYBOARD = 0x40;
 const IRQ_SEROR = 0x10;
 const IRQ_SEROC = 0x08;
-const IRQ_TIMER1 = 0x01;
-const IRQ_TIMER2 = 0x02;
 const IRQ_TIMER4 = 0x04;
+const IRQ_TIMER2 = 0x02;
+const IRQ_TIMER1 = 0x01;
 
 // SKSTAT bits (active low: 0 = condition present).
 const SKSTAT_SHIFT_HELD = 0x08;

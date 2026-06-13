@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { App } from "./app.tsx";
 import { AudioOutput } from "./audio.ts";
+import { installDevConsole } from "./dev-console.ts";
 import { EmulatorHost } from "./host.ts";
 import "./index.css";
 
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
 		basic,
 		audio,
 	});
+	installDevConsole(host);
 
 	root.textContent = "";
 	render(<App host={host} />, root);

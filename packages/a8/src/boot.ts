@@ -8,7 +8,7 @@ import {
 } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { AtrImage } from "./atr.ts";
 import { Cartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
@@ -16,17 +16,39 @@ import { Atari } from "./machine.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
 import { buildBootDisk } from "./xex-boot.ts";
 
-function loadRom(name: string): Uint8Array {
-	const path = join(import.meta.dirname, "../../../roms.local", name);
+// Usage: boot.ts --os <file> [--basic <file>] [--xl | --xe] [--trace] [--dump-frame] [file]
+// `--os`/`--basic` are paths to the OS and BASIC ROM images. `file` is an XEX,
+// ATR, or cartridge image; like the web emulator's Load, booting a file is
+// boot-image semantics — the 800's BASIC cart comes out.
+const argv = process.argv.slice(2);
+
+/** The value following a `--flag`, if present. */
+function flagValue(name: string): string | undefined {
+	const i = argv.indexOf(name);
+	return i >= 0 ? argv[i + 1] : undefined;
+}
+
+function loadRom(path: string | undefined, flag: string): Uint8Array {
+	if (!path) {
+		process.stderr.write(`Pass ${flag} <file> with a ROM image.\n`);
+		process.exit(1);
+	}
 	return new Uint8Array(fs.readFileSync(path));
 }
 
-// Usage: boot.ts [--xl | --xe] [--trace] [--dump-frame] [file]
-// `file` is an XEX, ATR, or cartridge image; like the web emulator's Load,
-// booting a file is boot-image semantics — the 800's BASIC cart comes out.
-const xe = process.argv.includes("--xe");
-const xl = xe || process.argv.includes("--xl");
-const filePath = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
+const osPath = flagValue("--os");
+const basicPath = flagValue("--basic");
+const xe = argv.includes("--xe");
+const xl = xe || argv.includes("--xl");
+// The positional file is the first non-flag arg that isn't an --os/--basic value.
+const flagValueIndices = new Set(
+	["--os", "--basic"]
+		.map((flag) => argv.indexOf(flag) + 1)
+		.filter((i) => i > 0),
+);
+const filePath = argv.find(
+	(arg, i) => !arg.startsWith("--") && !flagValueIndices.has(i),
+);
 
 let cartridge: Cartridge | undefined;
 let disk: AtrImage | undefined;
@@ -54,8 +76,8 @@ if (filePath) {
 
 const machine = new Atari({
 	model: xe ? "130XE" : xl ? "800XL" : "800",
-	os: loadRom(xl ? "xl-02.rom" : "800-b-ntsc.rom"),
-	...(xl || !filePath ? { basic: loadRom("basic-c.rom") } : {}),
+	os: loadRom(osPath, "--os"),
+	...(xl || !filePath ? { basic: loadRom(basicPath, "--basic") } : {}),
 	...(cartridge ? { cartridge } : {}),
 });
 

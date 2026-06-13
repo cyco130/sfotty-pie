@@ -1,0 +1,11 @@
+{
+  "name": "@sfotty-pie/template-example",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@sfotty-pie/sfotty": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19"
+  }
+}

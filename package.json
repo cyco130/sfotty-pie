@@ -1,21 +1,22 @@
 {
-	"private": true,
-	"name": "sfotty-pie-workspace-root",
-	"version": "0.0.0",
-	"description": "Sfotty Pie workspace root",
-	"author": "Fatih Aygün <cyco130@gmail.com>",
-	"license": "MIT",
-	"repository": "https://github.com/cyco130/sfotty-pie",
-	"scripts": {
-		"dev": "pnpm -r --parallel dev",
-		"build": "pnpm -r build",
-		"prepare": "husky install",
-		"precommit": "lint-staged"
-	},
-	"devDependencies": {
-		"husky": "^9.1.7",
-		"lint-staged": "^15.2.11",
-		"prettier": "^3.4.2",
-		"vitest": "^2.1.8"
-	}
+  "name": "sfotty-pie-workspace-root",
+  "private": "true",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter \"./packages/*\" --filter \"!@sfotty-pie/template-*\" run dev",
+    "build": "pnpm -r --filter \"./packages/*\" --filter \"!@sfotty-pie/template-*\" run build",
+    "prepare": "husky",
+    "precommit": "lint-staged",
+    "format": "prettier --write .",
+    "ci": "pnpm -r --filter \"!@sfotty-pie/template-*\" --stream run ci",
+    "test": "pnpm run /^test:/",
+    "test:packages": "pnpm -r --filter \"!@sfotty-pie/template-*\" --stream run test",
+    "test:format": "prettier --check ."
+  },
+  "packageManager": "pnpm@11.5.1",
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.7",
+    "prettier": "^3.8.3",
+    "typescript": "^6.0.3"
+  }
 }

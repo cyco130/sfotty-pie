@@ -1,3 +1,14 @@
 packages:
-    - "packages/*"
-    - "examples/*"
+  - packages/*
+  - examples/*
+
+strictPeerDependencies: false
+sideEffectsCache: false
+linkWorkspacePackages: true
+
+minimumReleaseAgeExclude:
+  - "@cyco130/eslint-config"
+
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true

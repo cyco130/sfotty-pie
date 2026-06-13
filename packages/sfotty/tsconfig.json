@@ -1,5 +1,7 @@
 {
 	"compilerOptions": {
+		"noEmit": true,
+
 		"checkJs": true,
 		"forceConsistentCasingInFileNames": true,
 		"skipLibCheck": true,
@@ -8,17 +10,17 @@
 		"noImplicitOverride": true,
 		"noUncheckedIndexedAccess": true,
 
-		"module": "preserve",
+		"module": "nodenext",
 		"esModuleInterop": true,
 		"verbatimModuleSyntax": true,
 		"isolatedModules": true,
 		"moduleDetection": "force",
 		"resolveJsonModule": true,
-		"customConditions": ["import"],
-		"noEmit": true,
+		"allowImportingTsExtensions": true,
 
-		"target": "es2020",
-		"lib": ["es2022", "DOM"]
+		"target": "es2022",
+		"lib": ["es2022"],
+		"types": ["node"]
 	},
 	"exclude": ["node_modules", "dist"]
 }

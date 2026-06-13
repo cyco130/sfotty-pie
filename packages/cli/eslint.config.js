@@ -10,7 +10,6 @@ export default [
 		languageOptions: {
 			parserOptions: {
 				projectService: true,
-				// @ts-expect-error: remove this directive if you have Node type definitions in your project
 				tsconfigRootDir: import.meta.dirname,
 			},
 		},

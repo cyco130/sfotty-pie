@@ -47,5 +47,11 @@ Executables for the sample programs are in the `samples` directory. The sources 
 
 ## Ideas for future versions
 
--   Provide a [`lib6502`](http://www.6502.org/users/andre/osa/lib6502.html) implementation (file I/O and more)
--   Provide a `cc65` library implementation
+- Provide a [`lib6502`](http://www.6502.org/users/andre/osa/lib6502.html) implementation (file I/O and more)
+- Provide a `cc65` library implementation
+
+## License and credits
+
+MIT license.
+
+- [Fatih Aygün](https://github.com/cyco130) and [contributors](https://github.com/cyco130/sfotty-pie/graphs/contributors).

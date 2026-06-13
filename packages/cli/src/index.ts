@@ -1,7 +1,7 @@
+#!/usr/bin/env node
 import { Sfotty } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
-import util from "node:util";
 
 async function main() {
 	const args = process.argv.slice(2);
@@ -37,29 +37,39 @@ async function main() {
 
 	// Copy the command line args
 	const userArgs =
-		process.argv
+		args
 			.slice(index + 1)
 			.join("\0")
 			.slice(0, 254) + "\0\0";
 	ram.set(Buffer.from(userArgs), 0x0300);
-
-	process.stdin.on("end", function () {
-		process.stdout.write("end");
-	});
 
 	const rl = readline.createInterface({
 		input: process.stdin,
 		output: process.stdout,
 	});
 
-	const question = util.promisify(rl.question).bind(rl);
-
+	// Standard input is consumed line by line as readline emits it. The CPU
+	// pulls bytes out of this buffer; when it runs dry it throws BufferEmptyError
+	// and we wait for the next line (or EOF) before retrying the cycle.
 	let stdinBuffer = Buffer.alloc(0);
 	let stdinOffset = 0;
-	let abortController = new AbortController();
+	let stdinClosed = false;
+	let onStdin: (() => void) | null = null;
+
+	rl.on("line", (line) => {
+		stdinBuffer = Buffer.concat([
+			stdinBuffer.subarray(stdinOffset),
+			Buffer.from(line + "\n"),
+		]);
+		stdinOffset = 0;
+		onStdin?.();
+		onStdin = null;
+	});
 
 	rl.on("close", () => {
-		abortController.abort();
+		stdinClosed = true;
+		onStdin?.();
+		onStdin = null;
 	});
 
 	const sfotty = new Sfotty({
@@ -69,7 +79,7 @@ async function main() {
 					case 0x0201:
 						if (stdinOffset < stdinBuffer.length) {
 							return stdinBuffer[stdinOffset++]!;
-						} else if (abortController?.signal.aborted) {
+						} else if (stdinClosed) {
 							return 0;
 						} else {
 							throw new BufferEmptyError();
@@ -79,12 +89,12 @@ async function main() {
 						return (Math.random() * 255) | 0;
 
 					case 0x0241:
-						return abortController.signal.aborted ? 0x80 : 0x00;
+						return stdinClosed && stdinOffset >= stdinBuffer.length
+							? 0x80
+							: 0x00;
 
 					default:
-						console.error(
-							`Unhandled read from ${address.toString(16)}`,
-						);
+						console.error(`Unhandled read from ${address.toString(16)}`);
 						process.exit(2);
 				}
 			} else {
@@ -103,7 +113,8 @@ async function main() {
 						break;
 
 					case 0x0202:
-						rl.write(String.fromCharCode(value));
+						// Synchronous so output flushes before an EXIT process.exit().
+						fs.writeSync(1, Buffer.from([value]));
 						break;
 
 					case 0x0203:
@@ -111,9 +122,7 @@ async function main() {
 						break;
 
 					default:
-						console.error(
-							`Unhandled write to address ${address.toString(16)}`,
-						);
+						console.error(`Unhandled write to address ${address.toString(16)}`);
 						process.exit(2);
 				}
 			} else {
@@ -126,15 +135,19 @@ async function main() {
 
 	const opts = args.slice(0, index);
 	for (const opt of opts) {
-		if (opt === "--trace") {
-			sfotty.trace = true;
-		} else if (opt.startsWith("--max-cycles=")) {
+		// if (opt === "--trace") {
+		// 	sfotty.trace = true; // TODO: trace not implemented on the new core
+		// } else
+		if (opt.startsWith("--max-cycles=")) {
 			maxCycles = parseInt(opt.slice("--max-cycles=".length));
 		} else {
 			console.error(`Unrecognized option ${opt}`);
 			process.exit(3);
 		}
 	}
+
+	// The new core doesn't run a reset sequence yet, so jump to the reset vector.
+	sfotty.PC = ram[0xfffc]! | (ram[0xfffd]! << 8);
 
 	while (!sfotty.crashed && maxCycles--) {
 		try {
@@ -143,26 +156,23 @@ async function main() {
 			if (error instanceof BreakError) {
 				sfotty.PC = (sfotty.PC + 1) & 0xffff;
 			} else if (error instanceof BufferEmptyError) {
-				abortController = new AbortController();
-				// @ts-expect-error: Node typings are not aware of this variant
-				const input = await question("", {
-					signal: abortController.signal,
-				}).catch(() => "");
-
-				stdinBuffer = Buffer.from(input + "\n");
-				stdinOffset = 0;
+				// Wait for the next line of input (or EOF), then retry the cycle.
+				await new Promise<void>((resolve) => {
+					onStdin = resolve;
+				});
 			} else {
 				throw error;
 			}
 
-			sfotty.cycleCounter--;
+			// Not needed on the new core: a thrown bus access leaves CPU state
+			// untouched, so the next run() retries the same cycle.
+			// sfotty.cycleCounter--;
 		}
 	}
 
 	if (sfotty.crashed) {
 		console.error("Program crashed");
-		// eslint-disable-next-line no-console
-		console.log(sfotty.print());
+		// console.log(sfotty.print()); // TODO: print() not on the new core
 		process.exit(2);
 	}
 }

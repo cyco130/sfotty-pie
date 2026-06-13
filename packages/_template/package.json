@@ -1,6 +1,7 @@
 {
-  "name": "@sfotty-pie/sfotty",
-  "version": "0.2.0",
+  "name": "@sfotty-pie/template-package",
+  "private": true,
+  "version": "0.0.0",
   "description": "sfotty-pie",
   "keywords": [],
   "license": "MIT",
@@ -19,15 +20,12 @@
   "scripts": {
     "build": "tsdown --clean",
     "dev": "tsdown --watch",
-    "generate:opcodes": "node src/generate.ts",
     "prepack": "pnpm build",
     "test": "pnpm run /^test:/",
     "test:unit": "vitest run",
     "test:typecheck": "tsc -p tsconfig.json",
     "test:lint": "eslint . --max-warnings 0",
-    "test:package": "publint",
-    "generate:step": "node src/generate-step.ts",
-    "harte": "node src/single-step-test.ts"
+    "test:package": "publint"
   },
   "devDependencies": {
     "@cyco130/eslint-config": "^9.0.1",

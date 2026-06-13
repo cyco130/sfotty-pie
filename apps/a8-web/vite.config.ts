@@ -12,7 +12,7 @@ export default defineConfig({
 	plugins: [preact(), tailwindcss(), basicSsl()],
 	// Treat ROM/image files as binary assets so the library's globbed imports
 	// emit them as hashed assets instead of trying to parse them as source.
-	assetsInclude: ["**/*.rom"],
+	assetsInclude: ["**/*.rom", "**/*.xex", "**/*.atr", "**/*.car"],
 	server: { host: true },
 	// @sfotty-pie/a8 is a linked workspace package built to dist. Excluding it
 	// from dep pre-bundling lets Vite pick up its rebuilds (from the root

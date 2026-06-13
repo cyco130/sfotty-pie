@@ -143,6 +143,18 @@ export class EmulatorHost {
 		commands[command]({ emulator: this.#emulator, host: this });
 	}
 
+	/**
+	 * Set joystick 0 to an absolute direction — for the analog OSD stick,
+	 * which (unlike the keyboard's per-direction press/release) reports a
+	 * whole position at once. `mask` bits: 1 = up, 2 = down, 4 = left,
+	 * 8 = right; 0 = centred. Release-then-press is atomic between frames.
+	 */
+	setJoystickDirection(mask: number): void {
+		const machine = this.#emulator.machine;
+		machine.joystickUp(0, 0x0f & ~mask);
+		machine.joystickDown(0, mask);
+	}
+
 	// Build an emulator for the running config + the mounted image. On the
 	// 800 the BASIC cart shares the slot, so it's present only when not
 	// disabled and no cartridge is mounted. The XL/XE always wire BASIC in

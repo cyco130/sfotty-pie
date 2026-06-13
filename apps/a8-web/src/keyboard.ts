@@ -46,6 +46,21 @@ export class Keyboard {
 		input.addEventListener("input", (event) => {
 			if (!(event as InputEvent).isComposing) input.value = "";
 		});
+
+		// The function keys the emulator maps (F1-F9: Help, the console keys,
+		// Reset, Break) collide with browser shortcuts — most damagingly F5
+		// (and Ctrl+F5), which reload the page and so reconstruct the machine:
+		// a cold boot. The input's own handler preventDefaults them when
+		// focused, but a window-level guard stops the browser action even when
+		// focus has drifted onto a menu button. The emulator owns all of these
+		// regardless of modifiers, so prevent the browser unconditionally.
+		window.addEventListener(
+			"keydown",
+			(event) => {
+				if (/^F[1-9]$/.test(event.key)) event.preventDefault();
+			},
+			true,
+		);
 	}
 
 	/** Release everything held — call when the window loses focus. */

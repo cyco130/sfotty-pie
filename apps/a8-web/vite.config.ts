@@ -1,5 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import preact from "@preact/preset-vite";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite";
 
 // Serve the (gitignored, unredistributable) ROM images from roms.local/ at the
@@ -31,7 +33,7 @@ function serveLocalRoms(): Plugin {
 }
 
 export default defineConfig({
-	plugins: [serveLocalRoms()],
+	plugins: [preact(), tailwindcss(), serveLocalRoms()],
 	// @sfotty-pie/a8 is a linked workspace package built to dist. Excluding it
 	// from dep pre-bundling lets Vite pick up its rebuilds (from the root
 	// `pnpm dev` watch) and reload, instead of serving a stale optimized copy.

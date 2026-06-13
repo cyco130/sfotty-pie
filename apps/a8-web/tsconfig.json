@@ -11,6 +11,8 @@
 		"noUncheckedIndexedAccess": true,
 
 		"module": "preserve",
+		"jsx": "react-jsx",
+		"jsxImportSource": "preact",
 		"esModuleInterop": true,
 		"verbatimModuleSyntax": true,
 		"isolatedModules": true,

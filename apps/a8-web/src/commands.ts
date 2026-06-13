@@ -1,11 +1,45 @@
 import type { Emulator } from "./emulator.ts";
+import type { EmulatorHost } from "./host.ts";
 
 export interface CommandContext {
+	/** The live machine — for the key-matrix and joystick commands. */
 	emulator: Emulator;
+	/** The application host — for app-level commands (audio, pause, menu). */
+	host: EmulatorHost;
 }
 
 export const commands = {
 	POWER_CYCLE: ({ emulator }) => emulator.coldStart(),
+
+	// Emulation run state.
+	PAUSE: ({ host }) => host.pause(),
+	RESUME: ({ host }) => host.resume(),
+	TOGGLE_PAUSE: ({ host }) => host.togglePause(),
+
+	// Audio.
+	AUDIO_MUTE: ({ host }) => host.setMuted(true),
+	AUDIO_UNMUTE: ({ host }) => host.setMuted(false),
+	AUDIO_TOGGLE: ({ host }) => host.toggleAudio(),
+
+	// The menu sidebar.
+	MENU_OPEN: ({ host }) => host.openMenu(),
+	MENU_CLOSE: ({ host }) => host.closeMenu(),
+	MENU_TOGGLE: ({ host }) => host.toggleMenu(),
+
+	// Boot a file as a fresh machine image (opens the file picker).
+	BOOT_IMAGE: ({ host }) => host.pickBootImage(),
+
+	// Machine configuration. These stage a change; APPLY_CONFIG reboots into
+	// it (the menu's "Reboot to apply").
+	SET_TYPE_800: ({ host }) => host.stageModel("800"),
+	SET_TYPE_800XL: ({ host }) => host.stageModel("800XL"),
+	SET_TYPE_130XE: ({ host }) => host.stageModel("130XE"),
+	SET_TV_NTSC: ({ host }) => host.stageTv("ntsc"),
+	SET_TV_PAL: ({ host }) => host.stageTv("pal"),
+	BASIC_ENABLE: ({ host }) => host.stageBasicDisabled(false),
+	BASIC_DISABLE: ({ host }) => host.stageBasicDisabled(true),
+	APPLY_CONFIG: ({ host }) => host.applyConfig(),
+	REVERT_CONFIG: ({ host }) => host.revertConfig(),
 
 	// Regular key presses
 	PRESS_L: ({ emulator }) => emulator.machine.pokeyKeyDown(0x00),
@@ -355,8 +389,35 @@ for (const [key, value] of Object.entries(commands)) {
 	};
 }
 
+/** Every bindable command name — the key-binding and palette surface. */
+export type Command = keyof typeof commands;
+
 export const descriptions: Record<keyof typeof commands, string> = {
 	POWER_CYCLE: "Power cycle (cold reset)",
+
+	PAUSE: "Pause emulation",
+	RESUME: "Resume emulation",
+	TOGGLE_PAUSE: "Pause or resume emulation",
+
+	AUDIO_MUTE: "Mute audio",
+	AUDIO_UNMUTE: "Unmute audio",
+	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
+
+	MENU_OPEN: "Open the menu",
+	MENU_CLOSE: "Close the menu",
+	MENU_TOGGLE: "Toggle the menu",
+
+	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
+
+	SET_TYPE_800: "Set machine type to Atari 800",
+	SET_TYPE_800XL: "Set machine type to Atari 800XL",
+	SET_TYPE_130XE: "Set machine type to Atari 130XE",
+	SET_TV_NTSC: "Set TV standard to NTSC",
+	SET_TV_PAL: "Set TV standard to PAL",
+	BASIC_ENABLE: "Enable BASIC",
+	BASIC_DISABLE: "Disable BASIC",
+	APPLY_CONFIG: "Apply machine configuration (reboot)",
+	REVERT_CONFIG: "Discard staged machine configuration",
 
 	PRESS_L: "Press L (key code $00)",
 	PRESS_J: "Press J (key code $01)",

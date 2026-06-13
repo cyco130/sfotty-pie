@@ -1,6 +1,6 @@
 # Sfotty Pie CLI
 
-**Sfotty Pie CLI** is an emulator for a virtual 6502-based computer. The current implementation allows you two write CLI programs with access to stdin, stdout, and stderr.
+**Sfotty Pie CLI** is an emulator for a hypothetical 6502-based computer. The current implementation allows you two write CLI programs with access to stdin, stdout, and stderr.
 
 ## Executable file format
 
@@ -19,20 +19,20 @@ The program contents are loaded starting from the address `$0400`.
 
 **Page 2** (addresses from `$0200` to `$02FF`) is reserved for I/O operations. Currently, the following I/O operations are defined:
 
-| Address | Name     | Read / Write | Description                                                   |
-| ------- | -------- | ------------ | ------------------------------------------------------------- |
-| `$0200` | `EXIT`   | `W`          | Any write here exists the program with the written exit code. |
-| `$0201` | `STDIN`  | `R`          | Read a byte from the standard input (blocking).               |
-| `$0202` | `STDOUT` | `W`          | Write a byte to the standard output.                          |
-| `$0203` | `STDERR` | `W`          | Write a byte to the standard error.                           |
-| `$0240` | `RAND`   | `R`          | Read a random byte.                                           |
-| `$0241` | `FSTIN`  | `R`          | Status of stdin: EOF if bit 7 set.                            |
+| Address | Name     | Read / Write | Description                                                  |
+| ------- | -------- | ------------ | ------------------------------------------------------------ |
+| `$0200` | `EXIT`   | `W`          | Any write here exits the program with the written exit code. |
+| `$0201` | `STDIN`  | `R`          | Read a byte from the standard input (blocking).              |
+| `$0202` | `STDOUT` | `W`          | Write a byte to the standard output.                         |
+| `$0203` | `STDERR` | `W`          | Write a byte to the standard error.                          |
+| `$0240` | `RAND`   | `R`          | Read a random byte.                                          |
+| `$0241` | `FSTIN`  | `R`          | Status of stdin: EOF if bit 7 set.                           |
 
-On program start, all CPU registers will be in an unknown state. In particular, you should remember to clear the decimal flag. **page 3** (addresses from `$0300` to `$03FF`) will contain the command line arguments as a null-terminated list of null-terminated strings.
+**Page 3** (addresses from `$0300` to `$03FF`) will contain the command line arguments as a null-terminated list of null-terminated strings.
 
 Everything other than the I/O area is RAM, including the command line argument area, the program contents, and the interrupt vectors. Free areas will contain all zeroes.
 
-Executing an undocumented opcode ends the program with exit code 2.
+Executing a CIM (also known as JAM, KIL, etc.) instruction crashes the program with exit code 2.
 
 ## Sample programs
 
@@ -62,8 +62,9 @@ npx sfotty hello.65
 
 ## Ideas for future versions
 
-- Provide a [`lib6502`](http://www.6502.org/users/andre/osa/lib6502.html) implementation (file I/O and more)
-- Provide a `cc65` library implementation
+- More I/O operations, such as file I/O and networking
+- A [`lib6502`](http://www.6502.org/users/andre/osa/lib6502.html) implementation
+- A `cc65` library implementation
 
 ## License and credits
 

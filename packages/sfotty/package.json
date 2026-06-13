@@ -1,7 +1,7 @@
 {
   "name": "@sfotty-pie/sfotty",
   "version": "0.2.0",
-  "description": "Cycle-accurate NMOS 6502 CPU core.",
+  "description": "Cycle-exact 6502 emulator.",
   "keywords": [
     "6502",
     "nmos-6502",

@@ -1,6 +1,6 @@
-# Sfotty Pie Assembler
+# Spasm
 
-A multipass 6502 assembler. Its addressing-mode sizing, span-dependent branches, and segment layout converge to a fixpoint, so the assembler and the linker are one integrated, multipass engine rather than separate steps.
+A work-in-progress 6502 cross-assembler/linker. It's used to assemble 6502 code needed in this monorepo but it's not yet ready for public use.
 
 ## License and credits
 

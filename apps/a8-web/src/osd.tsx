@@ -82,7 +82,10 @@ function JoystickStick({ host }: { host: EmulatorHost }) {
 	const d = Math.SQRT1_2;
 
 	function move(e: TargetedTouchEvent<HTMLDivElement>) {
-		const touch = e.touches[0];
+		// targetTouches, not touches: with the fire button held by the other
+		// thumb, touches[0] would be that finger and the stick would read its
+		// position. targetTouches[0] is the finger actually on the stick.
+		const touch = e.targetTouches[0];
 		if (!touch) return;
 		e.preventDefault();
 		e.stopPropagation();

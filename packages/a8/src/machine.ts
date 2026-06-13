@@ -11,6 +11,8 @@ export type AtariModel = "800" | "800XL" | "130XE";
 export interface MachineConfig {
 	/** Which machine to emulate. */
 	model: AtariModel;
+	/** TV standard: line count, the GTIA PAL flag, and timing. Default NTSC. */
+	tvSystem?: "ntsc" | "pal";
 	/** OS ROM: OS-B (10K) for the 800, XL OS (16K) for the 800XL. */
 	os: Uint8Array;
 	/**
@@ -76,6 +78,8 @@ export class Atari implements Memory {
 			throw new Error("The 800XL requires a BASIC ROM — it's built in");
 		}
 
+		const tvSystem = config.tvSystem ?? "ntsc";
+
 		// The dmaRead closure reads #bus lazily, resolving the chip/bus
 		// construction cycle.
 		this.anticGtia = new AnticGtia(
@@ -83,7 +87,7 @@ export class Atari implements Memory {
 				dmaRead: (address) => this.#bus.read(address, ReadOptions.DMA),
 				log: log ?? (() => {}),
 			},
-			{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
+			{ anticTvSystem: tvSystem, gtiaTvSystem: tvSystem },
 		);
 
 		this.#pia = new Pia();

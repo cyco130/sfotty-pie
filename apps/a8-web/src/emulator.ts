@@ -5,6 +5,7 @@ import {
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
 	NTSC_CYCLES_PER_SECOND,
+	PAL_CYCLES_PER_SECOND,
 	SIOV,
 	type AtrImage,
 	type MachineConfig,
@@ -12,8 +13,6 @@ import {
 import { Sfotty } from "@sfotty-pie/sfotty";
 import { AntiAliasFilter } from "./audio-filter.ts";
 import type { AudioOutput } from "./audio.ts";
-
-const MS_PER_SCANLINE = (1000 * CYCLES_PER_LINE) / NTSC_CYCLES_PER_SECOND;
 
 // Audio chunking and pacing: ~21ms chunks, ~50ms of queue as the pacing
 // target, and a bounded scanline batch per wake so the UI stays responsive.
@@ -35,7 +34,16 @@ export interface EmulatorConfig extends MachineConfig {
 	disk?: AtrImage;
 	/** Audio sink. When its context runs, the audio clock paces emulation. */
 	audio?: AudioOutput;
+	/**
+	 * Hold OPTION down for the first frames after a cold boot — how the
+	 * XL/XE disables built-in BASIC (the OS samples CONSOL during init).
+	 */
+	holdOption?: boolean;
 }
+
+// Frames to hold OPTION for the BASIC-disable: the OS reads CONSOL early in
+// its cold-boot init, so a handful of frames is plenty.
+const OPTION_HOLD_FRAMES = 7;
 
 /**
  * Drives an {@link Atari} machine in real time, paced against
@@ -58,9 +66,21 @@ export class Emulator {
 	/** Increments on every completed frame. */
 	frameCount = 0;
 
+	/** True once the CPU has jammed on a CIM (KIL/JAM) instruction. */
+	get crashed(): boolean {
+		return this.#cpu.crashed;
+	}
+
 	#running = false;
 	#scanlines = 0;
 	#epoch = 0;
+
+	// BASIC-disable: hold OPTION for a few frames after each cold boot.
+	readonly #holdOption: boolean;
+	#optionFramesLeft = 0;
+
+	// Wall-clock pacing is per-TV-standard (NTSC ~1.79MHz, PAL ~1.77MHz).
+	readonly #msPerScanline: number;
 
 	// The audio pipeline: per-cycle POKEY+speaker level → anti-alias filter
 	// → nearest-neighbor decimation → DC blocker → fixed-size chunks.
@@ -79,10 +99,19 @@ export class Emulator {
 		this.#cpu = new Sfotty(this.machine, { withoutUndocumented: false });
 		this.#cpu.reset(true);
 
+		this.#holdOption = config.holdOption ?? false;
+		this.#startOptionHold();
+
+		const cyclesPerSecond =
+			config.tvSystem === "pal"
+				? PAL_CYCLES_PER_SECOND
+				: NTSC_CYCLES_PER_SECOND;
+		this.#msPerScanline = (1000 * CYCLES_PER_LINE) / cyclesPerSecond;
+
 		this.#audio = config.audio ?? null;
 		if (this.#audio) {
 			const rate = this.#audio.context.sampleRate;
-			this.#cyclesPerSample = NTSC_CYCLES_PER_SECOND / rate;
+			this.#cyclesPerSample = cyclesPerSecond / rate;
 			this.#targetBuffer = Math.round(rate * TARGET_BUFFER_SECONDS);
 		}
 
@@ -113,18 +142,27 @@ export class Emulator {
 	coldStart(): void {
 		this.machine.reset(true);
 		this.#cpu.reset(true);
+		this.#startOptionHold();
+	}
+
+	// Press OPTION at boot (BASIC-disable); the frame loop releases it after
+	// OPTION_HOLD_FRAMES.
+	#startOptionHold(): void {
+		if (!this.#holdOption) return;
+		this.machine.consoleKeyDown(0x04);
+		this.#optionFramesLeft = OPTION_HOLD_FRAMES;
 	}
 
 	async #loop(): Promise<void> {
 		const yieldMacrotask = makeMacrotaskYield();
-		this.#epoch = performance.now() - this.#scanlines * MS_PER_SCANLINE;
+		this.#epoch = performance.now() - this.#scanlines * this.#msPerScanline;
 
 		while (this.#running) {
 			if (document.hidden) {
 				this.#audio?.clear();
 				await waitForVisible();
 				// The hidden interval is lost time, not work to replay.
-				this.#epoch = performance.now() - this.#scanlines * MS_PER_SCANLINE;
+				this.#epoch = performance.now() - this.#scanlines * this.#msPerScanline;
 			}
 
 			const audio = this.#audio;
@@ -146,7 +184,7 @@ export class Emulator {
 				}
 				// Keep the wall clock rebased for a clean handoff if the
 				// audio context ever stops.
-				this.#epoch = performance.now() - this.#scanlines * MS_PER_SCANLINE;
+				this.#epoch = performance.now() - this.#scanlines * this.#msPerScanline;
 				continue;
 			}
 
@@ -154,14 +192,14 @@ export class Emulator {
 			this.#scanlines++;
 
 			const ahead =
-				this.#epoch + this.#scanlines * MS_PER_SCANLINE - performance.now();
+				this.#epoch + this.#scanlines * this.#msPerScanline - performance.now();
 
 			if (ahead > 5) {
 				// setTimeout overshoots; re-reading the clock next iteration
 				// self-corrects.
 				await sleep(ahead - 2);
 			} else if (ahead < -MAX_LAG_MS) {
-				this.#epoch = performance.now() - this.#scanlines * MS_PER_SCANLINE;
+				this.#epoch = performance.now() - this.#scanlines * this.#msPerScanline;
 			} else if (this.#scanlines % YIELD_INTERVAL === 0) {
 				// A macrotask yield — `await void 0` would only drain microtasks
 				// and starve rendering, input, and requestAnimationFrame.
@@ -199,6 +237,11 @@ export class Emulator {
 			this.frame = back;
 			this.#back ^= 1;
 			this.frameCount++;
+
+			// Release the BASIC-disable OPTION hold once the OS has booted.
+			if (this.#optionFramesLeft > 0 && --this.#optionFramesLeft === 0) {
+				this.machine.consoleKeyUp(0x04);
+			}
 		}
 	}
 

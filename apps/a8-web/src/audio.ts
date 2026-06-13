@@ -48,15 +48,33 @@ registerProcessor("a8-audio", A8Audio);
 export class AudioOutput {
 	readonly context: AudioContext;
 	readonly #node: AudioWorkletNode;
+	readonly #gain: GainNode;
 
 	// Queue-depth accounting: samples sent minus samples consumed, the
 	// latter estimated from the audio clock.
 	#sent = 0;
 	#base = 0;
 
-	private constructor(context: AudioContext, node: AudioWorkletNode) {
+	private constructor(
+		context: AudioContext,
+		node: AudioWorkletNode,
+		gain: GainNode,
+	) {
 		this.context = context;
 		this.#node = node;
+		this.#gain = gain;
+	}
+
+	/**
+	 * Mute at the output, not by withholding chunks — the emulator paces
+	 * itself off the audio clock, so the worklet must keep consuming.
+	 */
+	get muted(): boolean {
+		return this.#gain.gain.value === 0;
+	}
+
+	set muted(value: boolean) {
+		this.#gain.gain.value = value ? 0 : 1;
 	}
 
 	/** Create the context and worklet; null when Web Audio is unavailable. */
@@ -75,8 +93,10 @@ export class AudioOutput {
 			numberOfInputs: 0,
 			outputChannelCount: [1],
 		});
-		node.connect(context.destination);
-		return new AudioOutput(context, node);
+		const gain = new GainNode(context, { gain: 1 });
+		node.connect(gain);
+		gain.connect(context.destination);
+		return new AudioOutput(context, node, gain);
 	}
 
 	/** True while the context runs — i.e. the audio clock is ticking. */

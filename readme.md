@@ -33,3 +33,11 @@ The web app [a8-web](apps/a8-web) bundles open replacement OS and BASIC ROMs. Th
 - **Atari++ OS (os++)** and **Atari++ BASIC (Basic++)** by Thomas Richter / THOR Software — [Thor Public License](apps/a8-web/public/legal/atari++/THOR-Public-License.txt) (a Mozilla Public License 1.1 variant); the corresponding source is bundled alongside it.
 
 Full notices and bundled source: [THIRD-PARTY-LICENSES](apps/a8-web/public/legal/THIRD-PARTY-LICENSES.md).
+
+### Third-party test suites
+
+The [`@sfotty-pie/a8`](packages/a8/readme.md) repository sources include the **Altirra Acid800** hardware-conformance test suite by Avery Lee (separately MIT-licensed) to drive CI conformance tests — see [packages/a8/test/acid800/LICENSE](packages/a8/test/acid800/LICENSE). It is not shipped in the published npm package.
+
+### Not affiliated
+
+Sfotty Pie is an independent project. It is not affiliated with or endorsed by Atari, the Altirra/Acid800 project (Avery Lee), or the Atari++ project (Thomas Richter); the third-party works above are used under their own licenses.

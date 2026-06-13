@@ -35,7 +35,9 @@
     "test:typecheck": "tsc -p tsconfig.json",
     "test:lint": "eslint . --max-warnings 0",
     "test:package": "publint",
-    "boot": "node src/boot.ts"
+    "boot": "node src/boot.ts",
+    "acid800-tests": "node src/acid800-tests.ts",
+    "ci": "pnpm acid800-tests"
   },
   "dependencies": {
     "@sfotty-pie/sfotty": "workspace:*",

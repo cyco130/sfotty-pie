@@ -7,3 +7,5 @@
 MIT license.
 
 - [Fatih Aygün](https://github.com/cyco130) and [contributors](https://github.com/cyco130/sfotty-pie/graphs/contributors).
+
+The repository includes the **Altirra Acid800** hardware-conformance test suite (`test/acid800/acid800.atr`) to drive CI conformance tests. It lives in the sources only — the published npm package ships just `dist/` and `atari-src/`, not the test data. Acid800 is by Avery Lee and separately MIT-licensed — see [test/acid800/LICENSE](test/acid800/LICENSE). This project is independent and not affiliated with or endorsed by the Acid800 or Altirra projects.

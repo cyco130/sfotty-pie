@@ -40,9 +40,9 @@ const osPath = flagValue("--os");
 const basicPath = flagValue("--basic");
 const xe = argv.includes("--xe");
 const xl = xe || argv.includes("--xl");
-// The positional file is the first non-flag arg that isn't an --os/--basic value.
+// The positional file is the first non-flag arg that isn't a flag's value.
 const flagValueIndices = new Set(
-	["--os", "--basic"]
+	["--os", "--basic", "--keys"]
 		.map((flag) => argv.indexOf(flag) + 1)
 		.filter((i) => i > 0),
 );
@@ -81,16 +81,37 @@ const machine = new Atari({
 	...(cartridge ? { cartridge } : {}),
 });
 
+// --keys automation (e.g. Acid800): each time the program waits for a key — it
+// clears CH ($02FC) then polls it — feed the next scripted POKEY key code, and
+// once the script is exhausted exit the process. So a suite that ends on a
+// key-wait finishes immediately instead of spinning out the watchdog. Codes are
+// KBCODE values, comma-separated hex (e.g. `--keys 21,16` = Space then X).
+const CH = 0x02fc;
+const keyScript = (flagValue("--keys") ?? "")
+	.split(",")
+	.filter(Boolean)
+	.map((code) => parseInt(code, 16));
+let keyIndex = 0;
+let keyWaitArmed = false;
+
 // Record every bus address touched in the current window so the watchdog can
 // tell a real stuck loop from a legitimately long loop (e.g. the RAM test).
 const touched = new Set<number>();
 const bus: Memory = {
 	read(address, options) {
 		touched.add(address);
+		if (keyScript.length && address === CH && keyWaitArmed) {
+			keyWaitArmed = false;
+			if (keyIndex >= keyScript.length) process.exit(0);
+			const code = keyScript[keyIndex++]!;
+			process.stderr.write(`[keys] CH <- $${hex(code, 2)}\n`);
+			return code;
+		}
 		return machine.read(address, options);
 	},
 	write(address, value) {
 		touched.add(address);
+		if (keyScript.length && address === CH && value === 0) keyWaitArmed = true;
 		machine.write(address, value);
 	},
 };

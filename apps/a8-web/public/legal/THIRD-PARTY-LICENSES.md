@@ -2,6 +2,8 @@
 
 Sfotty Pie itself is MIT-licensed. The replacement firmware ROMs bundled with this web app keep their own licenses, reproduced below. (These are independent works the emulator loads as data — bundling them does not relicense Sfotty Pie's own code.)
 
+Sfotty Pie is an independent project and is not affiliated with or endorsed by Atari, the Altirra project (Avery Lee), or the Atari++ project (Thomas Richter).
+
 User-supplied ROMs and any images in the local library are not covered here; they belong to their respective owners.
 
 ---

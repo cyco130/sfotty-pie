@@ -18,7 +18,11 @@ import type { AudioOutput } from "./audio.ts";
 import { commands, type Command } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { Keyboard } from "./keyboard.ts";
-import { type LoadedFirmware } from "./library.ts";
+import {
+	loadLibraryEntry,
+	type LibraryEntry,
+	type LoadedFirmware,
+} from "./library.ts";
 import { buildNtscPalette, buildPalPalette } from "./palette.ts";
 
 export interface HostConfig {
@@ -350,14 +354,27 @@ export class EmulatorHost {
 		}
 	}
 
+	/** Boot a user-supplied file (the "Boot image…" picker / drag-and-drop). */
 	async loadFile(file: File): Promise<void> {
-		const contents = new Uint8Array(await file.arrayBuffer());
-		const format = detectFileFormat(contents, file.name);
+		this.#bootImage(new Uint8Array(await file.arrayBuffer()), file.name);
+	}
+
+	/** Boot a software item from the built-in library. */
+	async bootLibraryEntry(entry: LibraryEntry): Promise<void> {
+		this.#bootImage(await loadLibraryEntry(entry), entry.fileName);
+	}
+
+	// Mount an image (disk/cartridge/executable) and power-cycle into it.
+	// Booting an image always disables BASIC so it can't intercept the boot; on
+	// the 800 the BASIC cart also comes out for a game cartridge anyway (handled
+	// by #makeEmulator).
+	#bootImage(contents: Uint8Array, name: string): void {
+		const format = detectFileFormat(contents, name);
 
 		// An unrecognized/unloadable file changes nothing — just alert.
 		const unsupported = unsupportedMessage(format);
 		if (unsupported) {
-			this.alert.value = `${file.name}: ${unsupported}`;
+			this.alert.value = `${name}: ${unsupported}`;
 			return;
 		}
 
@@ -370,18 +387,17 @@ export class EmulatorHost {
 						? // XEX files boot from a generated in-memory disk whose
 							// boot sectors are the XEX loader.
 							{ disk: buildBootDisk(contents) }
-						: { cartridge: new Cartridge(contents, file.name) };
+						: { cartridge: new Cartridge(contents, name) };
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.alert.value = `${file.name}: ${message}`;
+			this.alert.value = `${name}: ${message}`;
 			return;
 		}
 
-		// A valid image: mount it and power-cycle. The 800's BASIC cart comes
-		// out for a game cartridge (handled by #makeEmulator).
 		this.menuOpen.value = false; // get out of the way
 		this.#attachment = attachment;
-		this.imageName.value = file.name;
+		this.imageName.value = name;
+		this.config.value = { ...this.config.value, basicDisabled: true };
 		this.#rebuild();
 	}
 

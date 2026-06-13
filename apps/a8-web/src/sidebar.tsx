@@ -1,6 +1,11 @@
 import { useEffect } from "preact/hooks";
 import type { Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
+import { builtinLibrary } from "./library.ts";
+
+// The bootable software in the library (the firmware/ items are auto-selected
+// by the host, not listed here).
+const software = builtinLibrary.filter((entry) => entry.category === "other");
 
 /** A labelled segmented control; each option dispatches its command. */
 function Segmented({
@@ -143,6 +148,27 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 					Boot image…
 				</button>
 			</section>
+
+			{software.length > 0 && (
+				<section>
+					<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+						Software
+					</h2>
+					<ul class="flex flex-col gap-1">
+						{software.map((entry) => (
+							<li key={entry.id}>
+								<button
+									type="button"
+									class="text-left text-sm hover:underline"
+									onClick={() => void host.bootLibraryEntry(entry)}
+								>
+									{entry.displayName}
+								</button>
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
 
 			{/* The key-mappings help is moot without a physical keyboard. Gate
 			    on pointer capability, not width: a phone in landscape is wide

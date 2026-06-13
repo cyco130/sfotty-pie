@@ -84,7 +84,8 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 				...rom.subarray(0xca6, 0xca6 + ALTIRRA_OS_BANNER.length),
 			),
 		origin: "Bundled with the Altirra emulator.",
-		notes: "A GPLv2-licensed 400/800 OS replacement.",
+		notes:
+			"A permissively licensed (FSF all-permissive) 400/800 OS replacement.",
 		type: "ntsc/pal",
 	},
 	{
@@ -98,7 +99,7 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 				ALTIRRA_OS_XL_BANNER,
 			),
 		origin: "Bundled with the Altirra emulator.",
-		notes: "A GPLv2-licensed XL/XE OS replacement.",
+		notes: "A permissively licensed (FSF all-permissive) XL/XE OS replacement.",
 		type: "xl/xe",
 	},
 	{
@@ -106,7 +107,8 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 		size: 8192,
 		check: (rom) => !!getAltirraBasicVersion(rom),
 		origin: "Bundled with the Altirra emulator.",
-		notes: "A GPLv2-licensed Atari BASIC replacement.",
+		notes:
+			"A permissively licensed (FSF all-permissive) Atari BASIC replacement.",
 		type: "basic",
 	},
 	{

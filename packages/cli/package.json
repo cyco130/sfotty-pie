@@ -1,6 +1,6 @@
 {
   "name": "@sfotty-pie/cli",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "description": "An emulator for a hypothetical 6502-based system.",
   "keywords": [
     "6502",

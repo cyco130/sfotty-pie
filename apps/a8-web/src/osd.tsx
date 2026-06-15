@@ -2,8 +2,11 @@ import type { TargetedTouchEvent } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
+import { KeyboardView } from "./osd-keyboard.tsx";
 
 const LEFTY_KEY = "a8.osd.lefty";
+
+type OsdView = "stick" | "keyboard" | "off";
 
 /** True while the primary pointer is touch (a phone/tablet, not a mouse). */
 function useCoarsePointer(): boolean {
@@ -154,10 +157,82 @@ function JoystickStick({ host }: { host: EmulatorHost }) {
 }
 
 /**
- * The on-screen controls for touch devices: a row of console/key buttons over
- * a fire button and an analog stick. Shown only when the primary pointer is
+ * Power (cold start) — a one-shot tap, styled recessed so it isn't
+ * fat-fingered mid-game. Lives in the persistent top bar beside Reset.
+ */
+function PowerButton({ host }: { host: EmulatorHost }) {
+	return (
+		<button
+			type="button"
+			class="touch-none rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-400 select-none active:bg-neutral-600"
+			onTouchStart={(e) => {
+				e.preventDefault();
+				host.dispatch("POWER_CYCLE");
+			}}
+		>
+			Power
+		</button>
+	);
+}
+
+/** Reset (hardware line) — momentary hold, in the persistent top bar. */
+function ResetButton({ host }: { host: EmulatorHost }) {
+	return (
+		<button
+			type="button"
+			class="touch-none rounded bg-neutral-700/70 px-3 py-1 text-xs text-white select-none active:bg-neutral-500"
+			onTouchStart={(e) => {
+				e.preventDefault();
+				host.dispatch("PRESS_RESET");
+			}}
+			onTouchEnd={(e) => {
+				e.preventDefault();
+				host.dispatch("RELEASE_RESET");
+			}}
+			onTouchCancel={() => host.dispatch("RELEASE_RESET")}
+		>
+			Reset
+		</button>
+	);
+}
+
+/** The 🕹 / ⌨ segmented control that swaps the OSD body between views. */
+function ViewToggle({
+	view,
+	onChange,
+}: {
+	view: OsdView;
+	onChange: (view: OsdView) => void;
+}) {
+	const tab = (v: OsdView, label: string, aria: string) => (
+		<button
+			type="button"
+			aria-label={aria}
+			aria-pressed={view === v}
+			class={`rounded px-3 py-1 text-lg select-none ${
+				view === v ? "bg-neutral-500 text-white" : "text-neutral-400"
+			}`}
+			onClick={() => onChange(v)}
+		>
+			{label}
+		</button>
+	);
+	return (
+		<div class="flex gap-1 rounded bg-neutral-800 p-0.5">
+			{tab("stick", "🕹", "Joystick controls")}
+			{tab("keyboard", "⌨", "Keyboard")}
+			{tab("off", "▾", "Hide controls")}
+		</div>
+	);
+}
+
+/**
+ * The on-screen controls for touch devices. A persistent top bar (Power + a
+ * 🕹/⌨ view toggle) sits over a body that swaps between the joystick view (a
+ * row of console keys over a fire button and analog stick, with a left-hander
+ * swap) and the on-screen keyboard. Shown only when the primary pointer is
  * coarse and the menu is closed (the menu becomes a top bar on mobile and
- * needs the room). A swap button flips the stick/fire sides for left-handers.
+ * needs the room).
  */
 export function Osd({ host }: { host: EmulatorHost }) {
 	const coarse = useCoarsePointer();
@@ -165,6 +240,7 @@ export function Osd({ host }: { host: EmulatorHost }) {
 	const [lefty, setLefty] = useState(
 		() => localStorage.getItem(LEFTY_KEY) === "1",
 	);
+	const [view, setView] = useState<OsdView>("stick");
 
 	if (!coarse || menuOpen) return null;
 
@@ -173,61 +249,69 @@ export function Osd({ host }: { host: EmulatorHost }) {
 
 	return (
 		<div class="flex shrink-0 flex-col gap-2 bg-neutral-900/80 p-2 select-none">
-			<div class="flex gap-1">
-				<HoldButton
-					host={host}
-					press="PRESS_OPTION"
-					release="RELEASE_OPTION"
-					label="Option"
-				/>
-				<HoldButton
-					host={host}
-					press="PRESS_SELECT"
-					release="RELEASE_SELECT"
-					label="Select"
-				/>
-				<HoldButton
-					host={host}
-					press="PRESS_START"
-					release="RELEASE_START"
-					label="Start"
-				/>
-				<HoldButton
-					host={host}
-					press="PRESS_RESET"
-					release="RELEASE_RESET"
-					label="Reset"
-				/>
-				<HoldButton
-					host={host}
-					press="PRESS_SPACE"
-					release="RELEASE_POKEY_KEY"
-					label="Space"
-				/>
-				<HoldButton
-					host={host}
-					press="PRESS_ESC"
-					release="RELEASE_POKEY_KEY"
-					label="Esc"
-				/>
+			<div class="flex items-center justify-between">
+				<div class="flex gap-1">
+					<PowerButton host={host} />
+					<ResetButton host={host} />
+				</div>
+				<ViewToggle view={view} onChange={setView} />
 			</div>
 
-			<div class="flex items-center justify-between py-4">
-				{lefty ? stick : fire}
-				<button
-					type="button"
-					aria-label="Swap stick and fire sides"
-					class="rounded bg-neutral-700/70 px-3 py-2 text-lg text-white active:bg-neutral-500"
-					onClick={() => {
-						const next = !lefty;
-						localStorage.setItem(LEFTY_KEY, next ? "1" : "0");
-						setLefty(next);
-					}}
-				>
-					⇄
-				</button>
-				{lefty ? fire : stick}
-			</div>
+			{view === "keyboard" && <KeyboardView host={host} />}
+
+			{view === "stick" && (
+				<>
+					<div class="flex gap-1">
+						<HoldButton
+							host={host}
+							press="PRESS_OPTION"
+							release="RELEASE_OPTION"
+							label="Option"
+						/>
+						<HoldButton
+							host={host}
+							press="PRESS_SELECT"
+							release="RELEASE_SELECT"
+							label="Select"
+						/>
+						<HoldButton
+							host={host}
+							press="PRESS_START"
+							release="RELEASE_START"
+							label="Start"
+						/>
+						<HoldButton
+							host={host}
+							press="PRESS_SPACE"
+							release="RELEASE_POKEY_KEY"
+							label="Space"
+						/>
+						<HoldButton
+							host={host}
+							press="PRESS_ESC"
+							release="RELEASE_POKEY_KEY"
+							label="Esc"
+						/>
+					</div>
+
+					<div class="flex items-center justify-between py-4">
+						{lefty ? stick : fire}
+						<button
+							type="button"
+							aria-label="Swap stick and fire sides"
+							class="rounded bg-neutral-700/70 px-3 py-2 text-lg text-white active:bg-neutral-500"
+							onClick={() => {
+								const next = !lefty;
+								localStorage.setItem(LEFTY_KEY, next ? "1" : "0");
+								setLefty(next);
+							}}
+						>
+							⇄
+						</button>
+						{lefty ? fire : stick}
+					</div>
+				</>
+			)}
 		</div>
 	);
 }

@@ -302,7 +302,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 						}
 						ops[opcode] = [
 							//
-							["r-pc"], // Do nothing
+							["r-pc", "dummy"], // Do nothing (dummy read of PC)
 						];
 						break;
 					case "imm":
@@ -386,7 +386,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 					);
 				}
 
-				ops[opcode] = [["r-pc", operation]];
+				ops[opcode] = [["r-pc", "dummy", operation]];
 			}
 			break;
 
@@ -424,16 +424,16 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 					case "acc":
 						switch (entry.mnemonic) {
 							case "ASL":
-								ops[opcode] = [["r-pc", "asla"]];
+								ops[opcode] = [["r-pc", "dummy", "asla"]];
 								break;
 							case "LSR":
-								ops[opcode] = [["r-pc", "lsra"]];
+								ops[opcode] = [["r-pc", "dummy", "lsra"]];
 								break;
 							case "ROL":
-								ops[opcode] = [["r-pc", "rola"]];
+								ops[opcode] = [["r-pc", "dummy", "rola"]];
 								break;
 							case "ROR":
-								ops[opcode] = [["r-pc", "rora"]];
+								ops[opcode] = [["r-pc", "dummy", "rora"]];
 								break;
 
 							default:

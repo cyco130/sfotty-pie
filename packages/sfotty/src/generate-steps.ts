@@ -223,12 +223,25 @@ interface StepDef {
 const steps: StepDef[] = [];
 const byBaseName = new Map<string, StepDef[]>();
 
+// Microstates whose bus access is a non-committing dummy (tagged with the
+// "dummy" marker in the instruction data). Emitted as the DUMMY table so #read
+// can set ReadOptions.DUMMY by state. (Implied/accumulator reads for now; stack,
+// RMW, indexed and reset dummies are tagged in later steps.)
+const dummyStates: number[] = [];
+
 const baseName = (s: StepDef) => `${s.mnemonic}_${s.mode}_${s.cycle + 1}`;
 
 for (const inst of NMOS_INSTRUCTIONS) {
 	const last = inst.code.length - 1;
 	const isBrk = inst.mnemonic.toUpperCase() === "BRK";
-	inst.code.forEach((cycle, i) => {
+	inst.code.forEach((rawCycle, i) => {
+		// Strip the "dummy" marker (not a real op): record the microstate so its
+		// bus access gets ReadOptions.DUMMY, then proceed as if it weren't there.
+		const cycle = rawCycle.includes("dummy")
+			? rawCycle.filter((token) => token !== "dummy")
+			: rawCycle;
+		if (cycle !== rawCycle) dummyStates.push((inst.opcode << 3) | i);
+
 		const unknown = cycle.find((token) => !isKnown(token));
 		if (unknown !== undefined) {
 			throw new Error(
@@ -378,6 +391,20 @@ ${funcs.join("\n\n")}
 export const MICROCODE: Step[] = [
 ${table.join("\n")}
 ];
+
+/**
+ * Per-microstate flag: 1 if that cycle's bus access is a non-committing dummy
+ * (e.g. the implied/accumulator "internal operation" read). The CPU ORs
+ * ReadOptions.DUMMY into the access when set, so traps can tell real accesses
+ * from speculative/discarded ones. Indexed by microstate, like MICROCODE.
+ */
+export const DUMMY: Uint8Array = /* @__PURE__ */ (() => {
+	const table = new Uint8Array(MICROCODE.length);
+	for (const state of [${dummyStates.sort((a, b) => a - b).join(", ")}]) {
+		table[state] = 1;
+	}
+	return table;
+})();
 `;
 
 const outPath = join(import.meta.dirname, "nmos-steps.generated.ts");

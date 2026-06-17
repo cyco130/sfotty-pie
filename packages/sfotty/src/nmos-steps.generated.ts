@@ -7525,3 +7525,21 @@ export const MICROCODE: Step[] = [
 	reset_vector_low,
 	reset_vector_high,
 ];
+
+/**
+ * Per-microstate flag: 1 if that cycle's bus access is a non-committing dummy
+ * (e.g. the implied/accumulator "internal operation" read). The CPU ORs
+ * ReadOptions.DUMMY into the access when set, so traps can tell real accesses
+ * from speculative/discarded ones. Indexed by microstate, like MICROCODE.
+ */
+export const DUMMY: Uint8Array = /* @__PURE__ */ (() => {
+	const table = new Uint8Array(MICROCODE.length);
+	for (const state of [
+		80, 192, 208, 336, 448, 464, 592, 704, 720, 848, 960, 976, 1088, 1104, 1216,
+		1232, 1344, 1360, 1472, 1488, 1600, 1616, 1728, 1744, 1856, 1872, 1984,
+		2000,
+	]) {
+		table[state] = 1;
+	}
+	return table;
+})();

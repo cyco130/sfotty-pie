@@ -121,7 +121,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 10,
 		mnemonic: "ASL",
 		mode: "acc",
-		code: [["r-pc", "asla"]],
+		code: [["r-pc", "dummy", "asla"]],
 	},
 	// 0B ANC imm
 	{
@@ -294,7 +294,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 24,
 		mnemonic: "CLC",
 		mode: "imp",
-		code: [["r-pc", "cf=0"]],
+		code: [["r-pc", "dummy", "cf=0"]],
 	},
 	// 19 ORA aby
 	{
@@ -314,7 +314,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// 1B SLO aby
 	{
@@ -497,7 +497,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 42,
 		mnemonic: "ROL",
 		mode: "acc",
-		code: [["r-pc", "rola"]],
+		code: [["r-pc", "dummy", "rola"]],
 	},
 	// 2B ANC imm
 	{
@@ -668,7 +668,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 56,
 		mnemonic: "SEC",
 		mode: "imp",
-		code: [["r-pc", "cf=1"]],
+		code: [["r-pc", "dummy", "cf=1"]],
 	},
 	// 39 AND aby
 	{
@@ -688,7 +688,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// 3B RLA aby
 	{
@@ -876,7 +876,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 74,
 		mnemonic: "LSR",
 		mode: "acc",
-		code: [["r-pc", "lsra"]],
+		code: [["r-pc", "dummy", "lsra"]],
 	},
 	// 4B ASR imm
 	{
@@ -1046,7 +1046,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 88,
 		mnemonic: "CLI",
 		mode: "imp",
-		code: [["r-pc", "if=0"]],
+		code: [["r-pc", "dummy", "if=0"]],
 	},
 	// 59 EOR aby
 	{
@@ -1066,7 +1066,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// 5B SRE aby
 	{
@@ -1251,7 +1251,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 106,
 		mnemonic: "ROR",
 		mode: "acc",
-		code: [["r-pc", "rora"]],
+		code: [["r-pc", "dummy", "rora"]],
 	},
 	// 6B ARR imm
 	{
@@ -1422,7 +1422,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 120,
 		mnemonic: "SEI",
 		mode: "imp",
-		code: [["r-pc", "if=1"]],
+		code: [["r-pc", "dummy", "if=1"]],
 	},
 	// 79 ADC aby
 	{
@@ -1442,7 +1442,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// 7B RRA aby
 	{
@@ -1593,7 +1593,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 136,
 		mnemonic: "DEY",
 		mode: "imp",
-		code: [["r-pc", "y--"]],
+		code: [["r-pc", "dummy", "y--"]],
 	},
 	// 89 NOP imm
 	{
@@ -1609,7 +1609,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 138,
 		mnemonic: "TXA",
 		mode: "imp",
-		code: [["r-pc", "a=x"]],
+		code: [["r-pc", "dummy", "a=x"]],
 	},
 	// 8B ANE imm
 	{
@@ -1735,7 +1735,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 152,
 		mnemonic: "TYA",
 		mode: "imp",
-		code: [["r-pc", "a=y"]],
+		code: [["r-pc", "dummy", "a=y"]],
 	},
 	// 99 STA aby
 	{
@@ -1754,7 +1754,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 154,
 		mnemonic: "TXS",
 		mode: "imp",
-		code: [["r-pc", "s=x"]],
+		code: [["r-pc", "dummy", "s=x"]],
 	},
 	// 9B SHS aby
 	{
@@ -1907,7 +1907,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 168,
 		mnemonic: "TAY",
 		mode: "imp",
-		code: [["r-pc", "y=a"]],
+		code: [["r-pc", "dummy", "y=a"]],
 	},
 	// A9 LDA imm
 	{
@@ -1921,7 +1921,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 170,
 		mnemonic: "TAX",
 		mode: "imp",
-		code: [["r-pc", "x=a"]],
+		code: [["r-pc", "dummy", "x=a"]],
 	},
 	// AB LXA imm
 	{
@@ -2080,7 +2080,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 184,
 		mnemonic: "CLV",
 		mode: "imp",
-		code: [["r-pc", "of=0"]],
+		code: [["r-pc", "dummy", "of=0"]],
 	},
 	// B9 LDA aby
 	{
@@ -2099,7 +2099,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 186,
 		mnemonic: "TSX",
 		mode: "imp",
-		code: [["r-pc", "x=s"]],
+		code: [["r-pc", "dummy", "x=s"]],
 	},
 	// BB LAS aby
 	{
@@ -2251,7 +2251,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 200,
 		mnemonic: "INY",
 		mode: "imp",
-		code: [["r-pc", "y++"]],
+		code: [["r-pc", "dummy", "y++"]],
 	},
 	// C9 CMP imm
 	{
@@ -2265,7 +2265,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 202,
 		mnemonic: "DEX",
 		mode: "imp",
-		code: [["r-pc", "x--"]],
+		code: [["r-pc", "dummy", "x--"]],
 	},
 	// CB SBX imm
 	{
@@ -2438,7 +2438,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 216,
 		mnemonic: "CLD",
 		mode: "imp",
-		code: [["r-pc", "df=0"]],
+		code: [["r-pc", "dummy", "df=0"]],
 	},
 	// D9 CMP aby
 	{
@@ -2458,7 +2458,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// DB DCP aby
 	{
@@ -2619,7 +2619,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 232,
 		mnemonic: "INX",
 		mode: "imp",
-		code: [["r-pc", "x++"]],
+		code: [["r-pc", "dummy", "x++"]],
 	},
 	// E9 SBC imm
 	{
@@ -2633,7 +2633,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 234,
 		mnemonic: "NOP",
 		mode: "imp",
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// EB SBC imm
 	{
@@ -2806,7 +2806,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 248,
 		mnemonic: "SED",
 		mode: "imp",
-		code: [["r-pc", "df=1"]],
+		code: [["r-pc", "dummy", "df=1"]],
 	},
 	// F9 SBC aby
 	{
@@ -2826,7 +2826,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// FB ISB aby
 	{

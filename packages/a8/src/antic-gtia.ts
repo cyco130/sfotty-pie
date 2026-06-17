@@ -1432,15 +1432,21 @@ export class AnticGtia implements Memory {
 			return false;
 		}
 
+		let base: number;
 		let offset: number;
 		if (this.verticalPmResolution === 1) {
+			// One-line resolution: PMBASE is 2K-aligned (bits 0-2 ignored).
+			base = (this.pmbase & 0xf8) * 256;
 			offset = 768;
 		} else {
+			// Two-line resolution: PMBASE is 1K-aligned (bits 0-1 ignored).
+			base = (this.pmbase & 0xfc) * 256;
 			offset = 384;
 		}
 
-		const addr = this.pmbase * 256 + offset;
-		this.#dmaRead(addr + Math.floor(this.vcount / this.verticalPmResolution));
+		this.#dmaRead(
+			base + offset + Math.floor(this.vcount / this.verticalPmResolution),
+		);
 
 		return true;
 	}
@@ -1450,15 +1456,21 @@ export class AnticGtia implements Memory {
 			return false;
 		}
 
+		let base: number;
 		let offset: number;
 		if (this.verticalPmResolution === 1) {
+			// One-line resolution: PMBASE is 2K-aligned (bits 0-2 ignored).
+			base = (this.pmbase & 0xf8) * 256;
 			offset = 1024 + n * 256;
 		} else {
+			// Two-line resolution: PMBASE is 1K-aligned (bits 0-1 ignored).
+			base = (this.pmbase & 0xfc) * 256;
 			offset = 512 + n * 128;
 		}
 
-		const addr = this.pmbase * 256 + offset;
-		this.#dmaRead(addr + Math.floor(this.vcount / this.verticalPmResolution));
+		this.#dmaRead(
+			base + offset + Math.floor(this.vcount / this.verticalPmResolution),
+		);
 
 		return true;
 	}

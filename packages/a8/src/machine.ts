@@ -58,18 +58,20 @@ export interface MachineConfig {
  *   $4000-$7FFF via PORTB bits 2-3) with separate CPU/ANTIC access
  *   (bits 4/5).
  *
- * The host drives the machine one cycle at a time:
+ * The host drives the machine one cycle at a time via {@link machineCycle},
+ * which runs ANTIC scheduling, the bus phase (ANTIC DMA or the CPU), and the
+ * render, and returns the audio level. A bus phase may throw to suspend; the
+ * host catches it, resolves it, and calls {@link resumeMachineCycle}:
  *
  * ```ts
- * machine.anticGtia.beforeCpu();
- * machine.anticGtia.busCycle(); // ANTIC's DMA fetch; sets `halt`
- * machine.cycle(); // returns the audio level, for hosts producing sound
- * cpu.NMI = machine.anticGtia.nmi;
- * cpu.IRQ = machine.irq;
- * cpu.RDY = machine.anticGtia.rdy;
- * if (machine.resetAsserted) cpu.reset(false);
- * else if (!machine.anticGtia.halt) cpu.run();
- * machine.anticGtia.afterCpu(frame, machine.busData);
+ * let audio;
+ * try {
+ * 	audio = machine.machineCycle();
+ * } catch (signal) {
+ * 	// resolve the suspend (await input, clear a breakpoint, …)
+ * 	audio = machine.resumeMachineCycle();
+ * }
+ * // read machine.frame for video
  * ```
  *
  * Keyboard input goes through the `pokeyKeyDown`/`pokeyKeyUp` family of
@@ -179,7 +181,8 @@ export class Atari implements Memory {
 	/**
 	 * Advance the per-cycle chips (currently POKEY) one machine cycle — call
 	 * once per cycle alongside the ANTIC `beforeCpu`/`afterCpu` pair. Returns
-	 * POKEY's summed audio output (0-60) for hosts that produce sound.
+	 * POKEY's summed audio output (0-60) for hosts that produce sound. (Hosts on
+	 * the inline loop drive this directly; {@link machineCycle} ticks it for you.)
 	 */
 	cycle(): number {
 		return this.#pokey.cycle();
@@ -223,6 +226,10 @@ export class Atari implements Memory {
 	 * which would re-run the committed scheduling. Idempotent by construction:
 	 * each bus phase does its access before any commit, so a throw unwinds clean
 	 * and the retried access repeats nothing.
+	 *
+	 * Named `machineCycle` transitionally — it coexists with the POKEY-tick
+	 * `cycle()` until a8-web's inline loop migrates onto it, when it is renamed to
+	 * `cycle()`.
 	 */
 	machineCycle(): number {
 		if (this.#phase !== PHASE.IDLE) {

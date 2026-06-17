@@ -944,8 +944,24 @@ export class AnticGtia implements Memory {
 			// persist (the GTIA collision tests rely on that).
 			if (y < 224) {
 				if (i === 0 && this.enableMissiles) {
-					// TODO: VDELAY for missiles (bits 0-3)
-					this.grafM = busData;
+					// VDELAY bits 0-3 delay each missile independently, but
+					// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
+					// latch each pair on its own: a delayed missile updates only
+					// on odd scanlines, exactly like the per-player logic below.
+					let m = this.grafM;
+					if (isOddScanline || !(this.vdelay & 0x01)) {
+						m = (m & ~0x03) | (busData & 0x03);
+					}
+					if (isOddScanline || !(this.vdelay & 0x02)) {
+						m = (m & ~0x0c) | (busData & 0x0c);
+					}
+					if (isOddScanline || !(this.vdelay & 0x04)) {
+						m = (m & ~0x30) | (busData & 0x30);
+					}
+					if (isOddScanline || !(this.vdelay & 0x08)) {
+						m = (m & ~0xc0) | (busData & 0xc0);
+					}
+					this.grafM = m;
 				}
 
 				if (this.enablePlayers) {
@@ -1056,9 +1072,17 @@ export class AnticGtia implements Memory {
 		const x = i - 17 + 3;
 		const y = this.vcount - 8;
 
-		if (y < 0 || y >= 240 || x < 0 || x >= 94) {
+		if (y < 0 || y >= 240) {
 			return 0;
 		}
+
+		// A sprite triggered in the left horizontal blank still shifts its
+		// pixels into the visible region and collides there, so the shift
+		// registers must load and advance regardless of the horizontal window —
+		// only the output is blanked outside it. Gating the load on x (as a
+		// single early return did) dropped the whole sprite when it triggered
+		// in HBLANK, losing the pixels that spill into the visible area.
+		const visible = x >= 0 && x < 94;
 
 		const start = (this.hpos + 2) * 2 + pos;
 
@@ -1185,7 +1209,7 @@ export class AnticGtia implements Memory {
 			}
 		}
 
-		return result;
+		return visible ? result : 0;
 	}
 
 	// Get playfield and P/M outputs and detect collisions
@@ -1432,15 +1456,21 @@ export class AnticGtia implements Memory {
 			return false;
 		}
 
+		let base: number;
 		let offset: number;
 		if (this.verticalPmResolution === 1) {
+			// One-line resolution: PMBASE is 2K-aligned (bits 0-2 ignored).
+			base = (this.pmbase & 0xf8) * 256;
 			offset = 768;
 		} else {
+			// Two-line resolution: PMBASE is 1K-aligned (bits 0-1 ignored).
+			base = (this.pmbase & 0xfc) * 256;
 			offset = 384;
 		}
 
-		const addr = this.pmbase * 256 + offset;
-		this.#dmaRead(addr + Math.floor(this.vcount / this.verticalPmResolution));
+		this.#dmaRead(
+			base + offset + Math.floor(this.vcount / this.verticalPmResolution),
+		);
 
 		return true;
 	}
@@ -1450,15 +1480,21 @@ export class AnticGtia implements Memory {
 			return false;
 		}
 
+		let base: number;
 		let offset: number;
 		if (this.verticalPmResolution === 1) {
+			// One-line resolution: PMBASE is 2K-aligned (bits 0-2 ignored).
+			base = (this.pmbase & 0xf8) * 256;
 			offset = 1024 + n * 256;
 		} else {
+			// Two-line resolution: PMBASE is 1K-aligned (bits 0-1 ignored).
+			base = (this.pmbase & 0xfc) * 256;
 			offset = 512 + n * 128;
 		}
 
-		const addr = this.pmbase * 256 + offset;
-		this.#dmaRead(addr + Math.floor(this.vcount / this.verticalPmResolution));
+		this.#dmaRead(
+			base + offset + Math.floor(this.vcount / this.verticalPmResolution),
+		);
 
 		return true;
 	}

@@ -117,6 +117,17 @@ export class SfottyCore {
 	 */
 	NMI = false;
 
+	/**
+	 * Optional hook fired at each committed opcode fetch (`SYNC & !DUMMY`), with
+	 * the opcode's address, just after the fetch commits. It is *not* fired on the
+	 * dummy fetch that precedes an interrupt, nor on RDY-stalled re-fetches, so it
+	 * sees each executed instruction exactly once. Hosts use it for tracing /
+	 * instruction-level debugging; it is a post-commit notification and must not
+	 * throw (use an execute interceptor on the bus to suspend at a fetch). Leave
+	 * undefined for zero overhead.
+	 */
+	onFetch: ((pc: number) => void) | undefined = undefined;
+
 	#nmiPrev = false; // For edge detection of NMI.
 	#nmiPending = false; // Set when an NMI is latched, cleared when serviced.
 	#interruptDetected = false; // Combined NMI/IRQ detect, recomputed each cycle; opPoll latches it one cycle later (the two-cycles-before-decode delay).
@@ -312,8 +323,10 @@ export class SfottyCore {
 			this.state = 0; // BRK / interrupt sequence
 		} else {
 			this.bFlag = true;
+			const pc = this.PC;
 			this.PC = inc16(this.PC);
 			this.state = value << 3;
+			this.onFetch?.(pc);
 		}
 
 		return true;

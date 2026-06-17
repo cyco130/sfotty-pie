@@ -182,6 +182,21 @@ export class Sfotty {
 		this.#core.NMI = value;
 	}
 
+	/**
+	 * Optional hook fired at each committed opcode fetch (`SYNC & !DUMMY`), with
+	 * the opcode's address, just after the fetch commits. Not fired on the dummy
+	 * fetch before an interrupt or on RDY-stalled re-fetches, so it sees each
+	 * executed instruction exactly once. For tracing / instruction-level
+	 * debugging; it must not throw (use an execute interceptor to suspend at a
+	 * fetch). Undefined by default (zero overhead).
+	 */
+	get onFetch(): ((pc: number) => void) | undefined {
+		return this.#core.onFetch;
+	}
+	set onFetch(value: ((pc: number) => void) | undefined) {
+		this.#core.onFetch = value;
+	}
+
 	/** Pack the status flags into a byte. Bit 5 (unused) reads as 1; bit 4 is B. */
 	getP(): number {
 		return this.#core.getP();

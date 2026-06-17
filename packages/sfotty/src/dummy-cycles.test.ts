@@ -147,6 +147,49 @@ describe("dummy cycles", () => {
 		expect(noCross.bytes[0x1201]).toBe(0x42);
 	});
 
+	test("a taken branch's internal PC re-reads are DUMMY", () => {
+		// BNE +$0E from $0200, Z clear → taken, same page. After fetching opcode and
+		// operand PC=$0202; cycle 3 re-reads $0202 to add the offset and throws it
+		// away — the real opcode fetch is the following DECODE at $0210.
+		const noCross = record();
+		noCross.bytes[0x0200] = 0xd0; // BNE
+		noCross.bytes[0x0201] = 0x0e;
+		noCross.cpu.zFlag = false;
+		run(noCross.cpu, 4);
+
+		const dummy = noCross.reads.find((r) => r.address === 0x0202);
+		expect(dummy).toBeDefined();
+		expect(dummy!.options & ReadOptions.DUMMY).toBeTruthy();
+		expect(dummy!.options & ReadOptions.SYNC).toBe(0);
+
+		const real = noCross.reads.find(
+			(r) => r.address === 0x0210 && r.options & ReadOptions.SYNC,
+		);
+		expect(real).toBeDefined();
+		expect(real!.options & ReadOptions.DUMMY).toBe(0);
+
+		// Page cross adds a second dummy: BNE +$40 from $02F0 → $0332. Cycle 3
+		// re-reads $02F2 (dummy), cycle 4 re-reads $0232 at the unfixed PCH (dummy),
+		// then DECODE fetches the real opcode at the fixed $0332.
+		const cross = record();
+		cross.cpu.PC = 0x02f0;
+		cross.bytes[0x02f0] = 0xd0;
+		cross.bytes[0x02f1] = 0x40;
+		cross.cpu.zFlag = false;
+		run(cross.cpu, 5);
+
+		for (const addr of [0x02f2, 0x0232]) {
+			const d = cross.reads.find((r) => r.address === addr);
+			expect(d, `dummy read at ${addr.toString(16)}`).toBeDefined();
+			expect(d!.options & ReadOptions.DUMMY).toBeTruthy();
+		}
+		const crossReal = cross.reads.find(
+			(r) => r.address === 0x0332 && r.options & ReadOptions.SYNC,
+		);
+		expect(crossReal).toBeDefined();
+		expect(crossReal!.options & ReadOptions.DUMMY).toBe(0);
+	});
+
 	test("a real operand read is not DUMMY", () => {
 		const { cpu, bytes, reads } = record();
 		bytes[0x0200] = LDA_IMM; // LDA #$EA — operand read at $0201 is real

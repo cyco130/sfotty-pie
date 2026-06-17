@@ -190,8 +190,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "pl?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 11 ORA iny
@@ -568,8 +568,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "mi?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 31 AND iny
@@ -946,8 +946,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "vc?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 51 EOR iny
@@ -1326,8 +1326,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "vs?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 71 ADC iny
@@ -1663,8 +1663,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "cc?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 91 STA iny
@@ -1992,8 +1992,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "cs?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// B1 LDA iny
@@ -2340,8 +2340,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "ne?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// D1 CMP iny
@@ -2708,8 +2708,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "eq?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// F1 SBC iny

@@ -949,8 +949,10 @@ function relative(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 
 	return [
 		["r-pc++", operation],
-		["r-pc", "pc+=dr?"],
-		["r-pc", "pch=fix"],
+		// Cycles 3 (taken) and 4 (page cross) re-read PC but discard the byte —
+		// the real opcode fetch is the following DECODE — so both are dummies.
+		["r-pc", "dummy", "pc+=dr?"],
+		["r-pc", "dummy", "pch=fix"],
 	];
 }
 

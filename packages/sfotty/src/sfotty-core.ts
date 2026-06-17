@@ -233,10 +233,14 @@ export class SfottyCore {
 
 	/**
 	 * The bus write choke point. Writes ignore RDY entirely (NMOS quirk), so this
-	 * is a straight passthrough — it never stalls. @internal
+	 * never stalls. The DUMMY table (keyed by microstate) marks the non-committing
+	 * write-back cycle of a read-modify-write instruction, so traps can tell it
+	 * from the real store. Writes are never SPECULATIVE — only reads cross pages.
+	 * @internal
 	 */
 	#write(address: number, value: number): void {
-		this.#bus.write(address, value);
+		const options = DUMMY[this.state] ? ReadOptions.DUMMY : ReadOptions.NONE;
+		this.#bus.write(address, value, options);
 	}
 
 	/**

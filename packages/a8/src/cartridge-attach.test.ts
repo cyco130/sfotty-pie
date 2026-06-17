@@ -48,9 +48,9 @@ test("a cartridge shadows the XL's built-in BASIC", () => {
 
 	// Bank BASIC in like the OS does (DDRB all outputs, PORTB bit 1 low) —
 	// the cartridge still wins at $A000.
-	machine.write(0xd303, 0x00);
-	machine.write(0xd301, 0xff);
-	machine.write(0xd303, 0x04);
-	machine.write(0xd301, 0xfd);
+	machine.write(0xd303, 0x00, ReadOptions.NONE);
+	machine.write(0xd301, 0xff, ReadOptions.NONE);
+	machine.write(0xd303, 0x04, ReadOptions.NONE);
+	machine.write(0xd301, 0xfd, ReadOptions.NONE);
 	expect(machine.read(0xa000, ReadOptions.NONE)).toBe(0x42);
 });

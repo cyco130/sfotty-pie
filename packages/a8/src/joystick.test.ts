@@ -26,7 +26,7 @@ function makeMachine(model: AtariModel) {
 
 test("joystick 0/1 directions drive PORTA, active low", () => {
 	const machine = makeMachine("800");
-	machine.write(PACTL, 0x04);
+	machine.write(PACTL, 0x04, ReadOptions.NONE);
 	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xff);
 
 	machine.joystickDown(0, 0x05); // up+left
@@ -43,7 +43,7 @@ test("joystick 0/1 directions drive PORTA, active low", () => {
 
 test("the 800 has joysticks 2/3 on PORTB", () => {
 	const machine = makeMachine("800");
-	machine.write(PBCTL, 0x04);
+	machine.write(PBCTL, 0x04, ReadOptions.NONE);
 
 	machine.joystickDown(2, 0x02); // down
 	machine.joystickDown(3, 0x01); // up
@@ -66,7 +66,7 @@ test("triggers drive the GTIA TRIG lines", () => {
 
 test("the XL has no ports 2/3", () => {
 	const machine = makeMachine("800XL");
-	machine.write(PBCTL, 0x04);
+	machine.write(PBCTL, 0x04, ReadOptions.NONE);
 
 	machine.joystickDown(2, 0x0f);
 	machine.joystickTriggerDown(3);
@@ -92,9 +92,9 @@ test("XL/XE TRIG3 senses the cartridge (RD5)", () => {
 
 test("a stick switch pulls even an output-driven PORTA pin low", () => {
 	const machine = makeMachine("800");
-	machine.write(PORTA, 0xff); // PACTL bit 2 is 0 after power-on: sets DDRA
-	machine.write(PACTL, 0x04);
-	machine.write(PORTA, 0xff); // the output latch
+	machine.write(PORTA, 0xff, ReadOptions.NONE); // PACTL bit 2 is 0 after power-on: sets DDRA
+	machine.write(PACTL, 0x04, ReadOptions.NONE);
+	machine.write(PORTA, 0xff, ReadOptions.NONE); // the output latch
 
 	machine.joystickDown(0, 0x01);
 	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xfe);
@@ -104,6 +104,6 @@ test("joystick state survives a reset (switches are physical)", () => {
 	const machine = makeMachine("800");
 	machine.joystickDown(0, 0x08);
 	machine.reset(false);
-	machine.write(PACTL, 0x04);
+	machine.write(PACTL, 0x04, ReadOptions.NONE);
 	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xf7);
 });

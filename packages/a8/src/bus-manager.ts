@@ -22,8 +22,13 @@ export type ReadObserver = (
 export type WriteInterceptor = (
 	address: number,
 	value: number,
+	flags: ReadOptions,
 ) => boolean | void;
-export type WriteObserver = (address: number, value: number) => void;
+export type WriteObserver = (
+	address: number,
+	value: number,
+	flags: ReadOptions,
+) => void;
 
 // Execute traps are sugar for a read trap masked to a committed opcode fetch
 // ({ sync: true, dummy: false }); the fetched byte isn't passed (HLE returns a
@@ -669,19 +674,20 @@ export class AtariBus implements Memory {
 		return value;
 	}
 
-	write(address: number, value: number) {
+	write(address: number, value: number, options: ReadOptions) {
 		this.busData = value;
-		// Writes carry no flags yet (no DMA/dummy writes are marked), so masks
-		// match against 0 — a require-set mask never fires on a write.
+		// `options` carries DUMMY for a read-modify-write write-back, so a trap's
+		// mask can exclude it (the default { dummy: false } does — observers fire
+		// on the committed store only).
 		if (
 			this.#writeInterceptors.size &&
-			this.#runWriteInterceptors(address, value)
+			this.#runWriteInterceptors(address, value, options)
 		) {
 			return; // suppressed — the store didn't commit, so no observers fire
 		}
-		this.#map(address, ReadOptions.NONE).write(address, value);
+		this.#map(address, options).write(address, value, options);
 		if (this.#writeObservers.size) {
-			this.#runWriteObservers(address, value);
+			this.#runWriteObservers(address, value, options);
 		}
 	}
 
@@ -742,26 +748,34 @@ export class AtariBus implements Memory {
 		}
 	}
 
-	#runWriteInterceptors(address: number, value: number): boolean {
+	#runWriteInterceptors(
+		address: number,
+		value: number,
+		flags: ReadOptions,
+	): boolean {
 		const list = this.#writeInterceptors.get(address);
 		if (!list) return false;
 		for (let i = list.length - 1; i >= 0; i--) {
 			const entry = list[i]!;
-			if (entry.set !== 0) continue; // a write carries no flags to require
-			const suppress = entry.fn(address, value);
+			if ((flags & entry.set) !== entry.set || (flags & entry.clear) !== 0) {
+				continue;
+			}
+			const suppress = entry.fn(address, value, flags);
 			if (entry.once) removeEntry(this.#writeInterceptors, address, entry);
 			if (suppress) return true; // first to suppress wins
 		}
 		return false;
 	}
 
-	#runWriteObservers(address: number, value: number): void {
+	#runWriteObservers(address: number, value: number, flags: ReadOptions): void {
 		const list = this.#writeObservers.get(address);
 		if (!list) return;
 		for (let i = list.length - 1; i >= 0; i--) {
 			const entry = list[i]!;
-			if (entry.set !== 0) continue;
-			entry.fn(address, value);
+			if ((flags & entry.set) !== entry.set || (flags & entry.clear) !== 0) {
+				continue;
+			}
+			entry.fn(address, value, flags);
 			if (entry.once) removeEntry(this.#writeObservers, address, entry);
 		}
 	}

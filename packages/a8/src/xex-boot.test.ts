@@ -56,7 +56,11 @@ test("booting the disk loads and runs the executable", () => {
 	for (let sector = 1; sector <= 3; sector++) {
 		const data = disk.readSector(sector)!;
 		for (let i = 0; i < data.length; i++) {
-			machine.write(0x0700 + (sector - 1) * 128 + i, data[i]!);
+			machine.write(
+				0x0700 + (sector - 1) * 128 + i,
+				data[i]!,
+				ReadOptions.NONE,
+			);
 		}
 	}
 

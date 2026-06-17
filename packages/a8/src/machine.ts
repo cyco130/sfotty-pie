@@ -141,8 +141,8 @@ export class Atari implements Memory {
 		return this.#bus.read(address, options);
 	}
 
-	write(address: number, value: number): void {
-		this.#bus.write(address, value);
+	write(address: number, value: number, options: ReadOptions): void {
+		this.#bus.write(address, value, options);
 	}
 
 	reset(cold: boolean): void {

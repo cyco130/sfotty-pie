@@ -45,7 +45,11 @@ export interface Memory {
 	 * Write a byte to the address.
 	 *
 	 * May throw to interrupt the CPU like {@link Memory.read}; the byte is not
-	 * written and the cycle can be retried.
+	 * written and the cycle can be retried. `options` carries the same
+	 * {@link ReadOptions} flags as a read — in particular `DUMMY` for the
+	 * non-committing write-back cycle of a read-modify-write instruction, so
+	 * traps can tell it from the real store. Implementors that don't care may
+	 * omit the parameter (a narrower signature still satisfies this interface).
 	 */
-	write(address: number, value: number): void;
+	write(address: number, value: number, options: ReadOptions): void;
 }

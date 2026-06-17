@@ -56,7 +56,7 @@ export function createSioHandler(
 	// Finish like SIO does: status into DSTATS and Y, N mirroring bit 7,
 	// then RTS back to the caller.
 	const complete = (status: number): number => {
-		machine.write(DSTATS, status);
+		machine.write(DSTATS, status, ReadOptions.NONE);
 		cpu.Y = status;
 		cpu.nFlag = status >= 0x80;
 		cpu.zFlag = false;
@@ -81,7 +81,7 @@ export function createSioHandler(
 		const transfer = (data: ArrayLike<number>): number => {
 			const length = byteCount ? Math.min(byteCount, data.length) : data.length;
 			for (let i = 0; i < length; i++) {
-				machine.write((buffer + i) & 0xffff, data[i]!);
+				machine.write((buffer + i) & 0xffff, data[i]!, ReadOptions.NONE);
 			}
 			return complete(STATUS_OK);
 		};

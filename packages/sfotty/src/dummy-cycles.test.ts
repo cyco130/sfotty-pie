@@ -15,15 +15,18 @@ function record(): {
 	cpu: Sfotty;
 	bytes: Uint8Array;
 	reads: { address: number; options: number }[];
+	writes: { address: number; value: number; options: number }[];
 } {
 	const bytes = new Uint8Array(0x10000).fill(NOP);
 	const reads: { address: number; options: number }[] = [];
+	const writes: { address: number; value: number; options: number }[] = [];
 	const bus: Memory = {
 		read(address, options) {
 			reads.push({ address, options });
 			return bytes[address]!;
 		},
-		write(address, value) {
+		write(address, value, options) {
+			writes.push({ address, value, options });
 			bytes[address] = value;
 		},
 	};
@@ -31,7 +34,7 @@ function record(): {
 	cpu.PC = 0x0200;
 	cpu.S = 0xff;
 	cpu.state = DECODE;
-	return { cpu, bytes, reads };
+	return { cpu, bytes, reads, writes };
 }
 
 function run(cpu: Sfotty, cycles: number): void {
@@ -188,6 +191,41 @@ describe("dummy cycles", () => {
 		);
 		expect(crossReal).toBeDefined();
 		expect(crossReal!.options & ReadOptions.DUMMY).toBe(0);
+	});
+
+	test("a read-modify-write writes the old value back as a DUMMY, the new value for real", () => {
+		// INC $80 (zero page): read, write the old value back (dummy), write old+1.
+		// The 6502 always does that throwaway write-back — traps key on DUMMY to
+		// tell it from the committed store.
+		const { cpu, bytes, writes } = record();
+		bytes[0x0200] = 0xe6; // INC zp
+		bytes[0x0201] = 0x80;
+		bytes[0x0080] = 0x41;
+		run(cpu, 5);
+
+		const toTarget = writes.filter((w) => w.address === 0x0080);
+		expect(toTarget).toHaveLength(2);
+
+		// First write: the old value, flagged DUMMY.
+		expect(toTarget[0]!.value).toBe(0x41);
+		expect(toTarget[0]!.options & ReadOptions.DUMMY).toBeTruthy();
+
+		// Second write: the incremented value, committed (not DUMMY).
+		expect(toTarget[1]!.value).toBe(0x42);
+		expect(toTarget[1]!.options & ReadOptions.DUMMY).toBe(0);
+	});
+
+	test("a plain store's write is not DUMMY", () => {
+		const { cpu, bytes, writes } = record();
+		bytes[0x0200] = 0x85; // STA zp
+		bytes[0x0201] = 0x90;
+		cpu.A = 0x37;
+		run(cpu, 3);
+
+		const store = writes.find((w) => w.address === 0x0090);
+		expect(store).toBeDefined();
+		expect(store!.value).toBe(0x37);
+		expect(store!.options & ReadOptions.DUMMY).toBe(0);
 	});
 
 	test("a real operand read is not DUMMY", () => {

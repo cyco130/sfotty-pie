@@ -767,7 +767,12 @@ function rmwZeropage(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 	//                and do the operation on it
 	// 5  address  W  write the new value to effective address
 
-	return [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", operation], ["w-ar"]];
+	return [
+		["r-pc++", "ar=dr"],
+		["r-ar"],
+		["w-ar", "dummy", operation],
+		["w-ar"],
+	];
 }
 
 function rmwAbsolute(operation: InternalOp): [BusOp, ...InternalOp[]][] {
@@ -783,7 +788,7 @@ function rmwAbsolute(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ar=dr"],
 		["r-pc++", "ah=dr"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -804,7 +809,7 @@ function rmwZeropageX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ar=dr"],
 		["r-ar", "ar+=x"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -825,7 +830,7 @@ function rmwZeropageY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ar=dr"],
 		["r-ar", "ar+=y"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -850,7 +855,7 @@ function rmwAbsoluteX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ah=dr", "ar+=x?"],
 		["r-ar", "?ah++"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -875,7 +880,7 @@ function rmwAbsoluteY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ah=dr", "ar+=y?"],
 		["r-ar", "?ah++"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -896,7 +901,7 @@ function rmwIndirectX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-dr++"], // AL = read(DR++);
 		["r-dr"], // AH = read(DR);
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -923,7 +928,7 @@ function rmwIndirectY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-dr", "ar+=y?"],
 		["r-ar", "?ah++"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }

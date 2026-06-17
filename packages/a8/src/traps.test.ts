@@ -18,7 +18,7 @@ function machine(): Atari {
 
 test("execute interceptor substitutes a committed fetch only", () => {
 	const m = machine();
-	m.write(0x0090, 0x42); // plain zero-page RAM
+	m.write(0x0090, 0x42, ReadOptions.NONE); // plain zero-page RAM
 	m.interceptExecute(0x0090, () => 0x60);
 
 	expect(m.read(0x0090, FETCH)).toBe(0x60); // committed fetch → substituted
@@ -28,7 +28,7 @@ test("execute interceptor substitutes a committed fetch only", () => {
 
 test("read traps fire on data reads and committed fetches, but not dummies", () => {
 	const m = machine();
-	m.write(0x0091, 0x11);
+	m.write(0x0091, 0x11, ReadOptions.NONE);
 	const seen: number[] = [];
 	m.observeRead(0x0091, (_a, _v, flags) => seen.push(flags));
 
@@ -40,7 +40,7 @@ test("read traps fire on data reads and committed fetches, but not dummies", () 
 
 test("a mask of { dummy: undefined } also fires on dummy accesses", () => {
 	const m = machine();
-	m.write(0x0091, 0x11);
+	m.write(0x0091, 0x11, ReadOptions.NONE);
 	let count = 0;
 	m.observeRead(0x0091, () => count++, { mask: { dummy: undefined } });
 	m.read(0x0091, ReadOptions.NONE);
@@ -50,7 +50,7 @@ test("a mask of { dummy: undefined } also fires on dummy accesses", () => {
 
 test("interceptors are additive, LIFO, first non-undefined wins", () => {
 	const m = machine();
-	m.write(0x0092, 0x10);
+	m.write(0x0092, 0x10, ReadOptions.NONE);
 	const order: string[] = [];
 	m.interceptRead(0x0092, () => {
 		order.push("first");
@@ -69,7 +69,7 @@ test("interceptors are additive, LIFO, first non-undefined wins", () => {
 
 test("observers run last-registered-first", () => {
 	const m = machine();
-	m.write(0x0093, 0x77);
+	m.write(0x0093, 0x77, ReadOptions.NONE);
 	const order: string[] = [];
 	m.observeRead(0x0093, () => order.push("a"));
 	m.observeRead(0x0093, () => order.push("b"));
@@ -79,7 +79,7 @@ test("observers run last-registered-first", () => {
 
 test("read interceptor substitutes; observers see the result after", () => {
 	const m = machine();
-	m.write(0x0094, 0x11);
+	m.write(0x0094, 0x11, ReadOptions.NONE);
 	const observed: number[] = [];
 	m.observeRead(0x0094, (_a, value) => observed.push(value));
 
@@ -91,24 +91,24 @@ test("read interceptor substitutes; observers see the result after", () => {
 
 test("write interceptor can suppress the store; observers fire only on commit", () => {
 	const m = machine();
-	m.write(0x0095, 0x10);
+	m.write(0x0095, 0x10, ReadOptions.NONE);
 	const written: number[] = [];
 	m.observeWrite(0x0095, (_a, value) => written.push(value));
 
 	const handle = m.interceptWrite(0x0095, () => true); // suppress
-	m.write(0x0095, 0x20);
+	m.write(0x0095, 0x20, ReadOptions.NONE);
 	expect(m.read(0x0095, ReadOptions.NONE)).toBe(0x10); // unchanged
 	expect(written).toEqual([]); // suppressed → no observer
 
 	handle.remove();
-	m.write(0x0095, 0x30); // now commits
+	m.write(0x0095, 0x30, ReadOptions.NONE); // now commits
 	expect(m.read(0x0095, ReadOptions.NONE)).toBe(0x30);
 	expect(written).toEqual([0x30]);
 });
 
 test("once auto-removes after the first fire", () => {
 	const m = machine();
-	m.write(0x0096, 0x77);
+	m.write(0x0096, 0x77, ReadOptions.NONE);
 	let calls = 0;
 	m.observeRead(0x0096, () => calls++, { once: true });
 	m.read(0x0096, ReadOptions.NONE);
@@ -122,7 +122,7 @@ test("once auto-removes after the first fire", () => {
 
 test("a PEEK fires no traps and substitutes nothing", () => {
 	const m = machine();
-	m.write(0x0097, 0x33);
+	m.write(0x0097, 0x33, ReadOptions.NONE);
 	let reads = 0;
 	m.observeRead(0x0097, () => reads++);
 	m.interceptRead(0x0097, () => 0x99);

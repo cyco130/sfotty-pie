@@ -42,15 +42,15 @@ function setDcb(
 		aux?: number;
 	},
 ) {
-	machine.write(0x0300, dcb.device ?? 0x31);
-	machine.write(0x0301, dcb.unit ?? 1);
-	machine.write(0x0302, dcb.command);
-	machine.write(0x0304, dcb.buffer & 0xff);
-	machine.write(0x0305, dcb.buffer >> 8);
-	machine.write(0x0308, dcb.byteCount & 0xff);
-	machine.write(0x0309, dcb.byteCount >> 8);
-	machine.write(0x030a, (dcb.aux ?? 0) & 0xff);
-	machine.write(0x030b, (dcb.aux ?? 0) >> 8);
+	machine.write(0x0300, dcb.device ?? 0x31, ReadOptions.NONE);
+	machine.write(0x0301, dcb.unit ?? 1, ReadOptions.NONE);
+	machine.write(0x0302, dcb.command, ReadOptions.NONE);
+	machine.write(0x0304, dcb.buffer & 0xff, ReadOptions.NONE);
+	machine.write(0x0305, dcb.buffer >> 8, ReadOptions.NONE);
+	machine.write(0x0308, dcb.byteCount & 0xff, ReadOptions.NONE);
+	machine.write(0x0309, dcb.byteCount >> 8, ReadOptions.NONE);
+	machine.write(0x030a, (dcb.aux ?? 0) & 0xff, ReadOptions.NONE);
+	machine.write(0x030b, (dcb.aux ?? 0) >> 8, ReadOptions.NONE);
 }
 
 test("read sector fills the buffer and reports success", () => {
@@ -113,9 +113,9 @@ test("the trap fires on a real JSR through SIOV", () => {
 	setDcb(machine, { command: 0x52, buffer: 0x2000, byteCount: 128, aux: 3 });
 
 	// JSR SIOV
-	machine.write(0x0600, 0x20);
-	machine.write(0x0601, SIOV & 0xff);
-	machine.write(0x0602, SIOV >> 8);
+	machine.write(0x0600, 0x20, ReadOptions.NONE);
+	machine.write(0x0601, SIOV & 0xff, ReadOptions.NONE);
+	machine.write(0x0602, SIOV >> 8, ReadOptions.NONE);
 
 	cpu.reset(true);
 	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.run();

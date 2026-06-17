@@ -25,6 +25,7 @@ function runSuite(): Record<string, Status> {
 		[
 			join(HERE, "boot.ts"),
 			"--xe",
+			...(process.argv.includes("--pal") ? ["--pal"] : []),
 			"--os",
 			join(FIRMWARE, "AltirraOS XL-XE.rom"),
 			"--basic",

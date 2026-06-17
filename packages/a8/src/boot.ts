@@ -16,7 +16,7 @@ import { Atari } from "./machine.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
 import { buildBootDisk } from "./xex-boot.ts";
 
-// Usage: boot.ts --os <file> [--basic <file>] [--xl | --xe] [--trace] [--dump-frame] [file]
+// Usage: boot.ts --os <file> [--basic <file>] [--xl | --xe] [--pal] [--trace] [--dump-frame] [file]
 // `--os`/`--basic` are paths to the OS and BASIC ROM images. `file` is an XEX,
 // ATR, or cartridge image; like the web emulator's Load, booting a file is
 // boot-image semantics — the 800's BASIC cart comes out.
@@ -40,6 +40,7 @@ const osPath = flagValue("--os");
 const basicPath = flagValue("--basic");
 const xe = argv.includes("--xe");
 const xl = xe || argv.includes("--xl");
+const pal = argv.includes("--pal");
 // The positional file is the first non-flag arg that isn't a flag's value.
 const flagValueIndices = new Set(
 	["--os", "--basic", "--keys"]
@@ -79,6 +80,7 @@ const machine = new Atari({
 	os: loadRom(osPath, "--os"),
 	...(xl || !filePath ? { basic: loadRom(basicPath, "--basic") } : {}),
 	...(cartridge ? { cartridge } : {}),
+	...(pal ? { tvSystem: "pal" as const } : {}),
 });
 
 // --keys automation (e.g. Acid800): each time the program waits for a key — it

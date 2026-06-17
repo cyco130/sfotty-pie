@@ -279,7 +279,18 @@ export class SfottyCore {
 	 * token. @internal
 	 */
 	opReadDecode(): boolean {
-		const value = this.#read(this.PC, ReadOptions.OPCODE_FETCH);
+		// SYNC (the pin) asserts on every opcode-fetch cycle. DUMMY marks the ones
+		// that don't commit an instruction: the dummy fetch done here when an
+		// interrupt is pending (the BRK sequence runs instead), and the re-fetch of
+		// an RDY-stalled cycle (re-issued until RDY rises). A committed opcode fetch
+		// is therefore SYNC without DUMMY — what execute traps key on, so they fire
+		// once on the real fetch, not the dummy or the stall re-reads.
+		// #interruptPending is already latched on entry (the poll ran last cycle).
+		const dummy = this.#interruptPending || !this.RDY;
+		const value = this.#read(
+			this.PC,
+			dummy ? ReadOptions.SYNC | ReadOptions.DUMMY : ReadOptions.SYNC,
+		);
 		if (!this.RDY) {
 			return false;
 		}

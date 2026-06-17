@@ -113,14 +113,16 @@ export function disassemble(read: PeekReader, pc: number): Disassembly {
 }
 
 /**
- * One register-annotated trace line for the instruction at the CPU's PC, e.g.
+ * One register-annotated trace line for the instruction at `pc`, e.g.
  * `E477  A2 FF     LDX #$FF      A=00 X=00 Y=00 S=FF P=34 nv-bdIzc`.
  *
- * Call it when the CPU is at an instruction boundary (`cpu.state === DECODE`).
+ * `pc` defaults to the CPU's PC — correct when called at an instruction
+ * boundary (`cpu.state === DECODE`). Pass it explicitly from `onFetch`, which
+ * fires just after PC has advanced past the opcode: hand it the opcode address.
  * `read` must be side-effect-free (peek), since it reads the instruction bytes.
  */
-export function traceLine(cpu: Sfotty, read: PeekReader): string {
-	const { text, bytes } = disassemble(read, cpu.PC);
+export function traceLine(cpu: Sfotty, read: PeekReader, pc = cpu.PC): string {
+	const { text, bytes } = disassemble(read, pc);
 	const byteText = bytes
 		.map((b) => hex(b, 2))
 		.join(" ")
@@ -138,7 +140,7 @@ export function traceLine(cpu: Sfotty, read: PeekReader): string {
 		(p & 0x01 ? "C" : "c");
 
 	return (
-		`${hex(cpu.PC, 4)}  ${byteText} ${text.padEnd(13)} ` +
+		`${hex(pc, 4)}  ${byteText} ${text.padEnd(13)} ` +
 		`A=${hex(cpu.A, 2)} X=${hex(cpu.X, 2)} Y=${hex(cpu.Y, 2)} ` +
 		`S=${hex(cpu.S, 2)} P=${hex(p, 2)} ${flags}`
 	);

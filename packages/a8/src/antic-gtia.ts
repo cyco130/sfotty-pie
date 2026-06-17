@@ -1056,9 +1056,17 @@ export class AnticGtia implements Memory {
 		const x = i - 17 + 3;
 		const y = this.vcount - 8;
 
-		if (y < 0 || y >= 240 || x < 0 || x >= 94) {
+		if (y < 0 || y >= 240) {
 			return 0;
 		}
+
+		// A sprite triggered in the left horizontal blank still shifts its
+		// pixels into the visible region and collides there, so the shift
+		// registers must load and advance regardless of the horizontal window —
+		// only the output is blanked outside it. Gating the load on x (as a
+		// single early return did) dropped the whole sprite when it triggered
+		// in HBLANK, losing the pixels that spill into the visible area.
+		const visible = x >= 0 && x < 94;
 
 		const start = (this.hpos + 2) * 2 + pos;
 
@@ -1185,7 +1193,7 @@ export class AnticGtia implements Memory {
 			}
 		}
 
-		return result;
+		return visible ? result : 0;
 	}
 
 	// Get playfield and P/M outputs and detect collisions

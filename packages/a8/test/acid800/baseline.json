@@ -30,7 +30,7 @@
 	"CPU: Timing": "pass",
 	"GTIA: Address mirroring": "pass",
 	"GTIA: CONSOL test": "pass",
-	"GTIA: Collision test": "fail",
+	"GTIA: Collision test": "pass",
 	"GTIA: Default value": "pass",
 	"GTIA: P/M retriggering": "pass",
 	"GTIA: Phantom PMG DMA": "fail",

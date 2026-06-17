@@ -1,4 +1,4 @@
-import { ReadOptions, type Memory } from "@sfotty-pie/sfotty";
+import { ReadOptions, Sfotty, type Memory } from "@sfotty-pie/sfotty";
 import { AnticGtia } from "./antic-gtia.ts";
 import {
 	AtariBus,
@@ -17,6 +17,13 @@ import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
 
 export type AtariModel = "800" | "800XL" | "130XE";
+
+// Where machineCycle()/resumeMachineCycle() are within one machine cycle. A
+// throw from a bus phase (ANTIC's DMA read in BUS, the CPU's access in CPU)
+// leaves the marker on that phase, so resumeMachineCycle() re-enters there
+// without re-running the committed beforeCpu. A const object, not an enum
+// (enums emit runtime code, which this repo's strip-only TS execution rejects).
+const PHASE = { IDLE: 0, BUS: 1, CPU: 2 } as const;
 
 export interface MachineConfig {
 	/** Which machine to emulate. */
@@ -80,6 +87,17 @@ export class Atari implements Memory {
 	readonly #xl: boolean;
 	#resetHeld = false;
 
+	// The CPU the machine owns and drives via machineCycle()/resumeMachineCycle().
+	readonly #cpu: Sfotty;
+	// The framebuffer afterCpu renders into: 240 lines of 376 hi-res pixels, one
+	// Atari color byte each (see boot.ts/a8-web for the layout).
+	readonly #frame = new Uint8Array(376 * 240);
+	// Continuation marker for the cycle phase machine; see PHASE.
+	#phase: number = PHASE.IDLE;
+	// POKEY's audio level for this cycle, sampled once in machineCycle() and
+	// returned again by resumeMachineCycle() so a resumed cycle doesn't re-tick.
+	#audio = 0;
+
 	constructor(config: MachineConfig) {
 		const { model, os, basic, cartridge, log } = config;
 		const xl = model !== "800"; // XL and XE share the XL architecture
@@ -131,6 +149,11 @@ export class Atari implements Memory {
 		if (xl) {
 			this.anticGtia.trig3 = cartridge ? 1 : 0;
 		}
+
+		// The machine is its own bus (it implements Memory), so the CPU reads and
+		// writes through the trap-aware AtariBus. Constructed last, once #bus is
+		// wired. Powers on into the reset sequence like real hardware.
+		this.#cpu = new Sfotty(this);
 	}
 
 	/** The last value driven on the data bus (see {@link AtariBus.busData}). */
@@ -160,6 +183,84 @@ export class Atari implements Memory {
 	 */
 	cycle(): number {
 		return this.#pokey.cycle();
+	}
+
+	/** The CPU the machine owns and drives. */
+	get cpu(): Sfotty {
+		return this.#cpu;
+	}
+
+	/**
+	 * The framebuffer the machine renders into (376×240 Atari color bytes),
+	 * updated by each cycle's render phase.
+	 */
+	get frame(): Uint8Array {
+		return this.#frame;
+	}
+
+	/**
+	 * Optional hook fired at each committed opcode fetch, with the opcode's
+	 * address — for tracing / instruction-level debugging. Forwarded to the
+	 * CPU's `onFetch`; see {@link Sfotty.onFetch} for the exact semantics.
+	 */
+	get onInstruction(): ((pc: number) => void) | undefined {
+		return this.#cpu.onFetch;
+	}
+	set onInstruction(fn: ((pc: number) => void) | undefined) {
+		this.#cpu.onFetch = fn;
+	}
+
+	/**
+	 * Run one whole machine cycle: ANTIC scheduling (`beforeCpu`, commits) + the
+	 * POKEY tick, then the bus phase (ANTIC's DMA fetch or the CPU's access) and
+	 * the render. Returns POKEY's audio level (0-60).
+	 *
+	 * A bus phase may **throw** — an interceptor suspending on a read/write/fetch,
+	 * or a host's own breakpoint signal. This method does not catch it: the throw
+	 * propagates with the cycle frozen at that phase. The host catches whatever it
+	 * threw, resolves it (await input, clear a breakpoint, …), and calls
+	 * {@link resumeMachineCycle} to finish the *same* cycle — never `machineCycle`,
+	 * which would re-run the committed scheduling. Idempotent by construction:
+	 * each bus phase does its access before any commit, so a throw unwinds clean
+	 * and the retried access repeats nothing.
+	 */
+	machineCycle(): number {
+		if (this.#phase !== PHASE.IDLE) {
+			throw new Error(
+				"machineCycle() called mid-cycle — use resumeMachineCycle()",
+			);
+		}
+		this.anticGtia.beforeCpu();
+		this.#audio = this.#pokey.cycle();
+		this.#phase = PHASE.BUS;
+		return this.#runCycle();
+	}
+
+	/** Finish a cycle that a bus phase suspended; see {@link machineCycle}. */
+	resumeMachineCycle(): number {
+		return this.#runCycle();
+	}
+
+	// The phase machine shared by machineCycle/resumeMachineCycle: a fall-through
+	// switch that enters at the saved #phase and runs forward to the end of the
+	// cycle. The marker is set to the current phase *before* each throwable call,
+	// so a throw leaves it pointing where to resume.
+	#runCycle(): number {
+		switch (this.#phase) {
+			case PHASE.BUS:
+				this.anticGtia.busCycle(); // ANTIC DMA read — may throw
+				this.#cpu.NMI = this.anticGtia.nmi;
+				this.#cpu.IRQ = this.irq;
+				this.#cpu.RDY = this.anticGtia.rdy;
+				this.#phase = PHASE.CPU;
+			// falls through
+			case PHASE.CPU:
+				if (this.resetAsserted) this.#cpu.reset(false);
+				else if (!this.anticGtia.halt) this.#cpu.run(); // may throw
+				this.anticGtia.afterCpu(this.#frame, this.busData);
+				this.#phase = PHASE.IDLE;
+		}
+		return this.#audio;
 	}
 
 	/**

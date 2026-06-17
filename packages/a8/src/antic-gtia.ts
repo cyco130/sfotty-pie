@@ -730,6 +730,13 @@ export class AnticGtia implements Memory {
 	/** The RDY output line: false while a WSYNC stall is in effect. */
 	rdy = true;
 
+	// Carried from beforeCpu to busCycle: the cycle's hpos slot (captured before
+	// beforeCpu advances hpos) and whether it's a visible display line. busCycle
+	// uses these to drive the DMA fetch without re-deriving them off the
+	// already-advanced counters.
+	#dmaHpos = 0;
+	#dmaVisibleLine = false;
+
 	/**
 	 * The VCOUNT register value as the CPU sees it mid-cycle. The hardware
 	 * line counter increments at the end of cycle 110 but only rolls over at
@@ -891,10 +898,28 @@ export class AnticGtia implements Memory {
 			this.lastDisplayListAddress = this.displayListAddress;
 		}
 
+		// The DMA fetch itself — a bus access — is busCycle's job. Hand it the
+		// slot and visible-line decision computed here; beforeCpu commits the
+		// cycle's scheduling without touching the bus.
+		this.#dmaHpos = i;
+		this.#dmaVisibleLine = visibleLine;
+	}
+
+	/**
+	 * The ANTIC bus phase: perform this cycle's DMA fetch (display list, P/M,
+	 * character, or playfield) or DRAM refresh, and set {@link halt} for it.
+	 * Split out from {@link beforeCpu} — which commits the cycle's scheduling
+	 * without touching the bus — so the read can be retried after a suspend
+	 * without re-advancing ANTIC's counters. Call once per cycle, between
+	 * beforeCpu and running the CPU.
+	 */
+	busCycle(): void {
+		const i = this.#dmaHpos;
+
 		if (
 			(i === 0 && this.#fetchMissiles()) ||
 			(i >= 2 && i <= 5 && this.#fetchPlayer(i - 2)) ||
-			(visibleLine &&
+			(this.#dmaVisibleLine &&
 				((i === 1 && this.#fetchFirstByte()) ||
 					(i === 6 && this.#fetchSecondByte()) ||
 					(i === 7 && this.#fetchThirdByte()) ||

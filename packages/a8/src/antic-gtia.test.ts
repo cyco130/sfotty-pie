@@ -224,6 +224,7 @@ test("a JVB display list reloads its target every frame", () => {
 			latchLines.push(ag.vcount);
 			ag.dli = false; // observe each latch separately
 		}
+		ag.busCycle();
 		ag.afterCpu(frame, 0xff);
 	}
 

@@ -55,6 +55,7 @@ export interface MachineConfig {
  *
  * ```ts
  * machine.anticGtia.beforeCpu();
+ * machine.anticGtia.busCycle(); // ANTIC's DMA fetch; sets `halt`
  * machine.cycle(); // returns the audio level, for hosts producing sound
  * cpu.NMI = machine.anticGtia.nmi;
  * cpu.IRQ = machine.irq;

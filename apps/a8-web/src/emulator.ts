@@ -276,6 +276,7 @@ export class Emulator {
 
 		for (let cycle = 0; cycle < CYCLES_PER_LINE; cycle++) {
 			ag.beforeCpu();
+			ag.busCycle();
 			this.#collectAudio(this.machine.cycle(), ag.consoleSpeaker);
 			cpu.NMI = ag.nmi;
 			cpu.IRQ = this.machine.irq;

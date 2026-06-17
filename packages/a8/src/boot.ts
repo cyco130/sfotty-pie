@@ -358,9 +358,17 @@ function reportHotspots(): void {
 async function run(): Promise<void> {
 	const ag = machine.anticGtia;
 
+	// Mirror the CPU's edge-triggered NMI latch host-side: a false→true
+	// transition on the NMI line arms a pending NMI that the CPU services at the
+	// next instruction boundary. Used only to gate host traps (below).
+	let prevNmi = false;
+	let nmiPending = false;
+
 	while (cycles < LIMIT) {
 		ag.beforeCpu();
 		machine.cycle();
+		if (ag.nmi && !prevNmi) nmiPending = true;
+		prevNmi = ag.nmi;
 		cpu.NMI = ag.nmi;
 		cpu.IRQ = machine.irq;
 		cpu.RDY = ag.rdy;
@@ -375,8 +383,15 @@ async function run(): Promise<void> {
 			seenPcs.add(cpu.PC);
 			if (trace) process.stderr.write(traceLine(cpu, peek) + "\n");
 
-			const trap = traps.get(cpu.PC);
-			if (trap) {
+			// A latched NMI is serviced at this boundary instead of executing
+			// the opcode at PC: the CPU pushes PC, vectors to the handler, then
+			// RTIs back here and re-DECODEs the same PC. Skip traps now so a
+			// side-effecting one (the E: PUTBYT stdout tee) fires once — after
+			// the RTI — rather than doubling the character.
+			const trap = nmiPending ? undefined : traps.get(cpu.PC);
+			if (nmiPending) {
+				nmiPending = false;
+			} else if (trap) {
 				try {
 					trapped = trap();
 				} catch (error) {

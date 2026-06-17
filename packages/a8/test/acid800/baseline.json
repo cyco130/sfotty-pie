@@ -10,7 +10,7 @@
 	"ANTIC: HSCROL bug": "fail",
 	"ANTIC: Hires bug": "fail",
 	"ANTIC: Line buffering": "fail",
-	"ANTIC: NMIIST/NMIRES test": "pass",
+	"ANTIC: NMIST/NMIRES test": "pass",
 	"ANTIC: P/M graphics DMA": "fail",
 	"ANTIC: Playfield start timing": "fail",
 	"ANTIC: Playfield stop timing": "fail",

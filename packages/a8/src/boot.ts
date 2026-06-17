@@ -152,51 +152,42 @@ rl.on("close", () => {
 	onStdin = null;
 });
 
-// --- Execute traps: emulate OS-ROM entry points in the host. ---
-function rts(): void {
-	const lo = machine.read(0x0100 | ((cpu.S + 1) & 0xff), ReadOptions.NONE);
-	const hi = machine.read(0x0100 | ((cpu.S + 2) & 0xff), ReadOptions.NONE);
-	cpu.S = (cpu.S + 2) & 0xff;
-	cpu.PC = (((hi << 8) | lo) + 1) & 0xffff;
-}
-
-function returnStatus(status: number): void {
-	cpu.Y = status;
-	cpu.nFlag = (status & 0x80) !== 0;
-	cpu.zFlag = status === 0;
-	rts();
-}
+// --- Execute traps: emulate OS-ROM entry points in the host. Each is a bus
+// trap registered on the machine (machine.intercept*/observe*); an interceptor
+// returns this substitute opcode to RTS straight back to the caller, skipping
+// the real ROM routine. ---
+const RTS = 0x60;
 
 function hex(value: number, width: number): string {
 	return value.toString(16).toUpperCase().padStart(width, "0");
 }
 
 // Thrown by the GETBYT trap when the stdin line buffer is empty: the run loop
-// catches it, awaits the next line, and retries the same instruction.
+// catches it (around cpu.run()), awaits the next line, and retries the cycle.
 const NEED_INPUT = Symbol("need-input");
 
-// A trap returns true if it handled the call (already RTS'd — skip the real ROM
-// routine) or false if it only observed (let the ROM code run).
-const traps = new Map<number, () => boolean>();
-
-// E: PUTBYT — copy the ATASCII character in A to stdout, then let the real ROM
-// routine run too, so the text also lands in screen RAM (and the framebuffer).
-function editorPutByte(): boolean {
+// E: PUTBYT — an execute observer: copy the ATASCII character in A to stdout,
+// then return (void) so the real ROM routine still runs and the text also lands
+// in screen RAM (and the framebuffer).
+function editorPutByte(): void {
 	const c = cpu.A & 0xff;
 	fs.writeSync(1, Buffer.from([c === 0x9b ? 0x0a : c])); // EOL → newline
-	return false;
 }
 
-// E: GETBYT — return the next stdin byte in A (as ATASCII), waiting if needed.
-function editorGetByte(): boolean {
+// E: GETBYT — an execute interceptor: put the next stdin byte in A (as ATASCII)
+// and return RTS so the CPU returns to the caller. Throws to suspend when no
+// input is buffered yet — the run loop awaits a line and retries the fetch.
+function editorGetByte(): number {
 	if (stdinOffset >= stdinBuffer.length) {
 		if (stdinClosed) process.exit(0); // stdin ended → end the session
 		throw NEED_INPUT;
 	}
 	const c = stdinBuffer[stdinOffset++]!;
 	cpu.A = c === 0x0a ? 0x9b : c; // newline → ATASCII EOL
-	returnStatus(0x01);
-	return true;
+	cpu.Y = 0x01; // IOCB status: success
+	cpu.nFlag = false;
+	cpu.zFlag = false;
+	return RTS;
 }
 
 // Find a device's handler-vector table via HATABS ($031A): 3-byte entries
@@ -228,36 +219,27 @@ function installEditorTraps(): void {
 		(machine.read(table + off + 1, ReadOptions.NONE) << 8);
 	const getByte = (word(4) + 1) & 0xffff;
 	const putByte = (word(6) + 1) & 0xffff;
-	traps.set(getByte, editorGetByte);
-	traps.set(putByte, editorPutByte);
+	machine.interceptExecute(getByte, editorGetByte);
+	machine.observeExecute(putByte, editorPutByte);
 }
 
-traps.set(0xe456, () => {
-	// CIOV: only OPEN comes through here. Use it to install the E: byte traps,
-	// then let the real OS run the open.
-	installEditorTraps();
-	return false;
-});
+// CIOV: every CIO call passes through here; on the first, HATABS is set up, so
+// install the E: byte traps. Observe-only — the real OS routine still runs.
+machine.observeExecute(0xe456, installEditorTraps);
+
 // SIOV: serve D1: from the attached image (trap-based SIO); everything else
-// times out, so without a disk the OS abandons the disk boot like before. The
-// handler returns a substitute RTS opcode for the bus-trap style; here we
-// perform the RTS ourselves.
+// times out, so without a disk the OS abandons the disk boot. The handler does
+// the host-side work and returns a substitute RTS opcode to return to the caller.
 const sio = createSioHandler({
 	machine,
 	cpu,
 	getDisk: (unit) => (unit === 1 ? disk : undefined),
 });
-traps.set(SIOV, () => {
-	sio(SIOV);
-	rts();
-	return true;
-});
+machine.interceptExecute(SIOV, sio);
 
-traps.set(0xe471, () => {
-	// BLKBDV, the Memo Pad ("blackboard") entry: the OS jumps here when there
-	// is nothing left to run — e.g. a booted executable returned. Session over.
-	process.exit(0);
-});
+// BLKBDV, the Memo Pad ("blackboard") entry: the OS jumps here when there is
+// nothing left to run — e.g. a booted executable returned. Session over.
+machine.observeExecute(0xe471, () => process.exit(0));
 
 // --- Stuck-loop watchdog. ---
 const WINDOW = 10_000;
@@ -358,58 +340,38 @@ function reportHotspots(): void {
 async function run(): Promise<void> {
 	const ag = machine.anticGtia;
 
-	// Mirror the CPU's edge-triggered NMI latch host-side: a false→true
-	// transition on the NMI line arms a pending NMI that the CPU services at the
-	// next instruction boundary. Used only to gate host traps (below).
-	let prevNmi = false;
-	let nmiPending = false;
-
 	while (cycles < LIMIT) {
 		ag.beforeCpu();
 		machine.cycle();
-		if (ag.nmi && !prevNmi) nmiPending = true;
-		prevNmi = ag.nmi;
 		cpu.NMI = ag.nmi;
 		cpu.IRQ = machine.irq;
 		cpu.RDY = ag.rdy;
 
-		let trapped = false;
-
-		// Traps fire on an opcode fetch the CPU will actually perform — not on
-		// halted cycles (the CPU is frozen), and not while a WSYNC stall is
-		// repeating the fetch (the trap would fire once per stalled cycle).
+		// Trace/watchdog bookkeeping at each committed instruction boundary — not
+		// on halted cycles (CPU frozen) or WSYNC-stalled re-fetches (RDY low).
 		if (!ag.halt && cpu.RDY && cpu.state === DECODE) {
 			fetchCount[cpu.PC] = (fetchCount[cpu.PC] ?? 0) + 1;
 			seenPcs.add(cpu.PC);
 			if (trace) process.stderr.write(traceLine(cpu, peek) + "\n");
-
-			// A latched NMI is serviced at this boundary instead of executing
-			// the opcode at PC: the CPU pushes PC, vectors to the handler, then
-			// RTIs back here and re-DECODEs the same PC. Skip traps now so a
-			// side-effecting one (the E: PUTBYT stdout tee) fires once — after
-			// the RTI — rather than doubling the character.
-			const trap = nmiPending ? undefined : traps.get(cpu.PC);
-			if (nmiPending) {
-				nmiPending = false;
-			} else if (trap) {
-				try {
-					trapped = trap();
-				} catch (error) {
-					if (error !== NEED_INPUT) throw error;
-					// Keep beforeCpu/afterCpu paired for this cycle, then wait
-					// for input and retry the same instruction.
-					ag.afterCpu(frame, machine.busData);
-					cycles++;
-					await new Promise<void>((resolve) => {
-						onStdin = resolve;
-					});
-					continue;
-				}
-			}
 		}
 
-		if (!trapped && !ag.halt) {
-			cpu.run();
+		// Traps live on the bus now (machine.intercept*/observe*) and fire during
+		// the opcode fetch inside cpu.run() — interrupt-safe by construction, so
+		// the old host-side NMI latch is gone. The E: GETBYT interceptor throws
+		// NEED_INPUT to suspend when stdin is empty; catch it, pair afterCpu for
+		// this cycle, await the next line, and retry the same (un-advanced) cycle.
+		if (!ag.halt) {
+			try {
+				cpu.run();
+			} catch (error) {
+				if (error !== NEED_INPUT) throw error;
+				ag.afterCpu(frame, machine.busData);
+				cycles++;
+				await new Promise<void>((resolve) => {
+					onStdin = resolve;
+				});
+				continue;
+			}
 		}
 
 		ag.afterCpu(frame, machine.busData);

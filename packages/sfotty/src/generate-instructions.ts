@@ -1018,7 +1018,7 @@ function storeAbsoluteX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 	return [
 		["r-pc++", "ar=dr"],
 		["r-pc++", "ah=dr", "ar+=x?"],
-		["r-ar", "?ah++", operation],
+		["r-ar", "dummy", "?ah++", operation],
 		["w-ar"],
 	];
 }
@@ -1041,7 +1041,7 @@ function storeAbsoluteY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 	return [
 		["r-pc++", "ar=dr"],
 		["r-pc++", "ah=dr", "ar+=y?"],
-		["r-ar", "?ah++", operation],
+		["r-ar", "dummy", "?ah++", operation],
 		["w-ar"],
 	];
 }
@@ -1080,7 +1080,7 @@ function storeIndirectY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ar=dr"],
 		["r-dr++"],
 		["r-dr", "ar+=y?"],
-		["r-ar", "?ah++", operation],
+		["r-ar", "dummy", "?ah++", operation],
 		["w-ar"],
 	];
 }

@@ -113,6 +113,40 @@ describe("dummy cycles", () => {
 		expect(single!.options & ReadOptions.DUMMY).toBe(0);
 	});
 
+	test("an indexed store always reads-before-write, and that read is DUMMY", () => {
+		// STA $12FF,X with X=1 → effective $1300. The 6502 can't undo a write to a
+		// wrong address, so it always reads the unfixed address ($1200) first and
+		// throws it away — a dummy read on every indexed store, cross or not.
+		const cross = record();
+		cross.bytes[0x0200] = 0x9d; // STA abs,X
+		cross.bytes[0x0201] = 0xff;
+		cross.bytes[0x0202] = 0x12;
+		cross.cpu.X = 1;
+		cross.cpu.A = 0x42;
+		run(cross.cpu, 5);
+
+		// The pre-write read at the unfixed $1200 is a dummy.
+		const dummyRead = cross.reads.find((r) => r.address === 0x1200);
+		expect(dummyRead).toBeDefined();
+		expect(dummyRead!.options & ReadOptions.DUMMY).toBeTruthy();
+		// And it didn't corrupt $1200 — only $1300 gets the store.
+		expect(cross.bytes[0x1300]).toBe(0x42);
+
+		// No cross either: STA $1200,X with X=1 → $1201, still a dummy read first.
+		const noCross = record();
+		noCross.bytes[0x0200] = 0x9d;
+		noCross.bytes[0x0201] = 0x00;
+		noCross.bytes[0x0202] = 0x12;
+		noCross.cpu.X = 1;
+		noCross.cpu.A = 0x42;
+		run(noCross.cpu, 5);
+
+		const read = noCross.reads.find((r) => r.address === 0x1201);
+		expect(read).toBeDefined();
+		expect(read!.options & ReadOptions.DUMMY).toBeTruthy();
+		expect(noCross.bytes[0x1201]).toBe(0x42);
+	});
+
 	test("a real operand read is not DUMMY", () => {
 		const { cpu, bytes, reads } = record();
 		bytes[0x0200] = LDA_IMM; // LDA #$EA — operand read at $0201 is real

@@ -1676,7 +1676,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-dr++"],
 			["r-dr", "ar+=y?"],
-			["r-ar", "?ah++", "sta"],
+			["r-ar", "dummy", "?ah++", "sta"],
 			["w-ar"],
 		],
 	},
@@ -1705,7 +1705,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-dr++"],
 			["r-dr", "ar+=y?"],
-			["r-ar", "?ah++", "sha"],
+			["r-ar", "dummy", "?ah++", "sha"],
 			["w-ar"],
 		],
 	},
@@ -1753,7 +1753,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=y?"],
-			["r-ar", "?ah++", "sta"],
+			["r-ar", "dummy", "?ah++", "sta"],
 			["w-ar"],
 		],
 	},
@@ -1773,7 +1773,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=y?"],
-			["r-ar", "?ah++", "shs"],
+			["r-ar", "dummy", "?ah++", "shs"],
 			["w-ar"],
 		],
 	},
@@ -1786,7 +1786,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=x?"],
-			["r-ar", "?ah++", "shy"],
+			["r-ar", "dummy", "?ah++", "shy"],
 			["w-ar"],
 		],
 	},
@@ -1798,7 +1798,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=x?"],
-			["r-ar", "?ah++", "sta"],
+			["r-ar", "dummy", "?ah++", "sta"],
 			["w-ar"],
 		],
 	},
@@ -1811,7 +1811,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=y?"],
-			["r-ar", "?ah++", "shx"],
+			["r-ar", "dummy", "?ah++", "shx"],
 			["w-ar"],
 		],
 	},
@@ -1824,7 +1824,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=y?"],
-			["r-ar", "?ah++", "sha"],
+			["r-ar", "dummy", "?ah++", "sha"],
 			["w-ar"],
 		],
 	},

@@ -1,6 +1,6 @@
 import { ReadOptions, type Memory } from "./bus.ts";
 import { DECODE, RESET, type Step } from "./microcode.ts";
-import { DUMMY, MICROCODE } from "./nmos-steps.generated.ts";
+import { DUMMY, MICROCODE, SPECULATIVE } from "./nmos-steps.generated.ts";
 import { NMOS_INSTRUCTIONS } from "./nmos-instructions.generated.ts";
 
 /** Variant flags that change the instruction set/behavior. */
@@ -222,9 +222,12 @@ export class SfottyCore {
 	 */
 	#read(address: number, options: ReadOptions): number {
 		// A non-committing dummy cycle (the DUMMY table is keyed by microstate)
-		// marks its read so traps can tell it from a real access. opReadDecode's
-		// own interrupt/stall DUMMY is passed in `options`; DUMMY[DECODE] is 0.
-		if (DUMMY[this.state]) options |= ReadOptions.DUMMY;
+		// marks its read so traps can tell it from a real access. SPECULATIVE
+		// cycles (the indexed page-cross read) are dummy only when `crossed`.
+		// opReadDecode's own interrupt/stall DUMMY is passed in `options`.
+		if (DUMMY[this.state] || (this.#crossed && SPECULATIVE[this.state])) {
+			options |= ReadOptions.DUMMY;
+		}
 		return this.#bus.read(address, options);
 	}
 

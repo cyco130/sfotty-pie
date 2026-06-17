@@ -7544,3 +7544,21 @@ export const DUMMY: Uint8Array = /* @__PURE__ */ (() => {
 	}
 	return table;
 })();
+
+/**
+ * Per-microstate flag: 1 if that cycle's read is *speculative* — the indexed
+ * page-cross read at the not-yet-fixed address. It's a real read when no page
+ * boundary was crossed and a dummy when one was, so the CPU ORs ReadOptions.DUMMY
+ * only when its crossed flag is set. Indexed by microstate, like MICROCODE.
+ */
+export const SPECULATIVE: Uint8Array = /* @__PURE__ */ (() => {
+	const table = new Uint8Array(MICROCODE.length);
+	for (const state of [
+		139, 202, 226, 234, 395, 458, 482, 490, 651, 714, 738, 746, 907, 970, 994,
+		1002, 1419, 1435, 1482, 1498, 1506, 1514, 1522, 1530, 1675, 1738, 1762,
+		1770, 1931, 1994, 2018, 2026,
+	]) {
+		table[state] = 1;
+	}
+	return table;
+})();

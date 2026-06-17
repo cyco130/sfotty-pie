@@ -81,6 +81,38 @@ describe("dummy cycles", () => {
 		expect(pull!.options & ReadOptions.DUMMY).toBe(0);
 	});
 
+	test("an indexed read is DUMMY only on a page cross (the speculative read)", () => {
+		// LDA $12FF,X with X=1 → effective $1300, crossing the $12xx→$13xx page.
+		const cross = record();
+		cross.bytes[0x0200] = 0xbd; // LDA abs,X
+		cross.bytes[0x0201] = 0xff;
+		cross.bytes[0x0202] = 0x12;
+		cross.cpu.X = 1;
+		run(cross.cpu, 5);
+
+		// The speculative read at the not-yet-fixed $1200 is a dummy.
+		const speculative = cross.reads.find((r) => r.address === 0x1200);
+		expect(speculative).toBeDefined();
+		expect(speculative!.options & ReadOptions.DUMMY).toBeTruthy();
+
+		// The fixed re-read at $1300 is the real one.
+		const real = cross.reads.find((r) => r.address === 0x1300);
+		expect(real).toBeDefined();
+		expect(real!.options & ReadOptions.DUMMY).toBe(0);
+
+		// No cross: LDA $1200,X with X=1 → $1201, a single real read, no dummy.
+		const noCross = record();
+		noCross.bytes[0x0200] = 0xbd;
+		noCross.bytes[0x0201] = 0x00;
+		noCross.bytes[0x0202] = 0x12;
+		noCross.cpu.X = 1;
+		run(noCross.cpu, 5);
+
+		const single = noCross.reads.find((r) => r.address === 0x1201);
+		expect(single).toBeDefined();
+		expect(single!.options & ReadOptions.DUMMY).toBe(0);
+	});
+
 	test("a real operand read is not DUMMY", () => {
 		const { cpu, bytes, reads } = record();
 		bytes[0x0200] = LDA_IMM; // LDA #$EA — operand read at $0201 is real

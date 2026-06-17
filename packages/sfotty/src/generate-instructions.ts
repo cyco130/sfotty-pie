@@ -60,7 +60,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// interrupted PC with B clear, while a real BRK skips the signature byte
 			// with B set.
 			ops[opcode] = [
-				["r-brk", "ar=sp", "dr=pch"],
+				["r-brk", "dummy", "ar=sp", "dr=pch"], // read next byte, thrown away
 				["w-ar--", "dr=pcl"],
 				["w-ar--", "dr=pi", "if=1"],
 				["w-ar--", "s=al", "ar=vector"],
@@ -86,7 +86,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 
 			ops[opcode] = [
 				["r-pc++", "ar=sp", "s=dr"],
-				["r-ar", "dr=pch"],
+				["r-ar", "dummy", "dr=pch"], // internal stack read, value discarded
 				["w-ar--", "dr=pcl"],
 				["w-ar--"],
 				["r-pc", "pcl=s", "s=al", "pch=dr"],
@@ -150,8 +150,8 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 6  $0100,S  R  pull PCH from stack
 
 			ops[opcode] = [
-				["r-pc", "ar=sp"],
-				["r-ar++"],
+				["r-pc", "dummy", "ar=sp"], // read next byte, thrown away
+				["r-ar++", "dummy"], // increment S (stack read discarded)
 				["r-ar++", "p=dr"],
 				["r-ar++", "pcl=dr"],
 				["r-ar", "pch=dr", "s=al"],
@@ -174,11 +174,11 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 6    PC     R  increment PC
 
 			ops[opcode] = [
-				["r-pc", "ar=sp"],
-				["r-ar++"],
+				["r-pc", "dummy", "ar=sp"], // read next byte, thrown away
+				["r-ar++", "dummy"], // increment S (stack read discarded)
 				["r-ar++", "pcl=dr"],
 				["r-ar", "pch=dr", "s=al"],
-				["r-pc++"],
+				["r-pc++", "dummy"], // increment PC (PC read discarded)
 			];
 
 			break;
@@ -194,7 +194,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 2    PC     R  read next instruction byte (and throw it away)
 			// 3  $0100,S  W  push register on stack, decrement S
 			ops[opcode] = [
-				["r-pc", "ar=sp", "dr=p"],
+				["r-pc", "dummy", "ar=sp", "dr=p"], // read next byte, thrown away
 				["w-ar--", "s=al"],
 			];
 			break;
@@ -210,7 +210,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 2    PC     R  read next instruction byte (and throw it away)
 			// 3  $0100,S  W  push register on stack, decrement S
 			ops[opcode] = [
-				["r-pc", "ar=sp", "dr=a"],
+				["r-pc", "dummy", "ar=sp", "dr=a"], // read next byte, thrown away
 				["w-ar--", "s=al"],
 			];
 			break;
@@ -227,7 +227,11 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 3  $0100,S  R  increment S
 			// 4  $0100,S  R  pull register from stack
 
-			ops[opcode] = [["r-pc", "ar=sp"], ["r-ar++"], ["r-ar", "s=al", "p=dr"]];
+			ops[opcode] = [
+				["r-pc", "dummy", "ar=sp"], // read next byte, thrown away
+				["r-ar++", "dummy"], // increment S (stack read discarded)
+				["r-ar", "s=al", "p=dr"],
+			];
 			break;
 
 		case "PLA":
@@ -242,7 +246,11 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 3  $0100,S  R  increment S
 			// 4  $0100,S  R  pull register from stack
 
-			ops[opcode] = [["r-pc", "ar=sp"], ["r-ar++"], ["r-ar", "s=al", "a=dr"]];
+			ops[opcode] = [
+				["r-pc", "dummy", "ar=sp"], // read next byte, thrown away
+				["r-ar++", "dummy"], // increment S (stack read discarded)
+				["r-ar", "s=al", "a=dr"],
+			];
 			break;
 
 		case "ORA":

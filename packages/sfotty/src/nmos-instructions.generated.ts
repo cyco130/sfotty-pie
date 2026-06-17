@@ -10,7 +10,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "BRK",
 		mode: "imp",
 		code: [
-			["r-brk", "ar=sp", "dr=pch"],
+			["r-brk", "dummy", "ar=sp", "dr=pch"],
 			["w-ar--", "dr=pcl"],
 			["w-ar--", "dr=pi", "if=1"],
 			["w-ar--", "s=al", "ar=vector"],
@@ -105,7 +105,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "PHP",
 		mode: "imp",
 		code: [
-			["r-pc", "ar=sp", "dr=p"],
+			["r-pc", "dummy", "ar=sp", "dr=p"],
 			["w-ar--", "s=al"],
 		],
 	},
@@ -393,7 +393,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "abs",
 		code: [
 			["r-pc++", "ar=sp", "s=dr"],
-			["r-ar", "dr=pch"],
+			["r-ar", "dummy", "dr=pch"],
 			["w-ar--", "dr=pcl"],
 			["w-ar--"],
 			["r-pc", "pcl=s", "s=al", "pch=dr"],
@@ -483,7 +483,11 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 40,
 		mnemonic: "PLP",
 		mode: "imp",
-		code: [["r-pc", "ar=sp"], ["r-ar++"], ["r-ar", "s=al", "p=dr"]],
+		code: [
+			["r-pc", "dummy", "ar=sp"],
+			["r-ar++", "dummy"],
+			["r-ar", "s=al", "p=dr"],
+		],
 	},
 	// 29 AND imm
 	{
@@ -766,8 +770,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "RTI",
 		mode: "imp",
 		code: [
-			["r-pc", "ar=sp"],
-			["r-ar++"],
+			["r-pc", "dummy", "ar=sp"],
+			["r-ar++", "dummy"],
 			["r-ar++", "p=dr"],
 			["r-ar++", "pcl=dr"],
 			["r-ar", "pch=dr", "s=al"],
@@ -860,7 +864,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "PHA",
 		mode: "imp",
 		code: [
-			["r-pc", "ar=sp", "dr=a"],
+			["r-pc", "dummy", "ar=sp", "dr=a"],
 			["w-ar--", "s=al"],
 		],
 	},
@@ -1144,11 +1148,11 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "RTS",
 		mode: "imp",
 		code: [
-			["r-pc", "ar=sp"],
-			["r-ar++"],
+			["r-pc", "dummy", "ar=sp"],
+			["r-ar++", "dummy"],
 			["r-ar++", "pcl=dr"],
 			["r-ar", "pch=dr", "s=al"],
-			["r-pc++"],
+			["r-pc++", "dummy"],
 		],
 	},
 	// 61 ADC inx
@@ -1237,7 +1241,11 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 104,
 		mnemonic: "PLA",
 		mode: "imp",
-		code: [["r-pc", "ar=sp"], ["r-ar++"], ["r-ar", "s=al", "a=dr"]],
+		code: [
+			["r-pc", "dummy", "ar=sp"],
+			["r-ar++", "dummy"],
+			["r-ar", "s=al", "a=dr"],
+		],
 	},
 	// 69 ADC imm
 	{

@@ -276,6 +276,11 @@ for (const inst of NMOS_INSTRUCTIONS) {
 	});
 }
 
+// Reset's first five cycles are dummy reads (states 0x801..0x805: two reads at
+// PC, then three fake-push stack reads); the last two (0x806/0x807) read the
+// real reset vector. The sequence is hand-written below, not token-generated.
+dummyStates.push(0x801, 0x802, 0x803, 0x804, 0x805);
+
 // A base name is ambiguous when its steps don't all share one body — i.e. the
 // body bakes in the opcode (via its next-state transition), so the colliding
 // opcodes need distinct functions. Those re-add the opcode: `cim02_imp_0`.

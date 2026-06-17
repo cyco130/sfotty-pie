@@ -1,6 +1,16 @@
 import { ReadOptions, type Memory } from "@sfotty-pie/sfotty";
 import { AnticGtia } from "./antic-gtia.ts";
-import { AtariBus } from "./bus-manager.ts";
+import {
+	AtariBus,
+	type ExecuteInterceptor,
+	type ExecuteObserver,
+	type ReadInterceptor,
+	type ReadObserver,
+	type TrapHandle,
+	type TrapOptions,
+	type WriteInterceptor,
+	type WriteObserver,
+} from "./bus-manager.ts";
 import { Cartridge } from "./cartridge.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
@@ -224,18 +234,67 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * Register an execute trap: when the CPU fetches an opcode from
-	 * `address`, `callback` runs first. It may perform host-side work and
-	 * return a substitute opcode (typically $60, RTS) — or `undefined` to
-	 * fall through to the real memory. One trap per address; used for OS
-	 * entry points like SIOV (see `createSioHandler`). A WSYNC stall can
-	 * repeat the trapped fetch, so callbacks must be idempotent.
+	 * Trap a memory access. Interceptors run before the access and may
+	 * short-circuit it (return a substitute read value / true to suppress a
+	 * write); observers run after and only watch. Both phases are additive and
+	 * run last-registered-first; the first interceptor to return a value wins.
+	 * An optional `mask` filters by access flags (default `{ dummy: false }`);
+	 * `interceptExecute`/`observeExecute` are sugar for a read masked to a
+	 * committed opcode fetch. Each returns a handle to unregister. A committed
+	 * opcode fetch can't repeat under a WSYNC stall (the stall re-fetch is
+	 * DUMMY), so execute traps fire once. See [traps](../../notes.local/traps.md).
 	 */
-	addExecuteTrap(
+	interceptExecute(
 		address: number,
-		callback: (address: number) => number | undefined,
-	): void {
-		this.#bus.addTrap(address, callback);
+		fn: ExecuteInterceptor,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.#bus.interceptExecute(address, fn, opts);
+	}
+
+	observeExecute(
+		address: number,
+		fn: ExecuteObserver,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.#bus.observeExecute(address, fn, opts);
+	}
+
+	interceptRead(
+		address: number,
+		fn: ReadInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#bus.interceptRead(address, fn, opts);
+	}
+
+	observeRead(
+		address: number,
+		fn: ReadObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#bus.observeRead(address, fn, opts);
+	}
+
+	interceptWrite(
+		address: number,
+		fn: WriteInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#bus.interceptWrite(address, fn, opts);
+	}
+
+	observeWrite(
+		address: number,
+		fn: WriteObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#bus.observeWrite(address, fn, opts);
+	}
+
+	/** Alias for {@link interceptExecute}; kept until SIO setup moves into the core. */
+	addExecuteTrap(address: number, callback: ExecuteInterceptor): TrapHandle {
+		return this.#bus.interceptExecute(address, callback);
 	}
 
 	/**

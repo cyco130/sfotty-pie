@@ -2,6 +2,97 @@ import { type Memory, ReadOptions } from "@sfotty-pie/sfotty";
 import type { Cartridge } from "./cartridge.ts";
 import type { Pia } from "./pia.ts";
 
+// Trap callbacks. Interceptors run *before* the access and may short-circuit it
+// (a read interceptor returns a substitute value; a write interceptor returns
+// true to suppress the store) — return undefined/void to fall through.
+// Observers run *after* and only watch. Both phases are additive and run
+// last-registered-first (LIFO), so a newly installed hook takes precedence; for
+// interceptors the first non-undefined return wins. `address` is passed for
+// future range traps; handlers reach cpu/machine via the closure they were
+// registered in. `flags` is the access's ReadOptions.
+export type ReadInterceptor = (
+	address: number,
+	flags: ReadOptions,
+) => number | undefined;
+export type ReadObserver = (
+	address: number,
+	value: number,
+	flags: ReadOptions,
+) => void;
+export type WriteInterceptor = (
+	address: number,
+	value: number,
+) => boolean | void;
+export type WriteObserver = (address: number, value: number) => void;
+
+// Execute traps are sugar for a read trap masked to a committed opcode fetch
+// ({ sync: true, dummy: false }); the fetched byte isn't passed (HLE returns a
+// substitute opcode like RTS; observers read CPU state via their closure).
+export type ExecuteInterceptor = (address: number) => number | undefined;
+export type ExecuteObserver = (address: number) => void;
+
+/**
+ * Which accesses a trap fires on, by flag. `true` = the flag must be set,
+ * `false` = it must be clear, omitted = don't care. The default when no mask is
+ * given is `{ dummy: false }` — fire on committing accesses only. An execute
+ * trap is `{ sync: true, dummy: false }` (a committed opcode fetch).
+ */
+export interface TrapMask {
+	sync?: boolean;
+	dummy?: boolean;
+	dma?: boolean;
+}
+
+/** Returned by every trap registration; call `remove()` to unregister it. */
+export interface TrapHandle {
+	remove(): void;
+}
+
+export interface TrapOptions {
+	/** Auto-remove the trap after it next fires. */
+	once?: boolean;
+	/** Which accesses to fire on (default `{ dummy: false }`). */
+	mask?: TrapMask;
+}
+
+const DEFAULT_MASK: TrapMask = { dummy: false };
+const EXECUTE_MASK: TrapMask = { sync: true, dummy: false };
+
+/** Compile a mask into require-set / require-clear bit patterns. */
+function compileMask(mask: TrapMask): { set: number; clear: number } {
+	let set = 0;
+	let clear = 0;
+	const apply = (flag: number, want: boolean | undefined) => {
+		if (want === true) set |= flag;
+		else if (want === false) clear |= flag;
+	};
+	apply(ReadOptions.SYNC, mask.sync);
+	apply(ReadOptions.DUMMY, mask.dummy);
+	apply(ReadOptions.DMA, mask.dma);
+	return { set, clear };
+}
+
+/** A registered trap: its compiled mask, the once flag, and the callback. */
+interface TrapEntry<F> {
+	set: number;
+	clear: number;
+	once: boolean;
+	fn: F;
+}
+
+/** Remove an entry from a registry list, dropping the address key if empty. */
+function removeEntry<F>(
+	map: Map<number, TrapEntry<F>[]>,
+	address: number,
+	entry: TrapEntry<F>,
+): void {
+	const list = map.get(address);
+	if (!list) return;
+	const index = list.indexOf(entry);
+	if (index >= 0) list.splice(index, 1);
+	if (list.length === 0) map.delete(address);
+}
+
 export class Ram implements Memory {
 	#memory: Uint8Array;
 	#base: number;
@@ -549,31 +640,190 @@ export class AtariBus implements Memory {
 	busData = 0xff;
 
 	read(address: number, options: ReadOptions) {
-		if (options & ReadOptions.OPCODE_FETCH) {
-			const trap = this.#traps.get(address);
-			const value = trap?.(address);
-			if (value !== undefined) {
-				return (this.busData = value);
+		// A PEEK (debugger/disassembler inspection) must not fire traps or
+		// disturb the bus — it has no side effects. The `.size` guards keep the
+		// common no-traps path off the lookup hot path: these run on every
+		// access, so an empty registry must cost a field read, not a Map.get.
+		if (!(options & ReadOptions.PEEK) && this.#readInterceptors.size) {
+			const substitute = this.#runRead(
+				this.#readInterceptors,
+				address,
+				options,
+			);
+			if (substitute !== undefined) {
+				this.busData = substitute;
+				if (this.#readObservers.size) {
+					this.#runReadObservers(address, substitute, options);
+				}
+				return substitute;
 			}
 		}
 
 		const value = this.#map(address, options).read(address, options);
-		// A PEEK (debugger/disassembler inspection) must not disturb the bus,
-		// or it would corrupt the floating-bus value a later real read sees.
 		if (!(options & ReadOptions.PEEK)) {
 			this.busData = value;
+			if (this.#readObservers.size) {
+				this.#runReadObservers(address, value, options);
+			}
 		}
 		return value;
 	}
 
 	write(address: number, value: number) {
 		this.busData = value;
-		return this.#map(address, ReadOptions.NONE).write(address, value);
+		// Writes carry no flags yet (no DMA/dummy writes are marked), so masks
+		// match against 0 — a require-set mask never fires on a write.
+		if (
+			this.#writeInterceptors.size &&
+			this.#runWriteInterceptors(address, value)
+		) {
+			return; // suppressed — the store didn't commit, so no observers fire
+		}
+		this.#map(address, ReadOptions.NONE).write(address, value);
+		if (this.#writeObservers.size) {
+			this.#runWriteObservers(address, value);
+		}
 	}
 
-	#traps = new Map<number, (address: number) => number | undefined>();
-	addTrap(address: number, callback: (address: number) => number | undefined) {
-		this.#traps.set(address, callback);
+	// Trap registries. Each phase is an additive list per address, run
+	// last-registered-first (LIFO). Interceptors (before) may short-circuit;
+	// observers (after) only watch. `set`/`clear` are the compiled mask.
+	#readInterceptors = new Map<number, TrapEntry<ReadInterceptor>[]>();
+	#readObservers = new Map<number, TrapEntry<ReadObserver>[]>();
+	#writeInterceptors = new Map<number, TrapEntry<WriteInterceptor>[]>();
+	#writeObservers = new Map<number, TrapEntry<WriteObserver>[]>();
+
+	#add<F>(
+		map: Map<number, TrapEntry<F>[]>,
+		address: number,
+		fn: F,
+		opts: TrapOptions | undefined,
+	): TrapHandle {
+		const { set, clear } = compileMask(opts?.mask ?? DEFAULT_MASK);
+		const entry: TrapEntry<F> = { set, clear, once: opts?.once ?? false, fn };
+		const list = map.get(address);
+		if (list) list.push(entry);
+		else map.set(address, [entry]);
+		return {
+			remove: () => removeEntry(map, address, entry),
+		};
+	}
+
+	// LIFO over the matching interceptors; first non-undefined return wins.
+	#runRead(
+		map: Map<number, TrapEntry<ReadInterceptor>[]>,
+		address: number,
+		flags: ReadOptions,
+	): number | undefined {
+		const list = map.get(address);
+		if (!list) return undefined;
+		for (let i = list.length - 1; i >= 0; i--) {
+			const entry = list[i]!;
+			if ((flags & entry.set) !== entry.set || (flags & entry.clear) !== 0) {
+				continue;
+			}
+			const result = entry.fn(address, flags);
+			if (entry.once) removeEntry(map, address, entry);
+			if (result !== undefined) return result;
+		}
+		return undefined;
+	}
+
+	#runReadObservers(address: number, value: number, flags: ReadOptions): void {
+		const list = this.#readObservers.get(address);
+		if (!list) return;
+		for (let i = list.length - 1; i >= 0; i--) {
+			const entry = list[i]!;
+			if ((flags & entry.set) !== entry.set || (flags & entry.clear) !== 0) {
+				continue;
+			}
+			entry.fn(address, value, flags);
+			if (entry.once) removeEntry(this.#readObservers, address, entry);
+		}
+	}
+
+	#runWriteInterceptors(address: number, value: number): boolean {
+		const list = this.#writeInterceptors.get(address);
+		if (!list) return false;
+		for (let i = list.length - 1; i >= 0; i--) {
+			const entry = list[i]!;
+			if (entry.set !== 0) continue; // a write carries no flags to require
+			const suppress = entry.fn(address, value);
+			if (entry.once) removeEntry(this.#writeInterceptors, address, entry);
+			if (suppress) return true; // first to suppress wins
+		}
+		return false;
+	}
+
+	#runWriteObservers(address: number, value: number): void {
+		const list = this.#writeObservers.get(address);
+		if (!list) return;
+		for (let i = list.length - 1; i >= 0; i--) {
+			const entry = list[i]!;
+			if (entry.set !== 0) continue;
+			entry.fn(address, value);
+			if (entry.once) removeEntry(this.#writeObservers, address, entry);
+		}
+	}
+
+	/** Trap a data read, before the access; may return a substitute value. */
+	interceptRead(
+		address: number,
+		fn: ReadInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#add(this.#readInterceptors, address, fn, opts);
+	}
+
+	/** Watch a read after it resolves (its committed value). */
+	observeRead(
+		address: number,
+		fn: ReadObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#add(this.#readObservers, address, fn, opts);
+	}
+
+	/** Trap a write, before the store; return true to suppress it. */
+	interceptWrite(
+		address: number,
+		fn: WriteInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#add(this.#writeInterceptors, address, fn, opts);
+	}
+
+	/** Watch a write after it commits. */
+	observeWrite(
+		address: number,
+		fn: WriteObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#add(this.#writeObservers, address, fn, opts);
+	}
+
+	/** Sugar: trap a committed opcode fetch (read masked to SYNC & !DUMMY). */
+	interceptExecute(
+		address: number,
+		fn: ExecuteInterceptor,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.interceptRead(address, (a) => fn(a), {
+			mask: EXECUTE_MASK,
+			once: opts?.once,
+		});
+	}
+
+	/** Sugar: watch a committed opcode fetch. */
+	observeExecute(
+		address: number,
+		fn: ExecuteObserver,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.observeRead(address, (a) => fn(a), {
+			mask: EXECUTE_MASK,
+			once: opts?.once,
+		});
 	}
 }
 

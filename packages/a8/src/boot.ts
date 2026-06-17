@@ -1,11 +1,4 @@
-import {
-	DECODE,
-	disassemble,
-	type Memory,
-	ReadOptions,
-	Sfotty,
-	traceLine,
-} from "@sfotty-pie/sfotty";
+import { DECODE, ReadOptions, Sfotty, traceLine } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
 import { basename } from "node:path";
@@ -85,9 +78,9 @@ const machine = new Atari({
 
 // --keys automation (e.g. Acid800): each time the program waits for a key — it
 // clears CH ($02FC) then polls it — feed the next scripted POKEY key code, and
-// once the script is exhausted exit the process. So a suite that ends on a
-// key-wait finishes immediately instead of spinning out the watchdog. Codes are
-// KBCODE values, comma-separated hex (e.g. `--keys 21,16` = Space then X).
+// once the script is exhausted exit the process. Codes are KBCODE values,
+// comma-separated hex (e.g. `--keys 21,16` = Space then X). Wired as bus traps
+// further down: a write of 0 to CH arms it, the next CH read returns the code.
 const CH = 0x02fc;
 const keyScript = (flagValue("--keys") ?? "")
 	.split(",")
@@ -96,29 +89,7 @@ const keyScript = (flagValue("--keys") ?? "")
 let keyIndex = 0;
 let keyWaitArmed = false;
 
-// Record every bus address touched in the current window so the watchdog can
-// tell a real stuck loop from a legitimately long loop (e.g. the RAM test).
-const touched = new Set<number>();
-const bus: Memory = {
-	read(address, options) {
-		touched.add(address);
-		if (keyScript.length && address === CH && keyWaitArmed) {
-			keyWaitArmed = false;
-			if (keyIndex >= keyScript.length) process.exit(0);
-			const code = keyScript[keyIndex++]!;
-			process.stderr.write(`[keys] CH <- $${hex(code, 2)}\n`);
-			return code;
-		}
-		return machine.read(address, options);
-	},
-	write(address, value) {
-		touched.add(address);
-		if (keyScript.length && address === CH && value === 0) keyWaitArmed = true;
-		machine.write(address, value);
-	},
-};
-
-const cpu = new Sfotty(bus, { withoutUndocumented: false });
+const cpu = new Sfotty(machine, { withoutUndocumented: false });
 
 const peek = (address: number) => machine.read(address, ReadOptions.PEEK);
 
@@ -241,32 +212,26 @@ machine.interceptExecute(SIOV, sio);
 // nothing left to run — e.g. a booted executable returned. Session over.
 machine.observeExecute(0xe471, () => process.exit(0));
 
-// --- Stuck-loop watchdog. ---
-const WINDOW = 10_000;
-const FEW_PCS = 64;
-const FEW_ADDRESSES = 32;
-// Generous: past multi-frame OS startup delays AND test-suite deadman
-// timeouts (Acid800's serial-input test spins for many emulated seconds
-// before its own timeout gives up).
-const STUCK_LIMIT = 30_000_000;
+// --keys: arm on a write of 0 to CH (the program clearing it before polling),
+// then substitute the next scripted code on the following CH read.
+if (keyScript.length) {
+	machine.observeWrite(CH, (_address, value) => {
+		if (value === 0) keyWaitArmed = true;
+	});
+	machine.interceptRead(CH, () => {
+		if (!keyWaitArmed) return undefined;
+		keyWaitArmed = false;
+		if (keyIndex >= keyScript.length) process.exit(0);
+		const code = keyScript[keyIndex++]!;
+		process.stderr.write(`[keys] CH <- $${hex(code, 2)}\n`);
+		return code;
+	});
+}
+
+// Hard cap on emulated cycles. The program normally exits long before this
+// (BLKBDV, stdin close, or the --keys script running out); reaching it means
+// something is stuck — re-run with --trace to see where.
 const LIMIT = 1_000_000_000;
-
-// With --nudge: when a small loop persists, the program is often polling for
-// a keypress (e.g. Acid800's "press any key" does BIT $D20E) — that bypasses
-// the E: traps, so press Return through the real keyboard matrix before
-// declaring it stuck. Off by default: Acid800's standalone tests *rerun* on a
-// keypress, where stopping at the wait loop is the better outcome.
-const nudgeEnabled = process.argv.includes("--nudge");
-const NUDGE_AT = 500_000; // spin cycles before the first nudge (then doubled)
-const NUDGE_HOLD = 30_000; // ~2 frames of key-down
-const MAX_NUDGES = 3;
-let nudges = 0;
-let keyUpAt = 0;
-
-const fetchCount = new Uint32Array(0x10000);
-const seenPcs = new Set<number>();
-let windowStart = 0;
-let loopCycles = 0;
 let cycles = 0;
 
 // The framebuffer ANTIC/GTIA renders into: 240 lines of 376 hi-res pixels (94
@@ -305,38 +270,6 @@ function dumpRegisters(): void {
 	);
 }
 
-function reportStuck(): void {
-	const pcs = [...seenPcs].sort((a, b) => a - b);
-	const addresses = [...touched].sort((a, b) => a - b);
-	process.stderr.write(
-		`\nStuck at ${cycles} cycles (spinning ~${loopCycles}): ` +
-			`${seenPcs.size} PCs, ${touched.size} addresses.\n` +
-			`Addresses touched: ${addresses.map((a) => "$" + hex(a, 4)).join(" ")}\n` +
-			`Loop body:\n`,
-	);
-	for (const pc of pcs) {
-		process.stderr.write(
-			`  ${hex(pc, 4)}  ${disassemble(peek, pc).text.padEnd(13)} ` +
-				`(x${fetchCount[pc]})\n`,
-		);
-	}
-	dumpRegisters();
-}
-
-function reportHotspots(): void {
-	const hot = [...fetchCount.entries()]
-		.filter(([, count]) => count > 0)
-		.sort(([, a], [, b]) => b - a)
-		.slice(0, 20);
-	process.stderr.write(`\nReached ${cycles} cycles. Hottest PCs:\n`);
-	for (const [pc, count] of hot) {
-		process.stderr.write(
-			`  ${hex(pc, 4)}  ${disassemble(peek, pc).text.padEnd(13)} (x${count})\n`,
-		);
-	}
-	dumpRegisters();
-}
-
 async function run(): Promise<void> {
 	const ag = machine.anticGtia;
 
@@ -347,12 +280,10 @@ async function run(): Promise<void> {
 		cpu.IRQ = machine.irq;
 		cpu.RDY = ag.rdy;
 
-		// Trace/watchdog bookkeeping at each committed instruction boundary — not
-		// on halted cycles (CPU frozen) or WSYNC-stalled re-fetches (RDY low).
-		if (!ag.halt && cpu.RDY && cpu.state === DECODE) {
-			fetchCount[cpu.PC] = (fetchCount[cpu.PC] ?? 0) + 1;
-			seenPcs.add(cpu.PC);
-			if (trace) process.stderr.write(traceLine(cpu, peek) + "\n");
+		// --trace: print each committed instruction (not halted cycles, where the
+		// CPU is frozen, or WSYNC-stalled re-fetches where RDY is low).
+		if (trace && !ag.halt && cpu.RDY && cpu.state === DECODE) {
+			process.stderr.write(traceLine(cpu, peek) + "\n");
 		}
 
 		// Traps live on the bus now (machine.intercept*/observe*) and fire during
@@ -382,40 +313,14 @@ async function run(): Promise<void> {
 			dumpRegisters();
 			break;
 		}
-
-		if (keyUpAt !== 0 && cycles >= keyUpAt) {
-			machine.pokeyKeyUp();
-			keyUpAt = 0;
-		}
-
-		if (cycles - windowStart >= WINDOW) {
-			const small = seenPcs.size <= FEW_PCS && touched.size <= FEW_ADDRESSES;
-			if (small) {
-				loopCycles += cycles - windowStart;
-				if (
-					nudgeEnabled &&
-					nudges < MAX_NUDGES &&
-					loopCycles >= NUDGE_AT << nudges
-				) {
-					nudges++;
-					machine.pokeyKeyDown(0x0c); // Return
-					keyUpAt = cycles + NUDGE_HOLD;
-				}
-				if (loopCycles >= STUCK_LIMIT) {
-					reportStuck();
-					break;
-				}
-			} else {
-				loopCycles = 0;
-				nudges = 0;
-			}
-			seenPcs.clear();
-			touched.clear();
-			windowStart = cycles;
-		}
 	}
 
-	if (cycles >= LIMIT) reportHotspots();
+	if (cycles >= LIMIT) {
+		process.stderr.write(
+			`\nReached LIMIT (${cycles} cycles) — likely stuck; re-run with --trace.\n`,
+		);
+		dumpRegisters();
+	}
 	rl.close();
 }
 

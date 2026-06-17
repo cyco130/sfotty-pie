@@ -944,8 +944,24 @@ export class AnticGtia implements Memory {
 			// persist (the GTIA collision tests rely on that).
 			if (y < 224) {
 				if (i === 0 && this.enableMissiles) {
-					// TODO: VDELAY for missiles (bits 0-3)
-					this.grafM = busData;
+					// VDELAY bits 0-3 delay each missile independently, but
+					// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
+					// latch each pair on its own: a delayed missile updates only
+					// on odd scanlines, exactly like the per-player logic below.
+					let m = this.grafM;
+					if (isOddScanline || !(this.vdelay & 0x01)) {
+						m = (m & ~0x03) | (busData & 0x03);
+					}
+					if (isOddScanline || !(this.vdelay & 0x02)) {
+						m = (m & ~0x0c) | (busData & 0x0c);
+					}
+					if (isOddScanline || !(this.vdelay & 0x04)) {
+						m = (m & ~0x30) | (busData & 0x30);
+					}
+					if (isOddScanline || !(this.vdelay & 0x08)) {
+						m = (m & ~0xc0) | (busData & 0xc0);
+					}
+					this.grafM = m;
 				}
 
 				if (this.enablePlayers) {

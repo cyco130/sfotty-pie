@@ -38,7 +38,7 @@
 	"GTIA: Player resizing": "fail",
 	"GTIA: Psuedo mode E": "fail",
 	"GTIA: Special modes collision test": "fail",
-	"GTIA: Vertical delay": "fail",
+	"GTIA: Vertical delay": "pass",
 	"MMU: XL banking": "pass",
 	"PIA: Basic test": "pass",
 	"PIA: Interrupt control test": "pass",

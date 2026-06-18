@@ -151,6 +151,7 @@ export class Emulator {
 	}
 
 	#running = false;
+	#turboMode = false;
 	#scanlines = 0;
 	#epoch = 0;
 
@@ -213,6 +214,20 @@ export class Emulator {
 		this.#running = false;
 	}
 
+	/**
+	 * Turbo mode: run as fast as the host allows, dropping both the audio
+	 * buffer gate and the wall-clock sleep so emulation is no longer pinned to
+	 * real time. Audio is suppressed while it's on (real-time playback can't
+	 * speed up without unbounded buffering). Toggling either way rebases the
+	 * wall clock and re-anchors the audio queue for a clean handoff.
+	 */
+	setTurboMode(enabled: boolean): void {
+		if (this.#turboMode === enabled) return;
+		this.#turboMode = enabled;
+		this.#audio?.clear();
+		this.#epoch = performance.now() - this.#scanlines * this.#msPerScanline;
+	}
+
 	/** Power cycle: cold-reset the machine and the CPU. */
 	coldStart(): void {
 		this.machine.reset(true);
@@ -238,6 +253,20 @@ export class Emulator {
 				await waitForVisible();
 				// The hidden interval is lost time, not work to replay.
 				this.#epoch = performance.now() - this.#scanlines * this.#msPerScanline;
+			}
+
+			if (this.#turboMode) {
+				// Unthrottled: run a whole emulated frame back-to-back, then
+				// yield a macrotask — the only thing turbo waits on, so input
+				// and the present loop still get a task turn. No sleep, no audio
+				// gate. One frame per yield self-bounds main-thread hold time.
+				const target = this.frameCount + 1;
+				while (this.#running && this.frameCount < target) {
+					this.#runScanline();
+					this.#scanlines++;
+				}
+				await yieldMacrotask();
+				continue;
 			}
 
 			const audio = this.#audio;
@@ -327,6 +356,10 @@ export class Emulator {
 	#collectAudio(pokeyLevel: number, speaker: number): void {
 		const audio = this.#audio;
 		if (!audio?.running) return;
+		// In turbo we generate samples far faster than real-time playback;
+		// queuing them would grow the worklet buffer without bound. Drop them
+		// and let the context underrun to silence until turbo ends.
+		if (this.#turboMode) return;
 
 		const filtered = this.#filter.apply(
 			(pokeyLevel / 60) * 0.2 + speaker * 0.2,

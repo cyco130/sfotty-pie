@@ -110,6 +110,9 @@ export class EmulatorHost {
 	/** The measured emulated frame rate, sampled about once a second. */
 	readonly fps = signal(0);
 
+	/** Whether turbo mode (unthrottled, muted) is engaged. */
+	readonly turboMode = signal(false);
+
 	/** Whether the menu sidebar is open. */
 	readonly menuOpen = signal(false);
 
@@ -123,6 +126,7 @@ export class EmulatorHost {
 	#keyInput: HTMLInputElement | null = null;
 	#bootImagePicker: (() => void) | null = null;
 	#cpuTrace = false; // persists across reboots; reapplied to each emulator
+	#turboMode = false; // persists across reboots; reapplied to each emulator
 	// The currently mounted image (kept across reboots; replaced by a Load).
 	#attachment: { cartridge: Cartridge } | { disk: AtrImage } | null = null;
 
@@ -209,6 +213,7 @@ export class EmulatorHost {
 			...(this.#audio && { audio: this.#audio }),
 		});
 		emulator.setTrace(this.#cpuTrace);
+		emulator.setTurboMode(this.#turboMode);
 		return emulator;
 	}
 
@@ -261,6 +266,16 @@ export class EmulatorHost {
 	togglePause(): void {
 		if (this.running.value) this.pause();
 		else this.resume();
+	}
+
+	setTurboMode(enabled: boolean): void {
+		this.#turboMode = enabled;
+		this.#emulator.setTurboMode(enabled);
+		this.turboMode.value = enabled;
+	}
+
+	toggleTurboMode(): void {
+		this.setTurboMode(!this.turboMode.value);
 	}
 
 	setMuted(muted: boolean): void {

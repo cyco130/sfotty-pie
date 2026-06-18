@@ -16,6 +16,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 	const config = host.config.value;
 	const audio = host.audio.value;
 	const running = host.running.value;
+	const turboMode = host.turboMode.value;
 	const fps = host.fps.value;
 	const menuOpen = host.menuOpen.value;
 
@@ -65,6 +66,17 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 					onClick={() => host.dispatch("TOGGLE_PAUSE")}
 				>
 					{running ? "Running" : "Paused"}
+				</button>
+				<button
+					type="button"
+					class={
+						turboMode
+							? "text-amber-400 hover:text-amber-300"
+							: "hover:text-white"
+					}
+					onClick={() => host.dispatch("TURBO_MODE_TOGGLE")}
+				>
+					Turbo mode
 				</button>
 				<span class="w-16 text-right tabular-nums text-neutral-500">
 					{fps ? `${fps} fps` : "—"}

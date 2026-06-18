@@ -109,7 +109,7 @@ test("the status command reports write protection and density", () => {
 
 test("the trap fires on a real JSR through SIOV", () => {
 	const { machine, cpu, handler } = setup(new AtrImage(makeAtr(128, 4)));
-	machine.addExecuteTrap(SIOV, handler);
+	machine.interceptExecute(SIOV, handler);
 	setDcb(machine, { command: 0x52, buffer: 0x2000, byteCount: 128, aux: 3 });
 
 	// JSR SIOV

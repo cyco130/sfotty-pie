@@ -1,14 +1,13 @@
 import { ReadOptions } from "@sfotty-pie/sfotty";
-import type { AtrImage } from "./atr.ts";
 import type { Atari } from "./machine.ts";
-import { createSioHandler, SIOV } from "./sio.ts";
 
-// A headless Atari session: a machine driven to completion with the console and
-// disk I/O served by high-level emulation of the OS ROM (E: PUTBYT/GETBYT, SIO,
-// CIOV, BLKBDV) instead of a real display/keyboard. The host injects only I/O
-// policy — where output goes, where input comes from, optional CH key
-// automation, an optional trace hook — so both the boot CLI and the Acid800
-// conformance runner share this exact run loop and trap wiring.
+// A headless Atari session: a machine driven to completion with the console I/O
+// served by high-level emulation of the OS ROM (E: PUTBYT/GETBYT, CIOV, BLKBDV)
+// instead of a real display/keyboard. Disk I/O is the machine's own built-in SIO
+// (insert the disk before constructing this). The host injects only I/O policy —
+// where output goes, where input comes from, optional CH key automation, an
+// optional trace hook — so both the boot CLI and the Acid800 conformance runner
+// share this exact run loop and trap wiring.
 
 const RTS = 0x60; // the substitute opcode an execute interceptor returns
 const CH = 0x02fc; // POKEY keyboard code, polled by key-input routines
@@ -31,10 +30,9 @@ export interface InputSource {
 }
 
 export interface HeadlessConfig {
-	/** The machine to drive. Its CPU powers on into the reset sequence. */
+	/** The machine to drive. Its CPU powers on into the reset sequence; insert
+	 * any boot disk on it before constructing the session. */
 	machine: Atari;
-	/** Disk served as D1: via trap-based SIO; everything else times out. */
-	disk?: AtrImage;
 	/** E: PUTBYT sink — each output byte, with the Atari EOL mapped to `0x0A`. */
 	output: (byte: number) => void;
 	/** E: GETBYT source. Omit for a session that never reads console input. */
@@ -60,7 +58,6 @@ export interface RunResult {
 
 export class Headless {
 	readonly #machine: Atari;
-	readonly #disk: AtrImage | undefined;
 	readonly #output: (byte: number) => void;
 	readonly #input: InputSource | undefined;
 	readonly #keys: number[];
@@ -71,7 +68,6 @@ export class Headless {
 
 	constructor(config: HeadlessConfig) {
 		this.#machine = config.machine;
-		this.#disk = config.disk;
 		this.#output = config.output;
 		this.#input = config.input;
 		this.#keys = config.keys ?? [];
@@ -124,16 +120,7 @@ export class Headless {
 		// byte routines. Observe-only — the real OS routine still runs.
 		this.#machine.observeExecute(CIOV, () => this.#installEditorTraps());
 
-		// SIOV: serve D1: from the attached image; everything else times out, so
-		// without a disk the OS abandons the disk boot.
-		this.#machine.interceptExecute(
-			SIOV,
-			createSioHandler({
-				machine: this.#machine,
-				cpu: this.#machine.cpu,
-				getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
-			}),
-		);
+		// (Disk I/O is the machine's own built-in SIO — see Atari.insertDisk.)
 
 		// BLKBDV: the OS jumps here when there is nothing left to run. Session over.
 		this.#machine.observeExecute(BLKBDV, () => {

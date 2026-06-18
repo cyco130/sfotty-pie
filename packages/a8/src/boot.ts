@@ -79,6 +79,8 @@ const machine = new Atari({
 	...(pal ? { tvSystem: "pal" as const } : {}),
 });
 
+if (disk) machine.insertDisk(disk);
+
 const peek = (address: number) => machine.read(address, ReadOptions.PEEK);
 
 function hex(value: number, width: number): string {
@@ -162,7 +164,6 @@ function dumpRegisters(): void {
 
 const headless = new Headless({
 	machine,
-	...(disk ? { disk } : {}),
 	output: (byte) => {
 		fs.writeSync(1, Buffer.from([byte]));
 	},

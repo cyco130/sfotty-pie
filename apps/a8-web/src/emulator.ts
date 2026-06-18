@@ -1,12 +1,10 @@
 import {
 	Atari,
-	createSioHandler,
 	CYCLES_PER_LINE,
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
 	NTSC_CYCLES_PER_SECOND,
 	PAL_CYCLES_PER_SECOND,
-	SIOV,
 	type AtrImage,
 	type MachineConfig,
 } from "@sfotty-pie/a8";
@@ -186,6 +184,8 @@ export class Emulator {
 		];
 		this.frame = this.#frames[1];
 
+		if (config.disk) this.machine.insertDisk(config.disk);
+
 		this.#holdOption = config.holdOption ?? false;
 		this.#startOptionHold();
 
@@ -201,18 +201,6 @@ export class Emulator {
 			this.#cyclesPerSample = cyclesPerSecond / rate;
 			this.#targetBuffer = Math.round(rate * TARGET_BUFFER_SECONDS);
 		}
-
-		// Trap-based SIO: disk requests are served from the ATR image in the
-		// host; everything else times out so the OS moves on with its boot.
-		const { disk } = config;
-		this.machine.addExecuteTrap(
-			SIOV,
-			createSioHandler({
-				machine: this.machine,
-				cpu: this.machine.cpu,
-				getDisk: (unit) => (unit === 1 ? disk : undefined),
-			}),
-		);
 	}
 
 	start(): void {

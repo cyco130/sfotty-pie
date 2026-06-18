@@ -1,5 +1,6 @@
 import { ReadOptions, Sfotty, type Memory } from "@sfotty-pie/sfotty";
 import { AnticGtia } from "./antic-gtia.ts";
+import type { AtrImage } from "./atr.ts";
 import {
 	AtariBus,
 	type ExecuteInterceptor,
@@ -15,6 +16,7 @@ import { Cartridge } from "./cartridge.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
+import { createSioHandler, SIOV } from "./sio.ts";
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
 export type AtariModel = "800" | "800XL" | "130XE";
@@ -92,6 +94,9 @@ export class Atari implements Memory {
 
 	// The CPU the machine owns and drives via cycle()/resumeCycle().
 	readonly #cpu: Sfotty;
+	// The D1: disk image served by the built-in trap-based SIO; undefined = no
+	// disk (SIO times out and the OS moves on). Set via insertDisk.
+	#disk: AtrImage | undefined;
 	// The framebuffer afterCpu renders into (one Atari color byte per pixel). The
 	// constructor allocates a default so it is never absent; a host wanting its
 	// own buffer (e.g. double-buffering) repoints it with setFrameBuffer.
@@ -158,6 +163,18 @@ export class Atari implements Memory {
 		// writes through the trap-aware AtariBus. Constructed last, once #bus is
 		// wired. Powers on into the reset sequence like real hardware.
 		this.#cpu = new Sfotty(this);
+
+		// Built-in SIO high-level emulation: a JSR through SIOV is trapped and
+		// served from the inserted D1: image (no serial hardware emulated). Wired
+		// once; insertDisk swaps the image the handler reads.
+		this.interceptExecute(
+			SIOV,
+			createSioHandler({
+				machine: this,
+				cpu: this.#cpu,
+				getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
+			}),
+		);
 	}
 
 	/** The last value driven on the data bus (see {@link AtariBus.busData}). */
@@ -399,9 +416,13 @@ export class Atari implements Memory {
 		return this.#bus.observeWrite(address, fn, opts);
 	}
 
-	/** Alias for {@link interceptExecute}; kept until SIO setup moves into the core. */
-	addExecuteTrap(address: number, callback: ExecuteInterceptor): TrapHandle {
-		return this.#bus.interceptExecute(address, callback);
+	/**
+	 * Insert (or replace) the D1: disk image the built-in SIO serves. Pass it
+	 * before booting a disk; with none inserted, SIO requests time out and the
+	 * OS falls through to its other boot sources.
+	 */
+	insertDisk(disk: AtrImage): void {
+		this.#disk = disk;
 	}
 
 	/**

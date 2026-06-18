@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
-import { DECODE, ReadOptions, Sfotty } from "@sfotty-pie/sfotty";
+import { DECODE, ReadOptions } from "@sfotty-pie/sfotty";
 import { Atari } from "./machine.ts";
-import { createSioHandler, SIOV } from "./sio.ts";
 import { buildBootDisk, FILE_SIZE_OFFSET } from "./xex-boot.ts";
 import { XEX_LOADER } from "./xex-loader-bytes.ts";
 
@@ -45,11 +44,8 @@ test("buildBootDisk lays out loader, size, and data", () => {
 test("booting the disk loads and runs the executable", () => {
 	const disk = buildBootDisk(XEX);
 	const machine = new Atari({ model: "800", os: new Uint8Array(10240) });
-	const cpu = new Sfotty(machine, { withoutUndocumented: false });
-	machine.addExecuteTrap(
-		SIOV,
-		createSioHandler({ machine, cpu, getDisk: () => disk }),
-	);
+	machine.insertDisk(disk);
+	const cpu = machine.cpu; // the machine's own CPU, which its built-in SIO drives
 
 	// Play OS: copy the boot sectors to their load address and call the boot
 	// init vector (header bytes 4-5), like the real boot would.

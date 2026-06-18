@@ -29,14 +29,13 @@ async function runSuite(): Promise<Record<string, Status>> {
 		basic: new Uint8Array(readFileSync(join(FIRMWARE, "Altirra BASIC.rom"))),
 		...(process.argv.includes("--pal") ? { tvSystem: "pal" as const } : {}),
 	});
-	const disk = new AtrImage(
-		new Uint8Array(readFileSync(join(ACID_DIR, "acid800.atr"))),
+	machine.insertDisk(
+		new AtrImage(new Uint8Array(readFileSync(join(ACID_DIR, "acid800.atr")))),
 	);
 
 	const bytes: number[] = [];
 	await new Headless({
 		machine,
-		disk,
 		output: (byte) => bytes.push(byte),
 		keys: [0x21, 0x16], // Space then X: skip the boot menu, run the tests
 	}).run();

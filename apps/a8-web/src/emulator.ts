@@ -1,16 +1,14 @@
 import {
 	Atari,
-	createSioHandler,
 	CYCLES_PER_LINE,
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
 	NTSC_CYCLES_PER_SECOND,
 	PAL_CYCLES_PER_SECOND,
-	SIOV,
 	type AtrImage,
 	type MachineConfig,
 } from "@sfotty-pie/a8";
-import { DECODE, ReadOptions, Sfotty, traceLine } from "@sfotty-pie/sfotty";
+import { ReadOptions, traceLine, type Sfotty } from "@sfotty-pie/sfotty";
 import { AntiAliasFilter } from "./audio-filter.ts";
 import type { AudioOutput } from "./audio.ts";
 
@@ -67,27 +65,27 @@ const OPTION_HOLD_FRAMES = 7;
  */
 export class Emulator {
 	readonly machine: Atari;
-	readonly #cpu: Sfotty;
 
-	#frames = [
-		new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT),
-		new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT),
-	] as const;
+	// Double buffer for tear-free display: the machine renders into #frames[#back]
+	// (its own default buffer is reused as one half), and at each frame boundary
+	// we present it and repoint the machine at the other half. Both assigned in
+	// the constructor, once `machine` exists.
+	readonly #frames: readonly [Uint8Array, Uint8Array];
 	#back = 0;
 
 	/** The latest completed frame (one Atari color byte per pixel). */
-	frame: Uint8Array = this.#frames[1];
+	frame: Uint8Array;
 	/** Increments on every completed frame. */
 	frameCount = 0;
 
 	/** True once the CPU has jammed on a CIM (KIL/JAM) instruction. */
 	get crashed(): boolean {
-		return this.#cpu.crashed;
+		return this.machine.cpu.crashed;
 	}
 
 	/** The CPU, for the dev console (inspection only). */
 	get cpu(): Sfotty {
-		return this.#cpu;
+		return this.machine.cpu;
 	}
 
 	#trace = false;
@@ -104,10 +102,30 @@ export class Emulator {
 	readonly #peek = (address: number): number =>
 		this.machine.read(address & 0xffff, ReadOptions.PEEK);
 
+	// Record one committed-fetch instruction, skipping a PC seen in the last
+	// LOOP_WINDOW records so tight loops collapse. Wired to the machine's
+	// onInstruction only while tracing, so there's no per-instruction cost when
+	// it's off; once a reset-capture fills, it unwires itself to freeze the ring.
+	readonly #recordTrace = (pc: number): void => {
+		if (this.#recentPcs.includes(pc)) return;
+		this.#traceRing[this.#traceCount % TRACE_RING_SIZE] = traceLine(
+			this.machine.cpu,
+			this.#peek,
+			pc,
+		);
+		this.#recentPcs[this.#traceCount % LOOP_WINDOW] = pc;
+		this.#traceCount++;
+		if (this.#traceFreezeAt >= 0 && this.#traceCount >= this.#traceFreezeAt) {
+			this.#trace = false; // ring now holds the boot; freeze it
+			this.machine.onInstruction = undefined;
+		}
+	};
+
 	/** Enable/disable the CPU instruction trace ring. */
 	setTrace(enabled: boolean): void {
 		this.#trace = enabled;
 		this.#traceFreezeAt = -1;
+		this.machine.onInstruction = enabled ? this.#recordTrace : undefined;
 	}
 
 	/** Clear the trace ring. */
@@ -157,8 +175,16 @@ export class Emulator {
 
 	constructor(config: EmulatorConfig) {
 		this.machine = new Atari(config);
-		this.#cpu = new Sfotty(this.machine, { withoutUndocumented: false });
-		this.#cpu.reset(true);
+		// Reuse the machine's default buffer as one half of the double buffer; the
+		// machine already renders into it (#back starts at 0), so the first frame
+		// needs no setFrameBuffer. The front starts on the other (empty) half.
+		this.#frames = [
+			this.machine.frame,
+			new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT),
+		];
+		this.frame = this.#frames[1];
+
+		if (config.disk) this.machine.insertDisk(config.disk);
 
 		this.#holdOption = config.holdOption ?? false;
 		this.#startOptionHold();
@@ -175,18 +201,6 @@ export class Emulator {
 			this.#cyclesPerSample = cyclesPerSecond / rate;
 			this.#targetBuffer = Math.round(rate * TARGET_BUFFER_SECONDS);
 		}
-
-		// Trap-based SIO: disk requests are served from the ATR image in the
-		// host; everything else times out so the OS moves on with its boot.
-		const { disk } = config;
-		this.machine.addExecuteTrap(
-			SIOV,
-			createSioHandler({
-				machine: this.machine,
-				cpu: this.#cpu,
-				getDisk: (unit) => (unit === 1 ? disk : undefined),
-			}),
-		);
 	}
 
 	start(): void {
@@ -202,7 +216,7 @@ export class Emulator {
 	/** Power cycle: cold-reset the machine and the CPU. */
 	coldStart(): void {
 		this.machine.reset(true);
-		this.#cpu.reset(true);
+		this.machine.cpu.reset(true);
 		this.#startOptionHold();
 	}
 
@@ -271,19 +285,11 @@ export class Emulator {
 
 	#runScanline(): void {
 		const ag = this.machine.anticGtia;
-		const cpu = this.#cpu;
-		const back = this.#frames[this.#back === 0 ? 0 : 1];
 
 		for (let cycle = 0; cycle < CYCLES_PER_LINE; cycle++) {
-			ag.beforeCpu();
-			this.#collectAudio(this.machine.cycle(), ag.consoleSpeaker);
-			cpu.NMI = ag.nmi;
-			cpu.IRQ = this.machine.irq;
-			cpu.RDY = ag.rdy;
-
-			// On the XL Reset line's release, start a fresh trace capture of
-			// the boot that follows (the 800's Reset is an NMI, captured in
-			// normal flow).
+			// On the XL Reset line's release, start a fresh trace capture of the
+			// boot that follows (the 800's Reset is an NMI, captured in normal
+			// flow). The CPU reset itself is handled inside cycle().
 			const resetAsserted = this.machine.resetAsserted;
 			if (this.#trace && this.#wasResetAsserted && !resetAsserted) {
 				this.#traceCount = 0;
@@ -292,41 +298,20 @@ export class Emulator {
 			}
 			this.#wasResetAsserted = resetAsserted;
 
-			if (resetAsserted) {
-				// The XL Reset button holds the system reset line; restarting
-				// the CPU's reset sequence every cycle models the held RES
-				// line — the sequence completes once the button is released.
-				cpu.reset(false);
-			} else if (!ag.halt) {
-				// Record each instruction at its opcode fetch (RDY excludes
-				// WSYNC-stalled re-fetches), skipping tight-loop repeats.
-				if (this.#trace && cpu.RDY && cpu.state === DECODE) {
-					const pc = cpu.PC;
-					if (!this.#recentPcs.includes(pc)) {
-						this.#traceRing[this.#traceCount % TRACE_RING_SIZE] = traceLine(
-							cpu,
-							this.#peek,
-						);
-						this.#recentPcs[this.#traceCount % LOOP_WINDOW] = pc;
-						this.#traceCount++;
-						if (
-							this.#traceFreezeAt >= 0 &&
-							this.#traceCount >= this.#traceFreezeAt
-						) {
-							this.#trace = false; // ring now holds the boot; freeze it
-						}
-					}
-				}
-				cpu.run();
-			}
-
-			ag.afterCpu(back, this.machine.busData);
+			// One whole machine cycle: ANTIC + POKEY + bus + CPU + render, the
+			// audio level returned. Instructions are recorded via onInstruction
+			// (see #recordTrace). a8-web installs no suspending traps, so cycle()
+			// never throws — no resumeCycle() needed here.
+			this.#collectAudio(this.machine.cycle(), ag.consoleSpeaker);
 		}
 
-		// vcount wraps to 0 while the last line of the frame is run: flip.
+		// vcount wraps to 0 while the last line of the frame is run: present the
+		// finished buffer and repoint rendering at the other half.
 		if (ag.vcount === 0) {
-			this.frame = back;
+			// The `=== 0 ? 0 : 1` keeps a literal tuple index (no undefined).
+			this.frame = this.#frames[this.#back === 0 ? 0 : 1];
 			this.#back ^= 1;
+			this.machine.setFrameBuffer(this.#frames[this.#back === 0 ? 0 : 1]);
 			this.frameCount++;
 
 			// Release the BASIC-disable OPTION hold once the OS has booted.

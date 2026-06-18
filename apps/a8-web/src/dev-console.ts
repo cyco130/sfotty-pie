@@ -31,7 +31,11 @@ export function installDevConsole(host: EmulatorHost): void {
 		},
 		peek,
 		poke: (address: number, value: number) =>
-			host.emulator.machine.write(address & 0xffff, value & 0xff),
+			host.emulator.machine.write(
+				address & 0xffff,
+				value & 0xff,
+				ReadOptions.NONE,
+			),
 		disasm: (address: number, count = 16) => {
 			let pc = address & 0xffff;
 			const lines: string[] = [];

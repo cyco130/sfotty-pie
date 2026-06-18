@@ -4,7 +4,9 @@ import config from "@cyco130/eslint-config/node";
 export default [
 	...config,
 	{
-		ignores: ["dist/", "node_modules/"],
+		// `*.local.*` are gitignored dev scratch (debug harnesses): kept in the
+		// project for types/imports, but not held to lint.
+		ignores: ["dist/", "node_modules/", "**/*.local.*"],
 	},
 	{
 		languageOptions: {

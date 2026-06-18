@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { Sfotty } from "./sfotty.ts";
 import { DECODE } from "./microcode.ts";
-import { type Memory } from "./bus.ts";
+import { type Memory, ReadOptions } from "./bus.ts";
 
 // Specs for the seven interrupt-recognition behaviors of the NMOS 6502.
 //
@@ -205,5 +205,73 @@ describe("interrupts", () => {
 		// instruction — the NMI frame's return is the handler's second instruction.
 		expect(cpu.PC & 0xff00).toBe(NMI_VEC & 0xff00);
 		expect(frame2Return(ram)).toBe(IRQ_VEC + 1);
+	});
+
+	test("8: the interrupt dummy fetch is SYNC|DUMMY, the committed fetch SYNC-only", () => {
+		// A held IRQ is taken after the first instruction (point 2). The decode it
+		// hijacks still issues an opcode fetch at PC — SYNC asserts (Visual6502) —
+		// but the opcode never executes (PC isn't advanced; the BRK sequence runs).
+		// So that fetch carries DUMMY; the committed fetch does not. A committed
+		// opcode fetch (SYNC & !DUMMY) is what execute traps key on — they must not
+		// fire on the dummy, or they'd double-fire on the post-RTI re-fetch.
+		const reads: { address: number; options: number }[] = [];
+		const ram = new Ram();
+		word(ram, 0xfffe, IRQ_VEC);
+		ram.bytes[IRQ_VEC] = CIM;
+		const recording: Memory = {
+			read(address, options) {
+				reads.push({ address, options });
+				return ram.read(address);
+			},
+			write: (address, value) => ram.write(address, value),
+		};
+		const cpu = new Sfotty(recording);
+		cpu.PC = 0x0200; // $0200.. are NOPs
+		cpu.S = 0xff;
+		cpu.state = DECODE;
+		cpu.iFlag = false;
+		cpu.IRQ = true; // held — taken at the $0201 boundary
+
+		run(cpu, 10);
+
+		// The committed fetch of the first NOP at $0200: SYNC, no DUMMY.
+		const committed = reads.find(
+			(r) => r.address === 0x0200 && r.options & ReadOptions.SYNC,
+		);
+		expect(committed).toBeDefined();
+		expect(committed!.options & ReadOptions.DUMMY).toBe(0);
+
+		// The hijacked decode at $0201: SYNC and DUMMY.
+		const dummy = reads.find(
+			(r) => r.address === 0x0201 && r.options & ReadOptions.SYNC,
+		);
+		expect(dummy).toBeDefined();
+		expect(dummy!.options & ReadOptions.DUMMY).toBeTruthy();
+	});
+
+	test("9: an RDY-stalled opcode fetch is SYNC|DUMMY", () => {
+		// While RDY is low the decode read is re-issued every cycle but doesn't
+		// commit, so it carries DUMMY too — only the fetch on the cycle RDY rises
+		// is a committed (SYNC, no DUMMY) fetch.
+		const reads: { address: number; options: number }[] = [];
+		const ram = new Ram();
+		const recording: Memory = {
+			read(address, options) {
+				reads.push({ address, options });
+				return ram.read(address);
+			},
+			write: (address, value) => ram.write(address, value),
+		};
+		const cpu = new Sfotty(recording);
+		cpu.PC = 0x0200;
+		cpu.S = 0xff;
+		cpu.state = DECODE;
+		cpu.RDY = false; // stalled
+		cpu.run();
+
+		const stalled = reads.find((r) => r.address === 0x0200);
+		expect(stalled).toBeDefined();
+		expect(stalled!.options & ReadOptions.SYNC).toBeTruthy();
+		expect(stalled!.options & ReadOptions.DUMMY).toBeTruthy();
 	});
 });

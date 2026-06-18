@@ -7525,3 +7525,46 @@ export const MICROCODE: Step[] = [
 	reset_vector_low,
 	reset_vector_high,
 ];
+
+/**
+ * Per-microstate flag: 1 if that cycle's bus access is a non-committing dummy
+ * (e.g. the implied/accumulator "internal operation" read). The CPU ORs
+ * ReadOptions.DUMMY into the access when set, so traps can tell real accesses
+ * from speculative/discarded ones. Indexed by microstate, like MICROCODE.
+ */
+export const DUMMY: Uint8Array = /* @__PURE__ */ (() => {
+	const table = new Uint8Array(MICROCODE.length);
+	for (const state of [
+		0, 29, 50, 58, 64, 80, 115, 123, 129, 130, 157, 179, 187, 192, 208, 220,
+		244, 252, 257, 285, 306, 314, 320, 321, 336, 371, 379, 385, 386, 413, 435,
+		443, 448, 464, 476, 500, 508, 512, 513, 541, 562, 570, 576, 592, 627, 635,
+		641, 642, 669, 691, 699, 704, 720, 732, 756, 764, 768, 769, 772, 797, 818,
+		826, 832, 833, 848, 883, 891, 897, 898, 925, 947, 955, 960, 976, 988, 1012,
+		1020, 1088, 1104, 1153, 1154, 1163, 1179, 1216, 1226, 1232, 1242, 1250,
+		1258, 1266, 1274, 1344, 1360, 1409, 1410, 1472, 1488, 1565, 1586, 1594,
+		1600, 1616, 1651, 1659, 1665, 1666, 1693, 1715, 1723, 1728, 1744, 1756,
+		1780, 1788, 1821, 1842, 1850, 1856, 1872, 1907, 1915, 1921, 1922, 1949,
+		1971, 1979, 1984, 2000, 2012, 2036, 2044, 2049, 2050, 2051, 2052, 2053,
+	]) {
+		table[state] = 1;
+	}
+	return table;
+})();
+
+/**
+ * Per-microstate flag: 1 if that cycle's read is *speculative* — the indexed
+ * page-cross read at the not-yet-fixed address. It's a real read when no page
+ * boundary was crossed and a dummy when one was, so the CPU ORs ReadOptions.DUMMY
+ * only when its crossed flag is set. Indexed by microstate, like MICROCODE.
+ */
+export const SPECULATIVE: Uint8Array = /* @__PURE__ */ (() => {
+	const table = new Uint8Array(MICROCODE.length);
+	for (const state of [
+		139, 202, 226, 234, 395, 458, 482, 490, 651, 714, 738, 746, 907, 970, 994,
+		1002, 1419, 1435, 1482, 1498, 1506, 1514, 1522, 1530, 1675, 1738, 1762,
+		1770, 1931, 1994, 2018, 2026,
+	]) {
+		table[state] = 1;
+	}
+	return table;
+})();

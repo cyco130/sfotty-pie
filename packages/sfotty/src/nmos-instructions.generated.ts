@@ -10,7 +10,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "BRK",
 		mode: "imp",
 		code: [
-			["r-brk", "ar=sp", "dr=pch"],
+			["r-brk", "dummy", "ar=sp", "dr=pch"],
 			["w-ar--", "dr=pcl"],
 			["w-ar--", "dr=pi", "if=1"],
 			["w-ar--", "s=al", "ar=vector"],
@@ -58,7 +58,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr++"],
 			["r-dr"],
 			["r-ar"],
-			["w-ar", "mo-slo"],
+			["w-ar", "dummy", "mo-slo"],
 			["w-ar"],
 		],
 	},
@@ -89,7 +89,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 6,
 		mnemonic: "ASL",
 		mode: "zpg",
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-asl"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-asl"],
+			["w-ar"],
+		],
 	},
 	// 07 SLO zpg
 	{
@@ -97,7 +102,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "SLO",
 		mode: "zpg",
 		undocumented: true,
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-slo"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-slo"],
+			["w-ar"],
+		],
 	},
 	// 08 PHP imp
 	{
@@ -105,7 +115,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "PHP",
 		mode: "imp",
 		code: [
-			["r-pc", "ar=sp", "dr=p"],
+			["r-pc", "dummy", "ar=sp", "dr=p"],
 			["w-ar--", "s=al"],
 		],
 	},
@@ -121,7 +131,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 10,
 		mnemonic: "ASL",
 		mode: "acc",
-		code: [["r-pc", "asla"]],
+		code: [["r-pc", "dummy", "asla"]],
 	},
 	// 0B ANC imm
 	{
@@ -165,7 +175,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-asl"],
+			["w-ar", "dummy", "mo-asl"],
 			["w-ar"],
 		],
 	},
@@ -179,7 +189,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-slo"],
+			["w-ar", "dummy", "mo-slo"],
 			["w-ar"],
 		],
 	},
@@ -190,8 +200,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "pl?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 11 ORA iny
@@ -234,7 +244,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-slo"],
+			["w-ar", "dummy", "mo-slo"],
 			["w-ar"],
 		],
 	},
@@ -271,7 +281,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-asl"],
+			["w-ar", "dummy", "mo-asl"],
 			["w-ar"],
 		],
 	},
@@ -285,7 +295,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-slo"],
+			["w-ar", "dummy", "mo-slo"],
 			["w-ar"],
 		],
 	},
@@ -294,7 +304,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 24,
 		mnemonic: "CLC",
 		mode: "imp",
-		code: [["r-pc", "cf=0"]],
+		code: [["r-pc", "dummy", "cf=0"]],
 	},
 	// 19 ORA aby
 	{
@@ -314,7 +324,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// 1B SLO aby
 	{
@@ -327,7 +337,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-slo"],
+			["w-ar", "dummy", "mo-slo"],
 			["w-ar"],
 		],
 	},
@@ -367,7 +377,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-asl"],
+			["w-ar", "dummy", "mo-asl"],
 			["w-ar"],
 		],
 	},
@@ -382,7 +392,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-slo"],
+			["w-ar", "dummy", "mo-slo"],
 			["w-ar"],
 		],
 	},
@@ -393,7 +403,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "abs",
 		code: [
 			["r-pc++", "ar=sp", "s=dr"],
-			["r-ar", "dr=pch"],
+			["r-ar", "dummy", "dr=pch"],
 			["w-ar--", "dr=pcl"],
 			["w-ar--"],
 			["r-pc", "pcl=s", "s=al", "pch=dr"],
@@ -439,7 +449,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr++"],
 			["r-dr"],
 			["r-ar"],
-			["w-ar", "mo-rla"],
+			["w-ar", "dummy", "mo-rla"],
 			["w-ar"],
 		],
 	},
@@ -468,7 +478,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 38,
 		mnemonic: "ROL",
 		mode: "zpg",
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-rol"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-rol"],
+			["w-ar"],
+		],
 	},
 	// 27 RLA zpg
 	{
@@ -476,14 +491,23 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "RLA",
 		mode: "zpg",
 		undocumented: true,
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-rla"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-rla"],
+			["w-ar"],
+		],
 	},
 	// 28 PLP imp
 	{
 		opcode: 40,
 		mnemonic: "PLP",
 		mode: "imp",
-		code: [["r-pc", "ar=sp"], ["r-ar++"], ["r-ar", "s=al", "p=dr"]],
+		code: [
+			["r-pc", "dummy", "ar=sp"],
+			["r-ar++", "dummy"],
+			["r-ar", "s=al", "p=dr"],
+		],
 	},
 	// 29 AND imm
 	{
@@ -497,7 +521,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 42,
 		mnemonic: "ROL",
 		mode: "acc",
-		code: [["r-pc", "rola"]],
+		code: [["r-pc", "dummy", "rola"]],
 	},
 	// 2B ANC imm
 	{
@@ -539,7 +563,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-rol"],
+			["w-ar", "dummy", "mo-rol"],
 			["w-ar"],
 		],
 	},
@@ -553,7 +577,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-rla"],
+			["w-ar", "dummy", "mo-rla"],
 			["w-ar"],
 		],
 	},
@@ -564,8 +588,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "mi?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 31 AND iny
@@ -608,7 +632,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-rla"],
+			["w-ar", "dummy", "mo-rla"],
 			["w-ar"],
 		],
 	},
@@ -645,7 +669,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-rol"],
+			["w-ar", "dummy", "mo-rol"],
 			["w-ar"],
 		],
 	},
@@ -659,7 +683,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-rla"],
+			["w-ar", "dummy", "mo-rla"],
 			["w-ar"],
 		],
 	},
@@ -668,7 +692,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 56,
 		mnemonic: "SEC",
 		mode: "imp",
-		code: [["r-pc", "cf=1"]],
+		code: [["r-pc", "dummy", "cf=1"]],
 	},
 	// 39 AND aby
 	{
@@ -688,7 +712,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// 3B RLA aby
 	{
@@ -701,7 +725,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-rla"],
+			["w-ar", "dummy", "mo-rla"],
 			["w-ar"],
 		],
 	},
@@ -741,7 +765,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-rol"],
+			["w-ar", "dummy", "mo-rol"],
 			["w-ar"],
 		],
 	},
@@ -756,7 +780,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-rla"],
+			["w-ar", "dummy", "mo-rla"],
 			["w-ar"],
 		],
 	},
@@ -766,8 +790,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "RTI",
 		mode: "imp",
 		code: [
-			["r-pc", "ar=sp"],
-			["r-ar++"],
+			["r-pc", "dummy", "ar=sp"],
+			["r-ar++", "dummy"],
 			["r-ar++", "p=dr"],
 			["r-ar++", "pcl=dr"],
 			["r-ar", "pch=dr", "s=al"],
@@ -813,7 +837,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr++"],
 			["r-dr"],
 			["r-ar"],
-			["w-ar", "mo-sre"],
+			["w-ar", "dummy", "mo-sre"],
 			["w-ar"],
 		],
 	},
@@ -844,7 +868,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 70,
 		mnemonic: "LSR",
 		mode: "zpg",
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-lsr"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-lsr"],
+			["w-ar"],
+		],
 	},
 	// 47 SRE zpg
 	{
@@ -852,7 +881,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "SRE",
 		mode: "zpg",
 		undocumented: true,
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-sre"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-sre"],
+			["w-ar"],
+		],
 	},
 	// 48 PHA imp
 	{
@@ -860,7 +894,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "PHA",
 		mode: "imp",
 		code: [
-			["r-pc", "ar=sp", "dr=a"],
+			["r-pc", "dummy", "ar=sp", "dr=a"],
 			["w-ar--", "s=al"],
 		],
 	},
@@ -876,7 +910,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 74,
 		mnemonic: "LSR",
 		mode: "acc",
-		code: [["r-pc", "lsra"]],
+		code: [["r-pc", "dummy", "lsra"]],
 	},
 	// 4B ASR imm
 	{
@@ -917,7 +951,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-lsr"],
+			["w-ar", "dummy", "mo-lsr"],
 			["w-ar"],
 		],
 	},
@@ -931,7 +965,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-sre"],
+			["w-ar", "dummy", "mo-sre"],
 			["w-ar"],
 		],
 	},
@@ -942,8 +976,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "vc?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 51 EOR iny
@@ -986,7 +1020,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-sre"],
+			["w-ar", "dummy", "mo-sre"],
 			["w-ar"],
 		],
 	},
@@ -1023,7 +1057,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-lsr"],
+			["w-ar", "dummy", "mo-lsr"],
 			["w-ar"],
 		],
 	},
@@ -1037,7 +1071,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-sre"],
+			["w-ar", "dummy", "mo-sre"],
 			["w-ar"],
 		],
 	},
@@ -1046,7 +1080,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 88,
 		mnemonic: "CLI",
 		mode: "imp",
-		code: [["r-pc", "if=0"]],
+		code: [["r-pc", "dummy", "if=0"]],
 	},
 	// 59 EOR aby
 	{
@@ -1066,7 +1100,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// 5B SRE aby
 	{
@@ -1079,7 +1113,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-sre"],
+			["w-ar", "dummy", "mo-sre"],
 			["w-ar"],
 		],
 	},
@@ -1119,7 +1153,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-lsr"],
+			["w-ar", "dummy", "mo-lsr"],
 			["w-ar"],
 		],
 	},
@@ -1134,7 +1168,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-sre"],
+			["w-ar", "dummy", "mo-sre"],
 			["w-ar"],
 		],
 	},
@@ -1144,11 +1178,11 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "RTS",
 		mode: "imp",
 		code: [
-			["r-pc", "ar=sp"],
-			["r-ar++"],
+			["r-pc", "dummy", "ar=sp"],
+			["r-ar++", "dummy"],
 			["r-ar++", "pcl=dr"],
 			["r-ar", "pch=dr", "s=al"],
-			["r-pc++"],
+			["r-pc++", "dummy"],
 		],
 	},
 	// 61 ADC inx
@@ -1191,7 +1225,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr++"],
 			["r-dr"],
 			["r-ar"],
-			["w-ar", "mo-rra"],
+			["w-ar", "dummy", "mo-rra"],
 			["w-ar"],
 		],
 	},
@@ -1222,7 +1256,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 102,
 		mnemonic: "ROR",
 		mode: "zpg",
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-ror"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-ror"],
+			["w-ar"],
+		],
 	},
 	// 67 RRA zpg
 	{
@@ -1230,14 +1269,23 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "RRA",
 		mode: "zpg",
 		undocumented: true,
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-rra"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-rra"],
+			["w-ar"],
+		],
 	},
 	// 68 PLA imp
 	{
 		opcode: 104,
 		mnemonic: "PLA",
 		mode: "imp",
-		code: [["r-pc", "ar=sp"], ["r-ar++"], ["r-ar", "s=al", "a=dr"]],
+		code: [
+			["r-pc", "dummy", "ar=sp"],
+			["r-ar++", "dummy"],
+			["r-ar", "s=al", "a=dr"],
+		],
 	},
 	// 69 ADC imm
 	{
@@ -1251,7 +1299,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 106,
 		mnemonic: "ROR",
 		mode: "acc",
-		code: [["r-pc", "rora"]],
+		code: [["r-pc", "dummy", "rora"]],
 	},
 	// 6B ARR imm
 	{
@@ -1293,7 +1341,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-ror"],
+			["w-ar", "dummy", "mo-ror"],
 			["w-ar"],
 		],
 	},
@@ -1307,7 +1355,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-rra"],
+			["w-ar", "dummy", "mo-rra"],
 			["w-ar"],
 		],
 	},
@@ -1318,8 +1366,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "vs?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 71 ADC iny
@@ -1362,7 +1410,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-rra"],
+			["w-ar", "dummy", "mo-rra"],
 			["w-ar"],
 		],
 	},
@@ -1399,7 +1447,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-ror"],
+			["w-ar", "dummy", "mo-ror"],
 			["w-ar"],
 		],
 	},
@@ -1413,7 +1461,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-rra"],
+			["w-ar", "dummy", "mo-rra"],
 			["w-ar"],
 		],
 	},
@@ -1422,7 +1470,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 120,
 		mnemonic: "SEI",
 		mode: "imp",
-		code: [["r-pc", "if=1"]],
+		code: [["r-pc", "dummy", "if=1"]],
 	},
 	// 79 ADC aby
 	{
@@ -1442,7 +1490,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// 7B RRA aby
 	{
@@ -1455,7 +1503,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-rra"],
+			["w-ar", "dummy", "mo-rra"],
 			["w-ar"],
 		],
 	},
@@ -1495,7 +1543,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-ror"],
+			["w-ar", "dummy", "mo-ror"],
 			["w-ar"],
 		],
 	},
@@ -1510,7 +1558,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-rra"],
+			["w-ar", "dummy", "mo-rra"],
 			["w-ar"],
 		],
 	},
@@ -1593,7 +1641,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 136,
 		mnemonic: "DEY",
 		mode: "imp",
-		code: [["r-pc", "y--"]],
+		code: [["r-pc", "dummy", "y--"]],
 	},
 	// 89 NOP imm
 	{
@@ -1609,7 +1657,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 138,
 		mnemonic: "TXA",
 		mode: "imp",
-		code: [["r-pc", "a=x"]],
+		code: [["r-pc", "dummy", "a=x"]],
 	},
 	// 8B ANE imm
 	{
@@ -1655,8 +1703,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "cc?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// 91 STA iny
@@ -1668,7 +1716,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-dr++"],
 			["r-dr", "ar+=y?"],
-			["r-ar", "?ah++", "sta"],
+			["r-ar", "dummy", "?ah++", "sta"],
 			["w-ar"],
 		],
 	},
@@ -1697,7 +1745,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-dr++"],
 			["r-dr", "ar+=y?"],
-			["r-ar", "?ah++", "sha"],
+			["r-ar", "dummy", "?ah++", "sha"],
 			["w-ar"],
 		],
 	},
@@ -1735,7 +1783,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 152,
 		mnemonic: "TYA",
 		mode: "imp",
-		code: [["r-pc", "a=y"]],
+		code: [["r-pc", "dummy", "a=y"]],
 	},
 	// 99 STA aby
 	{
@@ -1745,7 +1793,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=y?"],
-			["r-ar", "?ah++", "sta"],
+			["r-ar", "dummy", "?ah++", "sta"],
 			["w-ar"],
 		],
 	},
@@ -1754,7 +1802,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 154,
 		mnemonic: "TXS",
 		mode: "imp",
-		code: [["r-pc", "s=x"]],
+		code: [["r-pc", "dummy", "s=x"]],
 	},
 	// 9B SHS aby
 	{
@@ -1765,7 +1813,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=y?"],
-			["r-ar", "?ah++", "shs"],
+			["r-ar", "dummy", "?ah++", "shs"],
 			["w-ar"],
 		],
 	},
@@ -1778,7 +1826,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=x?"],
-			["r-ar", "?ah++", "shy"],
+			["r-ar", "dummy", "?ah++", "shy"],
 			["w-ar"],
 		],
 	},
@@ -1790,7 +1838,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=x?"],
-			["r-ar", "?ah++", "sta"],
+			["r-ar", "dummy", "?ah++", "sta"],
 			["w-ar"],
 		],
 	},
@@ -1803,7 +1851,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=y?"],
-			["r-ar", "?ah++", "shx"],
+			["r-ar", "dummy", "?ah++", "shx"],
 			["w-ar"],
 		],
 	},
@@ -1816,7 +1864,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		code: [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr", "ar+=y?"],
-			["r-ar", "?ah++", "sha"],
+			["r-ar", "dummy", "?ah++", "sha"],
 			["w-ar"],
 		],
 	},
@@ -1907,7 +1955,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 168,
 		mnemonic: "TAY",
 		mode: "imp",
-		code: [["r-pc", "y=a"]],
+		code: [["r-pc", "dummy", "y=a"]],
 	},
 	// A9 LDA imm
 	{
@@ -1921,7 +1969,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 170,
 		mnemonic: "TAX",
 		mode: "imp",
-		code: [["r-pc", "x=a"]],
+		code: [["r-pc", "dummy", "x=a"]],
 	},
 	// AB LXA imm
 	{
@@ -1984,8 +2032,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "cs?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// B1 LDA iny
@@ -2080,7 +2128,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 184,
 		mnemonic: "CLV",
 		mode: "imp",
-		code: [["r-pc", "of=0"]],
+		code: [["r-pc", "dummy", "of=0"]],
 	},
 	// B9 LDA aby
 	{
@@ -2099,7 +2147,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 186,
 		mnemonic: "TSX",
 		mode: "imp",
-		code: [["r-pc", "x=s"]],
+		code: [["r-pc", "dummy", "x=s"]],
 	},
 	// BB LAS aby
 	{
@@ -2206,7 +2254,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr++"],
 			["r-dr"],
 			["r-ar"],
-			["w-ar", "mo-dcp"],
+			["w-ar", "dummy", "mo-dcp"],
 			["w-ar"],
 		],
 	},
@@ -2235,7 +2283,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 198,
 		mnemonic: "DEC",
 		mode: "zpg",
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-dec"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-dec"],
+			["w-ar"],
+		],
 	},
 	// C7 DCP zpg
 	{
@@ -2244,14 +2297,19 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		altMnemonics: ["DCM"],
 		mode: "zpg",
 		undocumented: true,
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-dcp"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-dcp"],
+			["w-ar"],
+		],
 	},
 	// C8 INY imp
 	{
 		opcode: 200,
 		mnemonic: "INY",
 		mode: "imp",
-		code: [["r-pc", "y++"]],
+		code: [["r-pc", "dummy", "y++"]],
 	},
 	// C9 CMP imm
 	{
@@ -2265,7 +2323,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 202,
 		mnemonic: "DEX",
 		mode: "imp",
-		code: [["r-pc", "x--"]],
+		code: [["r-pc", "dummy", "x--"]],
 	},
 	// CB SBX imm
 	{
@@ -2306,7 +2364,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-dec"],
+			["w-ar", "dummy", "mo-dec"],
 			["w-ar"],
 		],
 	},
@@ -2321,7 +2379,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-dcp"],
+			["w-ar", "dummy", "mo-dcp"],
 			["w-ar"],
 		],
 	},
@@ -2332,8 +2390,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "ne?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// D1 CMP iny
@@ -2377,7 +2435,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-dcp"],
+			["w-ar", "dummy", "mo-dcp"],
 			["w-ar"],
 		],
 	},
@@ -2414,7 +2472,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-dec"],
+			["w-ar", "dummy", "mo-dec"],
 			["w-ar"],
 		],
 	},
@@ -2429,7 +2487,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-dcp"],
+			["w-ar", "dummy", "mo-dcp"],
 			["w-ar"],
 		],
 	},
@@ -2438,7 +2496,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 216,
 		mnemonic: "CLD",
 		mode: "imp",
-		code: [["r-pc", "df=0"]],
+		code: [["r-pc", "dummy", "df=0"]],
 	},
 	// D9 CMP aby
 	{
@@ -2458,7 +2516,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// DB DCP aby
 	{
@@ -2472,7 +2530,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-dcp"],
+			["w-ar", "dummy", "mo-dcp"],
 			["w-ar"],
 		],
 	},
@@ -2512,7 +2570,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-dec"],
+			["w-ar", "dummy", "mo-dec"],
 			["w-ar"],
 		],
 	},
@@ -2528,7 +2586,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-dcp"],
+			["w-ar", "dummy", "mo-dcp"],
 			["w-ar"],
 		],
 	},
@@ -2574,7 +2632,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr++"],
 			["r-dr"],
 			["r-ar"],
-			["w-ar", "mo-isb"],
+			["w-ar", "dummy", "mo-isb"],
 			["w-ar"],
 		],
 	},
@@ -2603,7 +2661,12 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 230,
 		mnemonic: "INC",
 		mode: "zpg",
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-inc"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-inc"],
+			["w-ar"],
+		],
 	},
 	// E7 ISB zpg
 	{
@@ -2612,14 +2675,19 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		altMnemonics: ["INS", "ISC"],
 		mode: "zpg",
 		undocumented: true,
-		code: [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", "mo-isb"], ["w-ar"]],
+		code: [
+			["r-pc++", "ar=dr"],
+			["r-ar"],
+			["w-ar", "dummy", "mo-isb"],
+			["w-ar"],
+		],
 	},
 	// E8 INX imp
 	{
 		opcode: 232,
 		mnemonic: "INX",
 		mode: "imp",
-		code: [["r-pc", "x++"]],
+		code: [["r-pc", "dummy", "x++"]],
 	},
 	// E9 SBC imm
 	{
@@ -2633,7 +2701,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 234,
 		mnemonic: "NOP",
 		mode: "imp",
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// EB SBC imm
 	{
@@ -2674,7 +2742,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-inc"],
+			["w-ar", "dummy", "mo-inc"],
 			["w-ar"],
 		],
 	},
@@ -2689,7 +2757,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-pc++", "ah=dr"],
 			["r-ar"],
-			["w-ar", "mo-isb"],
+			["w-ar", "dummy", "mo-isb"],
 			["w-ar"],
 		],
 	},
@@ -2700,8 +2768,8 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mode: "rel",
 		code: [
 			["r-pc++", "eq?"],
-			["r-pc", "pc+=dr?"],
-			["r-pc", "pch=fix"],
+			["r-pc", "dummy", "pc+=dr?"],
+			["r-pc", "dummy", "pch=fix"],
 		],
 	},
 	// F1 SBC iny
@@ -2745,7 +2813,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-isb"],
+			["w-ar", "dummy", "mo-isb"],
 			["w-ar"],
 		],
 	},
@@ -2782,7 +2850,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-inc"],
+			["w-ar", "dummy", "mo-inc"],
 			["w-ar"],
 		],
 	},
@@ -2797,7 +2865,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ar=dr"],
 			["r-ar", "ar+=x"],
 			["r-ar"],
-			["w-ar", "mo-isb"],
+			["w-ar", "dummy", "mo-isb"],
 			["w-ar"],
 		],
 	},
@@ -2806,7 +2874,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		opcode: 248,
 		mnemonic: "SED",
 		mode: "imp",
-		code: [["r-pc", "df=1"]],
+		code: [["r-pc", "dummy", "df=1"]],
 	},
 	// F9 SBC aby
 	{
@@ -2826,7 +2894,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 		mnemonic: "NOP",
 		mode: "imp",
 		undocumented: true,
-		code: [["r-pc"]],
+		code: [["r-pc", "dummy"]],
 	},
 	// FB ISB aby
 	{
@@ -2840,7 +2908,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=y?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-isb"],
+			["w-ar", "dummy", "mo-isb"],
 			["w-ar"],
 		],
 	},
@@ -2880,7 +2948,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-inc"],
+			["w-ar", "dummy", "mo-inc"],
 			["w-ar"],
 		],
 	},
@@ -2896,7 +2964,7 @@ export const NMOS_INSTRUCTIONS: Instruction[] = [
 			["r-pc++", "ah=dr", "ar+=x?"],
 			["r-ar", "?ah++"],
 			["r-ar"],
-			["w-ar", "mo-isb"],
+			["w-ar", "dummy", "mo-isb"],
 			["w-ar"],
 		],
 	},

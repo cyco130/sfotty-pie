@@ -1,6 +1,13 @@
 /**
  * GTIA palette generation: 16 hues × 16 luminances → little-endian RGBA words
- * for writing through a Uint32 view of ImageData.
+ * (`0xAABBGGRR`) for writing through a Uint32 view of canvas ImageData, or for
+ * unpacking per channel (`r = w & 0xff`, `g = (w >>> 8) & 0xff`, `b = (w >>> 16)
+ * & 0xff`) when encoding an image.
+ *
+ * This is the GTIA colour decode — the analog signal interpretation, the visual
+ * counterpart to the disassembler's text — so it lives with the machine rather
+ * than in any one host; the actual presentation (scaling, pixel aspect, gamma
+ * tuning) stays host-side.
  *
  * A GTIA colour is a (hue, luma) pair. Hue 0 is grey; hues 1–15 sit at chroma
  * phases set by the colour generator. NTSC steps the phase uniformly and
@@ -86,6 +93,11 @@ export function buildNtscPalette(): Uint32Array {
 /** The PAL GTIA palette. */
 export function buildPalPalette(): Uint32Array {
 	return buildPalette(PAL);
+}
+
+/** The palette for a TV standard (defaults to NTSC). */
+export function paletteFor(tvSystem: "ntsc" | "pal" = "ntsc"): Uint32Array {
+	return tvSystem === "pal" ? buildPalPalette() : buildNtscPalette();
 }
 
 function channel(value: number): number {

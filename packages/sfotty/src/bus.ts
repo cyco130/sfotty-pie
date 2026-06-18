@@ -1,16 +1,27 @@
 /**
- * Why/how a read is happening — distinguishes a normal CPU read, the opcode
- * fetch (SYNC), a side-effect-free peek, and another chip's DMA.
+ * Why/how a read is happening — distinguishes a normal CPU read, an opcode
+ * fetch (the SYNC pin), a non-committing dummy access, a side-effect-free peek,
+ * and another chip's DMA.
  *
  * A const object rather than an `enum`: TypeScript enums emit runtime code,
  * which Node's strip-only type support (this repo's no-transpile execution
  * model) rejects. The values are bit flags, meant to be OR'd together.
+ *
+ * `SYNC` is the physical pin — asserted on *every* opcode-fetch cycle, including
+ * the dummy fetch the CPU does just before servicing a pending NMI/IRQ and the
+ * re-fetch of an RDY-stalled cycle (verified against a Visual6502 trace). `DUMMY`
+ * marks a *non-committing* CPU access — the interrupt dummy fetch and the
+ * RDY-stalled re-fetch today (other dummy reads/writes are not marked yet). So a
+ * **committed opcode fetch is `SYNC & !DUMMY`**, which is what execute traps want:
+ * fire once on the real fetch, never on the dummy (which would otherwise
+ * double-fire after the interrupt returns and re-fetches).
  */
 export const ReadOptions = {
 	NONE: 0,
 	PEEK: 1, // Don't cause side effects (debugger/disassembler inspection)
-	OPCODE_FETCH: 2, // Opcode fetch (asserts the SYNC line)
-	DMA: 4, // Read coming from another chip, not the CPU (e.g. ANTIC)
+	SYNC: 2, // The SYNC pin: any opcode-fetch cycle, including dummy/stalled fetches
+	DUMMY: 4, // A non-committing CPU access (interrupt dummy fetch, RDY-stalled re-fetch)
+	DMA: 8, // Access coming from another chip, not the CPU (e.g. ANTIC)
 } as const;
 
 /** A bit mask of {@link ReadOptions} flags. */
@@ -34,7 +45,11 @@ export interface Memory {
 	 * Write a byte to the address.
 	 *
 	 * May throw to interrupt the CPU like {@link Memory.read}; the byte is not
-	 * written and the cycle can be retried.
+	 * written and the cycle can be retried. `options` carries the same
+	 * {@link ReadOptions} flags as a read — in particular `DUMMY` for the
+	 * non-committing write-back cycle of a read-modify-write instruction, so
+	 * traps can tell it from the real store. Implementors that don't care may
+	 * omit the parameter (a narrower signature still satisfies this interface).
 	 */
-	write(address: number, value: number): void;
+	write(address: number, value: number, options: ReadOptions): void;
 }

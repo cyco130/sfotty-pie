@@ -5,11 +5,14 @@
 // becoming a fail, a fail becoming a pass, or a new/missing test — fails, so an
 // intentional change must be recorded with `pnpm acid800-tests --update`.
 //
-// The suite is driven through boot.ts: `--keys 21,16` feeds Space then X to skip
-// the boot menu into "exit and run tests", then exits the process once done.
-import { execFileSync } from "node:child_process";
+// The suite runs in-process on the headless host: `keys: [0x21, 0x16]` feeds
+// Space then X to skip the boot menu into "exit and run tests", and E: PUTBYT
+// output is captured and parsed directly (no subprocess, no stdout round-trip).
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { AtrImage } from "./atr.ts";
+import { Headless } from "./headless.ts";
+import { Atari } from "./machine.ts";
 
 const HERE = import.meta.dirname; // packages/a8/src
 const REPO = join(HERE, "..", "..", "..");
@@ -19,35 +22,36 @@ const BASELINE = join(ACID_DIR, "baseline.json");
 
 type Status = "pass" | "fail" | "skip";
 
-function runSuite(): Record<string, Status> {
-	const output = execFileSync(
-		"node",
-		[
-			join(HERE, "boot.ts"),
-			"--xe",
-			...(process.argv.includes("--pal") ? ["--pal"] : []),
-			"--os",
-			join(FIRMWARE, "AltirraOS XL-XE.rom"),
-			"--basic",
-			join(FIRMWARE, "Altirra BASIC.rom"),
-			join(ACID_DIR, "acid800.atr"),
-			"--keys",
-			"21,16",
-		],
-		{ encoding: "latin1", input: "", maxBuffer: 64 << 20 },
+async function runSuite(): Promise<Record<string, Status>> {
+	const machine = new Atari({
+		model: "130XE",
+		os: new Uint8Array(readFileSync(join(FIRMWARE, "AltirraOS XL-XE.rom"))),
+		basic: new Uint8Array(readFileSync(join(FIRMWARE, "Altirra BASIC.rom"))),
+		...(process.argv.includes("--pal") ? { tvSystem: "pal" as const } : {}),
+	});
+	machine.insertDisk(
+		new AtrImage(new Uint8Array(readFileSync(join(ACID_DIR, "acid800.atr")))),
 	);
+
+	const bytes: number[] = [];
+	await new Headless({
+		machine,
+		output: (byte) => bytes.push(byte),
+		keys: [0x21, 0x16], // Space then X: skip the boot menu, run the tests
+	}).run();
 
 	// Each result reads "Loading test N<ctl><name>...<Pass|FAIL.|Skipped>", where
 	// <ctl> is an ATASCII control byte (and is sometimes already a real newline).
 	// Turn every non-printable byte into a line break, then the name is just the
 	// text before "...".
-	const lines = Array.from(output, (ch) => {
-		const code = ch.charCodeAt(0);
-		return code < 0x20 || code >= 0x7f ? "\n" : ch;
-	}).join("");
+	const text = bytes
+		.map((code) =>
+			code < 0x20 || code >= 0x7f ? "\n" : String.fromCharCode(code),
+		)
+		.join("");
 
 	const results: Record<string, Status> = {};
-	for (const line of lines.split("\n")) {
+	for (const line of text.split("\n")) {
 		const match = /^(.+?)\.\.\.(Pass|FAIL|Skipped)/.exec(line);
 		if (!match) continue;
 		const status: Status =
@@ -57,7 +61,7 @@ function runSuite(): Record<string, Status> {
 	return results;
 }
 
-const results = runSuite();
+const results = await runSuite();
 const total = Object.keys(results).length;
 const tally = Object.values(results).reduce<Record<Status, number>>(
 	(counts, status) => ({ ...counts, [status]: counts[status] + 1 }),

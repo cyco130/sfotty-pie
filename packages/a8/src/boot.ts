@@ -1,25 +1,20 @@
-import {
-	DECODE,
-	disassemble,
-	type Memory,
-	ReadOptions,
-	Sfotty,
-	traceLine,
-} from "@sfotty-pie/sfotty";
+import { ReadOptions, traceLine } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
 import { basename } from "node:path";
 import { AtrImage } from "./atr.ts";
 import { Cartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
+import { Headless, type InputSource } from "./headless.ts";
 import { Atari } from "./machine.ts";
-import { createSioHandler, SIOV } from "./sio.ts";
 import { buildBootDisk } from "./xex-boot.ts";
 
 // Usage: boot.ts --os <file> [--basic <file>] [--xl | --xe] [--pal] [--trace] [--dump-frame] [file]
 // `--os`/`--basic` are paths to the OS and BASIC ROM images. `file` is an XEX,
 // ATR, or cartridge image; like the web emulator's Load, booting a file is
-// boot-image semantics — the 800's BASIC cart comes out.
+// boot-image semantics — the 800's BASIC cart comes out. This is a thin CLI over
+// the headless host (machine + OS-ROM HLE traps + run loop); console I/O is wired
+// to stdin/stdout here, and the run loop lives in Headless.
 const argv = process.argv.slice(2);
 
 /** The value following a `--flag`, if present. */
@@ -41,9 +36,10 @@ const basicPath = flagValue("--basic");
 const xe = argv.includes("--xe");
 const xl = xe || argv.includes("--xl");
 const pal = argv.includes("--pal");
+const trace = argv.includes("--trace");
 // The positional file is the first non-flag arg that isn't a flag's value.
 const flagValueIndices = new Set(
-	["--os", "--basic", "--keys"]
+	["--os", "--basic"]
 		.map((flag) => argv.indexOf(flag) + 1)
 		.filter((i) => i > 0),
 );
@@ -83,52 +79,17 @@ const machine = new Atari({
 	...(pal ? { tvSystem: "pal" as const } : {}),
 });
 
-// --keys automation (e.g. Acid800): each time the program waits for a key — it
-// clears CH ($02FC) then polls it — feed the next scripted POKEY key code, and
-// once the script is exhausted exit the process. So a suite that ends on a
-// key-wait finishes immediately instead of spinning out the watchdog. Codes are
-// KBCODE values, comma-separated hex (e.g. `--keys 21,16` = Space then X).
-const CH = 0x02fc;
-const keyScript = (flagValue("--keys") ?? "")
-	.split(",")
-	.filter(Boolean)
-	.map((code) => parseInt(code, 16));
-let keyIndex = 0;
-let keyWaitArmed = false;
-
-// Record every bus address touched in the current window so the watchdog can
-// tell a real stuck loop from a legitimately long loop (e.g. the RAM test).
-const touched = new Set<number>();
-const bus: Memory = {
-	read(address, options) {
-		touched.add(address);
-		if (keyScript.length && address === CH && keyWaitArmed) {
-			keyWaitArmed = false;
-			if (keyIndex >= keyScript.length) process.exit(0);
-			const code = keyScript[keyIndex++]!;
-			process.stderr.write(`[keys] CH <- $${hex(code, 2)}\n`);
-			return code;
-		}
-		return machine.read(address, options);
-	},
-	write(address, value) {
-		touched.add(address);
-		if (keyScript.length && address === CH && value === 0) keyWaitArmed = true;
-		machine.write(address, value);
-	},
-};
-
-const cpu = new Sfotty(bus, { withoutUndocumented: false });
+if (disk) machine.insertDisk(disk);
 
 const peek = (address: number) => machine.read(address, ReadOptions.PEEK);
 
-// Power-on reset: the seven-cycle RES sequence runs on the first run() calls
-// and lands at the reset vector.
-cpu.reset(true);
+function hex(value: number, width: number): string {
+	return value.toString(16).toUpperCase().padStart(width, "0");
+}
 
-const trace = process.argv.includes("--trace");
-
-// --- Console via readline (line-buffered stdin) — good enough for BASIC. ---
+// --- Console input via readline (line-buffered stdin) — good enough for BASIC.
+// Exposed to the host as an InputSource: read() pops the next buffered byte;
+// wait() resolves when a line arrives, or false when stdin closes. ---
 const rl = readline.createInterface({
 	input: process.stdin,
 	output: process.stdout,
@@ -136,168 +97,45 @@ const rl = readline.createInterface({
 let stdinBuffer = Buffer.alloc(0);
 let stdinOffset = 0;
 let stdinClosed = false;
-let onStdin: (() => void) | null = null;
+let onStdin: ((more: boolean) => void) | null = null;
 rl.on("line", (line) => {
 	stdinBuffer = Buffer.concat([
 		stdinBuffer.subarray(stdinOffset),
 		Buffer.from(line + "\n"),
 	]);
 	stdinOffset = 0;
-	onStdin?.();
+	onStdin?.(true);
 	onStdin = null;
 });
 rl.on("close", () => {
 	stdinClosed = true;
-	onStdin?.();
+	onStdin?.(false);
 	onStdin = null;
 });
 
-// --- Execute traps: emulate OS-ROM entry points in the host. ---
-function rts(): void {
-	const lo = machine.read(0x0100 | ((cpu.S + 1) & 0xff), ReadOptions.NONE);
-	const hi = machine.read(0x0100 | ((cpu.S + 2) & 0xff), ReadOptions.NONE);
-	cpu.S = (cpu.S + 2) & 0xff;
-	cpu.PC = (((hi << 8) | lo) + 1) & 0xffff;
-}
+const input: InputSource = {
+	read() {
+		return stdinOffset < stdinBuffer.length
+			? stdinBuffer[stdinOffset++]!
+			: undefined;
+	},
+	wait() {
+		if (stdinOffset < stdinBuffer.length) return Promise.resolve(true);
+		if (stdinClosed) return Promise.resolve(false);
+		return new Promise<boolean>((resolve) => {
+			onStdin = resolve;
+		});
+	},
+};
 
-function returnStatus(status: number): void {
-	cpu.Y = status;
-	cpu.nFlag = (status & 0x80) !== 0;
-	cpu.zFlag = status === 0;
-	rts();
-}
-
-function hex(value: number, width: number): string {
-	return value.toString(16).toUpperCase().padStart(width, "0");
-}
-
-// Thrown by the GETBYT trap when the stdin line buffer is empty: the run loop
-// catches it, awaits the next line, and retries the same instruction.
-const NEED_INPUT = Symbol("need-input");
-
-// A trap returns true if it handled the call (already RTS'd — skip the real ROM
-// routine) or false if it only observed (let the ROM code run).
-const traps = new Map<number, () => boolean>();
-
-// E: PUTBYT — copy the ATASCII character in A to stdout, then let the real ROM
-// routine run too, so the text also lands in screen RAM (and the framebuffer).
-function editorPutByte(): boolean {
-	const c = cpu.A & 0xff;
-	fs.writeSync(1, Buffer.from([c === 0x9b ? 0x0a : c])); // EOL → newline
-	return false;
-}
-
-// E: GETBYT — return the next stdin byte in A (as ATASCII), waiting if needed.
-function editorGetByte(): boolean {
-	if (stdinOffset >= stdinBuffer.length) {
-		if (stdinClosed) process.exit(0); // stdin ended → end the session
-		throw NEED_INPUT;
-	}
-	const c = stdinBuffer[stdinOffset++]!;
-	cpu.A = c === 0x0a ? 0x9b : c; // newline → ATASCII EOL
-	returnStatus(0x01);
-	return true;
-}
-
-// Find a device's handler-vector table via HATABS ($031A): 3-byte entries
-// [name, table-lo, table-hi], terminated by a zero name.
-function findHandler(device: number): number {
-	for (let addr = 0x031a; addr < 0x033f; addr += 3) {
-		const name = machine.read(addr, ReadOptions.NONE);
-		if (name === 0) break;
-		if (name === device) {
-			return (
-				machine.read(addr + 1, ReadOptions.NONE) |
-				(machine.read(addr + 2, ReadOptions.NONE) << 8)
-			);
-		}
-	}
-	return 0;
-}
-
-// On the first CIOV call HATABS is initialized, so discover E:'s GETBYT/PUTBYT
-// routines (each stored as address-1) and trap them — OS-version independent.
-let editorTrapped = false;
-function installEditorTraps(): void {
-	if (editorTrapped) return;
-	editorTrapped = true;
-	const table = findHandler(0x45); // 'E'
-	if (table === 0) return;
-	const word = (off: number) =>
-		machine.read(table + off, ReadOptions.NONE) |
-		(machine.read(table + off + 1, ReadOptions.NONE) << 8);
-	const getByte = (word(4) + 1) & 0xffff;
-	const putByte = (word(6) + 1) & 0xffff;
-	traps.set(getByte, editorGetByte);
-	traps.set(putByte, editorPutByte);
-}
-
-traps.set(0xe456, () => {
-	// CIOV: only OPEN comes through here. Use it to install the E: byte traps,
-	// then let the real OS run the open.
-	installEditorTraps();
-	return false;
-});
-// SIOV: serve D1: from the attached image (trap-based SIO); everything else
-// times out, so without a disk the OS abandons the disk boot like before. The
-// handler returns a substitute RTS opcode for the bus-trap style; here we
-// perform the RTS ourselves.
-const sio = createSioHandler({
-	machine,
-	cpu,
-	getDisk: (unit) => (unit === 1 ? disk : undefined),
-});
-traps.set(SIOV, () => {
-	sio(SIOV);
-	rts();
-	return true;
-});
-
-traps.set(0xe471, () => {
-	// BLKBDV, the Memo Pad ("blackboard") entry: the OS jumps here when there
-	// is nothing left to run — e.g. a booted executable returned. Session over.
-	process.exit(0);
-});
-
-// --- Stuck-loop watchdog. ---
-const WINDOW = 10_000;
-const FEW_PCS = 64;
-const FEW_ADDRESSES = 32;
-// Generous: past multi-frame OS startup delays AND test-suite deadman
-// timeouts (Acid800's serial-input test spins for many emulated seconds
-// before its own timeout gives up).
-const STUCK_LIMIT = 30_000_000;
-const LIMIT = 1_000_000_000;
-
-// With --nudge: when a small loop persists, the program is often polling for
-// a keypress (e.g. Acid800's "press any key" does BIT $D20E) — that bypasses
-// the E: traps, so press Return through the real keyboard matrix before
-// declaring it stuck. Off by default: Acid800's standalone tests *rerun* on a
-// keypress, where stopping at the wait loop is the better outcome.
-const nudgeEnabled = process.argv.includes("--nudge");
-const NUDGE_AT = 500_000; // spin cycles before the first nudge (then doubled)
-const NUDGE_HOLD = 30_000; // ~2 frames of key-down
-const MAX_NUDGES = 3;
-let nudges = 0;
-let keyUpAt = 0;
-
-const fetchCount = new Uint32Array(0x10000);
-const seenPcs = new Set<number>();
-let windowStart = 0;
-let loopCycles = 0;
-let cycles = 0;
-
-// The framebuffer ANTIC/GTIA renders into: 240 lines of 376 hi-res pixels (94
-// visible cycles x 4), one Atari color byte each.
-const frame = new Uint8Array(376 * 240);
-
-if (process.argv.includes("--dump-frame")) {
-	// Render the last frame as ASCII art on exit. Hooked on the exit event
-	// because the normal exit path is process.exit() inside the GETBYT trap.
+if (argv.includes("--dump-frame")) {
+	// Render the last frame as ASCII art on exit. Hooked on the exit event so it
+	// runs whichever way the process ends.
 	process.on("exit", dumpFrame);
 }
 
 function dumpFrame(): void {
+	const frame = machine.frame;
 	// Call the most frequent color the background.
 	const counts = new Uint32Array(256);
 	for (const value of frame) counts[value]!++;
@@ -317,144 +155,38 @@ function dumpFrame(): void {
 }
 
 function dumpRegisters(): void {
+	const cpu = machine.cpu;
 	process.stderr.write(
 		`  PC=${hex(cpu.PC, 4)} A=${hex(cpu.A, 2)} X=${hex(cpu.X, 2)} ` +
 			`Y=${hex(cpu.Y, 2)} S=${hex(cpu.S, 2)} P=${hex(cpu.getP(), 2)}\n`,
 	);
 }
 
-function reportStuck(): void {
-	const pcs = [...seenPcs].sort((a, b) => a - b);
-	const addresses = [...touched].sort((a, b) => a - b);
+const headless = new Headless({
+	machine,
+	output: (byte) => {
+		fs.writeSync(1, Buffer.from([byte]));
+	},
+	input,
+	...(trace
+		? {
+				onInstruction: (pc: number) =>
+					process.stderr.write(traceLine(machine.cpu, peek, pc) + "\n"),
+			}
+		: {}),
+});
+
+const result = await headless.run();
+
+if (machine.cpu.crashed) {
+	process.stderr.write(`\nCRASHED: ${machine.cpu.describeState()}\n`);
+	dumpRegisters();
+} else if (result.reachedLimit) {
 	process.stderr.write(
-		`\nStuck at ${cycles} cycles (spinning ~${loopCycles}): ` +
-			`${seenPcs.size} PCs, ${touched.size} addresses.\n` +
-			`Addresses touched: ${addresses.map((a) => "$" + hex(a, 4)).join(" ")}\n` +
-			`Loop body:\n`,
+		`\nReached LIMIT (${result.cycles} cycles) — likely stuck; re-run with --trace.\n`,
 	);
-	for (const pc of pcs) {
-		process.stderr.write(
-			`  ${hex(pc, 4)}  ${disassemble(peek, pc).text.padEnd(13)} ` +
-				`(x${fetchCount[pc]})\n`,
-		);
-	}
 	dumpRegisters();
 }
 
-function reportHotspots(): void {
-	const hot = [...fetchCount.entries()]
-		.filter(([, count]) => count > 0)
-		.sort(([, a], [, b]) => b - a)
-		.slice(0, 20);
-	process.stderr.write(`\nReached ${cycles} cycles. Hottest PCs:\n`);
-	for (const [pc, count] of hot) {
-		process.stderr.write(
-			`  ${hex(pc, 4)}  ${disassemble(peek, pc).text.padEnd(13)} (x${count})\n`,
-		);
-	}
-	dumpRegisters();
-}
-
-async function run(): Promise<void> {
-	const ag = machine.anticGtia;
-
-	// Mirror the CPU's edge-triggered NMI latch host-side: a false→true
-	// transition on the NMI line arms a pending NMI that the CPU services at the
-	// next instruction boundary. Used only to gate host traps (below).
-	let prevNmi = false;
-	let nmiPending = false;
-
-	while (cycles < LIMIT) {
-		ag.beforeCpu();
-		machine.cycle();
-		if (ag.nmi && !prevNmi) nmiPending = true;
-		prevNmi = ag.nmi;
-		cpu.NMI = ag.nmi;
-		cpu.IRQ = machine.irq;
-		cpu.RDY = ag.rdy;
-
-		let trapped = false;
-
-		// Traps fire on an opcode fetch the CPU will actually perform — not on
-		// halted cycles (the CPU is frozen), and not while a WSYNC stall is
-		// repeating the fetch (the trap would fire once per stalled cycle).
-		if (!ag.halt && cpu.RDY && cpu.state === DECODE) {
-			fetchCount[cpu.PC] = (fetchCount[cpu.PC] ?? 0) + 1;
-			seenPcs.add(cpu.PC);
-			if (trace) process.stderr.write(traceLine(cpu, peek) + "\n");
-
-			// A latched NMI is serviced at this boundary instead of executing
-			// the opcode at PC: the CPU pushes PC, vectors to the handler, then
-			// RTIs back here and re-DECODEs the same PC. Skip traps now so a
-			// side-effecting one (the E: PUTBYT stdout tee) fires once — after
-			// the RTI — rather than doubling the character.
-			const trap = nmiPending ? undefined : traps.get(cpu.PC);
-			if (nmiPending) {
-				nmiPending = false;
-			} else if (trap) {
-				try {
-					trapped = trap();
-				} catch (error) {
-					if (error !== NEED_INPUT) throw error;
-					// Keep beforeCpu/afterCpu paired for this cycle, then wait
-					// for input and retry the same instruction.
-					ag.afterCpu(frame, machine.busData);
-					cycles++;
-					await new Promise<void>((resolve) => {
-						onStdin = resolve;
-					});
-					continue;
-				}
-			}
-		}
-
-		if (!trapped && !ag.halt) {
-			cpu.run();
-		}
-
-		ag.afterCpu(frame, machine.busData);
-		cycles++;
-
-		if (cpu.crashed) {
-			process.stderr.write(`\nCRASHED: ${cpu.describeState()}\n`);
-			dumpRegisters();
-			break;
-		}
-
-		if (keyUpAt !== 0 && cycles >= keyUpAt) {
-			machine.pokeyKeyUp();
-			keyUpAt = 0;
-		}
-
-		if (cycles - windowStart >= WINDOW) {
-			const small = seenPcs.size <= FEW_PCS && touched.size <= FEW_ADDRESSES;
-			if (small) {
-				loopCycles += cycles - windowStart;
-				if (
-					nudgeEnabled &&
-					nudges < MAX_NUDGES &&
-					loopCycles >= NUDGE_AT << nudges
-				) {
-					nudges++;
-					machine.pokeyKeyDown(0x0c); // Return
-					keyUpAt = cycles + NUDGE_HOLD;
-				}
-				if (loopCycles >= STUCK_LIMIT) {
-					reportStuck();
-					break;
-				}
-			} else {
-				loopCycles = 0;
-				nudges = 0;
-			}
-			seenPcs.clear();
-			touched.clear();
-			windowStart = cycles;
-		}
-	}
-
-	if (cycles >= LIMIT) reportHotspots();
-	rl.close();
-}
-
-await run();
+rl.close();
+process.exit(0);

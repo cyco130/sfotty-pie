@@ -1,6 +1,6 @@
 import { ReadOptions, type Memory } from "./bus.ts";
 import { DECODE, RESET, type Step } from "./microcode.ts";
-import { MICROCODE } from "./nmos-steps.generated.ts";
+import { DUMMY, MICROCODE, SPECULATIVE } from "./nmos-steps.generated.ts";
 import { NMOS_INSTRUCTIONS } from "./nmos-instructions.generated.ts";
 
 /** Variant flags that change the instruction set/behavior. */
@@ -117,6 +117,17 @@ export class SfottyCore {
 	 */
 	NMI = false;
 
+	/**
+	 * Optional hook fired at each committed opcode fetch (`SYNC & !DUMMY`), with
+	 * the opcode's address, just after the fetch commits. It is *not* fired on the
+	 * dummy fetch that precedes an interrupt, nor on RDY-stalled re-fetches, so it
+	 * sees each executed instruction exactly once. Hosts use it for tracing /
+	 * instruction-level debugging; it is a post-commit notification and must not
+	 * throw (use an execute interceptor on the bus to suspend at a fetch). Leave
+	 * undefined for zero overhead.
+	 */
+	onFetch: ((pc: number) => void) | undefined = undefined;
+
 	#nmiPrev = false; // For edge detection of NMI.
 	#nmiPending = false; // Set when an NMI is latched, cleared when serviced.
 	#interruptDetected = false; // Combined NMI/IRQ detect, recomputed each cycle; opPoll latches it one cycle later (the two-cycles-before-decode delay).
@@ -221,15 +232,26 @@ export class SfottyCore {
 	 * @internal
 	 */
 	#read(address: number, options: ReadOptions): number {
+		// A non-committing dummy cycle (the DUMMY table is keyed by microstate)
+		// marks its read so traps can tell it from a real access. SPECULATIVE
+		// cycles (the indexed page-cross read) are dummy only when `crossed`.
+		// opReadDecode's own interrupt/stall DUMMY is passed in `options`.
+		if (DUMMY[this.state] || (this.#crossed && SPECULATIVE[this.state])) {
+			options |= ReadOptions.DUMMY;
+		}
 		return this.#bus.read(address, options);
 	}
 
 	/**
 	 * The bus write choke point. Writes ignore RDY entirely (NMOS quirk), so this
-	 * is a straight passthrough — it never stalls. @internal
+	 * never stalls. The DUMMY table (keyed by microstate) marks the non-committing
+	 * write-back cycle of a read-modify-write instruction, so traps can tell it
+	 * from the real store. Writes are never SPECULATIVE — only reads cross pages.
+	 * @internal
 	 */
 	#write(address: number, value: number): void {
-		this.#bus.write(address, value);
+		const options = DUMMY[this.state] ? ReadOptions.DUMMY : ReadOptions.NONE;
+		this.#bus.write(address, value, options);
 	}
 
 	/**
@@ -279,7 +301,18 @@ export class SfottyCore {
 	 * token. @internal
 	 */
 	opReadDecode(): boolean {
-		const value = this.#read(this.PC, ReadOptions.OPCODE_FETCH);
+		// SYNC (the pin) asserts on every opcode-fetch cycle. DUMMY marks the ones
+		// that don't commit an instruction: the dummy fetch done here when an
+		// interrupt is pending (the BRK sequence runs instead), and the re-fetch of
+		// an RDY-stalled cycle (re-issued until RDY rises). A committed opcode fetch
+		// is therefore SYNC without DUMMY — what execute traps key on, so they fire
+		// once on the real fetch, not the dummy or the stall re-reads.
+		// #interruptPending is already latched on entry (the poll ran last cycle).
+		const dummy = this.#interruptPending || !this.RDY;
+		const value = this.#read(
+			this.PC,
+			dummy ? ReadOptions.SYNC | ReadOptions.DUMMY : ReadOptions.SYNC,
+		);
 		if (!this.RDY) {
 			return false;
 		}
@@ -290,8 +323,10 @@ export class SfottyCore {
 			this.state = 0; // BRK / interrupt sequence
 		} else {
 			this.bFlag = true;
+			const pc = this.PC;
 			this.PC = inc16(this.PC);
 			this.state = value << 3;
+			this.onFetch?.(pc);
 		}
 
 		return true;

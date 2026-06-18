@@ -151,8 +151,8 @@ test("the 800 Reset key drives the RNMI line, not the reset line", () => {
 
 	// Set up some PIA state: it must survive, since nothing pulses the
 	// 400/800 hardware reset line — the Reset key is only an NMI source.
-	machine.write(0xd302, 0x3c); // PACTL: CA2 manual high, data register
-	machine.write(0xd300, 0xa5); // PORTA output latch
+	machine.write(0xd302, 0x3c, ReadOptions.NONE); // PACTL: CA2 manual high, data register
+	machine.write(0xd300, 0xa5, ReadOptions.NONE); // PORTA output latch
 
 	machine.resetButtonDown();
 	expect(machine.anticGtia.rnmi).toBe(true);
@@ -165,16 +165,16 @@ test("the 800 Reset key drives the RNMI line, not the reset line", () => {
 
 test("the XL Reset button resets components and holds the reset line", () => {
 	const machine = makeMachine("800XL");
-	machine.write(NMIEN, 0xc0);
+	machine.write(NMIEN, 0xc0, ReadOptions.NONE);
 	expect(machine.anticGtia.vbiEnabled).toBe(true);
 
 	// Bank the OS ROM out (DDRB all outputs, then PORTB bit 0 low) and put a
 	// marker in the RAM underneath.
-	machine.write(0xd303, 0x00);
-	machine.write(0xd301, 0xff);
-	machine.write(0xd303, 0x04);
-	machine.write(0xd301, 0xfe);
-	machine.write(0xe000, 0x55);
+	machine.write(0xd303, 0x00, ReadOptions.NONE);
+	machine.write(0xd301, 0xff, ReadOptions.NONE);
+	machine.write(0xd303, 0x04, ReadOptions.NONE);
+	machine.write(0xd301, 0xfe, ReadOptions.NONE);
+	machine.write(0xe000, 0x55, ReadOptions.NONE);
 	expect(machine.read(0xe000, ReadOptions.NONE)).toBe(0x55);
 
 	machine.resetButtonDown();
@@ -194,7 +194,7 @@ test("console keys drive the CONSOL register (active low)", () => {
 	const machine = makeMachine("800");
 	const CONSOL = 0xd01f;
 	// Release the power-on written latch first, like the OS does.
-	machine.write(CONSOL, 0x08);
+	machine.write(CONSOL, 0x08, ReadOptions.NONE);
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
 
 	machine.consoleKeyDown(4); // Option
@@ -207,7 +207,7 @@ test("console keys drive the CONSOL register (active low)", () => {
 
 test("the keyboard facade reaches POKEY through the bus", () => {
 	const machine = makeMachine("800");
-	machine.write(IRQEN_IRQST, 0x40);
+	machine.write(IRQEN_IRQST, 0x40, ReadOptions.NONE);
 
 	machine.pokeyKeyDown(0x3f);
 	machine.shiftKeyDown();

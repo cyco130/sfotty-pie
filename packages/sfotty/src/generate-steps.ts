@@ -223,12 +223,33 @@ interface StepDef {
 const steps: StepDef[] = [];
 const byBaseName = new Map<string, StepDef[]>();
 
+// Microstates whose bus access is an *unconditional* non-committing dummy
+// (tagged with the "dummy" marker in the instruction data). Emitted as the DUMMY
+// table so #read can set ReadOptions.DUMMY by state.
+const dummyStates: number[] = [];
+
+// Microstates whose read is *speculative*: the indexed `?` cycle reads at the
+// not-yet-fixed address, which is only a dummy when a page boundary was crossed
+// (otherwise the read is the real one). Emitted as the SPECULATIVE table; #read
+// marks it DUMMY only when the runtime `crossed` flag is set.
+const speculativeStates: number[] = [];
+
 const baseName = (s: StepDef) => `${s.mnemonic}_${s.mode}_${s.cycle + 1}`;
 
 for (const inst of NMOS_INSTRUCTIONS) {
 	const last = inst.code.length - 1;
 	const isBrk = inst.mnemonic.toUpperCase() === "BRK";
-	inst.code.forEach((cycle, i) => {
+	inst.code.forEach((rawCycle, i) => {
+		// Strip the "dummy" marker (not a real op): record the microstate so its
+		// bus access gets ReadOptions.DUMMY, then proceed as if it weren't there.
+		const cycle = rawCycle.includes("dummy")
+			? rawCycle.filter((token) => token !== "dummy")
+			: rawCycle;
+		if (cycle !== rawCycle) dummyStates.push((inst.opcode << 3) | i);
+
+		// The bare "?" token marks an indexed speculative read (dummy iff crossed).
+		if (cycle.includes("?")) speculativeStates.push((inst.opcode << 3) | i);
+
 		const unknown = cycle.find((token) => !isKnown(token));
 		if (unknown !== undefined) {
 			throw new Error(
@@ -262,6 +283,11 @@ for (const inst of NMOS_INSTRUCTIONS) {
 		group.push(step);
 	});
 }
+
+// Reset's first five cycles are dummy reads (states 0x801..0x805: two reads at
+// PC, then three fake-push stack reads); the last two (0x806/0x807) read the
+// real reset vector. The sequence is hand-written below, not token-generated.
+dummyStates.push(0x801, 0x802, 0x803, 0x804, 0x805);
 
 // A base name is ambiguous when its steps don't all share one body — i.e. the
 // body bakes in the opcode (via its next-state transition), so the colliding
@@ -378,6 +404,34 @@ ${funcs.join("\n\n")}
 export const MICROCODE: Step[] = [
 ${table.join("\n")}
 ];
+
+/**
+ * Per-microstate flag: 1 if that cycle's bus access is a non-committing dummy
+ * (e.g. the implied/accumulator "internal operation" read). The CPU ORs
+ * ReadOptions.DUMMY into the access when set, so traps can tell real accesses
+ * from speculative/discarded ones. Indexed by microstate, like MICROCODE.
+ */
+export const DUMMY: Uint8Array = /* @__PURE__ */ (() => {
+	const table = new Uint8Array(MICROCODE.length);
+	for (const state of [${dummyStates.sort((a, b) => a - b).join(", ")}]) {
+		table[state] = 1;
+	}
+	return table;
+})();
+
+/**
+ * Per-microstate flag: 1 if that cycle's read is *speculative* — the indexed
+ * page-cross read at the not-yet-fixed address. It's a real read when no page
+ * boundary was crossed and a dummy when one was, so the CPU ORs ReadOptions.DUMMY
+ * only when its crossed flag is set. Indexed by microstate, like MICROCODE.
+ */
+export const SPECULATIVE: Uint8Array = /* @__PURE__ */ (() => {
+	const table = new Uint8Array(MICROCODE.length);
+	for (const state of [${speculativeStates.sort((a, b) => a - b).join(", ")}]) {
+		table[state] = 1;
+	}
+	return table;
+})();
 `;
 
 const outPath = join(import.meta.dirname, "nmos-steps.generated.ts");

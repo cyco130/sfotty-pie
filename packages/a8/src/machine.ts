@@ -1,12 +1,32 @@
-import { ReadOptions, type Memory } from "@sfotty-pie/sfotty";
+import { ReadOptions, Sfotty, type Memory } from "@sfotty-pie/sfotty";
 import { AnticGtia } from "./antic-gtia.ts";
-import { AtariBus } from "./bus-manager.ts";
+import type { AtrImage } from "./atr.ts";
+import {
+	AtariBus,
+	type ExecuteInterceptor,
+	type ExecuteObserver,
+	type ReadInterceptor,
+	type ReadObserver,
+	type TrapHandle,
+	type TrapOptions,
+	type WriteInterceptor,
+	type WriteObserver,
+} from "./bus-manager.ts";
 import { Cartridge } from "./cartridge.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
+import { createSioHandler, SIOV } from "./sio.ts";
+import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
 export type AtariModel = "800" | "800XL" | "130XE";
+
+// Where cycle()/resumeCycle() are within one machine cycle. A
+// throw from a bus phase (ANTIC's DMA read in BUS, the CPU's access in CPU)
+// leaves the marker on that phase, so resumeCycle() re-enters there
+// without re-running the committed beforeCpu. A const object, not an enum
+// (enums emit runtime code, which this repo's strip-only TS execution rejects).
+const PHASE = { IDLE: 0, BUS: 1, CPU: 2 } as const;
 
 export interface MachineConfig {
 	/** Which machine to emulate. */
@@ -41,17 +61,20 @@ export interface MachineConfig {
  *   $4000-$7FFF via PORTB bits 2-3) with separate CPU/ANTIC access
  *   (bits 4/5).
  *
- * The host drives the machine one cycle at a time:
+ * The host drives the machine one cycle at a time via {@link cycle}, which runs
+ * ANTIC scheduling, the bus phase (ANTIC DMA or the CPU), and the render, and
+ * returns the audio level. A bus phase may throw to suspend; the host catches
+ * it, resolves it, and calls {@link resumeCycle}:
  *
  * ```ts
- * machine.anticGtia.beforeCpu();
- * machine.cycle(); // returns the audio level, for hosts producing sound
- * cpu.NMI = machine.anticGtia.nmi;
- * cpu.IRQ = machine.irq;
- * cpu.RDY = machine.anticGtia.rdy;
- * if (machine.resetAsserted) cpu.reset(false);
- * else if (!machine.anticGtia.halt) cpu.run();
- * machine.anticGtia.afterCpu(frame, machine.busData);
+ * let audio;
+ * try {
+ * 	audio = machine.cycle();
+ * } catch (signal) {
+ * 	// resolve the suspend (await input, clear a breakpoint, …)
+ * 	audio = machine.resumeCycle();
+ * }
+ * // read machine.frame for video
  * ```
  *
  * Keyboard input goes through the `pokeyKeyDown`/`pokeyKeyUp` family of
@@ -68,6 +91,21 @@ export class Atari implements Memory {
 	readonly #pokey: Pokey;
 	readonly #xl: boolean;
 	#resetHeld = false;
+
+	// The CPU the machine owns and drives via cycle()/resumeCycle().
+	readonly #cpu: Sfotty;
+	// The D1: disk image served by the built-in trap-based SIO; undefined = no
+	// disk (SIO times out and the OS moves on). Set via insertDisk.
+	#disk: AtrImage | undefined;
+	// The framebuffer afterCpu renders into (one Atari color byte per pixel). The
+	// constructor allocates a default so it is never absent; a host wanting its
+	// own buffer (e.g. double-buffering) repoints it with setFrameBuffer.
+	#frame: Uint8Array = new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT);
+	// Continuation marker for the cycle phase machine; see PHASE.
+	#phase: number = PHASE.IDLE;
+	// POKEY's audio level for this cycle, sampled once in cycle() and
+	// returned again by resumeCycle() so a resumed cycle doesn't re-tick.
+	#audio = 0;
 
 	constructor(config: MachineConfig) {
 		const { model, os, basic, cartridge, log } = config;
@@ -120,6 +158,23 @@ export class Atari implements Memory {
 		if (xl) {
 			this.anticGtia.trig3 = cartridge ? 1 : 0;
 		}
+
+		// The machine is its own bus (it implements Memory), so the CPU reads and
+		// writes through the trap-aware AtariBus. Constructed last, once #bus is
+		// wired. Powers on into the reset sequence like real hardware.
+		this.#cpu = new Sfotty(this);
+
+		// Built-in SIO high-level emulation: a JSR through SIOV is trapped and
+		// served from the inserted D1: image (no serial hardware emulated). Wired
+		// once; insertDisk swaps the image the handler reads.
+		this.interceptExecute(
+			SIOV,
+			createSioHandler({
+				machine: this,
+				cpu: this.#cpu,
+				getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
+			}),
+		);
 	}
 
 	/** The last value driven on the data bus (see {@link AtariBus.busData}). */
@@ -131,8 +186,8 @@ export class Atari implements Memory {
 		return this.#bus.read(address, options);
 	}
 
-	write(address: number, value: number): void {
-		this.#bus.write(address, value);
+	write(address: number, value: number, options: ReadOptions): void {
+		this.#bus.write(address, value, options);
 	}
 
 	reset(cold: boolean): void {
@@ -142,13 +197,92 @@ export class Atari implements Memory {
 		this.#pokey.reset(cold);
 	}
 
+	/** The CPU the machine owns and drives. */
+	get cpu(): Sfotty {
+		return this.#cpu;
+	}
+
 	/**
-	 * Advance the per-cycle chips (currently POKEY) one machine cycle — call
-	 * once per cycle alongside the ANTIC `beforeCpu`/`afterCpu` pair. Returns
-	 * POKEY's summed audio output (0-60) for hosts that produce sound.
+	 * The framebuffer the machine renders into (376×240 Atari color bytes),
+	 * updated by each cycle's render phase — the current target, which
+	 * {@link setFrameBuffer} can repoint.
+	 */
+	get frame(): Uint8Array {
+		return this.#frame;
+	}
+
+	/**
+	 * Point rendering at `buffer` (376×240) for subsequent cycles. The default
+	 * buffer is always present, so this is optional — a host uses it to render
+	 * into its own buffer, e.g. swapping targets at frame boundaries for
+	 * tear-free double-buffering. Call it only at a frame boundary, or the
+	 * in-progress frame tears.
+	 */
+	setFrameBuffer(buffer: Uint8Array): void {
+		this.#frame = buffer;
+	}
+
+	/**
+	 * Optional hook fired at each committed opcode fetch, with the opcode's
+	 * address — for tracing / instruction-level debugging. Forwarded to the
+	 * CPU's `onFetch`; see {@link Sfotty.onFetch} for the exact semantics.
+	 */
+	get onInstruction(): ((pc: number) => void) | undefined {
+		return this.#cpu.onFetch;
+	}
+	set onInstruction(fn: ((pc: number) => void) | undefined) {
+		this.#cpu.onFetch = fn;
+	}
+
+	/**
+	 * Run one whole machine cycle: ANTIC scheduling (`beforeCpu`, commits) + the
+	 * POKEY tick, then the bus phase (ANTIC's DMA fetch or the CPU's access) and
+	 * the render. Returns POKEY's audio level (0-60).
+	 *
+	 * A bus phase may **throw** — an interceptor suspending on a read/write/fetch,
+	 * or a host's own breakpoint signal. This method does not catch it: the throw
+	 * propagates with the cycle frozen at that phase. The host catches whatever it
+	 * threw, resolves it (await input, clear a breakpoint, …), and calls
+	 * {@link resumeCycle} to finish the *same* cycle — never `cycle`,
+	 * which would re-run the committed scheduling. Idempotent by construction:
+	 * each bus phase does its access before any commit, so a throw unwinds clean
+	 * and the retried access repeats nothing.
 	 */
 	cycle(): number {
-		return this.#pokey.cycle();
+		if (this.#phase !== PHASE.IDLE) {
+			throw new Error("cycle() called mid-cycle — use resumeCycle()");
+		}
+		this.anticGtia.beforeCpu();
+		this.#audio = this.#pokey.cycle();
+		this.#phase = PHASE.BUS;
+		return this.#runCycle();
+	}
+
+	/** Finish a cycle that a bus phase suspended; see {@link cycle}. */
+	resumeCycle(): number {
+		return this.#runCycle();
+	}
+
+	// The phase machine shared by cycle/resumeCycle: a fall-through
+	// switch that enters at the saved #phase and runs forward to the end of the
+	// cycle. The marker is set to the current phase *before* each throwable call,
+	// so a throw leaves it pointing where to resume.
+	#runCycle(): number {
+		switch (this.#phase) {
+			case PHASE.BUS:
+				this.anticGtia.busCycle(); // ANTIC DMA read — may throw
+				this.#cpu.NMI = this.anticGtia.nmi;
+				this.#cpu.IRQ = this.irq;
+				this.#cpu.RDY = this.anticGtia.rdy;
+				this.#phase = PHASE.CPU;
+			// falls through
+			case PHASE.CPU:
+				if (this.resetAsserted) this.#cpu.reset(false);
+				else if (!this.anticGtia.halt) this.#cpu.run(); // may throw
+				this.anticGtia.afterCpu(this.#frame, this.busData);
+				this.#phase = PHASE.IDLE;
+		}
+		return this.#audio;
 	}
 
 	/**
@@ -224,18 +358,71 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * Register an execute trap: when the CPU fetches an opcode from
-	 * `address`, `callback` runs first. It may perform host-side work and
-	 * return a substitute opcode (typically $60, RTS) — or `undefined` to
-	 * fall through to the real memory. One trap per address; used for OS
-	 * entry points like SIOV (see `createSioHandler`). A WSYNC stall can
-	 * repeat the trapped fetch, so callbacks must be idempotent.
+	 * Trap a memory access. Interceptors run before the access and may
+	 * short-circuit it (return a substitute read value / true to suppress a
+	 * write); observers run after and only watch. Both phases are additive and
+	 * run last-registered-first; the first interceptor to return a value wins.
+	 * An optional `mask` filters by access flags (default `{ dummy: false }`);
+	 * `interceptExecute`/`observeExecute` are sugar for a read masked to a
+	 * committed opcode fetch. Each returns a handle to unregister. A committed
+	 * opcode fetch can't repeat under a WSYNC stall (the stall re-fetch is
+	 * DUMMY), so execute traps fire once. See [traps](../../notes.local/traps.md).
 	 */
-	addExecuteTrap(
+	interceptExecute(
 		address: number,
-		callback: (address: number) => number | undefined,
-	): void {
-		this.#bus.addTrap(address, callback);
+		fn: ExecuteInterceptor,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.#bus.interceptExecute(address, fn, opts);
+	}
+
+	observeExecute(
+		address: number,
+		fn: ExecuteObserver,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.#bus.observeExecute(address, fn, opts);
+	}
+
+	interceptRead(
+		address: number,
+		fn: ReadInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#bus.interceptRead(address, fn, opts);
+	}
+
+	observeRead(
+		address: number,
+		fn: ReadObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#bus.observeRead(address, fn, opts);
+	}
+
+	interceptWrite(
+		address: number,
+		fn: WriteInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#bus.interceptWrite(address, fn, opts);
+	}
+
+	observeWrite(
+		address: number,
+		fn: WriteObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#bus.observeWrite(address, fn, opts);
+	}
+
+	/**
+	 * Insert (or replace) the D1: disk image the built-in SIO serves. Pass it
+	 * before booting a disk; with none inserted, SIO requests time out and the
+	 * OS falls through to its other boot sources.
+	 */
+	insertDisk(disk: AtrImage): void {
+		this.#disk = disk;
 	}
 
 	/**

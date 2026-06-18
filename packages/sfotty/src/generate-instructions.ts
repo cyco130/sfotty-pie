@@ -60,7 +60,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// interrupted PC with B clear, while a real BRK skips the signature byte
 			// with B set.
 			ops[opcode] = [
-				["r-brk", "ar=sp", "dr=pch"],
+				["r-brk", "dummy", "ar=sp", "dr=pch"], // read next byte, thrown away
 				["w-ar--", "dr=pcl"],
 				["w-ar--", "dr=pi", "if=1"],
 				["w-ar--", "s=al", "ar=vector"],
@@ -86,7 +86,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 
 			ops[opcode] = [
 				["r-pc++", "ar=sp", "s=dr"],
-				["r-ar", "dr=pch"],
+				["r-ar", "dummy", "dr=pch"], // internal stack read, value discarded
 				["w-ar--", "dr=pcl"],
 				["w-ar--"],
 				["r-pc", "pcl=s", "s=al", "pch=dr"],
@@ -150,8 +150,8 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 6  $0100,S  R  pull PCH from stack
 
 			ops[opcode] = [
-				["r-pc", "ar=sp"],
-				["r-ar++"],
+				["r-pc", "dummy", "ar=sp"], // read next byte, thrown away
+				["r-ar++", "dummy"], // increment S (stack read discarded)
 				["r-ar++", "p=dr"],
 				["r-ar++", "pcl=dr"],
 				["r-ar", "pch=dr", "s=al"],
@@ -174,11 +174,11 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 6    PC     R  increment PC
 
 			ops[opcode] = [
-				["r-pc", "ar=sp"],
-				["r-ar++"],
+				["r-pc", "dummy", "ar=sp"], // read next byte, thrown away
+				["r-ar++", "dummy"], // increment S (stack read discarded)
 				["r-ar++", "pcl=dr"],
 				["r-ar", "pch=dr", "s=al"],
-				["r-pc++"],
+				["r-pc++", "dummy"], // increment PC (PC read discarded)
 			];
 
 			break;
@@ -194,7 +194,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 2    PC     R  read next instruction byte (and throw it away)
 			// 3  $0100,S  W  push register on stack, decrement S
 			ops[opcode] = [
-				["r-pc", "ar=sp", "dr=p"],
+				["r-pc", "dummy", "ar=sp", "dr=p"], // read next byte, thrown away
 				["w-ar--", "s=al"],
 			];
 			break;
@@ -210,7 +210,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 2    PC     R  read next instruction byte (and throw it away)
 			// 3  $0100,S  W  push register on stack, decrement S
 			ops[opcode] = [
-				["r-pc", "ar=sp", "dr=a"],
+				["r-pc", "dummy", "ar=sp", "dr=a"], // read next byte, thrown away
 				["w-ar--", "s=al"],
 			];
 			break;
@@ -227,7 +227,11 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 3  $0100,S  R  increment S
 			// 4  $0100,S  R  pull register from stack
 
-			ops[opcode] = [["r-pc", "ar=sp"], ["r-ar++"], ["r-ar", "s=al", "p=dr"]];
+			ops[opcode] = [
+				["r-pc", "dummy", "ar=sp"], // read next byte, thrown away
+				["r-ar++", "dummy"], // increment S (stack read discarded)
+				["r-ar", "s=al", "p=dr"],
+			];
 			break;
 
 		case "PLA":
@@ -242,7 +246,11 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 			// 3  $0100,S  R  increment S
 			// 4  $0100,S  R  pull register from stack
 
-			ops[opcode] = [["r-pc", "ar=sp"], ["r-ar++"], ["r-ar", "s=al", "a=dr"]];
+			ops[opcode] = [
+				["r-pc", "dummy", "ar=sp"], // read next byte, thrown away
+				["r-ar++", "dummy"], // increment S (stack read discarded)
+				["r-ar", "s=al", "a=dr"],
+			];
 			break;
 
 		case "ORA":
@@ -302,7 +310,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 						}
 						ops[opcode] = [
 							//
-							["r-pc"], // Do nothing
+							["r-pc", "dummy"], // Do nothing (dummy read of PC)
 						];
 						break;
 					case "imm":
@@ -386,7 +394,7 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 					);
 				}
 
-				ops[opcode] = [["r-pc", operation]];
+				ops[opcode] = [["r-pc", "dummy", operation]];
 			}
 			break;
 
@@ -424,16 +432,16 @@ for (let opcode = 0; opcode <= 0xff; opcode++) {
 					case "acc":
 						switch (entry.mnemonic) {
 							case "ASL":
-								ops[opcode] = [["r-pc", "asla"]];
+								ops[opcode] = [["r-pc", "dummy", "asla"]];
 								break;
 							case "LSR":
-								ops[opcode] = [["r-pc", "lsra"]];
+								ops[opcode] = [["r-pc", "dummy", "lsra"]];
 								break;
 							case "ROL":
-								ops[opcode] = [["r-pc", "rola"]];
+								ops[opcode] = [["r-pc", "dummy", "rola"]];
 								break;
 							case "ROR":
-								ops[opcode] = [["r-pc", "rora"]];
+								ops[opcode] = [["r-pc", "dummy", "rora"]];
 								break;
 
 							default:
@@ -759,7 +767,12 @@ function rmwZeropage(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 	//                and do the operation on it
 	// 5  address  W  write the new value to effective address
 
-	return [["r-pc++", "ar=dr"], ["r-ar"], ["w-ar", operation], ["w-ar"]];
+	return [
+		["r-pc++", "ar=dr"],
+		["r-ar"],
+		["w-ar", "dummy", operation],
+		["w-ar"],
+	];
 }
 
 function rmwAbsolute(operation: InternalOp): [BusOp, ...InternalOp[]][] {
@@ -775,7 +788,7 @@ function rmwAbsolute(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ar=dr"],
 		["r-pc++", "ah=dr"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -796,7 +809,7 @@ function rmwZeropageX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ar=dr"],
 		["r-ar", "ar+=x"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -817,7 +830,7 @@ function rmwZeropageY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ar=dr"],
 		["r-ar", "ar+=y"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -842,7 +855,7 @@ function rmwAbsoluteX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ah=dr", "ar+=x?"],
 		["r-ar", "?ah++"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -867,7 +880,7 @@ function rmwAbsoluteY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ah=dr", "ar+=y?"],
 		["r-ar", "?ah++"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -888,7 +901,7 @@ function rmwIndirectX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-dr++"], // AL = read(DR++);
 		["r-dr"], // AH = read(DR);
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -915,7 +928,7 @@ function rmwIndirectY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-dr", "ar+=y?"],
 		["r-ar", "?ah++"],
 		["r-ar"],
-		["w-ar", operation],
+		["w-ar", "dummy", operation],
 		["w-ar"],
 	];
 }
@@ -941,8 +954,10 @@ function relative(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 
 	return [
 		["r-pc++", operation],
-		["r-pc", "pc+=dr?"],
-		["r-pc", "pch=fix"],
+		// Cycles 3 (taken) and 4 (page cross) re-read PC but discard the byte —
+		// the real opcode fetch is the following DECODE — so both are dummies.
+		["r-pc", "dummy", "pc+=dr?"],
+		["r-pc", "dummy", "pch=fix"],
 	];
 }
 
@@ -1010,7 +1025,7 @@ function storeAbsoluteX(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 	return [
 		["r-pc++", "ar=dr"],
 		["r-pc++", "ah=dr", "ar+=x?"],
-		["r-ar", "?ah++", operation],
+		["r-ar", "dummy", "?ah++", operation],
 		["w-ar"],
 	];
 }
@@ -1033,7 +1048,7 @@ function storeAbsoluteY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 	return [
 		["r-pc++", "ar=dr"],
 		["r-pc++", "ah=dr", "ar+=y?"],
-		["r-ar", "?ah++", operation],
+		["r-ar", "dummy", "?ah++", operation],
 		["w-ar"],
 	];
 }
@@ -1072,7 +1087,7 @@ function storeIndirectY(operation: InternalOp): [BusOp, ...InternalOp[]][] {
 		["r-pc++", "ar=dr"],
 		["r-dr++"],
 		["r-dr", "ar+=y?"],
-		["r-ar", "?ah++", operation],
+		["r-ar", "dummy", "?ah++", operation],
 		["w-ar"],
 	];
 }

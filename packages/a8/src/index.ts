@@ -19,4 +19,5 @@ export {
 	type FirmwareContext,
 } from "./firmware-preferences.ts";
 export { Atari, type AtariModel, type MachineConfig } from "./machine.ts";
+export { buildNtscPalette, buildPalPalette, paletteFor } from "./palette.ts";
 export * from "./timing-constants.ts";

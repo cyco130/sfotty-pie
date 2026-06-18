@@ -1,6 +1,8 @@
 import {
 	AtrImage,
 	buildBootDisk,
+	buildNtscPalette,
+	buildPalPalette,
 	Cartridge,
 	detectFileFormat,
 	FRAME_BUFFER_HEIGHT,
@@ -23,7 +25,6 @@ import {
 	type LibraryEntry,
 	type LoadedFirmware,
 } from "./library.ts";
-import { buildNtscPalette, buildPalPalette } from "./palette.ts";
 
 export interface HostConfig {
 	model: AtariModel;

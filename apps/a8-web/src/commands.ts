@@ -16,6 +16,11 @@ export const commands = {
 	RESUME: ({ host }) => host.resume(),
 	TOGGLE_PAUSE: ({ host }) => host.togglePause(),
 
+	// Turbo mode: run unthrottled (muted) vs. real time.
+	TURBO_MODE_ENABLE: ({ host }) => host.setTurboMode(true),
+	TURBO_MODE_DISABLE: ({ host }) => host.setTurboMode(false),
+	TURBO_MODE_TOGGLE: ({ host }) => host.toggleTurboMode(),
+
 	// Audio.
 	AUDIO_MUTE: ({ host }) => host.setMuted(true),
 	AUDIO_UNMUTE: ({ host }) => host.setMuted(false),
@@ -405,6 +410,10 @@ export const descriptions: Record<keyof typeof commands, string> = {
 	PAUSE: "Pause emulation",
 	RESUME: "Resume emulation",
 	TOGGLE_PAUSE: "Pause or resume emulation",
+
+	TURBO_MODE_ENABLE: "Enable turbo mode (run unthrottled, muted)",
+	TURBO_MODE_DISABLE: "Disable turbo mode (return to real-time speed)",
+	TURBO_MODE_TOGGLE: "Toggle turbo mode",
 
 	AUDIO_MUTE: "Mute audio",
 	AUDIO_UNMUTE: "Unmute audio",

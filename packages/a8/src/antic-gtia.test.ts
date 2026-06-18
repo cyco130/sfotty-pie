@@ -288,3 +288,29 @@ test("direct GRAF writes survive when GRACTL has latching off", () => {
 	}
 	expect(ag.grafP0).toBe(0x20); // now the bus byte latches, like DMA
 });
+
+test("P/M graphics latch across the whole visible region, including the bottom band", () => {
+	// Regression: the latch was gated at y < 224, freezing player graphics over
+	// scan lines 232-247. Invisible on NTSC, but it corrupted River Raid's lower
+	// HUD on PAL (taller frame), leaking a stale P2<->P3 collision and crashing
+	// the plane. The latch must run for the full collision region (lines 8-247).
+	const ag = makeAnticGtia();
+	const frame = new Uint8Array(376 * 240);
+	ag.write(0xd01d, 0x02); // GRACTL: enable player-graphics latching
+
+	const latchOnLine = (vcount: number, busByte: number): number => {
+		ag.vcount = vcount;
+		ag.hpos = 0;
+		ag.grafP0 = 0x00;
+		for (let i = 0; i < 114; i++) {
+			ag.beforeCpu();
+			ag.afterCpu(frame, busByte);
+		}
+		return ag.grafP0;
+	};
+
+	// Bottom of the visible region (scan line 240): latches (used to freeze).
+	expect(latchOnLine(240, 0x5a)).toBe(0x5a);
+	// Vertical blank (scan line 248): no latch — graphics are off, per the AHRM.
+	expect(latchOnLine(248, 0x5a)).toBe(0x00);
+});

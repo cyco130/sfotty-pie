@@ -966,8 +966,12 @@ export class AnticGtia implements Memory {
 
 			// The GRAF registers latch the bus during the P/M DMA slots only
 			// when GRACTL enables it — with GRACTL off, direct GRAF writes
-			// persist (the GTIA collision tests rely on that).
-			if (y < 224) {
+			// persist (the GTIA collision tests rely on that). The latch runs for
+			// the whole visible region (scan lines 8-247, i.e. y < 240): an
+			// earlier cut at y < 224 froze player graphics over the bottom 16
+			// lines, which is invisible on NTSC but corrupts the lower HUD on PAL
+			// (its taller frame puts content there) — River Raid's bug.
+			if (y < 240) {
 				if (i === 0 && this.enableMissiles) {
 					// VDELAY bits 0-3 delay each missile independently, but
 					// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so

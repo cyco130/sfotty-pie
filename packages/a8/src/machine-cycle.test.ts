@@ -15,12 +15,12 @@ function quietMachine(): Atari {
 	return machine;
 }
 
-test("machineCycle runs a whole cycle and fires onInstruction once", () => {
+test("cycle runs a whole cycle and fires onInstruction once", () => {
 	const machine = quietMachine();
 	const fetched: number[] = [];
 	machine.onInstruction = (pc) => fetched.push(pc);
 
-	machine.machineCycle();
+	machine.cycle();
 
 	expect(machine.cpu.PC).toBe(0x0601); // committed the NOP fetch
 	expect(fetched).toEqual([0x0600]); // exactly once, at the opcode address
@@ -42,22 +42,22 @@ test("a bus-phase throw suspends the cycle; resume finishes it without re-advanc
 
 	const hposBefore = machine.anticGtia.hpos;
 
-	// The fetch interceptor throws straight out of machineCycle — not caught.
+	// The fetch interceptor throws straight out of cycle — not caught.
 	let caught: unknown;
 	try {
-		machine.machineCycle();
+		machine.cycle();
 	} catch (error) {
 		caught = error;
 	}
 	expect(caught).toBe(suspend);
 
 	// Frozen mid-cycle: starting a fresh cycle is rejected (the host must resume).
-	expect(() => machine.machineCycle()).toThrow(/mid-cycle/);
+	expect(() => machine.cycle()).toThrow(/mid-cycle/);
 
 	// The fetch didn't commit: PC is untouched and the interrupt-free retry is clean.
 	expect(machine.cpu.PC).toBe(0x0600);
 
-	machine.resumeMachineCycle();
+	machine.resumeCycle();
 
 	// beforeCpu ran exactly once across the suspend — ANTIC advanced one cycle.
 	expect(machine.anticGtia.hpos).toBe(hposBefore + 1);

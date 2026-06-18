@@ -15,12 +15,13 @@ import { Cartridge } from "./cartridge.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
+import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
 export type AtariModel = "800" | "800XL" | "130XE";
 
-// Where machineCycle()/resumeMachineCycle() are within one machine cycle. A
+// Where cycle()/resumeCycle() are within one machine cycle. A
 // throw from a bus phase (ANTIC's DMA read in BUS, the CPU's access in CPU)
-// leaves the marker on that phase, so resumeMachineCycle() re-enters there
+// leaves the marker on that phase, so resumeCycle() re-enters there
 // without re-running the committed beforeCpu. A const object, not an enum
 // (enums emit runtime code, which this repo's strip-only TS execution rejects).
 const PHASE = { IDLE: 0, BUS: 1, CPU: 2 } as const;
@@ -58,18 +59,18 @@ export interface MachineConfig {
  *   $4000-$7FFF via PORTB bits 2-3) with separate CPU/ANTIC access
  *   (bits 4/5).
  *
- * The host drives the machine one cycle at a time via {@link machineCycle},
- * which runs ANTIC scheduling, the bus phase (ANTIC DMA or the CPU), and the
- * render, and returns the audio level. A bus phase may throw to suspend; the
- * host catches it, resolves it, and calls {@link resumeMachineCycle}:
+ * The host drives the machine one cycle at a time via {@link cycle}, which runs
+ * ANTIC scheduling, the bus phase (ANTIC DMA or the CPU), and the render, and
+ * returns the audio level. A bus phase may throw to suspend; the host catches
+ * it, resolves it, and calls {@link resumeCycle}:
  *
  * ```ts
  * let audio;
  * try {
- * 	audio = machine.machineCycle();
+ * 	audio = machine.cycle();
  * } catch (signal) {
  * 	// resolve the suspend (await input, clear a breakpoint, …)
- * 	audio = machine.resumeMachineCycle();
+ * 	audio = machine.resumeCycle();
  * }
  * // read machine.frame for video
  * ```
@@ -89,15 +90,16 @@ export class Atari implements Memory {
 	readonly #xl: boolean;
 	#resetHeld = false;
 
-	// The CPU the machine owns and drives via machineCycle()/resumeMachineCycle().
+	// The CPU the machine owns and drives via cycle()/resumeCycle().
 	readonly #cpu: Sfotty;
-	// The framebuffer afterCpu renders into: 240 lines of 376 hi-res pixels, one
-	// Atari color byte each (see boot.ts/a8-web for the layout).
-	readonly #frame = new Uint8Array(376 * 240);
+	// The framebuffer afterCpu renders into (one Atari color byte per pixel). The
+	// constructor allocates a default so it is never absent; a host wanting its
+	// own buffer (e.g. double-buffering) repoints it with setFrameBuffer.
+	#frame: Uint8Array = new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT);
 	// Continuation marker for the cycle phase machine; see PHASE.
 	#phase: number = PHASE.IDLE;
-	// POKEY's audio level for this cycle, sampled once in machineCycle() and
-	// returned again by resumeMachineCycle() so a resumed cycle doesn't re-tick.
+	// POKEY's audio level for this cycle, sampled once in cycle() and
+	// returned again by resumeCycle() so a resumed cycle doesn't re-tick.
 	#audio = 0;
 
 	constructor(config: MachineConfig) {
@@ -178,16 +180,6 @@ export class Atari implements Memory {
 		this.#pokey.reset(cold);
 	}
 
-	/**
-	 * Advance the per-cycle chips (currently POKEY) one machine cycle — call
-	 * once per cycle alongside the ANTIC `beforeCpu`/`afterCpu` pair. Returns
-	 * POKEY's summed audio output (0-60) for hosts that produce sound. (Hosts on
-	 * the inline loop drive this directly; {@link machineCycle} ticks it for you.)
-	 */
-	cycle(): number {
-		return this.#pokey.cycle();
-	}
-
 	/** The CPU the machine owns and drives. */
 	get cpu(): Sfotty {
 		return this.#cpu;
@@ -195,10 +187,22 @@ export class Atari implements Memory {
 
 	/**
 	 * The framebuffer the machine renders into (376×240 Atari color bytes),
-	 * updated by each cycle's render phase.
+	 * updated by each cycle's render phase — the current target, which
+	 * {@link setFrameBuffer} can repoint.
 	 */
 	get frame(): Uint8Array {
 		return this.#frame;
+	}
+
+	/**
+	 * Point rendering at `buffer` (376×240) for subsequent cycles. The default
+	 * buffer is always present, so this is optional — a host uses it to render
+	 * into its own buffer, e.g. swapping targets at frame boundaries for
+	 * tear-free double-buffering. Call it only at a frame boundary, or the
+	 * in-progress frame tears.
+	 */
+	setFrameBuffer(buffer: Uint8Array): void {
+		this.#frame = buffer;
 	}
 
 	/**
@@ -222,20 +226,14 @@ export class Atari implements Memory {
 	 * or a host's own breakpoint signal. This method does not catch it: the throw
 	 * propagates with the cycle frozen at that phase. The host catches whatever it
 	 * threw, resolves it (await input, clear a breakpoint, …), and calls
-	 * {@link resumeMachineCycle} to finish the *same* cycle — never `machineCycle`,
+	 * {@link resumeCycle} to finish the *same* cycle — never `cycle`,
 	 * which would re-run the committed scheduling. Idempotent by construction:
 	 * each bus phase does its access before any commit, so a throw unwinds clean
 	 * and the retried access repeats nothing.
-	 *
-	 * Named `machineCycle` transitionally — it coexists with the POKEY-tick
-	 * `cycle()` until a8-web's inline loop migrates onto it, when it is renamed to
-	 * `cycle()`.
 	 */
-	machineCycle(): number {
+	cycle(): number {
 		if (this.#phase !== PHASE.IDLE) {
-			throw new Error(
-				"machineCycle() called mid-cycle — use resumeMachineCycle()",
-			);
+			throw new Error("cycle() called mid-cycle — use resumeCycle()");
 		}
 		this.anticGtia.beforeCpu();
 		this.#audio = this.#pokey.cycle();
@@ -243,12 +241,12 @@ export class Atari implements Memory {
 		return this.#runCycle();
 	}
 
-	/** Finish a cycle that a bus phase suspended; see {@link machineCycle}. */
-	resumeMachineCycle(): number {
+	/** Finish a cycle that a bus phase suspended; see {@link cycle}. */
+	resumeCycle(): number {
 		return this.#runCycle();
 	}
 
-	// The phase machine shared by machineCycle/resumeMachineCycle: a fall-through
+	// The phase machine shared by cycle/resumeCycle: a fall-through
 	// switch that enters at the saved #phase and runs forward to the end of the
 	// cycle. The marker is set to the current phase *before* each throwable call,
 	// so a throw leaves it pointing where to resume.

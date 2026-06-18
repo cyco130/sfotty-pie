@@ -453,12 +453,11 @@ export class EmulatorHost {
 
 		let raf = 0;
 		let presented = -1;
-		let framesThisSecond = 0;
+		let framesAtSecondStart = this.#emulator.frameCount;
 		let secondStart = performance.now();
 		const present = () => {
 			if (this.#emulator.frameCount !== presented) {
 				presented = this.#emulator.frameCount;
-				framesThisSecond++;
 				const frame = this.#emulator.frame;
 				for (let i = 0; i < frame.length; i++) {
 					pixels[i] = palette[frame[i]!]!;
@@ -466,12 +465,24 @@ export class EmulatorHost {
 				context.putImageData(imageData, 0, 0);
 			}
 			this.crashed.value = this.#emulator.crashed; // dedup'd by the signal
-			// Sample the emulated frame rate about once a second.
+			// Sample the emulated frame rate about once a second. Measure the
+			// emulator's own frameCount delta over the elapsed wall clock, not
+			// how many distinct frames this RAF loop happened to observe — RAF
+			// coalesces under main-thread load and would undercount frames the
+			// emulator actually produced.
 			const now = performance.now();
 			const elapsed = now - secondStart;
-			if (elapsed >= 1000) {
-				this.fps.value = Math.round((framesThisSecond * 1000) / elapsed);
-				framesThisSecond = 0;
+			const frameCount = this.#emulator.frameCount;
+			if (frameCount < framesAtSecondStart) {
+				// The emulator was swapped (reboot/config change) and its
+				// frameCount reset — rebase the window rather than report a
+				// negative delta.
+				framesAtSecondStart = frameCount;
+				secondStart = now;
+			} else if (elapsed >= 1000) {
+				const frames = frameCount - framesAtSecondStart;
+				this.fps.value = Math.round((frames * 1000) / elapsed);
+				framesAtSecondStart = frameCount;
 				secondStart = now;
 			}
 			raf = requestAnimationFrame(present);

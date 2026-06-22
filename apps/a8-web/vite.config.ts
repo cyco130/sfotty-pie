@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import tailwindcss from "@tailwindcss/vite";
@@ -14,6 +15,17 @@ export default defineConfig({
 	// emit them as hashed assets instead of trying to parse them as source.
 	assetsInclude: ["**/*.rom", "**/*.xex", "**/*.atr", "**/*.car"],
 	server: { host: true },
+	// Multi-page build: the emulator (index.html) plus the reference docs
+	// (docs/index.html, served at /docs/). keyboard-lab.html is intentionally
+	// not an input — it stays a dev-only scratch page.
+	build: {
+		rollupOptions: {
+			input: {
+				main: fileURLToPath(new URL("./index.html", import.meta.url)),
+				docs: fileURLToPath(new URL("./docs/index.html", import.meta.url)),
+			},
+		},
+	},
 	// @sfotty-pie/a8 is a linked workspace package built to dist. Excluding it
 	// from dep pre-bundling lets Vite pick up its rebuilds (from the root
 	// `pnpm dev` watch) and reload, instead of serving a stale optimized copy.

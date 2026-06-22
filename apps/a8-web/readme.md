@@ -34,7 +34,7 @@ The headless emulator lives in `@sfotty-pie/a8`; this app is the I/O and chrome 
 ### Reference and dev pages
 
 - **`/docs/`** — a generated reference for the keyboard and the ATASCII/ANTIC character set: a keyboard map (hover, or click a key to pin its scan codes and functions), the full character table, the POKEY scan-code table, and the 8×8 key matrix. Built and deployed with the app; source in [`src/docs/`](src/docs/), data in [`src/keyboard-docs.ts`](src/keyboard-docs.ts).
-- **[`keyboard-lab.html`](keyboard-lab.html)** — a dev-only scratch page (served at `/keyboard-lab.html`, not in the production build) that logs raw `keydown` / `keyup` / `input` / `composition` events, handy for untangling browser keyboard quirks.
+- **[`keyboard-lab.html`](keyboard-lab.html)** — a scratch page (served at `/keyboard-lab.html`) that logs raw `keydown` / `keyup` / `input` / `composition` events, handy for untangling browser keyboard quirks. Built and deployed with the app so its capturability probes can be run on borrowed or remote machines across OSes and browsers.
 
 ## The image library
 
@@ -57,7 +57,7 @@ pnpm --filter @sfotty-pie/a8-web build
 Output is `apps/a8-web/dist/` — plain static files. Notes for hosting:
 
 - **Serve over HTTPS.** Audio (and more later) needs a secure context.
-- It's static pages (`index.html` and `/docs/`) with hashed assets and real files under `/legal/`, so **no SPA-style catch-all redirect** is needed.
+- It's static pages (`index.html`, `/docs/`, and `/keyboard-lab.html`) with hashed assets and real files under `/legal/`, so **no SPA-style catch-all redirect** is needed.
 - The committed build is **firmware-only** — `library.local/` is gitignored, so a clean CI/host build won't include your ROMs or games. Bake those in by populating `library.local/` in your build environment.
 
 Any static host works (e.g. `rsync` the `dist/` to a web root).

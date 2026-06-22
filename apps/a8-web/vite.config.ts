@@ -15,14 +15,18 @@ export default defineConfig({
 	// emit them as hashed assets instead of trying to parse them as source.
 	assetsInclude: ["**/*.rom", "**/*.xex", "**/*.atr", "**/*.car"],
 	server: { host: true },
-	// Multi-page build: the emulator (index.html) plus the reference docs
-	// (docs/index.html, served at /docs/). keyboard-lab.html is intentionally
-	// not an input — it stays a dev-only scratch page.
+	// Multi-page build: the emulator (index.html), the reference docs
+	// (docs/index.html, served at /docs/), and the keyboard event lab
+	// (keyboard-lab.html, served at /keyboard-lab.html) — shipped so its
+	// capturability probes can be run on borrowed/remote machines.
 	build: {
 		rollupOptions: {
 			input: {
 				main: fileURLToPath(new URL("./index.html", import.meta.url)),
 				docs: fileURLToPath(new URL("./docs/index.html", import.meta.url)),
+				keyboardLab: fileURLToPath(
+					new URL("./keyboard-lab.html", import.meta.url),
+				),
 			},
 		},
 	},

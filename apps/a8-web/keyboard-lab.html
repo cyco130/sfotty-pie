@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Keyboard event lab</title>
+		<style>
+			:root {
+				color-scheme: dark;
+			}
+			body {
+				margin: 0;
+				font:
+					14px/1.4 ui-monospace,
+					SFMono-Regular,
+					Menlo,
+					monospace;
+				background: #0a0a0a;
+				color: #e5e5e5;
+			}
+			header {
+				padding: 0.75rem 1rem;
+				border-bottom: 1px solid #262626;
+			}
+			h1 {
+				margin: 0 0 0.25rem;
+				font-size: 1rem;
+			}
+			p.hint {
+				margin: 0;
+				color: #a3a3a3;
+				font-size: 0.8rem;
+			}
+			.controls {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.75rem;
+				align-items: center;
+				padding: 0.75rem 1rem;
+			}
+			#field {
+				flex: 1 1 16rem;
+				padding: 0.5rem 0.75rem;
+				background: #171717;
+				color: #fff;
+				border: 1px solid #404040;
+				border-radius: 0.375rem;
+				font: inherit;
+			}
+			button,
+			label.toggle {
+				padding: 0.4rem 0.7rem;
+				background: #262626;
+				color: #e5e5e5;
+				border: 1px solid #404040;
+				border-radius: 0.375rem;
+				cursor: pointer;
+				user-select: none;
+			}
+			#mods {
+				padding: 0 1rem 0.5rem;
+				color: #a3a3a3;
+				font-size: 0.8rem;
+				min-height: 1.2em;
+			}
+			#mods .on {
+				color: #fbbf24;
+			}
+			#log {
+				margin: 0;
+				padding: 0.5rem 1rem 2rem;
+				white-space: pre-wrap;
+				word-break: break-word;
+			}
+			.row {
+				padding: 0.1rem 0;
+				border-bottom: 1px solid #1a1a1a;
+			}
+			.t-keydown {
+				color: #4ade80;
+			}
+			.t-keyup {
+				color: #60a5fa;
+			}
+			.t-input,
+			.t-beforeinput {
+				color: #f472b6;
+			}
+			.t-compositionstart,
+			.t-compositionupdate,
+			.t-compositionend {
+				color: #fbbf24;
+			}
+			.dim {
+				color: #737373;
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<h1>Keyboard event lab</h1>
+			<p class="hint">
+				Focus the field and type. Every keydown / keyup / beforeinput / input /
+				composition* event is logged here and to the browser console. Try dead
+				keys (e.g. <code>^</code> then <code>a</code>), AltGr, Shift, Ctrl, Caps
+				Lock, and held/repeating keys.
+			</p>
+		</header>
+		<div class="controls">
+			<input
+				id="field"
+				type="text"
+				autocomplete="off"
+				autocapitalize="off"
+				autocorrect="off"
+				spellcheck="false"
+				placeholder="Type here…"
+			/>
+			<label class="toggle">
+				<input id="prevent" type="checkbox" />
+				preventDefault keydown
+			</label>
+			<label class="toggle">
+				<input id="clearField" type="checkbox" checked />
+				auto-clear field
+			</label>
+			<button id="clear" type="button">Clear log</button>
+		</div>
+		<div id="mods"></div>
+		<div id="log"></div>
+		<script type="module" src="/src/keyboard-lab.ts"></script>
+	</body>
+</html>

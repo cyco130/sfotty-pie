@@ -1,5 +1,4 @@
 import { useEffect } from "preact/hooks";
-import type { Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { builtinLibrary } from "./library.ts";
 
@@ -7,17 +6,15 @@ import { builtinLibrary } from "./library.ts";
 // by the host, not listed here).
 const software = builtinLibrary.filter((entry) => entry.category === "other");
 
-/** A labelled segmented control; each option dispatches its command. */
+/** A labelled segmented control; each option stages its value via `onSelect`. */
 function Segmented({
 	label,
 	value,
 	options,
-	host,
 }: {
 	label: string;
 	value: string;
-	options: { value: string; label: string; command: Command }[];
-	host: EmulatorHost;
+	options: { value: string; label: string; onSelect: () => void }[];
 }) {
 	return (
 		<div class="flex items-center justify-between gap-3">
@@ -32,7 +29,7 @@ function Segmented({
 								? "bg-neutral-800 px-2 py-0.5 text-sm text-white"
 								: "bg-white px-2 py-0.5 text-sm text-neutral-700 hover:bg-neutral-100"
 						}
-						onClick={() => host.dispatch(option.command)}
+						onClick={option.onSelect}
 					>
 						{option.label}
 					</button>
@@ -69,7 +66,7 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 			if (event.key !== "Escape") return;
 			event.preventDefault();
 			event.stopPropagation();
-			host.dispatch("MENU_CLOSE");
+			host.closeMenu();
 		};
 		document.addEventListener("keydown", onKey, true);
 		return () => document.removeEventListener("keydown", onKey, true);
@@ -88,7 +85,7 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 					type="button"
 					class="px-1 text-neutral-500 hover:text-neutral-900"
 					aria-label="Close menu"
-					onClick={() => host.dispatch("MENU_CLOSE")}
+					onClick={() => host.closeMenu()}
 				>
 					✕
 				</button>
@@ -102,29 +99,54 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 					<Segmented
 						label="Type"
 						value={staged.model}
-						host={host}
 						options={[
-							{ value: "800", label: "800", command: "SET_TYPE_800" },
-							{ value: "800XL", label: "XL", command: "SET_TYPE_800XL" },
-							{ value: "130XE", label: "130XE", command: "SET_TYPE_130XE" },
+							{
+								value: "800",
+								label: "800",
+								onSelect: () => host.stageModel("800"),
+							},
+							{
+								value: "800XL",
+								label: "XL",
+								onSelect: () => host.stageModel("800XL"),
+							},
+							{
+								value: "130XE",
+								label: "130XE",
+								onSelect: () => host.stageModel("130XE"),
+							},
 						]}
 					/>
 					<Segmented
 						label="TV"
 						value={staged.tv}
-						host={host}
 						options={[
-							{ value: "ntsc", label: "NTSC", command: "SET_TV_NTSC" },
-							{ value: "pal", label: "PAL", command: "SET_TV_PAL" },
+							{
+								value: "ntsc",
+								label: "NTSC",
+								onSelect: () => host.stageTv("ntsc"),
+							},
+							{
+								value: "pal",
+								label: "PAL",
+								onSelect: () => host.stageTv("pal"),
+							},
 						]}
 					/>
 					<Segmented
 						label="BASIC"
 						value={staged.basicDisabled ? "off" : "on"}
-						host={host}
 						options={[
-							{ value: "on", label: "On", command: "BASIC_ENABLE" },
-							{ value: "off", label: "Off", command: "BASIC_DISABLE" },
+							{
+								value: "on",
+								label: "On",
+								onSelect: () => host.stageBasicDisabled(false),
+							},
+							{
+								value: "off",
+								label: "Off",
+								onSelect: () => host.stageBasicDisabled(true),
+							},
 						]}
 					/>
 				</div>
@@ -132,7 +154,7 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 					<button
 						type="button"
 						class="mt-3 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-white hover:bg-neutral-700"
-						onClick={() => host.dispatch("APPLY_CONFIG")}
+						onClick={() => host.applyConfig()}
 					>
 						Reboot to apply
 					</button>

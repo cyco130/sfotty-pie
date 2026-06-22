@@ -43,7 +43,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 			<button
 				type="button"
 				class="text-neutral-300 hover:text-white"
-				onClick={() => host.dispatch("MENU_OPEN")}
+				onClick={() => host.openMenu()}
 			>
 				{config.model} · {config.tv.toUpperCase()}
 			</button>

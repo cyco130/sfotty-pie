@@ -116,6 +116,9 @@ export class EmulatorHost {
 	/** Whether the menu sidebar is open. */
 	readonly menuOpen = signal(false);
 
+	/** Whether the command palette is open. */
+	readonly paletteOpen = signal(false);
+
 	// Identified firmware, indexed by key for ranked selection.
 	readonly #firmware: Map<FirmwareKey, LoadedFirmware>;
 	readonly #audio: AudioOutput | null;
@@ -332,8 +335,23 @@ export class EmulatorHost {
 		else this.openMenu();
 	}
 
-	// Machine configuration: the menu stages changes, then applies them with
-	// a single reboot.
+	openPalette(): void {
+		this.paletteOpen.value = true;
+	}
+
+	closePalette(): void {
+		this.paletteOpen.value = false;
+		this.#keyInput?.focus(); // return keystrokes to the emulator
+	}
+
+	togglePalette(): void {
+		if (this.paletteOpen.value) this.closePalette();
+		else this.openPalette();
+	}
+
+	// Machine configuration. The menu's form stages changes (below) and applies
+	// them with a single reboot; the palette's config commands apply one change
+	// and reboot immediately (apply*, below that).
 	stageModel(model: AtariModel): void {
 		this.staged.value = { ...this.staged.value, model };
 	}
@@ -354,9 +372,36 @@ export class EmulatorHost {
 		this.closeMenu();
 	}
 
-	/** Discard staged edits, snapping back to the running config. */
-	revertConfig(): void {
-		this.staged.value = this.config.peek();
+	// Apply a single config change to the running machine and reboot into it —
+	// the palette's "… (reboots)" commands. A no-op change is ignored so it
+	// doesn't cost a pointless cold boot. The staged copy follows so the menu
+	// opens clean.
+	#applyConfigChange(change: Partial<MachineSettings>): void {
+		const next = { ...this.config.value, ...change };
+		if (settingsEqual(next, this.config.value)) return;
+		this.config.value = next;
+		this.staged.value = next;
+		this.#rebuild();
+	}
+
+	applyModel(model: AtariModel): void {
+		this.#applyConfigChange({ model });
+	}
+
+	applyTv(tv: "ntsc" | "pal"): void {
+		this.#applyConfigChange({ tv });
+	}
+
+	toggleTv(): void {
+		this.applyTv(this.config.value.tv === "ntsc" ? "pal" : "ntsc");
+	}
+
+	applyBasicDisabled(basicDisabled: boolean): void {
+		this.#applyConfigChange({ basicDisabled });
+	}
+
+	toggleBasic(): void {
+		this.applyBasicDisabled(!this.config.value.basicDisabled);
 	}
 
 	#refreshAudioState(): void {

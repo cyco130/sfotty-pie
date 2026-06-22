@@ -27,24 +27,23 @@ export const commands = {
 	AUDIO_TOGGLE: ({ host }) => host.toggleAudio(),
 
 	// The menu sidebar.
-	MENU_OPEN: ({ host }) => host.openMenu(),
-	MENU_CLOSE: ({ host }) => host.closeMenu(),
 	MENU_TOGGLE: ({ host }) => host.toggleMenu(),
 
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: ({ host }) => host.pickBootImage(),
 
-	// Machine configuration. These stage a change; APPLY_CONFIG reboots into
-	// it (the menu's "Reboot to apply").
-	SET_TYPE_800: ({ host }) => host.stageModel("800"),
-	SET_TYPE_800XL: ({ host }) => host.stageModel("800XL"),
-	SET_TYPE_130XE: ({ host }) => host.stageModel("130XE"),
-	SET_TV_NTSC: ({ host }) => host.stageTv("ntsc"),
-	SET_TV_PAL: ({ host }) => host.stageTv("pal"),
-	BASIC_ENABLE: ({ host }) => host.stageBasicDisabled(false),
-	BASIC_DISABLE: ({ host }) => host.stageBasicDisabled(true),
-	APPLY_CONFIG: ({ host }) => host.applyConfig(),
-	REVERT_CONFIG: ({ host }) => host.revertConfig(),
+	// Machine configuration. Each applies the change and reboots into it
+	// immediately. (The menu's config form does its own stage/apply instead, so
+	// the palette stays a one-shot surface.)
+	SET_TYPE_800: ({ host }) => host.applyModel("800"),
+	SET_TYPE_800XL: ({ host }) => host.applyModel("800XL"),
+	SET_TYPE_130XE: ({ host }) => host.applyModel("130XE"),
+	SET_TV_NTSC: ({ host }) => host.applyTv("ntsc"),
+	SET_TV_PAL: ({ host }) => host.applyTv("pal"),
+	SET_TV_TOGGLE: ({ host }) => host.toggleTv(),
+	BASIC_ENABLE: ({ host }) => host.applyBasicDisabled(false),
+	BASIC_DISABLE: ({ host }) => host.applyBasicDisabled(true),
+	BASIC_TOGGLE: ({ host }) => host.toggleBasic(),
 
 	// Regular key presses
 	PRESS_L: ({ emulator }) => emulator.machine.pokeyKeyDown(0x00),
@@ -419,21 +418,19 @@ export const descriptions: Record<keyof typeof commands, string> = {
 	AUDIO_UNMUTE: "Unmute audio",
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
 
-	MENU_OPEN: "Open the menu",
-	MENU_CLOSE: "Close the menu",
 	MENU_TOGGLE: "Toggle the menu",
 
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 
-	SET_TYPE_800: "Set machine type to Atari 800",
-	SET_TYPE_800XL: "Set machine type to Atari 800XL",
-	SET_TYPE_130XE: "Set machine type to Atari 130XE",
-	SET_TV_NTSC: "Set TV standard to NTSC",
-	SET_TV_PAL: "Set TV standard to PAL",
-	BASIC_ENABLE: "Enable BASIC",
-	BASIC_DISABLE: "Disable BASIC",
-	APPLY_CONFIG: "Apply machine configuration (reboot)",
-	REVERT_CONFIG: "Discard staged machine configuration",
+	SET_TYPE_800: "Set machine type to Atari 800 (reboots)",
+	SET_TYPE_800XL: "Set machine type to Atari 800XL (reboots)",
+	SET_TYPE_130XE: "Set machine type to Atari 130XE (reboots)",
+	SET_TV_NTSC: "Set TV standard to NTSC (reboots)",
+	SET_TV_PAL: "Set TV standard to PAL (reboots)",
+	SET_TV_TOGGLE: "Toggle TV standard (NTSC/PAL) (reboots)",
+	BASIC_ENABLE: "Enable BASIC (reboots)",
+	BASIC_DISABLE: "Disable BASIC (reboots)",
+	BASIC_TOGGLE: "Toggle BASIC (reboots)",
 
 	PRESS_L: "Press L (key code $00)",
 	PRESS_J: "Press J (key code $01)",
@@ -773,6 +770,15 @@ export const descriptions: Record<keyof typeof commands, string> = {
 	PRESS_JOY0_TRIGGER: "Press joystick 0 trigger",
 	RELEASE_JOY0_TRIGGER: "Release joystick 0 trigger",
 };
+
+/**
+ * Every command the palette lists, sorted alphabetically by description — its
+ * default (empty-query) order. (Recently-used commands will float to the top
+ * later.)
+ */
+export const paletteCommands: readonly Command[] = (
+	Object.keys(commands) as Command[]
+).sort((a, b) => descriptions[a].localeCompare(descriptions[b]));
 
 /*
 "Toggle machine type (400/800 / XL/XE)"

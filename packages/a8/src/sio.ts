@@ -42,9 +42,15 @@ export interface SioHandlerOptions {
  * through SIOV/DSKINV). Custom fast loaders that drive POKEY's serial port
  * directly will need real serial emulation instead.
  *
- * Read-only for now: write commands report a device error, and the status
- * command flags the disk as write-protected. The handler is idempotent by
- * design — a WSYNC stall can repeat the trapped fetch.
+ * The trap is a thin translator: each SIO command maps to a method on the
+ * {@link AtrImage} medium (read/write a sector, report write-protect and
+ * density). Disk behavior lives on the image, not here — so a future real
+ * drive (a 1050/Happy with its own 6507 running the protocol on the wire)
+ * could slot in behind `getDisk` without rewriting this trap; it'd be a
+ * separate subsystem, not a refactor of it.
+ *
+ * The handler is idempotent by design — a WSYNC stall can repeat the trapped
+ * fetch (re-running a write just replays the same bytes to the same sector).
  */
 export function createSioHandler(
 	options: SioHandlerOptions,
@@ -95,19 +101,32 @@ export function createSioHandler(
 			}
 
 			case 0x53:
-				// Drive status: write-protected (read-only for now), plus the
-				// density bit; FDC status inverted (no error), format timeout.
+				// Drive status: write-protect bit when the medium is protected,
+				// plus the density bit; FDC status inverted (no error), format
+				// timeout.
 				return transfer([
-					0x08 | (disk.sectorSize === 256 ? 0x20 : 0),
+					(disk.writeProtected ? 0x08 : 0) |
+						(disk.sectorSize === 256 ? 0x20 : 0),
 					0xff,
 					0xe0,
 					0x00,
 				]);
 
 			case 0x50:
-			case 0x57:
-				// Write/put sector: read-only for now.
-				return complete(STATUS_DEVICE_ERROR);
+			case 0x57: {
+				// Put (no verify) / write (with verify) a sector. With no
+				// physical media there's nothing to verify, so both just store
+				// the bytes the OS staged in the SIO buffer.
+				if (disk.writeProtected) return complete(STATUS_DEVICE_ERROR);
+				const sector = peek(DAUX1) | (peek(DAUX2) << 8);
+				const data = new Uint8Array(byteCount);
+				for (let i = 0; i < byteCount; i++) {
+					data[i] = peek((buffer + i) & 0xffff);
+				}
+				return disk.writeSector(sector, data)
+					? complete(STATUS_OK)
+					: complete(STATUS_DEVICE_ERROR);
+			}
 
 			default:
 				return complete(STATUS_NAK);

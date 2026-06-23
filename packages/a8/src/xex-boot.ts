@@ -38,5 +38,7 @@ export function buildBootDisk(xex: Uint8Array): AtrImage {
 	// The executable itself, from sector 4 on
 	image.set(xex, 16 + 384);
 
-	return new AtrImage(image);
+	// Synthetic boot disk: write-protected so a program can't scribble on its
+	// own loader (and so it's never offered for download as a "disk").
+	return new AtrImage(image, { writeProtected: true });
 }

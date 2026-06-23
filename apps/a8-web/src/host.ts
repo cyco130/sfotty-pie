@@ -83,8 +83,15 @@ function unsupportedMessage(format: AtariFileFormat | null): string | null {
  * touch Preact's render path.
  */
 export class EmulatorHost {
-	/** The last successfully booted image's name (null = nothing loaded). */
-	readonly imageName = signal<string | null>(null);
+	/**
+	 * What's attached, for the status bar: the cartridge-slot label (a cart
+	 * name, or "BASIC" when it occupies the 400/800 cart slot, or null) and a
+	 * per-drive disk name (index 0 = D1:; null = empty).
+	 */
+	readonly attachments = signal<{
+		cartridge: string | null;
+		drives: (string | null)[];
+	}>({ cartridge: null, drives: [null] });
 
 	/** True once the CPU has jammed (CIM). */
 	readonly crashed = signal(false);
@@ -136,10 +143,15 @@ export class EmulatorHost {
 	#emulator: Emulator;
 	#keyInput: HTMLInputElement | null = null;
 	#bootImagePicker: (() => void) | null = null;
+	// What to do with the next file the shared picker yields (boot vs. attach).
+	#pendingPick: (file: File) => void = (file) => void this.loadFile(file);
 	#cpuTrace = false; // persists across reboots; reapplied to each emulator
 	#turboMode = false; // persists across reboots; reapplied to each emulator
-	// The currently mounted image (kept across reboots; replaced by a Load).
-	#attachment: { cartridge: Cartridge } | { disk: AtrImage } | null = null;
+	// What's mounted, kept across reboots and re-applied by #makeEmulator. The
+	// cartridge slot and the disk drives are independent (a cart and a disk can
+	// coexist); #drives is indexed by drive number (0 = D1:), one slot for now.
+	#cartridge: { cart: Cartridge; name: string } | null = null;
+	#drives: ({ disk: AtrImage; name: string } | null)[] = [null];
 
 	constructor({ model, firmware, audio, audioError }: HostConfig) {
 		// Later firmware of the same key wins; the library is already merged
@@ -160,6 +172,30 @@ export class EmulatorHost {
 			);
 			this.#refreshAudioState();
 		}
+
+		// Keep the status-bar attachment labels in sync with the config — the
+		// 400/800 BASIC slot depends on the model and whether BASIC is enabled.
+		// (Runs immediately, seeding the initial labels.)
+		this.config.subscribe(() => this.#refreshAttachments());
+	}
+
+	// Recompute the status-bar attachment labels from the mounted slots and the
+	// running config. On the 400/800 an enabled BASIC occupies the cartridge
+	// slot (when no cart is mounted) and shows there like any cartridge; on
+	// XL/XE BASIC is internal and isn't shown.
+	#refreshAttachments(): void {
+		const { model, basicDisabled } = this.config.value;
+		// On the 400/800 an enabled BASIC is a real cartridge in the slot, so
+		// show the actual ROM image's name; on XL/XE BASIC is internal and the
+		// slot reflects only a real cartridge.
+		const basic =
+			model === "800" && !basicDisabled
+				? (this.#pick(preferredBasicKeys())?.entry.fileName ?? null)
+				: null;
+		this.attachments.value = {
+			cartridge: this.#cartridge?.name ?? basic,
+			drives: this.#drives.map((drive) => drive?.name ?? null),
+		};
 	}
 
 	/** Run a bound command (from a key binding, the UI, or the palette). */
@@ -196,8 +232,7 @@ export class EmulatorHost {
 	#makeEmulator(): Emulator {
 		const { model, tv, basicDisabled } = this.config.value;
 		const xl = model !== "800";
-		const cartMounted =
-			this.#attachment !== null && "cartridge" in this.#attachment;
+		const cartMounted = this.#cartridge !== null;
 		const includeBasic = xl || (!basicDisabled && !cartMounted);
 
 		const os = this.#pick(preferredOsKeys({ model, tv }));
@@ -220,7 +255,8 @@ export class EmulatorHost {
 			tvSystem: tv,
 			...(basic && { basic: basic.bytes }),
 			...(xl && basicDisabled && { holdOption: true }),
-			...this.#attachment,
+			...(this.#cartridge && { cartridge: this.#cartridge.cart }),
+			...(this.#drives[0] && { disk: this.#drives[0].disk }),
 			...(this.#audio && { audio: this.#audio }),
 		});
 		emulator.setTrace(this.#cpuTrace);
@@ -321,7 +357,25 @@ export class EmulatorHost {
 	}
 
 	pickBootImage(): void {
+		this.#pendingPick = (file) => void this.loadFile(file);
 		this.#bootImagePicker?.();
+	}
+
+	/** Open the file picker to attach a disk to D1: (no reboot). */
+	pickAttachDisk(): void {
+		this.#pendingPick = (file) => void this.attachDiskFile(file);
+		this.#bootImagePicker?.();
+	}
+
+	/** Open the file picker to attach a cartridge (cold boots). */
+	pickAttachCartridge(): void {
+		this.#pendingPick = (file) => void this.attachCartridgeFile(file);
+		this.#bootImagePicker?.();
+	}
+
+	/** The shared picker's callback: route the chosen file per the last pick. */
+	handlePickedFile(file: File): void {
+		this.#pendingPick(file);
 	}
 
 	dismissAlert(): void {
@@ -435,16 +489,19 @@ export class EmulatorHost {
 			return;
 		}
 
-		let attachment: { cartridge: Cartridge } | { disk: AtrImage };
+		// Boot image starts fresh: fill the one slot it boots from and clear the
+		// rest. (Attach, below, instead adds to the running machine in place.)
+		let cartridge: { cart: Cartridge; name: string } | null = null;
+		let disk: { disk: AtrImage; name: string } | null = null;
 		try {
-			attachment =
-				format === "atr"
-					? { disk: new AtrImage(contents) }
-					: format === "xex"
-						? // XEX files boot from a generated in-memory disk whose
-							// boot sectors are the XEX loader.
-							{ disk: buildBootDisk(contents) }
-						: { cartridge: new Cartridge(contents, name) };
+			if (format === "atr") {
+				disk = { disk: new AtrImage(contents), name };
+			} else if (format === "xex") {
+				// XEX boots from a generated in-memory disk (its loader).
+				disk = { disk: buildBootDisk(contents), name };
+			} else {
+				cartridge = { cart: new Cartridge(contents, name), name };
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.alert.value = `${name}: ${message}`;
@@ -452,10 +509,129 @@ export class EmulatorHost {
 		}
 
 		this.sidebar.value = null; // get out of the way
-		this.#attachment = attachment;
-		this.imageName.value = name;
+		this.#cartridge = cartridge;
+		this.#drives = [disk];
 		this.config.value = { ...this.config.value, basicDisabled: true };
+		this.#refreshAttachments();
 		this.#rebuild();
+	}
+
+	/**
+	 * Save the disk mounted in D1: as an `.atr`, including any sectors the
+	 * running machine has written this session (writes live only in memory, so
+	 * this is how you keep them). Writable disks only — the synthetic XEX boot
+	 * disk is write-protected and isn't a real disk worth saving.
+	 */
+	downloadDisk(): void {
+		const drive = this.#drives[0];
+		if (!drive || drive.disk.writeProtected) {
+			this.alert.value = "No writable disk in D1: to download.";
+			return;
+		}
+
+		// Copy into a fresh ArrayBuffer-backed view: a snapshot the Blob owns,
+		// decoupled from later writes to the live image.
+		const blob = new Blob([new Uint8Array(drive.disk.toBytes())], {
+			type: "application/octet-stream",
+		});
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement("a");
+		anchor.href = url;
+		anchor.download = drive.name;
+		anchor.click();
+		URL.revokeObjectURL(url);
+	}
+
+	/**
+	 * Attach an ATR to D1: of the running machine — live, no reboot, BASIC
+	 * untouched (unlike Boot image, which power-cycles into the image). The
+	 * disk also becomes D1: for the next cold start and is what Download D1:
+	 * saves.
+	 */
+	async attachDiskFile(file: File): Promise<void> {
+		const contents = new Uint8Array(await file.arrayBuffer());
+		let disk: AtrImage;
+		try {
+			disk = new AtrImage(contents);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.alert.value = `${file.name}: ${message}`;
+			return;
+		}
+
+		this.#drives[0] = { disk, name: file.name };
+		this.#emulator.machine.insertDisk(disk);
+		this.sidebar.value = null; // get out of the way
+		this.#refreshAttachments();
+	}
+
+	/** Detach the disk from D1: of the running machine (live, no reboot). */
+	detachDisk(): void {
+		if (!this.#drives[0]) {
+			this.alert.value = "No disk in D1: to detach.";
+			return;
+		}
+		this.#drives[0] = null;
+		this.#emulator.machine.ejectDisk();
+		this.#refreshAttachments();
+	}
+
+	/**
+	 * Attach a cartridge and cold boot into it. Unlike Boot image this leaves
+	 * the other media in place (a disk in D1: stays, and the cart's own header
+	 * flags then decide whether the disk also boots). It reboots because a
+	 * cartridge is memory-mapped and only takes effect at reset; the niche
+	 * "stage it without rebooting" can come later.
+	 */
+	async attachCartridgeFile(file: File): Promise<void> {
+		const contents = new Uint8Array(await file.arrayBuffer());
+		const format = detectFileFormat(contents, file.name);
+		const isCartridge =
+			format !== null &&
+			format !== "atr" &&
+			format !== "xex" &&
+			unsupportedMessage(format) === null;
+		if (!isCartridge) {
+			this.alert.value = `${file.name}: not a cartridge image`;
+			return;
+		}
+
+		let cart: Cartridge;
+		try {
+			cart = new Cartridge(contents, file.name);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.alert.value = `${file.name}: ${message}`;
+			return;
+		}
+
+		this.sidebar.value = null; // get out of the way
+		this.#cartridge = { cart, name: file.name };
+		this.#refreshAttachments();
+		this.#rebuild();
+	}
+
+	/**
+	 * Clear the cartridge slot and cold boot (other media stays in place). With
+	 * an explicit cart in it, detach the cart. Otherwise, only on the 400/800
+	 * where an enabled BASIC fills the slot, disable BASIC instead (it reboots
+	 * too) — what the user means by "detach." Anything else (XL/XE, or the slot
+	 * already empty) has nothing to remove, so it reports that. (A confirmation
+	 * step can come later.)
+	 */
+	detachCartridge(): void {
+		if (this.#cartridge) {
+			this.#cartridge = null;
+			this.#refreshAttachments();
+			this.#rebuild();
+			return;
+		}
+		const { model, basicDisabled } = this.config.value;
+		if (model === "800" && !basicDisabled) {
+			this.applyBasicDisabled(true);
+			return;
+		}
+		this.alert.value = "No cartridge to detach.";
 	}
 
 	/**

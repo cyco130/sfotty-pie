@@ -236,13 +236,13 @@ function ViewToggle({
  */
 export function Osd({ host }: { host: EmulatorHost }) {
 	const coarse = useCoarsePointer();
-	const menuOpen = host.menuOpen.value;
+	const panelOpen = host.sidebar.value !== null;
 	const [lefty, setLefty] = useState(
 		() => localStorage.getItem(LEFTY_KEY) === "1",
 	);
 	const [view, setView] = useState<OsdView>("stick");
 
-	if (!coarse || menuOpen) return null;
+	if (!coarse || panelOpen) return null;
 
 	const fire = <TriggerButton host={host} />;
 	const stick = <JoystickStick host={host} />;

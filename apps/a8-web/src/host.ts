@@ -41,6 +41,12 @@ export interface HostConfig {
  */
 export type AudioState = "unavailable" | "suspended" | "on" | "muted";
 
+/**
+ * The sidebar's content when open. Stable string ids so the state stays
+ * serializable (a future deep-link layer can map these straight to the URL).
+ */
+export type SidebarPanel = "menu" | "palette";
+
 /** The user-facing machine configuration the menu edits. */
 export interface MachineSettings {
 	model: AtariModel;
@@ -113,8 +119,13 @@ export class EmulatorHost {
 	/** Whether turbo mode (unthrottled, muted) is engaged. */
 	readonly turboMode = signal(false);
 
-	/** Whether the menu sidebar is open. */
-	readonly menuOpen = signal(false);
+	/**
+	 * Which sidebar panel is showing, or null when closed. The sidebar is a
+	 * single docked surface that hosts the menu, the command palette, and (in
+	 * future) other dialogs — one at a time, always pushing the screen aside
+	 * rather than covering it.
+	 */
+	readonly sidebar = signal<SidebarPanel | null>(null);
 
 	// Identified firmware, indexed by key for ranked selection.
 	readonly #firmware: Map<FirmwareKey, LoadedFirmware>;
@@ -153,7 +164,7 @@ export class EmulatorHost {
 
 	/** Run a bound command (from a key binding, the UI, or the palette). */
 	dispatch(command: Command): void {
-		commands[command]({ emulator: this.#emulator, host: this });
+		commands[command].run({ emulator: this.#emulator, host: this });
 	}
 
 	/**
@@ -317,23 +328,26 @@ export class EmulatorHost {
 		this.alert.value = null;
 	}
 
-	openMenu(): void {
-		this.staged.value = this.config.peek(); // start from the running config
-		this.menuOpen.value = true;
+	/** Show a sidebar panel (switching directly if another is already open). */
+	showPanel(panel: SidebarPanel): void {
+		if (panel === "menu") this.staged.value = this.config.peek(); // from running config
+		this.sidebar.value = panel;
 	}
 
-	closeMenu(): void {
-		this.menuOpen.value = false;
+	closePanel(): void {
+		this.sidebar.value = null;
 		this.#keyInput?.focus(); // return keystrokes to the emulator
 	}
 
-	toggleMenu(): void {
-		if (this.menuOpen.value) this.closeMenu();
-		else this.openMenu();
+	/** A panel's trigger: open it, or close it if it's already the one showing. */
+	togglePanel(panel: SidebarPanel): void {
+		if (this.sidebar.value === panel) this.closePanel();
+		else this.showPanel(panel);
 	}
 
-	// Machine configuration: the menu stages changes, then applies them with
-	// a single reboot.
+	// Machine configuration. The menu's form stages changes (below) and applies
+	// them with a single reboot; the palette's config commands apply one change
+	// and reboot immediately (apply*, below that).
 	stageModel(model: AtariModel): void {
 		this.staged.value = { ...this.staged.value, model };
 	}
@@ -351,12 +365,39 @@ export class EmulatorHost {
 		if (!this.dirty.value) return;
 		this.config.value = this.staged.value;
 		this.#rebuild();
-		this.closeMenu();
+		this.closePanel();
 	}
 
-	/** Discard staged edits, snapping back to the running config. */
-	revertConfig(): void {
-		this.staged.value = this.config.peek();
+	// Apply a single config change to the running machine and reboot into it —
+	// the palette's "… (reboots)" commands. A no-op change is ignored so it
+	// doesn't cost a pointless cold boot. The staged copy follows so the menu
+	// opens clean.
+	#applyConfigChange(change: Partial<MachineSettings>): void {
+		const next = { ...this.config.value, ...change };
+		if (settingsEqual(next, this.config.value)) return;
+		this.config.value = next;
+		this.staged.value = next;
+		this.#rebuild();
+	}
+
+	applyModel(model: AtariModel): void {
+		this.#applyConfigChange({ model });
+	}
+
+	applyTv(tv: "ntsc" | "pal"): void {
+		this.#applyConfigChange({ tv });
+	}
+
+	toggleTv(): void {
+		this.applyTv(this.config.value.tv === "ntsc" ? "pal" : "ntsc");
+	}
+
+	applyBasicDisabled(basicDisabled: boolean): void {
+		this.#applyConfigChange({ basicDisabled });
+	}
+
+	toggleBasic(): void {
+		this.applyBasicDisabled(!this.config.value.basicDisabled);
 	}
 
 	#refreshAudioState(): void {
@@ -410,7 +451,7 @@ export class EmulatorHost {
 			return;
 		}
 
-		this.menuOpen.value = false; // get out of the way
+		this.sidebar.value = null; // get out of the way
 		this.#attachment = attachment;
 		this.imageName.value = name;
 		this.config.value = { ...this.config.value, basicDisabled: true };
@@ -520,8 +561,10 @@ export class EmulatorHost {
 		input.focus();
 
 		const refocus = (event: PointerEvent) => {
-			// Let toolbar buttons take their own clicks.
-			if ((event.target as HTMLElement).closest("button")) return;
+			// Let toolbar buttons and the sidebar (which has its own focusable
+			// input) take their own clicks; only steal focus back from clicks on
+			// the screen/letterbox so keystrokes return to the emulator.
+			if ((event.target as HTMLElement).closest("button, aside")) return;
 			event.preventDefault();
 			input.focus();
 		};

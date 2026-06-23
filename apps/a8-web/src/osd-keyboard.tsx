@@ -139,7 +139,7 @@ const SYM_ROWS: Key[][] = [
 		{ t: "char", base: "ASTERISK", label: "*", shiftLabel: "^" },
 		{ t: "char", base: "SLASH", label: "/" },
 		{ t: "char", base: "COMMA", label: ",", shiftLabel: "[" },
-		{ t: "char", base: "FULL_STOP", label: ".", shiftLabel: "]" },
+		{ t: "char", base: "PERIOD", label: ".", shiftLabel: "]" },
 		{ t: "lit", cmd: "PRESS_SHIFT_SLASH", label: "?" },
 		BACKSPACE,
 	],

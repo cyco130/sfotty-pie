@@ -18,13 +18,13 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 	const running = host.running.value;
 	const turboMode = host.turboMode.value;
 	const fps = host.fps.value;
-	const menuOpen = host.menuOpen.value;
+	const panelOpen = host.sidebar.value !== null;
 
 	// The compact font keeps the bar from wrapping on narrow viewports. It
 	// normally relaxes to full size at `sm` (640px), but an open sidebar steals
-	// ~18rem, so while it's open we hold the compact size until `lg` (1024px) —
+	// ~1/4 of the width, so while it's open we hold compact until `lg` (1024px) —
 	// otherwise the bar crowds on a landscape phone.
-	const density = menuOpen
+	const density = panelOpen
 		? "lg:gap-4 lg:px-3 lg:text-base"
 		: "sm:gap-4 sm:px-3 sm:text-base";
 
@@ -43,7 +43,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 			<button
 				type="button"
 				class="text-neutral-300 hover:text-white"
-				onClick={() => host.dispatch("MENU_OPEN")}
+				onClick={() => host.showPanel("menu")}
 			>
 				{config.model} · {config.tv.toUpperCase()}
 			</button>

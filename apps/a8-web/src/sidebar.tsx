@@ -1,4 +1,4 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import type { EmulatorHost } from "./host.ts";
 import { builtinLibrary } from "./library.ts";
 import { PaletteView } from "./palette.tsx";
@@ -72,7 +72,13 @@ function KeyRow({ keys, action }: { keys: string; action: string }) {
  * The menu panel: machine configuration (staged, applied with a reboot), the
  * boot-image action, the software library, and a short key-mappings reference.
  */
-function MenuView({ host }: { host: EmulatorHost }) {
+function MenuView({
+	host,
+	onOpenPalette,
+}: {
+	host: EmulatorHost;
+	onOpenPalette: () => void;
+}) {
 	const staged = host.staged.value;
 	const dirty = host.dirty.value;
 
@@ -153,7 +159,7 @@ function MenuView({ host }: { host: EmulatorHost }) {
 					<button
 						type="button"
 						class="text-left text-sm hover:underline"
-						onClick={() => host.showPanel("palette")}
+						onClick={onOpenPalette}
 					>
 						Command palette…
 					</button>
@@ -252,6 +258,17 @@ const TITLES = { menu: "Sfotty Pie A8 Web", palette: "Commands" } as const;
  */
 export function Sidebar({ host }: { host: EmulatorHost }) {
 	const panel = host.sidebar.value;
+	const primerRef = useRef<HTMLInputElement>(null);
+
+	// Opening the palette from a tap: focus a throwaway input *synchronously*
+	// within the gesture so iOS Safari raises the soft keyboard (it only does so
+	// for in-gesture focus, never from the post-render effect). PaletteView then
+	// moves focus to its real search box on mount — a transfer between text
+	// inputs keeps the already-shown keyboard up.
+	const openPalette = () => {
+		primerRef.current?.focus();
+		host.showPanel("palette");
+	};
 
 	// The global palette chord. Capture phase + stopImmediatePropagation so it
 	// preempts both the browser and the emulator's offscreen-input handler.
@@ -297,10 +314,23 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 			</div>
 
 			{panel === "menu" ? (
-				<MenuView host={host} />
+				<MenuView host={host} onOpenPalette={openPalette} />
 			) : (
 				<PaletteView host={host} />
 			)}
+
+			{/* Off-screen primer (see openPalette): kept mounted so a tap can
+			    focus it within the gesture and raise the iOS soft keyboard. */}
+			<input
+				ref={primerRef}
+				type="text"
+				aria-hidden="true"
+				tabIndex={-1}
+				autocomplete="off"
+				autocapitalize="off"
+				spellcheck={false}
+				class="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
+			/>
 		</aside>
 	);
 }

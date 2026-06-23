@@ -136,6 +136,8 @@ export class EmulatorHost {
 	#emulator: Emulator;
 	#keyInput: HTMLInputElement | null = null;
 	#bootImagePicker: (() => void) | null = null;
+	// What to do with the next file the shared picker yields (boot vs. insert).
+	#pendingPick: (file: File) => void = (file) => void this.loadFile(file);
 	#cpuTrace = false; // persists across reboots; reapplied to each emulator
 	#turboMode = false; // persists across reboots; reapplied to each emulator
 	// The currently mounted image (kept across reboots; replaced by a Load).
@@ -321,7 +323,19 @@ export class EmulatorHost {
 	}
 
 	pickBootImage(): void {
+		this.#pendingPick = (file) => void this.loadFile(file);
 		this.#bootImagePicker?.();
+	}
+
+	/** Open the file picker to insert a disk into D1: (no reboot). */
+	pickInsertDisk(): void {
+		this.#pendingPick = (file) => void this.insertDiskFile(file);
+		this.#bootImagePicker?.();
+	}
+
+	/** The shared picker's callback: route the chosen file per the last pick. */
+	handlePickedFile(file: File): void {
+		this.#pendingPick(file);
 	}
 
 	dismissAlert(): void {
@@ -456,6 +470,72 @@ export class EmulatorHost {
 		this.imageName.value = name;
 		this.config.value = { ...this.config.value, basicDisabled: true };
 		this.#rebuild();
+	}
+
+	/**
+	 * Save the disk mounted in D1: as an `.atr`, including any sectors the
+	 * running machine has written this session (writes live only in memory, so
+	 * this is how you keep them). Writable disks only — the synthetic XEX boot
+	 * disk is write-protected and isn't a real disk worth saving.
+	 */
+	downloadDisk(): void {
+		const attachment = this.#attachment;
+		if (
+			!attachment ||
+			!("disk" in attachment) ||
+			attachment.disk.writeProtected
+		) {
+			this.alert.value = "No writable disk in D1: to download.";
+			return;
+		}
+
+		// Copy into a fresh ArrayBuffer-backed view: a snapshot the Blob owns,
+		// decoupled from later writes to the live image.
+		const blob = new Blob([new Uint8Array(attachment.disk.toBytes())], {
+			type: "application/octet-stream",
+		});
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement("a");
+		anchor.href = url;
+		anchor.download = this.imageName.value ?? "disk.atr";
+		anchor.click();
+		URL.revokeObjectURL(url);
+	}
+
+	/**
+	 * Insert an ATR into D1: of the running machine — live, no reboot, BASIC
+	 * untouched (unlike Boot image, which power-cycles into the image). The
+	 * disk also becomes D1: for the next cold start and is what Download D1:
+	 * saves. (Single attachment slot for now: this replaces any mounted
+	 * cartridge in the persisted set, though the running machine keeps it
+	 * until the next reboot.)
+	 */
+	async insertDiskFile(file: File): Promise<void> {
+		const contents = new Uint8Array(await file.arrayBuffer());
+		let disk: AtrImage;
+		try {
+			disk = new AtrImage(contents);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.alert.value = `${file.name}: ${message}`;
+			return;
+		}
+
+		this.#attachment = { disk };
+		this.imageName.value = file.name;
+		this.#emulator.machine.insertDisk(disk);
+		this.sidebar.value = null; // get out of the way
+	}
+
+	/** Remove the disk from D1: of the running machine (live, no reboot). */
+	removeDisk(): void {
+		if (!this.#attachment || !("disk" in this.#attachment)) {
+			this.alert.value = "No disk in D1: to remove.";
+			return;
+		}
+		this.#attachment = null;
+		this.imageName.value = null;
+		this.#emulator.machine.ejectDisk();
 	}
 
 	/**

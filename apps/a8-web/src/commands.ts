@@ -68,6 +68,13 @@ export const commands = {
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: { label: "BOOT_IMAGE", run: ({ host }) => host.pickBootImage() },
 
+	// Insert a disk into D1: of the running machine (no reboot, BASIC kept).
+	INSERT_D1: { label: "INSERT_D1", run: ({ host }) => host.pickInsertDisk() },
+	// Remove the disk from D1: (live).
+	REMOVE_D1: { label: "REMOVE_D1", run: ({ host }) => host.removeDisk() },
+	// Save the D1: disk (with any in-session writes) to a file.
+	DOWNLOAD_D1: { label: "DOWNLOAD_D1", run: ({ host }) => host.downloadDisk() },
+
 	// Machine configuration. Each applies the change and reboots into it
 	// immediately. (The menu's config form does its own stage/apply instead, so
 	// the palette stays a one-shot surface.)
@@ -520,6 +527,9 @@ export const labels = {
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
 	MENU_TOGGLE: "Toggle the menu",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
+	INSERT_D1: "Insert a disk into D1: (no reboot)…",
+	REMOVE_D1: "Remove the disk from D1:",
+	DOWNLOAD_D1: "Download the D1: disk image…",
 	SET_TYPE_800: "Set machine type to Atari 800 (reboots)",
 	SET_TYPE_800XL: "Set machine type to Atari 800XL (reboots)",
 	SET_TYPE_130XE: "Set machine type to Atari 130XE (reboots)",

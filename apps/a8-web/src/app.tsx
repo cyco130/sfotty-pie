@@ -81,7 +81,8 @@ export function App({ host }: { host: EmulatorHost }) {
 
 			<Alert host={host} />
 
-			{/* Hidden picker behind the "Boot image…" menu action. */}
+			{/* Hidden picker shared by the boot-image and insert-disk actions;
+			    the host routes the chosen file per the action that opened it. */}
 			<input
 				ref={fileInput}
 				type="file"
@@ -90,7 +91,7 @@ export function App({ host }: { host: EmulatorHost }) {
 				onChange={(event) => {
 					const picker = event.currentTarget;
 					const file = picker.files?.[0];
-					if (file) void host.loadFile(file);
+					if (file) host.handlePickedFile(file);
 					picker.value = ""; // re-picking the same file fires again
 				}}
 			/>

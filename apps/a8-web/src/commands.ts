@@ -72,6 +72,15 @@ export const commands = {
 	ATTACH_D1: { label: "ATTACH_D1", run: ({ host }) => host.pickAttachDisk() },
 	// Detach the disk from D1: (live).
 	DETACH_D1: { label: "DETACH_D1", run: ({ host }) => host.detachDisk() },
+	// Attach/detach a cartridge (cold boots; leaves other media in place).
+	ATTACH_CARTRIDGE: {
+		label: "ATTACH_CARTRIDGE",
+		run: ({ host }) => host.pickAttachCartridge(),
+	},
+	DETACH_CARTRIDGE: {
+		label: "DETACH_CARTRIDGE",
+		run: ({ host }) => host.detachCartridge(),
+	},
 	// Save the D1: disk (with any in-session writes) to a file.
 	DOWNLOAD_D1: { label: "DOWNLOAD_D1", run: ({ host }) => host.downloadDisk() },
 
@@ -529,6 +538,8 @@ export const labels = {
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Attach a disk to D1:…",
 	DETACH_D1: "Detach the disk from D1:",
+	ATTACH_CARTRIDGE: "Attach a cartridge… (reboots)",
+	DETACH_CARTRIDGE: "Detach the cartridge (reboots)",
 	DOWNLOAD_D1: "Download the D1: disk image…",
 	SET_TYPE_800: "Set machine type to Atari 800 (reboots)",
 	SET_TYPE_800XL: "Set machine type to Atari 800XL (reboots)",

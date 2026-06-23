@@ -185,9 +185,15 @@ export class EmulatorHost {
 	// XL/XE BASIC is internal and isn't shown.
 	#refreshAttachments(): void {
 		const { model, basicDisabled } = this.config.value;
-		const basicInSlot = model === "800" && !basicDisabled;
+		// On the 400/800 an enabled BASIC is a real cartridge in the slot, so
+		// show the actual ROM image's name; on XL/XE BASIC is internal and the
+		// slot reflects only a real cartridge.
+		const basic =
+			model === "800" && !basicDisabled
+				? (this.#pick(preferredBasicKeys())?.entry.fileName ?? null)
+				: null;
 		this.attachments.value = {
-			cartridge: this.#cartridge?.name ?? (basicInSlot ? "BASIC" : null),
+			cartridge: this.#cartridge?.name ?? basic,
 			drives: this.#drives.map((drive) => drive?.name ?? null),
 		};
 	}
@@ -358,6 +364,12 @@ export class EmulatorHost {
 	/** Open the file picker to attach a disk to D1: (no reboot). */
 	pickAttachDisk(): void {
 		this.#pendingPick = (file) => void this.attachDiskFile(file);
+		this.#bootImagePicker?.();
+	}
+
+	/** Open the file picker to attach a cartridge (cold boots). */
+	pickAttachCartridge(): void {
+		this.#pendingPick = (file) => void this.attachCartridgeFile(file);
 		this.#bootImagePicker?.();
 	}
 
@@ -562,6 +574,64 @@ export class EmulatorHost {
 		this.#drives[0] = null;
 		this.#emulator.machine.ejectDisk();
 		this.#refreshAttachments();
+	}
+
+	/**
+	 * Attach a cartridge and cold boot into it. Unlike Boot image this leaves
+	 * the other media in place (a disk in D1: stays, and the cart's own header
+	 * flags then decide whether the disk also boots). It reboots because a
+	 * cartridge is memory-mapped and only takes effect at reset; the niche
+	 * "stage it without rebooting" can come later.
+	 */
+	async attachCartridgeFile(file: File): Promise<void> {
+		const contents = new Uint8Array(await file.arrayBuffer());
+		const format = detectFileFormat(contents, file.name);
+		const isCartridge =
+			format !== null &&
+			format !== "atr" &&
+			format !== "xex" &&
+			unsupportedMessage(format) === null;
+		if (!isCartridge) {
+			this.alert.value = `${file.name}: not a cartridge image`;
+			return;
+		}
+
+		let cart: Cartridge;
+		try {
+			cart = new Cartridge(contents, file.name);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.alert.value = `${file.name}: ${message}`;
+			return;
+		}
+
+		this.sidebar.value = null; // get out of the way
+		this.#cartridge = { cart, name: file.name };
+		this.#refreshAttachments();
+		this.#rebuild();
+	}
+
+	/**
+	 * Clear the cartridge slot and cold boot (other media stays in place). With
+	 * an explicit cart in it, detach the cart. Otherwise, only on the 400/800
+	 * where an enabled BASIC fills the slot, disable BASIC instead (it reboots
+	 * too) — what the user means by "detach." Anything else (XL/XE, or the slot
+	 * already empty) has nothing to remove, so it reports that. (A confirmation
+	 * step can come later.)
+	 */
+	detachCartridge(): void {
+		if (this.#cartridge) {
+			this.#cartridge = null;
+			this.#refreshAttachments();
+			this.#rebuild();
+			return;
+		}
+		const { model, basicDisabled } = this.config.value;
+		if (model === "800" && !basicDisabled) {
+			this.applyBasicDisabled(true);
+			return;
+		}
+		this.alert.value = "No cartridge to detach.";
 	}
 
 	/**

@@ -1,22 +1,7 @@
 import type { ComponentChild } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { type Command, descriptions, paletteCommands } from "./commands.ts";
+import { type Command, labelOf, paletteCommands } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
-
-/**
- * The chord that toggles the palette: Cmd+K on macOS, Alt+K elsewhere. Keyed
- * by physical position (`KeyK`) so it's layout-independent, and rejecting
- * AltGraph (which reports as Ctrl+Alt on Windows) so it stays character input.
- * Alt+K is otherwise the emulator's Mod-layer `K`, a no-op stub today.
- */
-function isToggleChord(event: KeyboardEvent): boolean {
-	if (event.code !== "KeyK") return false;
-	if (event.getModifierState("AltGraph")) return false;
-	const isMac = navigator.userAgent.includes("Mac");
-	return isMac
-		? event.metaKey && !event.ctrlKey && !event.altKey
-		: event.altKey && !event.ctrlKey && !event.metaKey;
-}
 
 interface FuzzyMatch {
 	score: number;
@@ -134,7 +119,7 @@ function highlight(text: string, positions: number[]): ComponentChild {
 		if (!buf) return;
 		parts.push(
 			bufMatched ? (
-				<strong class="font-semibold text-white">{buf}</strong>
+				<strong class="font-semibold text-black">{buf}</strong>
 			) : (
 				buf
 			),
@@ -159,45 +144,28 @@ interface Result {
 }
 
 /**
- * A VSCode-style command palette over the application verbs. The same
- * {@link EmulatorHost.dispatch} the toolbar and key bindings use, so every
- * surface drives one set of commands. Opening moves focus here, which naturally
- * stops keystrokes reaching the emulator; closing hands focus back.
+ * The command palette as a sidebar panel: a fuzzy-filtered list over the
+ * application verbs. The same {@link EmulatorHost.dispatch} the toolbar and key
+ * bindings use, so every surface drives one set of commands. Mounted only while
+ * showing, so it focuses its search box on mount; the container handles Esc.
  */
-export function Palette({ host }: { host: EmulatorHost }) {
-	const open = host.paletteOpen.value;
+export function PaletteView({ host }: { host: EmulatorHost }) {
 	const [query, setQuery] = useState("");
 	const [selected, setSelected] = useState(0);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const selectedRef = useRef<HTMLLIElement>(null);
 
-	// The global toggle chord. Capture phase + stopImmediatePropagation so it
-	// preempts both the browser and the emulator's offscreen-input handler.
+	// Focus the search box when the panel opens.
 	useEffect(() => {
-		const onKey = (event: KeyboardEvent) => {
-			if (!isToggleChord(event)) return;
-			event.preventDefault();
-			event.stopImmediatePropagation();
-			host.togglePalette();
-		};
-		window.addEventListener("keydown", onKey, true);
-		return () => window.removeEventListener("keydown", onKey, true);
-	}, [host]);
-
-	// Reset and focus the search box each time the palette opens.
-	useEffect(() => {
-		if (!open) return;
-		setQuery("");
-		setSelected(0);
 		inputRef.current?.focus();
-	}, [open]);
+	}, []);
 
 	const trimmed = query.trim();
 	const results: Result[] = trimmed
 		? paletteCommands
 				.map((command) => ({
 					command,
-					match: matchCommand(trimmed, descriptions[command]),
+					match: matchCommand(trimmed, labelOf(command)),
 				}))
 				.filter(
 					(entry): entry is { command: Command; match: FuzzyMatch } =>
@@ -206,7 +174,7 @@ export function Palette({ host }: { host: EmulatorHost }) {
 				.sort(
 					(a, b) =>
 						b.match.score - a.match.score ||
-						descriptions[a.command].length - descriptions[b.command].length,
+						labelOf(a.command).length - labelOf(b.command).length,
 				)
 				.map(({ command, match }) => ({ command, positions: match.positions }))
 		: paletteCommands.map((command) => ({ command, positions: [] }));
@@ -217,12 +185,10 @@ export function Palette({ host }: { host: EmulatorHost }) {
 		selectedRef.current?.scrollIntoView({ block: "nearest" });
 	}, [active]);
 
-	if (!open) return null;
-
 	const run = (command: Command | undefined) => {
 		if (!command) return;
 		host.dispatch(command);
-		host.closePalette();
+		host.closePanel();
 	};
 
 	const onKeyDown = (event: KeyboardEvent) => {
@@ -239,62 +205,48 @@ export function Palette({ host }: { host: EmulatorHost }) {
 				event.preventDefault();
 				run(results[active]?.command);
 				break;
-			case "Escape":
-				event.preventDefault();
-				host.closePalette();
-				break;
 		}
 	};
 
 	return (
-		<div
-			class="fixed inset-0 z-30 flex items-start justify-center bg-black/50 p-4 pt-[12vh]"
-			onClick={() => host.closePalette()}
-		>
-			<div
-				class="flex w-full max-w-lg flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-neutral-200 shadow-2xl"
-				onClick={(event) => event.stopPropagation()}
-			>
-				<div class="border-b border-neutral-700 px-3 py-2">
-					<input
-						ref={inputRef}
-						type="text"
-						placeholder="Type a command…"
-						value={query}
-						autocapitalize="off"
-						autocomplete="off"
-						spellcheck={false}
-						class="w-full bg-transparent text-sm text-neutral-100 placeholder-neutral-500 outline-none"
-						onInput={(event) => {
-							setQuery(event.currentTarget.value);
-							setSelected(0);
-						}}
-						onKeyDown={onKeyDown}
-					/>
-				</div>
+		<div class="flex min-h-0 flex-1 flex-col">
+			<input
+				ref={inputRef}
+				type="text"
+				placeholder="Type a command…"
+				value={query}
+				autocapitalize="off"
+				autocomplete="off"
+				spellcheck={false}
+				class="shrink-0 rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+				onInput={(event) => {
+					setQuery(event.currentTarget.value);
+					setSelected(0);
+				}}
+				onKeyDown={onKeyDown}
+			/>
 
-				{results.length === 0 ? (
-					<div class="px-3 py-4 text-sm text-neutral-500">No commands</div>
-				) : (
-					<ul class="max-h-[50vh] overflow-y-auto py-1">
-						{results.map(({ command, positions }, index) => (
-							<li
-								key={command}
-								ref={index === active ? selectedRef : null}
-								class={`cursor-pointer px-3 py-1.5 text-sm ${
-									index === active
-										? "bg-neutral-700/70 text-neutral-100"
-										: "text-neutral-300"
-								}`}
-								onMouseMove={() => setSelected(index)}
-								onClick={() => run(command)}
-							>
-								{highlight(descriptions[command], positions)}
-							</li>
-						))}
-					</ul>
-				)}
-			</div>
+			{results.length === 0 ? (
+				<div class="py-4 text-sm text-neutral-500">No commands</div>
+			) : (
+				<ul class="mt-2 min-h-0 flex-1 overflow-y-auto">
+					{results.map(({ command, positions }, index) => (
+						<li
+							key={command}
+							ref={index === active ? selectedRef : null}
+							class={`cursor-pointer rounded px-2 py-1.5 text-sm ${
+								index === active
+									? "bg-neutral-200 text-neutral-900"
+									: "text-neutral-700"
+							}`}
+							onMouseMove={() => setSelected(index)}
+							onClick={() => run(command)}
+						>
+							{highlight(labelOf(command), positions)}
+						</li>
+					))}
+				</ul>
+			)}
 		</div>
 	);
 }

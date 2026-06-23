@@ -298,7 +298,7 @@ export class Keyboard {
 				this.#pressComposed(event, "GREATER_THAN", !shift, shift);
 				return;
 			case "D":
-				this.#pressComposed(event, "FULL_STOP", true, shift); // Diamond
+				this.#pressComposed(event, "PERIOD", true, shift); // Diamond
 				return;
 			case "E":
 				this.#pressComposed(event, "SEMICOLON", true, shift); // Spade
@@ -436,7 +436,7 @@ const DEFAULT_LAYOUT_AWARE_MAPPINGS: Record<string, Command> = {
 	"+": "PRESS_PLUS",
 	",": "PRESS_COMMA",
 	"-": "PRESS_MINUS",
-	".": "PRESS_FULL_STOP",
+	".": "PRESS_PERIOD",
 	"/": "PRESS_SLASH",
 	"0": "PRESS_0",
 	"1": "PRESS_1",
@@ -483,7 +483,7 @@ const DEFAULT_LAYOUT_AWARE_MAPPINGS: Record<string, Command> = {
 	Z: "PRESS_Z",
 	"[": "PRESS_SHIFT_COMMA",
 	"\\": "PRESS_SHIFT_PLUS",
-	"]": "PRESS_SHIFT_FULL_STOP",
+	"]": "PRESS_SHIFT_PERIOD",
 	"^": "PRESS_SHIFT_ASTERISK",
 	_: "PRESS_SHIFT_MINUS",
 	a: "PRESS_A",
@@ -639,8 +639,8 @@ const DEFAULT_LAYOUT_AWARE_MAPPINGS: Record<string, Command> = {
 	"Control+,": "PRESS_CONTROL_COMMA",
 	"Control+[": "PRESS_CONTROL_COMMA",
 
-	"Control+.": "PRESS_CONTROL_FULL_STOP",
-	"Control+]": "PRESS_CONTROL_FULL_STOP",
+	"Control+.": "PRESS_CONTROL_PERIOD",
+	"Control+]": "PRESS_CONTROL_PERIOD",
 
 	"Control+/": "PRESS_CONTROL_SLASH",
 	"Control+?": "PRESS_CONTROL_SLASH",

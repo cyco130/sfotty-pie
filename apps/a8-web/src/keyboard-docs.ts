@@ -187,8 +187,8 @@ export const FUNCTIONS = {
 	},
 	"0x0e": {
 		code: 0x0e, // 14
-		glyph: "▂",
-		name: "LOWER ONE QUARTER BLOCK",
+		glyph: "▁",
+		name: "LOWER ONE EIGHTH BLOCK",
 		replacesAscii: "SO (Shift Out)",
 		altGlyph: {
 			glyph: "ó",
@@ -267,8 +267,8 @@ export const FUNCTIONS = {
 	},
 	"0x16": {
 		code: 0x16, // 22
-		glyph: "▎",
-		name: "LEFT ONE QUARTER BLOCK",
+		glyph: "▏",
+		name: "LEFT ONE EIGHTH BLOCK",
 		replacesAscii: "SYN (Synchronous Idle)",
 		altGlyph: {
 			glyph: "ñ",

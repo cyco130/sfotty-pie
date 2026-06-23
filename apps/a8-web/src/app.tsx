@@ -4,7 +4,6 @@ import { Alert } from "./alert.tsx";
 import { BottomBar } from "./bottom-bar.tsx";
 import type { EmulatorHost } from "./host.ts";
 import { Osd } from "./osd.tsx";
-import { Palette } from "./palette.tsx";
 import { Sidebar } from "./sidebar.tsx";
 import { TopBar } from "./top-bar.tsx";
 
@@ -81,8 +80,6 @@ export function App({ host }: { host: EmulatorHost }) {
 			</div>
 
 			<Alert host={host} />
-
-			<Palette host={host} />
 
 			{/* Hidden picker behind the "Boot image…" menu action. */}
 			<input

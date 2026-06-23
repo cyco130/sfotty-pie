@@ -2,6 +2,7 @@ import type { ComponentChild } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { type Command, labelOf, paletteCommands } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
+import { messages } from "./messages.ts";
 
 interface FuzzyMatch {
 	score: number;
@@ -213,7 +214,7 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 			<input
 				ref={inputRef}
 				type="text"
-				placeholder="Type a command…"
+				placeholder={messages.palette.placeholder}
 				value={query}
 				autocapitalize="off"
 				autocomplete="off"
@@ -227,7 +228,9 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 			/>
 
 			{results.length === 0 ? (
-				<div class="py-4 text-sm text-neutral-500">No commands</div>
+				<div class="py-4 text-sm text-neutral-500">
+					{messages.palette.noCommands}
+				</div>
 			) : (
 				<ul class="mt-2 min-h-0 flex-1 overflow-y-auto">
 					{results.map(({ command, positions }, index) => (

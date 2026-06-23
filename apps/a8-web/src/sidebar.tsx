@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "preact/hooks";
 import type { EmulatorHost } from "./host.ts";
 import { builtinLibrary } from "./library.ts";
+import { messages } from "./messages.ts";
 import { PaletteView } from "./palette.tsx";
 
 // The bootable software in the library (the firmware/ items are auto-selected
@@ -86,11 +87,11 @@ function MenuView({
 		<div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
 			<section>
 				<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-					Machine
+					{messages.sidebar.machine}
 				</h2>
 				<div class="flex flex-col gap-2">
 					<Segmented
-						label="Type"
+						label={messages.sidebar.type}
 						value={staged.model}
 						options={[
 							{
@@ -111,7 +112,7 @@ function MenuView({
 						]}
 					/>
 					<Segmented
-						label="TV"
+						label={messages.sidebar.tv}
 						value={staged.tv}
 						options={[
 							{
@@ -127,17 +128,17 @@ function MenuView({
 						]}
 					/>
 					<Segmented
-						label="BASIC"
+						label={messages.sidebar.basic}
 						value={staged.basicDisabled ? "off" : "on"}
 						options={[
 							{
 								value: "on",
-								label: "On",
+								label: messages.sidebar.on,
 								onSelect: () => host.stageBasicDisabled(false),
 							},
 							{
 								value: "off",
-								label: "Off",
+								label: messages.sidebar.off,
 								onSelect: () => host.stageBasicDisabled(true),
 							},
 						]}
@@ -149,7 +150,7 @@ function MenuView({
 						class="mt-3 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-white hover:bg-neutral-700"
 						onClick={() => host.applyConfig()}
 					>
-						Reboot to apply
+						{messages.sidebar.rebootToApply}
 					</button>
 				)}
 			</section>
@@ -161,7 +162,7 @@ function MenuView({
 						class="text-left text-sm hover:underline"
 						onClick={onOpenPalette}
 					>
-						Command palette…
+						{messages.sidebar.commandPalette}
 					</button>
 					<span class="any-pointer-fine:block hidden text-xs text-neutral-400">
 						{onMac() ? "⌘K" : "Alt+K"}
@@ -172,14 +173,14 @@ function MenuView({
 					class="text-left text-sm hover:underline"
 					onClick={() => host.dispatch("BOOT_IMAGE")}
 				>
-					Boot image…
+					{messages.sidebar.bootImage}
 				</button>
 			</section>
 
 			{software.length > 0 && (
 				<section>
 					<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-						Software
+						{messages.sidebar.software}
 					</h2>
 					<ul class="flex flex-col gap-1">
 						{software.map((entry) => (
@@ -203,43 +204,57 @@ function MenuView({
 			    which travels with a keyboard) stays false on touch-only. */}
 			<section class="hidden any-pointer-fine:block">
 				<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-					Keys
+					{messages.sidebar.keys}
 				</h2>
 				<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-					<KeyRow keys="Arrow keys" action="Joystick" />
-					<KeyRow keys="Left Shift" action="Trigger" />
-					<KeyRow keys="F2 / F3 / F4" action="Option / Select / Start" />
-					<KeyRow keys="F5" action="Reset (Ctrl: cold reset)" />
-					<KeyRow keys="F9" action="Break" />
+					<KeyRow
+						keys={messages.keyHelp.arrowKeys}
+						action={messages.keyHelp.joystick}
+					/>
+					<KeyRow
+						keys={messages.keyHelp.leftShift}
+						action={messages.keyHelp.trigger}
+					/>
+					<KeyRow
+						keys={messages.keyHelp.consoleKeys}
+						action={messages.keyHelp.consoleActions}
+					/>
+					<KeyRow
+						keys={messages.keyHelp.resetKey}
+						action={messages.keyHelp.resetAction}
+					/>
+					<KeyRow
+						keys={messages.keyHelp.breakKey}
+						action={messages.keyHelp.breakAction}
+					/>
 				</dl>
 			</section>
 
 			<section>
 				<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-					About
+					{messages.sidebar.about}
 				</h2>
 				<p class="text-sm text-neutral-600">
-					Sfotty Pie A8 Web — an Atari 8-bit emulator. MIT-licensed.{" "}
+					{messages.sidebar.aboutBlurb}{" "}
 					<a
 						class="text-neutral-800 underline hover:text-black"
 						href="https://github.com/cyco130/sfotty-pie"
 						target="_blank"
 						rel="noreferrer"
 					>
-						Source on GitHub
+						{messages.sidebar.sourceOnGitHub}
 					</a>
 					.
 				</p>
 				<p class="mt-1 text-sm text-neutral-600">
-					Bundled firmware (AltirraOS, Altirra BASIC, Atari++) is used under its
-					own license.{" "}
+					{messages.sidebar.firmwareNotice}{" "}
 					<a
 						class="text-neutral-800 underline hover:text-black"
 						href="/legal/THIRD-PARTY-LICENSES.md"
 						target="_blank"
 						rel="noreferrer"
 					>
-						Third-party licenses
+						{messages.sidebar.thirdPartyLicenses}
 					</a>
 					.
 				</p>
@@ -248,7 +263,10 @@ function MenuView({
 	);
 }
 
-const TITLES = { menu: "Sfotty Pie A8 Web", palette: "Commands" } as const;
+const TITLES = {
+	menu: messages.sidebar.titleMenu,
+	palette: messages.sidebar.titlePalette,
+} as const;
 
 /**
  * The sidebar: a single light panel that pushes the screen aside (never covers
@@ -306,7 +324,7 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 				<button
 					type="button"
 					class="px-1 text-neutral-500 hover:text-neutral-900"
-					aria-label="Close"
+					aria-label={messages.sidebar.close}
 					onClick={() => host.closePanel()}
 				>
 					✕

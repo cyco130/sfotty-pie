@@ -4,13 +4,14 @@ import { AudioOutput } from "./audio.ts";
 import { installDevConsole } from "./dev-console.ts";
 import { EmulatorHost } from "./host.ts";
 import { loadFirmwareLibrary } from "./library.ts";
+import { messages } from "./messages.ts";
 import "./index.css";
 
 async function main(): Promise<void> {
 	const root = document.querySelector<HTMLElement>("#app");
 	if (!root) return;
 
-	root.textContent = "Loading firmware…";
+	root.textContent = messages.app.loadingFirmware;
 
 	// The OS and BASIC ROMs come from the built-in library now; the host ranks
 	// and picks the best match for the running machine.

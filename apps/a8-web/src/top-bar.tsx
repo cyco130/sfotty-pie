@@ -1,11 +1,5 @@
-import type { AudioState, EmulatorHost } from "./host.ts";
-
-const AUDIO_LABEL: Record<AudioState, string> = {
-	unavailable: "No audio",
-	suspended: "Tap for audio",
-	on: "Audio on",
-	muted: "Audio muted",
-};
+import type { EmulatorHost } from "./host.ts";
+import { messages } from "./messages.ts";
 
 /**
  * The top status bar: machine summary (opens the menu), and the audio,
@@ -35,7 +29,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 			<button
 				type="button"
 				class="text-neutral-400 hover:text-white"
-				aria-label="Menu"
+				aria-label={messages.topBar.menu}
 				onClick={() => host.dispatch("MENU_TOGGLE")}
 			>
 				☰
@@ -58,14 +52,14 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 					}
 					onClick={() => host.dispatch("AUDIO_TOGGLE")}
 				>
-					{AUDIO_LABEL[audio]}
+					{messages.audio[audio]}
 				</button>
 				<button
 					type="button"
 					class="hover:text-white"
 					onClick={() => host.dispatch("TOGGLE_PAUSE")}
 				>
-					{running ? "Running" : "Paused"}
+					{running ? messages.topBar.running : messages.topBar.paused}
 				</button>
 				<button
 					type="button"
@@ -76,7 +70,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 					}
 					onClick={() => host.dispatch("TURBO_MODE_TOGGLE")}
 				>
-					Turbo mode
+					{messages.topBar.turbo}
 				</button>
 				<span class="w-16 text-right tabular-nums text-neutral-500">
 					{fps ? `${fps} fps` : "—"}

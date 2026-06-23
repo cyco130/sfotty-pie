@@ -25,6 +25,7 @@ import {
 	type LibraryEntry,
 	type LoadedFirmware,
 } from "./library.ts";
+import { messages } from "./messages.ts";
 
 export interface HostConfig {
 	model: AtariModel;
@@ -66,9 +67,9 @@ function unsupportedMessage(format: AtariFileFormat | null): string | null {
 	switch (format) {
 		case "os-rom-10k":
 		case "os-rom-16k":
-			return "that looks like an OS ROM, not something loadable";
+			return messages.errors.osRom;
 		case null:
-			return "unrecognized file format";
+			return messages.errors.unrecognized;
 		default:
 			return null; // a cartridge, disk, or executable
 	}
@@ -237,9 +238,7 @@ export class EmulatorHost {
 
 		const os = this.#pick(preferredOsKeys({ model, tv }));
 		if (!os) {
-			throw new Error(
-				`No compatible OS ROM in the library for ${model} (${tv.toUpperCase()}).`,
-			);
+			throw new Error(messages.errors.noCompatibleOs(model, tv.toUpperCase()));
 		}
 		const basic = includeBasic ? this.#pick(preferredBasicKeys()) : null;
 
@@ -340,8 +339,8 @@ export class EmulatorHost {
 		if (!audio) {
 			// No audio sink — surface why (it's the only feedback the user gets).
 			this.alert.value = this.#audioError
-				? `Audio unavailable: ${this.#audioError}`
-				: "Audio is unavailable in this browser.";
+				? messages.errors.audioUnavailableReason(this.#audioError)
+				: messages.errors.audioUnavailable;
 			return;
 		}
 		if (!audio.running) {
@@ -525,7 +524,7 @@ export class EmulatorHost {
 	downloadDisk(): void {
 		const drive = this.#drives[0];
 		if (!drive || drive.disk.writeProtected) {
-			this.alert.value = "No writable disk in D1: to download.";
+			this.alert.value = messages.errors.noWritableDisk;
 			return;
 		}
 
@@ -568,7 +567,7 @@ export class EmulatorHost {
 	/** Detach the disk from D1: of the running machine (live, no reboot). */
 	detachDisk(): void {
 		if (!this.#drives[0]) {
-			this.alert.value = "No disk in D1: to detach.";
+			this.alert.value = messages.errors.noDiskToDetach;
 			return;
 		}
 		this.#drives[0] = null;
@@ -592,7 +591,7 @@ export class EmulatorHost {
 			format !== "xex" &&
 			unsupportedMessage(format) === null;
 		if (!isCartridge) {
-			this.alert.value = `${file.name}: not a cartridge image`;
+			this.alert.value = `${file.name}: ${messages.errors.notACartridge}`;
 			return;
 		}
 
@@ -631,7 +630,7 @@ export class EmulatorHost {
 			this.applyBasicDisabled(true);
 			return;
 		}
-		this.alert.value = "No cartridge to detach.";
+		this.alert.value = messages.errors.noCartridge;
 	}
 
 	/**

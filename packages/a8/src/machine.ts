@@ -426,6 +426,14 @@ export class Atari implements Memory {
 	}
 
 	/**
+	 * Eject the D1: disk. Safe to call on a running machine: SIO requests then
+	 * time out and the OS falls through to its other boot sources.
+	 */
+	ejectDisk(): void {
+		this.#disk = undefined;
+	}
+
+	/**
 	 * Press joystick directions. `port` is 0-1 on the XL (two jacks) and 0-3
 	 * on the 800, whose ports 2/3 live on PIA port B; presses on ports the
 	 * machine doesn't have are ignored. `mask` is a set of direction bits:

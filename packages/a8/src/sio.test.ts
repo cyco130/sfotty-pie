@@ -83,28 +83,67 @@ test("an empty drive and a non-disk device time out", () => {
 	expect(cpu.Y).toBe(0x8a);
 });
 
-test("out-of-range sectors and writes report a device error", () => {
+test("out-of-range reads and writes report a device error", () => {
 	const { machine, cpu, handler } = setup(new AtrImage(makeAtr(128, 4)));
 
 	setDcb(machine, { command: 0x52, buffer: 0x2000, byteCount: 128, aux: 5 });
 	handler(SIOV);
 	expect(cpu.Y).toBe(0x90);
 
-	setDcb(machine, { command: 0x57, buffer: 0x2000, byteCount: 128, aux: 1 });
+	setDcb(machine, { command: 0x57, buffer: 0x2000, byteCount: 128, aux: 5 });
 	handler(SIOV);
 	expect(cpu.Y).toBe(0x90);
 });
 
-test("the status command reports write protection and density", () => {
+test("write sector stores bytes that read back", () => {
+	const disk = new AtrImage(makeAtr(128, 4));
+	const { machine, cpu, handler } = setup(disk);
+
+	for (let i = 0; i < 128; i++) {
+		machine.write(0x2000 + i, (i + 1) & 0xff, ReadOptions.NONE);
+	}
+	setDcb(machine, { command: 0x57, buffer: 0x2000, byteCount: 128, aux: 2 });
+
+	expect(handler(SIOV)).toBe(0x60); // RTS
+	expect(cpu.Y).toBe(0x01);
+
+	const stored = disk.readSector(2)!;
+	expect(stored[0]).toBe(1);
+	expect(stored[127]).toBe(128 & 0xff);
+	// A neighboring sector is untouched.
+	expect(disk.readSector(3)![0]).toBe(3);
+});
+
+test("writes to a write-protected disk report a device error", () => {
+	const disk = new AtrImage(makeAtr(128, 4), { writeProtected: true });
+	const { machine, cpu, handler } = setup(disk);
+
+	machine.write(0x2000, 0xff, ReadOptions.NONE);
+	setDcb(machine, { command: 0x57, buffer: 0x2000, byteCount: 128, aux: 2 });
+	handler(SIOV);
+
+	expect(cpu.Y).toBe(0x90);
+	expect(disk.readSector(2)![0]).toBe(2); // unchanged
+});
+
+test("the status command reports density and write protection", () => {
+	// A writable single-density disk: neither bit.
 	const single = setup(new AtrImage(makeAtr(128, 4)));
 	setDcb(single.machine, { command: 0x53, buffer: 0x02ea, byteCount: 4 });
 	single.handler(SIOV);
-	expect(single.machine.read(0x02ea, ReadOptions.NONE)).toBe(0x08);
+	expect(single.machine.read(0x02ea, ReadOptions.NONE)).toBe(0x00);
 
+	// Double density sets the density bit.
 	const double = setup(new AtrImage(makeAtr(256, 4)));
 	setDcb(double.machine, { command: 0x53, buffer: 0x02ea, byteCount: 4 });
 	double.handler(SIOV);
-	expect(double.machine.read(0x02ea, ReadOptions.NONE)).toBe(0x28);
+	expect(double.machine.read(0x02ea, ReadOptions.NONE)).toBe(0x20);
+
+	// A protected disk sets the write-protect bit.
+	const locked = setup(new AtrImage(makeAtr(128, 4), { writeProtected: true }));
+	setDcb(locked.machine, { command: 0x53, buffer: 0x02ea, byteCount: 4 });
+	locked.handler(SIOV);
+	expect(locked.machine.read(0x02ea, ReadOptions.NONE)).toBe(0x08);
 });
 
 test("the trap fires on a real JSR through SIOV", () => {

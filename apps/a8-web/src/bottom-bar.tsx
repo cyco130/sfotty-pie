@@ -1,4 +1,5 @@
 import type { EmulatorHost } from "./host.ts";
+import { messages } from "./messages.ts";
 
 /** The bottom status bar: the attached cartridge/disks and a crash indicator. */
 export function BottomBar({ host }: { host: EmulatorHost }) {
@@ -7,7 +8,11 @@ export function BottomBar({ host }: { host: EmulatorHost }) {
 
 	return (
 		<footer class="flex h-7 shrink-0 items-center gap-4 px-3 text-sm text-neutral-400">
-			{cartridge && <span class="truncate">Cart: {cartridge}</span>}
+			{cartridge && (
+				<span class="truncate">
+					{messages.bottomBar.cartridge} {cartridge}
+				</span>
+			)}
 			{drives.map(
 				(name, index) =>
 					name && (
@@ -18,7 +23,7 @@ export function BottomBar({ host }: { host: EmulatorHost }) {
 			)}
 			{crashed && (
 				<span class="ml-auto font-semibold text-red-500">
-					CPU crashed (CIM)
+					{messages.bottomBar.crashed}
 				</span>
 			)}
 		</footer>

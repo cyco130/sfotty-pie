@@ -2,6 +2,7 @@ import type { TargetedTouchEvent } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
+import { messages } from "./messages.ts";
 import { KeyboardView } from "./osd-keyboard.tsx";
 
 const LEFTY_KEY = "a8.osd.lefty";
@@ -219,9 +220,9 @@ function ViewToggle({
 	);
 	return (
 		<div class="flex gap-1 rounded bg-neutral-800 p-0.5">
-			{tab("stick", "🕹", "Joystick controls")}
-			{tab("keyboard", "⌨", "Keyboard")}
-			{tab("off", "▾", "Hide controls")}
+			{tab("stick", "🕹", messages.osd.joystickControls)}
+			{tab("keyboard", "⌨", messages.osd.keyboard)}
+			{tab("off", "▾", messages.osd.hideControls)}
 		</div>
 	);
 }
@@ -298,7 +299,7 @@ export function Osd({ host }: { host: EmulatorHost }) {
 						{lefty ? stick : fire}
 						<button
 							type="button"
-							aria-label="Swap stick and fire sides"
+							aria-label={messages.osd.swapSides}
 							class="rounded bg-neutral-700/70 px-3 py-2 text-lg text-white active:bg-neutral-500"
 							onClick={() => {
 								const next = !lefty;

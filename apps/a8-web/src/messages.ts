@@ -94,6 +94,7 @@ export const messages = {
 		noDiskToDetach: "No disk in D1: to detach.",
 		notACartridge: "not a cartridge image",
 		noCartridge: "No cartridge to detach.",
+		fullscreenUnavailable: "Full screen isn't available in this browser.",
 		noCompatibleOs: (model: string, tv: string) =>
 			`No compatible OS ROM in the library for ${model} (${tv}).`,
 	},
@@ -137,6 +138,7 @@ export const labels = {
 	AUDIO_UNMUTE: "Unmute audio",
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
 	MENU_TOGGLE: "Toggle the menu",
+	TOGGLE_FULLSCREEN: "Toggle full screen",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Attach a disk to D1:…",
 	DETACH_D1: "Detach the disk from D1:",

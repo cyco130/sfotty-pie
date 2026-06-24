@@ -66,6 +66,14 @@ export const commands = {
 		run: ({ host }) => host.togglePanel("menu"),
 	},
 
+	// Full-screen the whole app (chrome included), so the on-screen controls
+	// stay reachable. A no-op-safe toggle; also bound to a double-click on the
+	// screen.
+	TOGGLE_FULLSCREEN: {
+		label: "TOGGLE_FULLSCREEN",
+		run: ({ host }) => host.toggleFullscreen(),
+	},
+
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: { label: "BOOT_IMAGE", run: ({ host }) => host.pickBootImage() },
 

@@ -64,8 +64,12 @@ export function App({ host }: { host: EmulatorHost }) {
 			<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 				<TopBar host={host} />
 
-				{/* The screen: canvas centered, sized by the host, letterboxed. */}
-				<div class="relative flex-1 overflow-hidden bg-black">
+				{/* The screen: canvas centered, sized by the host, letterboxed.
+				    Double-click anywhere on it toggles full screen. */}
+				<div
+					class="relative flex-1 overflow-hidden bg-black"
+					onDblClick={() => host.dispatch("TOGGLE_FULLSCREEN")}
+				>
 					<canvas
 						ref={canvasRef}
 						width={FRAME_BUFFER_WIDTH}

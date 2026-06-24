@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import type { EmulatorHost, Toast } from "./host.ts";
+import { Icon } from "./icon.tsx";
 import { messages } from "./messages.ts";
 
 // Auto-dismiss timings: warnings linger longer than plain info.
@@ -68,9 +69,10 @@ function ErrorToast({
 				type="button"
 				class="shrink-0 px-1 hover:text-red-200"
 				aria-label={messages.toasts.dismiss}
+				title={messages.toasts.dismiss}
 				onClick={onDismiss}
 			>
-				✕
+				<Icon name="close" />
 			</button>
 		</div>
 	);

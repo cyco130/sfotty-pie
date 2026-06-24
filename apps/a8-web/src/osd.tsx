@@ -2,6 +2,7 @@ import type { TargetedTouchEvent } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import type { Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
+import { Icon, type IconName } from "./icon.tsx";
 import { messages } from "./messages.ts";
 import { KeyboardView } from "./osd-keyboard.tsx";
 
@@ -197,7 +198,7 @@ function ResetButton({ host }: { host: EmulatorHost }) {
 	);
 }
 
-/** The 🕹 / ⌨ segmented control that swaps the OSD body between views. */
+/** The joystick / keyboard segmented control that swaps the OSD body. */
 function ViewToggle({
 	view,
 	onChange,
@@ -205,31 +206,33 @@ function ViewToggle({
 	view: OsdView;
 	onChange: (view: OsdView) => void;
 }) {
-	const tab = (v: OsdView, label: string, aria: string) => (
+	const tab = (v: OsdView, icon: IconName, aria: string) => (
 		<button
 			type="button"
 			aria-label={aria}
+			title={aria}
 			aria-pressed={view === v}
 			class={`rounded px-3 py-1 text-lg select-none ${
 				view === v ? "bg-neutral-500 text-white" : "text-neutral-400"
 			}`}
 			onClick={() => onChange(v)}
 		>
-			{label}
+			<Icon name={icon} />
 		</button>
 	);
 	return (
 		<div class="flex gap-1 rounded bg-neutral-800 p-0.5">
-			{tab("stick", "🕹", messages.osd.joystickControls)}
-			{tab("keyboard", "⌨", messages.osd.keyboard)}
-			{tab("off", "▾", messages.osd.hideControls)}
+			{tab("stick", "joystick", messages.osd.joystickControls)}
+			{tab("keyboard", "keyboard", messages.osd.keyboard)}
+			{tab("off", "chevron-down", messages.osd.hideControls)}
 		</div>
 	);
 }
 
 /**
  * The on-screen controls for touch devices. A persistent top bar (Power + a
- * 🕹/⌨ view toggle) sits over a body that swaps between the joystick view (a
+ * joystick/keyboard view toggle) sits over a body that swaps between the
+ * joystick view (a
  * row of console keys over a fire button and analog stick, with a left-hander
  * swap) and the on-screen keyboard. Shown only when the primary pointer is
  * coarse and the menu is closed (the menu becomes a top bar on mobile and
@@ -300,6 +303,7 @@ export function Osd({ host }: { host: EmulatorHost }) {
 						<button
 							type="button"
 							aria-label={messages.osd.swapSides}
+							title={messages.osd.swapSides}
 							class="rounded bg-neutral-700/70 px-3 py-2 text-lg text-white active:bg-neutral-500"
 							onClick={() => {
 								const next = !lefty;
@@ -307,7 +311,7 @@ export function Osd({ host }: { host: EmulatorHost }) {
 								setLefty(next);
 							}}
 						>
-							⇄
+							<Icon name="swap" />
 						</button>
 						{lefty ? fire : stick}
 					</div>

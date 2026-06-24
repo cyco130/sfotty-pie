@@ -36,6 +36,10 @@ export default defineConfig({
 	// (keyboard-lab.html, served at /keyboard-lab.html) — shipped so its
 	// capturability probes can be run on borrowed/remote machines.
 	build: {
+		// Emit hashed, content-addressed assets under /_app/assets so the
+		// deploy's Nginx can serve them with a long-lived immutable cache
+		// (everything here is fingerprinted, so it's safe to cache forever).
+		assetsDir: "_app/assets",
 		rollupOptions: {
 			input: {
 				main: fileURLToPath(new URL("./index.html", import.meta.url)),

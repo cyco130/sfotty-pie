@@ -1,10 +1,26 @@
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
+// The commit the build was made from, surfaced in the UI to identify manual
+// deployments. Marked `-dirty` when the tree has uncommitted changes, and
+// `unknown` outside a git checkout.
+function gitHash(): string {
+	try {
+		const hash = execSync("git rev-parse --short HEAD").toString().trim();
+		const dirty = execSync("git status --porcelain").toString().trim() !== "";
+		return dirty ? `${hash}-dirty` : hash;
+	} catch {
+		return "unknown";
+	}
+}
+
 export default defineConfig({
+	// Build-time constant: replaces `import.meta.env.GIT_HASH` in the source.
+	define: { "import.meta.env.GIT_HASH": JSON.stringify(gitHash()) },
 	// basicSsl serves dev over HTTPS so the page is a secure context on a LAN
 	// IP — required for AudioWorklet (and other secure-only APIs) to exist when
 	// testing on a real device. Expect a one-time "untrusted certificate"

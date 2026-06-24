@@ -258,6 +258,9 @@ function MenuView({
 					</a>
 					.
 				</p>
+				<p class="mt-1 font-mono text-xs text-neutral-400">
+					{messages.sidebar.build} {import.meta.env.GIT_HASH}
+				</p>
 			</section>
 		</div>
 	);

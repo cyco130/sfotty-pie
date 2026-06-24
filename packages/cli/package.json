@@ -43,14 +43,14 @@
     "@sfotty-pie/sfotty": "workspace:*"
   },
   "devDependencies": {
-    "@cyco130/eslint-config": "^9.0.1",
+    "@cyco130/eslint-config": "^9.0.2",
     "@sfotty-pie/spasm": "workspace:*",
-    "@types/node": "^22.19.19",
-    "eslint": "^10.4.1",
+    "@types/node": "^22.20.0",
+    "eslint": "^10.5.0",
     "publint": "^0.3.21",
-    "tsdown": "0.22.1",
+    "tsdown": "0.22.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   },
   "engines": {
     "node": "22 || 24 || 25 || 26"

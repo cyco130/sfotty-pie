@@ -79,7 +79,7 @@ jobs:
 
       - name: Cache 65x02 vectors
         id: sst-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: external.local/65x02/6502/v1
           key: sst-65x02-6502-v1-${{ steps.sst.outputs.sha }}

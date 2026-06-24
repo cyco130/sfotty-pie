@@ -1,10 +1,10 @@
 import { render } from "preact";
-import { App } from "./app.tsx";
 import { AudioOutput } from "./audio.ts";
 import { installDevConsole } from "./dev-console.ts";
 import { EmulatorHost } from "./host.ts";
 import { loadFirmwareLibrary } from "./library.ts";
 import { messages } from "./messages.ts";
+import { Root } from "./root.tsx";
 import "./index.css";
 
 async function main(): Promise<void> {
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
 	installDevConsole(host);
 
 	root.textContent = "";
-	render(<App host={host} />, root);
+	render(<Root host={host} />, root);
 }
 
 void main();

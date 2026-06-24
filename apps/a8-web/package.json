@@ -15,7 +15,8 @@
     "@preact/signals": "^2.9.1",
     "@sfotty-pie/a8": "workspace:*",
     "@sfotty-pie/sfotty": "workspace:*",
-    "preact": "^10.29.2"
+    "preact": "^10.29.2",
+    "preact-iso": "^2.12.0"
   },
   "devDependencies": {
     "@babel/core": "^7.28.4",

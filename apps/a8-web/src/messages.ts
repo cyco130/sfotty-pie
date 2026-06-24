@@ -17,6 +17,24 @@ export const messages = {
 		loadingFirmware: "Loading firmware…",
 	},
 
+	pages: {
+		home: {
+			title: "Sfotty Pie",
+			heading: "Sfotty Pie",
+			lead: "An Atari 8-bit emulator and toolkit, in your browser.",
+			launch: "Launch the emulator",
+		},
+		emu: {
+			title: "Sfotty Pie A8 Web",
+		},
+		notFound: {
+			title: "Not found — Sfotty Pie",
+			heading: "Page not found",
+			body: "That page doesn’t exist.",
+			home: "Go home",
+		},
+	},
+
 	audio: {
 		unavailable: "No audio",
 		suspended: "Tap for audio",

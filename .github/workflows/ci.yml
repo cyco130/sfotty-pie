@@ -19,7 +19,7 @@ jobs:
     name: Quality (lint, typecheck, unit)
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -48,7 +48,7 @@ jobs:
     name: Conformance (single-step, Acid800)
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -86,7 +86,7 @@ jobs:
 
       - name: Fetch 65x02 vectors
         if: steps.sst-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: SingleStepTests/65x02
           ref: ${{ steps.sst.outputs.sha }}
@@ -107,7 +107,7 @@ jobs:
     name: Deploy to production
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6

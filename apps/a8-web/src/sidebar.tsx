@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 import type { EmulatorHost } from "./host.ts";
+import { Icon } from "./icon.tsx";
 import { builtinLibrary } from "./library.ts";
 import { messages } from "./messages.ts";
 import { PaletteView } from "./palette.tsx";
@@ -328,9 +329,10 @@ export function Sidebar({ host }: { host: EmulatorHost }) {
 					type="button"
 					class="px-1 text-neutral-500 hover:text-neutral-900"
 					aria-label={messages.sidebar.close}
+					title={messages.sidebar.close}
 					onClick={() => host.closePanel()}
 				>
-					✕
+					<Icon name="close" />
 				</button>
 			</div>
 

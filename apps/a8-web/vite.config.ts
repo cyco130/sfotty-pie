@@ -40,6 +40,12 @@ export default defineConfig({
 		// deploy's Nginx can serve them with a long-lived immutable cache
 		// (everything here is fingerprinted, so it's safe to cache forever).
 		assetsDir: "_app/assets",
+		// Never inline SVGs as data URIs: the icon sprite is referenced with
+		// `<use href="…#id">`, and browsers don't resolve a #fragment against a
+		// data: URI — it must stay a real (hashed) file. `false` opts out;
+		// `undefined` keeps Vite's default size threshold for everything else.
+		assetsInlineLimit: (filePath) =>
+			filePath.endsWith(".svg") ? false : undefined,
 		rollupOptions: {
 			input: {
 				main: fileURLToPath(new URL("./index.html", import.meta.url)),

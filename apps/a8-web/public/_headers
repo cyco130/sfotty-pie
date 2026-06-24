@@ -1,0 +1,11 @@
+# Cloudflare Pages cache policy (https://developers.cloudflare.com/pages/configuration/headers/).
+# Copied verbatim into dist/ by Vite, read by Pages on preview and production.
+
+# Fingerprinted build assets never change — cache forever.
+/_app/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Everything else (HTML shells, clean URLs like / and /docs/, anything new):
+# no-cache so a deploy is picked up immediately. Cheap 304 via ETag.
+/*
+  Cache-Control: no-cache

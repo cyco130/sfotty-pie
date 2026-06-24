@@ -37,7 +37,7 @@
     "test:package": "publint",
     "boot": "node src/boot.ts",
     "acid800-tests": "node src/acid800-tests.ts",
-    "ci": "pnpm acid800-tests && pnpm acid800-tests --pal"
+    "conformance": "pnpm acid800-tests && pnpm acid800-tests --pal"
   },
   "dependencies": {
     "@sfotty-pie/sfotty": "workspace:*",

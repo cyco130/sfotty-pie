@@ -1,4 +1,4 @@
-name: CI tests
+name: CI
 
 on:
   workflow_dispatch:
@@ -12,14 +12,11 @@ defaults:
     working-directory: .
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        node_version: [24]
-      fail-fast: false
-    name: "CI tests on node-${{ matrix.node_version }}, ${{ matrix.os }}"
+  # Fast, single-platform checks: lint, typecheck, unit. Same suite lint-staged
+  # runs on commit.
+  quality:
+    runs-on: ubuntu-latest
+    name: Quality (lint, typecheck, unit)
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -27,21 +24,49 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
 
-      - name: Set node version to ${{ matrix.node_version }}
+      - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node_version }}
+          node-version: 24
           check-latest: true
           cache: "pnpm"
 
       - name: Install
         run: pnpm install
 
-      - name: Build
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Run checks
+        run: pnpm run test
+
+  # Slow, platform-independent conformance suites (CPU single-step tests,
+  # Acid800), kept off the fast `test` loop. Acid800's image/firmware are
+  # committed; only the 65x02 vectors are fetched.
+  conformance:
+    runs-on: ubuntu-latest
+    name: Conformance (single-step, Acid800)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+          cache: "pnpm"
+
+      - name: Install
+        run: pnpm install
+
+      - name: Build packages
         run: pnpm run build
 
       - name: Disable AppArmor on Ubuntu
-        if: runner.os == 'Linux'
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
       # SingleStepTests/65x02 6502 vectors for the CPU conformance suite. We
@@ -69,5 +94,39 @@ jobs:
           fetch-depth: 1
           path: external.local/65x02
 
-      - name: Run CI tests
-        run: pnpm run ci
+      - name: Run conformance suites
+        run: pnpm run conformance
+
+  # Auto-deploy production, gated on both check jobs. Only on main (push or a
+  # manual run of this workflow); never on PRs. The force/preview escape hatch
+  # lives in deploy.yml, ungated.
+  deploy:
+    needs: [quality, conformance]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    name: Deploy to production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+          cache: "pnpm"
+
+      - name: Install
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Deploy to production
+        run: pnpm --filter @sfotty-pie/a8-web run deploy --branch main
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

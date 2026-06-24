@@ -25,4 +25,10 @@ export default [
 			"react/no-unknown-property": "off",
 		},
 	},
+	{
+		// scripts/ holds standalone Node CLIs (CI/deploy tooling), not browser
+		// code — stdout logging is their UI, so `console.log` is fine here.
+		files: ["scripts/**"],
+		rules: { "no-console": "off" },
+	},
 ];

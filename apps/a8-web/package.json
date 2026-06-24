@@ -9,7 +9,8 @@
     "test": "pnpm run /^test:/",
     "test:typecheck": "tsc -p tsconfig.json",
     "test:lint": "eslint . --max-warnings 0",
-    "ci": "pnpm build"
+    "ci": "pnpm build",
+    "deploy": "pnpm build && wrangler pages deploy dist --project-name a8-web"
   },
   "dependencies": {
     "@preact/signals": "^2.9.1",

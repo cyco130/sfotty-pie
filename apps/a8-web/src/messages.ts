@@ -55,6 +55,7 @@ export const messages = {
 		firmwareNotice:
 			"Bundled firmware (AltirraOS, Altirra BASIC, Atari++) is used under its own license.",
 		thirdPartyLicenses: "Third-party licenses",
+		build: "Build",
 		titleMenu: "Sfotty Pie A8 Web",
 		titlePalette: "Commands",
 	},

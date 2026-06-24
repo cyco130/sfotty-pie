@@ -43,6 +43,17 @@ export interface HostConfig {
 export type AudioState = "unavailable" | "suspended" | "on" | "muted";
 
 /**
+ * A transient on-screen notification. `info`/`warning` auto-dismiss in the
+ * corner; `error` pins (with Copy) until dismissed. See the `Toasts` view.
+ */
+export type ToastKind = "info" | "warning" | "error";
+export interface Toast {
+	id: number;
+	kind: ToastKind;
+	text: string;
+}
+
+/**
  * The sidebar's content when open. Stable string ids so the state stays
  * serializable (a future deep-link layer can map these straight to the URL).
  */
@@ -97,8 +108,11 @@ export class EmulatorHost {
 	/** True once the CPU has jammed (CIM). */
 	readonly crashed = signal(false);
 
-	/** A transient error alert (e.g. an unrecognized file); null = none. */
-	readonly alert = signal<string | null>(null);
+	/** Pinned error toasts (top-center, dismissed manually; copyable). */
+	readonly errors = signal<Toast[]>([]);
+	/** Auto-dismissing info/warning toasts (bottom-right). */
+	readonly notices = signal<Toast[]>([]);
+	#nextToastId = 0;
 
 	/** The running machine configuration (drives the config indicator). */
 	readonly config = signal<MachineSettings>({
@@ -338,9 +352,14 @@ export class EmulatorHost {
 		const audio = this.#audio;
 		if (!audio) {
 			// No audio sink — surface why (it's the only feedback the user gets).
-			this.alert.value = this.#audioError
-				? messages.errors.audioUnavailableReason(this.#audioError)
-				: messages.errors.audioUnavailable;
+			if (this.#audioError) {
+				this.toast(
+					messages.errors.audioUnavailableReason(this.#audioError),
+					"error",
+				);
+			} else {
+				this.toast(messages.errors.audioUnavailable, "warning");
+			}
 			return;
 		}
 		if (!audio.running) {
@@ -377,8 +396,49 @@ export class EmulatorHost {
 		this.#pendingPick(file);
 	}
 
-	dismissAlert(): void {
-		this.alert.value = null;
+	/**
+	 * Show a toast. `error` pins top-center (with Copy) until dismissed;
+	 * `info`/`warning` auto-dismiss in the bottom-right corner.
+	 */
+	toast(text: string, kind: ToastKind = "info"): void {
+		const entry: Toast = { id: this.#nextToastId++, kind, text };
+		const target = kind === "error" ? this.errors : this.notices;
+		target.value = [...target.value, entry];
+	}
+
+	dismissToast(id: number): void {
+		this.errors.value = this.errors.value.filter((t) => t.id !== id);
+		this.notices.value = this.notices.value.filter((t) => t.id !== id);
+	}
+
+	// Announce the config fields that changed between two settings, as toasts —
+	// so the palette's one-shot commands and the menu's batched apply both give
+	// the same feedback.
+	#announceConfigChange(prev: MachineSettings, next: MachineSettings): void {
+		if (next.model !== prev.model) {
+			this.toast(messages.toasts.switchingMachine(next.model));
+		}
+		if (next.tv !== prev.tv) {
+			this.toast(messages.toasts.switchingTv(next.tv.toUpperCase()));
+		}
+		if (next.basicDisabled !== prev.basicDisabled) {
+			this.toast(this.#basicToggleMessage(next.basicDisabled, next.model));
+		}
+	}
+
+	// Wording for a BASIC on/off toast: on the 400/800 with no explicit cart,
+	// BASIC *is* the cartridge in the slot, so phrase it as attach/detach with
+	// the ROM's name; otherwise it's a plain enable/disable.
+	#basicToggleMessage(disabled: boolean, model: AtariModel): string {
+		if (model === "800" && !this.#cartridge) {
+			const name = this.#pick(preferredBasicKeys())?.entry.fileName ?? "BASIC";
+			return disabled
+				? messages.toasts.detachingCartridge(name)
+				: messages.toasts.attachingCartridge(name);
+		}
+		return disabled
+			? messages.toasts.disablingBasic
+			: messages.toasts.enablingBasic;
 	}
 
 	/** Show a sidebar panel (switching directly if another is already open). */
@@ -416,7 +476,9 @@ export class EmulatorHost {
 	/** Apply the staged config: adopt it, power-cycle into it, close the menu. */
 	applyConfig(): void {
 		if (!this.dirty.value) return;
+		const prev = this.config.value;
 		this.config.value = this.staged.value;
+		this.#announceConfigChange(prev, this.config.value);
 		this.#rebuild();
 		this.closePanel();
 	}
@@ -428,8 +490,10 @@ export class EmulatorHost {
 	#applyConfigChange(change: Partial<MachineSettings>): void {
 		const next = { ...this.config.value, ...change };
 		if (settingsEqual(next, this.config.value)) return;
+		const prev = this.config.value;
 		this.config.value = next;
 		this.staged.value = next;
+		this.#announceConfigChange(prev, next);
 		this.#rebuild();
 	}
 
@@ -451,6 +515,12 @@ export class EmulatorHost {
 
 	toggleBasic(): void {
 		this.applyBasicDisabled(!this.config.value.basicDisabled);
+	}
+
+	/** Cold-restart the current machine (keeps all mounted media). */
+	powerCycle(): void {
+		this.toast(messages.toasts.powerCycling);
+		this.#emulator.coldStart();
 	}
 
 	#refreshAudioState(): void {
@@ -481,10 +551,10 @@ export class EmulatorHost {
 	#bootImage(contents: Uint8Array, name: string): void {
 		const format = detectFileFormat(contents, name);
 
-		// An unrecognized/unloadable file changes nothing — just alert.
+		// An unrecognized/unloadable file changes nothing — just warn.
 		const unsupported = unsupportedMessage(format);
 		if (unsupported) {
-			this.alert.value = `${name}: ${unsupported}`;
+			this.toast(`${name}: ${unsupported}`, "warning");
 			return;
 		}
 
@@ -503,9 +573,20 @@ export class EmulatorHost {
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.alert.value = `${name}: ${message}`;
+			this.toast(`${name}: ${message}`, "error");
 			return;
 		}
+
+		// Announce the teardown of every boot source it clears, then the boot
+		// itself — so the silent multi-action is legible.
+		this.#announceBootTeardown();
+		this.toast(
+			cartridge
+				? messages.toasts.bootCartridge(name)
+				: format === "xex"
+					? messages.toasts.bootExecutable(name)
+					: messages.toasts.bootDisk(name),
+		);
 
 		this.sidebar.value = null; // get out of the way
 		this.#cartridge = cartridge;
@@ -513,6 +594,25 @@ export class EmulatorHost {
 		this.config.value = { ...this.config.value, basicDisabled: true };
 		this.#refreshAttachments();
 		this.#rebuild();
+	}
+
+	// Toast each boot source Boot image is about to clear: the cartridge slot
+	// (an explicit cart, or BASIC on the 400/800), the D1: disk, and BASIC on
+	// XL/XE (on the 400/800 that's the cartridge-slot toast above).
+	#announceBootTeardown(): void {
+		const { model, basicDisabled } = this.config.value;
+		if (this.#cartridge) {
+			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
+		} else if (model === "800" && !basicDisabled) {
+			const name = this.#pick(preferredBasicKeys())?.entry.fileName ?? "BASIC";
+			this.toast(messages.toasts.detachingCartridge(name));
+		}
+		if (this.#drives[0]) {
+			this.toast(messages.toasts.detachingDisk(this.#drives[0].name));
+		}
+		if (model !== "800" && !basicDisabled) {
+			this.toast(messages.toasts.disablingBasic);
+		}
 	}
 
 	/**
@@ -524,7 +624,7 @@ export class EmulatorHost {
 	downloadDisk(): void {
 		const drive = this.#drives[0];
 		if (!drive || drive.disk.writeProtected) {
-			this.alert.value = messages.errors.noWritableDisk;
+			this.toast(messages.errors.noWritableDisk, "warning");
 			return;
 		}
 
@@ -539,6 +639,7 @@ export class EmulatorHost {
 		anchor.download = drive.name;
 		anchor.click();
 		URL.revokeObjectURL(url);
+		this.toast(messages.toasts.saving(drive.name));
 	}
 
 	/**
@@ -554,7 +655,7 @@ export class EmulatorHost {
 			disk = new AtrImage(contents);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.alert.value = `${file.name}: ${message}`;
+			this.toast(`${file.name}: ${message}`, "error");
 			return;
 		}
 
@@ -562,17 +663,20 @@ export class EmulatorHost {
 		this.#emulator.machine.insertDisk(disk);
 		this.sidebar.value = null; // get out of the way
 		this.#refreshAttachments();
+		this.toast(messages.toasts.attachingDisk(file.name));
 	}
 
 	/** Detach the disk from D1: of the running machine (live, no reboot). */
 	detachDisk(): void {
-		if (!this.#drives[0]) {
-			this.alert.value = messages.errors.noDiskToDetach;
+		const drive = this.#drives[0];
+		if (!drive) {
+			this.toast(messages.errors.noDiskToDetach, "warning");
 			return;
 		}
 		this.#drives[0] = null;
 		this.#emulator.machine.ejectDisk();
 		this.#refreshAttachments();
+		this.toast(messages.toasts.detachingDisk(drive.name));
 	}
 
 	/**
@@ -591,7 +695,7 @@ export class EmulatorHost {
 			format !== "xex" &&
 			unsupportedMessage(format) === null;
 		if (!isCartridge) {
-			this.alert.value = `${file.name}: ${messages.errors.notACartridge}`;
+			this.toast(`${file.name}: ${messages.errors.notACartridge}`, "warning");
 			return;
 		}
 
@@ -600,9 +704,20 @@ export class EmulatorHost {
 			cart = new Cartridge(contents, file.name);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.alert.value = `${file.name}: ${message}`;
+			this.toast(`${file.name}: ${message}`, "error");
 			return;
 		}
+
+		// Announce what's leaving the cart slot (an explicit cart, or BASIC on
+		// the 400/800) before the new cart goes in.
+		const { model, basicDisabled } = this.config.value;
+		if (this.#cartridge) {
+			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
+		} else if (model === "800" && !basicDisabled) {
+			const basic = this.#pick(preferredBasicKeys())?.entry.fileName ?? "BASIC";
+			this.toast(messages.toasts.detachingCartridge(basic));
+		}
+		this.toast(messages.toasts.attachingCartridge(file.name));
 
 		this.sidebar.value = null; // get out of the way
 		this.#cartridge = { cart, name: file.name };
@@ -620,17 +735,19 @@ export class EmulatorHost {
 	 */
 	detachCartridge(): void {
 		if (this.#cartridge) {
+			const { name } = this.#cartridge;
 			this.#cartridge = null;
 			this.#refreshAttachments();
 			this.#rebuild();
+			this.toast(messages.toasts.detachingCartridge(name));
 			return;
 		}
 		const { model, basicDisabled } = this.config.value;
 		if (model === "800" && !basicDisabled) {
-			this.applyBasicDisabled(true);
+			this.applyBasicDisabled(true); // toasts "Detaching cartridge (BASIC…)"
 			return;
 		}
-		this.alert.value = messages.errors.noCartridge;
+		this.toast(messages.errors.noCartridge, "warning");
 	}
 
 	/**

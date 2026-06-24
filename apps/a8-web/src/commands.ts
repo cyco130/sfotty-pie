@@ -24,7 +24,7 @@ const press = (code: number, label: LabelKey): CommandSpec => ({
 export const commands = {
 	POWER_CYCLE: {
 		label: "POWER_CYCLE",
-		run: ({ emulator }) => emulator.coldStart(),
+		run: ({ host }) => host.powerCycle(),
 	},
 
 	// Emulation run state.

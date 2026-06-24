@@ -1,6 +1,6 @@
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "@sfotty-pie/a8";
 import { useEffect, useRef } from "preact/hooks";
-import { Alert } from "./alert.tsx";
+import { Toasts } from "./toasts.tsx";
 import { BottomBar } from "./bottom-bar.tsx";
 import type { EmulatorHost } from "./host.ts";
 import { Osd } from "./osd.tsx";
@@ -79,7 +79,7 @@ export function App({ host }: { host: EmulatorHost }) {
 				<BottomBar host={host} />
 			</div>
 
-			<Alert host={host} />
+			<Toasts host={host} />
 
 			{/* Hidden picker shared by the boot-image and insert-disk actions;
 			    the host routes the chosen file per the action that opened it. */}

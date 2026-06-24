@@ -96,6 +96,27 @@ export const messages = {
 		noCompatibleOs: (model: string, tv: string) =>
 			`No compatible OS ROM in the library for ${model} (${tv}).`,
 	},
+
+	// Announcements (info/warning toasts) for state changes that would
+	// otherwise be silent — especially palette commands. Present tense.
+	toasts: {
+		bootDisk: (name: string) => `Booting D1: (${name})`,
+		bootCartridge: (name: string) => `Booting cartridge (${name})`,
+		bootExecutable: (name: string) => `Booting executable (${name})`,
+		attachingDisk: (name: string) => `Attaching D1: (${name})`,
+		detachingDisk: (name: string) => `Detaching D1: (${name})`,
+		attachingCartridge: (name: string) => `Attaching cartridge (${name})`,
+		detachingCartridge: (name: string) => `Detaching cartridge (${name})`,
+		enablingBasic: "Enabling BASIC",
+		disablingBasic: "Disabling BASIC",
+		switchingMachine: (model: string) => `Switching to Atari ${model}`,
+		switchingTv: (tv: string) => `Switching TV to ${tv}`,
+		powerCycling: "Power cycling",
+		saving: (name: string) => `Saving (${name})`,
+		copy: "Copy",
+		copied: "Copied",
+		dismiss: "Dismiss",
+	},
 } as const;
 
 /**

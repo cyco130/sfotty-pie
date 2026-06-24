@@ -46,8 +46,8 @@ Run from the repo root unless noted.
 
 - `pnpm dev` — watch-build all packages in parallel.
 - `pnpm build` — build all packages.
-- `pnpm test` — runs every script matching `test:*` (uses pnpm's `/^test:/` pattern syntax). Adding a new `test:foo` script auto-joins the suite — no test runner registry to update.
-- `pnpm run ci` — per-package CI script (each package decides what its CI pipeline runs). Note: bare `pnpm ci` is the clean-install command, not this script.
+- `pnpm test` — fast, single-platform checks: lint, typecheck, unit. Runs every script matching `test:*` (pnpm's `/^test:/` pattern syntax), so a new `test:foo` auto-joins the suite — no registry to update. This is the tier lint-staged runs on commit.
+- `pnpm conformance` — the slow, platform-independent conformance suites kept out of the fast `test` loop (and off lint-staged): CPU single-step tests (sfotty) and Acid800 (a8). Fans out to each package's `conformance` script; runs in CI and on demand. A future `e2e` tier (multi-OS/browser, the only genuinely platform-sensitive tests) will be the third bucket. Note: bare `pnpm ci` is pnpm's clean-install command — unrelated.
 - `pnpm format` — Prettier write across the repo.
 
 Inside a package, `pnpm test` similarly fans out to `test:unit` (vitest), `test:typecheck` (`tsc --noEmit`), `test:lint` (eslint), and `test:package` (publint).

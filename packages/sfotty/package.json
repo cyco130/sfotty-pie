@@ -34,7 +34,7 @@
     "test:typecheck": "tsc -p tsconfig.json",
     "test:lint": "eslint . --max-warnings 0",
     "test:package": "publint",
-    "ci": "pnpm single-step-tests",
+    "conformance": "pnpm single-step-tests",
     "single-step-tests": "node src/single-step-tests.ts",
     "generate:instructions": "node src/generate-instructions.ts",
     "generate:steps": "node src/generate-steps.ts"

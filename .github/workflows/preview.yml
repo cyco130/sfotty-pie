@@ -65,7 +65,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Comment preview URLs
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const alias = "${{ steps.deploy.outputs.alias_url }}";
@@ -130,7 +130,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Comment cleanup
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const marker = "<!-- preview-deployment -->";

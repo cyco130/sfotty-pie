@@ -50,7 +50,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 - AI use is fine as long and is subject to the same review standards as human-written code.
 - Small, focused, and well-described PRs are welcome.
 - For large or complex changes, open an issue first to discuss the approach before investing time in implementation.
-- Code-quality CI (`.github/workflows/cq.yml`) must pass.
+- CI (`.github/workflows/ci.yml`) must pass — both the `quality` job (lint, typecheck, unit) and the `conformance` job (CPU single-step tests, Acid800).
 
 ## Releases
 

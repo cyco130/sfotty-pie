@@ -1,0 +1,118 @@
+name: Preview
+
+# Per-PR preview deployments. On open/sync/reopen we build, lint+typecheck, and
+# deploy a preview to a stable per-branch alias URL; on close (merge or abandon)
+# we delete this branch's previews so the dashboard stays clean.
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    name: Deploy preview
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+          cache: "pnpm"
+
+      - name: Install
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm run build
+
+      # Don't hand out a green preview URL for a PR that doesn't typecheck/lint.
+      # The full conformance suite runs in parallel via ci.yml.
+      - name: Typecheck and lint a8-web
+        run: pnpm --filter @sfotty-pie/a8-web test
+
+      - name: Deploy preview
+        id: deploy
+        run: |
+          pnpm --filter @sfotty-pie/a8-web run deploy \
+            --branch "$HEAD_REF" --commit-dirty=true | tee wrangler-output.txt
+          # Parse by label rather than fixed offsets so a wrangler output tweak
+          # doesn't silently mangle the URLs. `|| true` so a parse miss doesn't
+          # fail the step — the deploy itself already succeeded above.
+          alias_url=$(grep -iE 'alias' wrangler-output.txt | grep -oiE 'https://[a-z0-9.-]+\.pages\.dev' | head -1 || true)
+          hash_url=$(grep -iE 'peek|deployment complete|view' wrangler-output.txt | grep -oiE 'https://[a-z0-9.-]+\.pages\.dev' | head -1 || true)
+          echo "alias_url=$alias_url" >> "$GITHUB_OUTPUT"
+          echo "hash_url=$hash_url" >> "$GITHUB_OUTPUT"
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Comment preview URLs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const alias = "${{ steps.deploy.outputs.alias_url }}";
+            const hash = "${{ steps.deploy.outputs.hash_url }}";
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: [
+                "Preview deployment ready 🚀",
+                "",
+                `- Branch URL: ${alias || "(unavailable)"}`,
+                `- This build: ${hash || "(unavailable)"}`,
+                "",
+                "The branch URL stays stable across pushes to this PR; the build URL changes each deploy.",
+              ].join("\n"),
+            });
+
+  cleanup:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Delete previews
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+
+      # The script uses only Node built-ins + global fetch, so no install needed.
+      - name: Delete preview deployments for this branch
+        run: node apps/a8-web/scripts/delete-preview-deployments.ts
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Comment cleanup
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "Preview deployments for this branch were deleted 🧹",
+            });

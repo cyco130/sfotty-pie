@@ -1,0 +1,55 @@
+name: Deploy (manual)
+
+# Manual, ungated escape hatch — no CI gate. Use it to force a production deploy
+# even when CI is red, or to push a preview of an arbitrary branch on demand.
+# Pick the branch in the "Run workflow" dropdown; pick the target below.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to deploy"
+        type: choice
+        options:
+          - preview
+          - production
+        default: preview
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: "Manual deploy (${{ inputs.target }})"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          check-latest: true
+          cache: "pnpm"
+
+      - name: Install
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Deploy
+        run: |
+          if [ "$TARGET" = "production" ]; then
+            pnpm --filter @sfotty-pie/a8-web run deploy --branch main
+          else
+            pnpm --filter @sfotty-pie/a8-web run deploy --branch "$REF_NAME" --commit-dirty=true
+          fi
+        env:
+          TARGET: ${{ inputs.target }}
+          REF_NAME: ${{ github.ref_name }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

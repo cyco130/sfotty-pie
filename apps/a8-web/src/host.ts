@@ -458,6 +458,27 @@ export class EmulatorHost {
 		else this.showPanel(panel);
 	}
 
+	/**
+	 * Enter or leave full screen. Targets the whole document so the toolbar and
+	 * the on-screen OSD controls stay in view (the canvas refits via its
+	 * ResizeObserver). Where the Fullscreen API is unavailable — notably iPhone
+	 * Safari, which only fullscreens video — say so rather than silently fail.
+	 */
+	toggleFullscreen(): void {
+		if (document.fullscreenElement) {
+			void document.exitFullscreen();
+			return;
+		}
+		const root = document.documentElement;
+		if (!root.requestFullscreen) {
+			this.toast(messages.errors.fullscreenUnavailable, "warning");
+			return;
+		}
+		void root.requestFullscreen().catch(() => {
+			this.toast(messages.errors.fullscreenUnavailable, "warning");
+		});
+	}
+
 	// Machine configuration. The menu's form stages changes (below) and applies
 	// them with a single reboot; the palette's config commands apply one change
 	// and reboot immediately (apply*, below that).

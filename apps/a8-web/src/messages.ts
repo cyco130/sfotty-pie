@@ -17,6 +17,50 @@ export const messages = {
 		loadingFirmware: "Loading firmware…",
 	},
 
+	pages: {
+		home: {
+			title: "Sfotty Pie",
+			heading: "Sfotty Pie",
+			lead: "Sfotty Pie is a set of tools for the 6502 (Sixty-Five-Oh-Two), the 8-bit CPU behind the Atari 8-bit, Apple II, Commodore 64, NES, and many others. It spans a cycle-exact 6502 core, an Atari 8-bit machine, and a 6502 assembler.",
+			launch: "Atari 8-bit emulator",
+			github: "GitHub",
+			legal:
+				"Sfotty Pie is MIT-licensed and is not affiliated with Atari. Bundled replacement firmware images (AltirraOS, Altirra BASIC, Atari++) are used under their own licenses.",
+			thirdPartyLicenses: "Third-party licenses",
+		},
+		emu: {
+			title: "A8 Web — Sfotty Pie",
+		},
+		atari: {
+			title: "Atari 8-bit — Sfotty Pie",
+			heading: "Atari 8-bit",
+			emu: "Emulator",
+			reference: "Reference",
+		},
+		reference: {
+			title: "Reference — Sfotty Pie",
+			heading: "Atari 8-bit reference",
+			atasciiKeyboard: "ATASCII & keyboard",
+		},
+		atasciiKeyboard: {
+			title: "ATASCII & keyboard — Sfotty Pie",
+		},
+		labs: {
+			title: "Labs — Sfotty Pie",
+			heading: "Labs",
+			keyboard: "Keyboard event lab",
+		},
+		keyboard: {
+			title: "Keyboard event lab — Sfotty Pie",
+		},
+		notFound: {
+			title: "Not found — Sfotty Pie",
+			heading: "Page not found",
+			body: "That page doesn’t exist.",
+			home: "Go home",
+		},
+	},
+
 	audio: {
 		unavailable: "No audio",
 		suspended: "Tap for audio",

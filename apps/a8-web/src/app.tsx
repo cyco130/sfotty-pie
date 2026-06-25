@@ -1,10 +1,10 @@
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "@sfotty-pie/a8";
+import type { ComponentChildren } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { Toasts } from "./toasts.tsx";
 import { BottomBar } from "./bottom-bar.tsx";
 import type { EmulatorHost } from "./host.ts";
 import { Osd } from "./osd.tsx";
-import { Sidebar } from "./sidebar.tsx";
 import { TopBar } from "./top-bar.tsx";
 
 /**
@@ -13,7 +13,13 @@ import { TopBar } from "./top-bar.tsx";
  * owns this chrome; the {@link EmulatorHost} owns the real-time loop that
  * blits into the ref'd canvas, so nothing on the hot path re-renders.
  */
-export function App({ host }: { host: EmulatorHost }) {
+export function App({
+	host,
+	sidebar,
+}: {
+	host: EmulatorHost;
+	sidebar?: ComponentChildren;
+}) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const keyInput = useRef<HTMLInputElement>(null);
 	const fileInput = useRef<HTMLInputElement>(null);
@@ -57,9 +63,9 @@ export function App({ host }: { host: EmulatorHost }) {
 			ref={rootRef}
 			class="flex h-full flex-col bg-black text-neutral-300 select-none sm:flex-row"
 		>
-			{/* The menu pushes the screen aside (left on desktop, top on
-			    mobile) rather than overlaying it. */}
-			<Sidebar host={host} />
+			{/* The panel routes render here, pushing the screen aside (left on
+			    desktop, top on mobile) rather than overlaying it. */}
+			{sidebar}
 
 			<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 				<TopBar host={host} />

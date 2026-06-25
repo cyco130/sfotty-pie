@@ -3,25 +3,30 @@
 #
 # CF *combines* (does not override) headers from every matching rule, so a `/*`
 # catch-all would append `no-cache` onto the asset rule's value and defeat
-# `immutable`. We therefore enumerate the no-cache paths so the fingerprinted
-# assets match only their own rule. New top-level paths that serve HTML go here.
+# `immutable`. We therefore enumerate the no-cache paths (by SPA route section)
+# so the fingerprinted assets match only their own rule. Add a section here when
+# a new top-level route is introduced.
 
 # Fingerprinted build assets never change — cache forever.
 /_app/assets/*
   Cache-Control: public, max-age=31536000, immutable
 
-# Everything else: no-cache so a deploy is picked up immediately (cheap 304 via
-# ETag). Enumerated (root, all .html, the clean-URL dirs, and legal/).
+# Everything else is the SPA shell (index.html), served for every app route:
+# no-cache so a deploy is picked up immediately (cheap 304 via ETag). Listed by
+# section; the bare and splat forms cover the index and its sub-routes.
 /
   Cache-Control: no-cache
 
-/*.html
+/a8
   Cache-Control: no-cache
 
-/docs/*
+/a8/*
   Cache-Control: no-cache
 
-/404/*
+/labs
+  Cache-Control: no-cache
+
+/labs/*
   Cache-Control: no-cache
 
 /legal/*

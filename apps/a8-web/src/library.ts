@@ -82,15 +82,30 @@ export const builtinLibrary: LibraryEntry[] = [...entries.values()].sort(
 		a.displayName.localeCompare(b.displayName),
 );
 
-/** Fetch an entry's raw bytes. */
+/**
+ * Fetch an entry's raw bytes.
+ *
+ * A `#start-end` URL fragment (hex byte offsets, end-exclusive) selects a slice
+ * of the asset — e.g. one ROM carved out of a combined dump. The fragment is
+ * stripped before the fetch, so a combined's slices all share one cached
+ * download and each is a `subarray` view into it. No fragment ⇒ the whole file.
+ */
 export async function loadLibraryEntry(
 	entry: LibraryEntry,
 ): Promise<Uint8Array> {
-	const response = await fetch(entry.url);
+	const hash = entry.url.indexOf("#");
+	const base = hash < 0 ? entry.url : entry.url.slice(0, hash);
+	const response = await fetch(base);
 	if (!response.ok) {
 		throw new Error(`Failed to load ${entry.id} (${response.status})`);
 	}
-	return new Uint8Array(await response.arrayBuffer());
+	const bytes = new Uint8Array(await response.arrayBuffer());
+	if (hash < 0) return bytes;
+	const [start, end] = entry.url
+		.slice(hash + 1)
+		.split("-")
+		.map((h) => parseInt(h, 16));
+	return bytes.subarray(start, end);
 }
 
 /** A firmware-category library item whose bytes are loaded and identified. */

@@ -43,7 +43,7 @@ test("buildBootDisk lays out loader, size, and data", () => {
 
 test("booting the disk loads and runs the executable", () => {
 	const disk = buildBootDisk(XEX);
-	const machine = new Atari({ model: "800", os: new Uint8Array(10240) });
+	const machine = new Atari({ os: new Uint8Array(10240) });
 	machine.insertDisk(disk);
 	const cpu = machine.cpu; // the machine's own CPU, which its built-in SIO drives
 

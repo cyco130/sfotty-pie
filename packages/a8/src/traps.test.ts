@@ -10,7 +10,7 @@ const DUMMY = ReadOptions.SYNC | ReadOptions.DUMMY; // non-committing fetch
 
 function machine(): Atari {
 	return new Atari({
-		model: "800XL",
+		xl: true,
 		os: new Uint8Array(16384),
 		basic: new Uint8Array(8192),
 	});

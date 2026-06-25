@@ -14,8 +14,9 @@ function makeMachine(model: AtariModel = "800") {
 	basic[8191] = 0xa0;
 
 	return new Atari({
-		model,
-		os: new Uint8Array(model === "800XL" ? 16384 : 10240),
+		xl: model !== "800",
+		...(model === "130XE" && { xeBankCount: 4, separateAnticAccess: true }),
+		os: new Uint8Array(model === "800" ? 10240 : 16384),
 		basic,
 	});
 }

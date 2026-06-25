@@ -328,7 +328,14 @@ export class EmulatorHost {
 		);
 
 		const emulator = new Emulator({
-			model,
+			// Map the current model onto the machine's architecture + bus options.
+			// The fuller model classes (1200XL/XEGS, RAM sizes) land with the
+			// MachineSettings redesign.
+			xl,
+			...(model === "130XE" && {
+				xeBankCount: 4,
+				separateAnticAccess: true,
+			}),
 			os: osBytes,
 			tvSystem: tv,
 			...(basic && basicBytes && { basic: basicBytes }),

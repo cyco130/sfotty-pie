@@ -17,8 +17,9 @@ function makeMachine(model: AtariModel, cartridge?: Cartridge) {
 	basic[8191] = 0xa0;
 
 	return new Atari({
-		model,
-		os: new Uint8Array(model === "800XL" ? 16384 : 10240),
+		xl: model !== "800",
+		...(model === "130XE" && { xeBankCount: 4, separateAnticAccess: true }),
+		os: new Uint8Array(model === "800" ? 10240 : 16384),
 		basic,
 		cartridge,
 	});
@@ -33,14 +34,8 @@ test("a cartridge takes the 800's BASIC slot", () => {
 });
 
 test("the 800's cartridge slot can be left empty", () => {
-	const machine = new Atari({ model: "800", os: new Uint8Array(10240) });
+	const machine = new Atari({ os: new Uint8Array(10240) });
 	expect(machine.read(0xa000, ReadOptions.NONE)).toBe(0x00); // RAM
-});
-
-test("the XL requires its built-in BASIC ROM", () => {
-	expect(
-		() => new Atari({ model: "800XL", os: new Uint8Array(16384) }),
-	).toThrow("BASIC ROM");
 });
 
 test("a cartridge shadows the XL's built-in BASIC", () => {

@@ -29,21 +29,35 @@ export type AtariModel = "800" | "800XL" | "130XE";
 const PHASE = { IDLE: 0, BUS: 1, CPU: 2 } as const;
 
 export interface MachineConfig {
-	/** Which machine to emulate. */
-	model: AtariModel;
+	/**
+	 * XL/XE architecture: PORTB banking and built-in (banked) ROM slots.
+	 * Default false — the 400/800, where BASIC/cartridges share the $A000 slot.
+	 */
+	xl?: boolean;
 	/** TV standard: line count, the GTIA PAL flag, and timing. Default NTSC. */
 	tvSystem?: "ntsc" | "pal";
-	/** OS ROM: OS-B (10K) for the 800, XL OS (16K) for the 800XL. */
+	/**
+	 * Conventional RAM in KB: 16/48 on the 400/800, 64 on XL/XE. Defaults from
+	 * `xl` (48 / 64).
+	 */
+	conventionalRamSize?: number;
+	/** 16K PORTB-banked extended-RAM banks (0/4/8/16/32/64). Default 0. */
+	xeBankCount?: number;
+	/** Separate CPU/ANTIC extended-RAM access (needs ≤32 banks). Default false. */
+	separateAnticAccess?: boolean;
+	/** OS ROM: 10K (400/800) or 16K (XL/XE). */
 	os: Uint8Array;
 	/**
-	 * BASIC ROM (8K): an $A000 cartridge on the 800 — omit it to leave the
-	 * slot empty — and built-in (so required) on the 800XL.
+	 * BASIC ROM (8K). Built-in (PORTB-banked) on XL/XE; on the 400/800 a passed
+	 * `basic` is wrapped as an $A000 cartridge (omit to leave the slot empty).
+	 * The 1200XL has no built-in BASIC — omit it and supply BASIC as a cart.
 	 */
 	basic?: Uint8Array;
+	/** Built-in game ROM (8K), PORTB-banked — the XEGS. Requires `xl`. */
+	game?: Uint8Array;
 	/**
-	 * Cartridge in the (left) slot. On the 800 it takes the slot otherwise
-	 * occupied by the BASIC cartridge; on the XL it shadows the built-in
-	 * BASIC at $A000.
+	 * Cartridge in the (left) slot. On the 400/800 it takes the slot otherwise
+	 * occupied by the BASIC cartridge; on XL/XE it shadows built-in BASIC.
 	 */
 	cartridge?: Cartridge;
 	/** Debug log sink (used by ANTIC's display list disassembler). */
@@ -86,9 +100,9 @@ export interface MachineConfig {
 export class Atari implements Memory {
 	readonly anticGtia: AnticGtia;
 
-	readonly #bus: AtariBus;
-	readonly #pia: Pia;
-	readonly #pokey: Pokey;
+	readonly bus: AtariBus;
+	readonly pia: Pia;
+	readonly pokey: Pokey;
 	readonly #xl: boolean;
 	#resetHeld = false;
 
@@ -108,13 +122,9 @@ export class Atari implements Memory {
 	#audio = 0;
 
 	constructor(config: MachineConfig) {
-		const { model, os, basic, cartridge, log } = config;
-		const xl = model !== "800"; // XL and XE share the XL architecture
+		const { os, basic, game, cartridge, log } = config;
+		const xl = config.xl ?? false;
 		this.#xl = xl;
-
-		if (xl && !basic) {
-			throw new Error("The 800XL requires a BASIC ROM — it's built in");
-		}
 
 		const tvSystem = config.tvSystem ?? "ntsc";
 
@@ -122,28 +132,29 @@ export class Atari implements Memory {
 		// construction cycle.
 		this.anticGtia = new AnticGtia(
 			{
-				dmaRead: (address) => this.#bus.read(address, ReadOptions.DMA),
+				dmaRead: (address) => this.bus.read(address, ReadOptions.DMA),
 				log: log ?? (() => {}),
 			},
 			{ anticTvSystem: tvSystem, gtiaTvSystem: tvSystem },
 		);
 
-		this.#pia = new Pia();
-		this.#pokey = new Pokey();
+		this.pia = new Pia();
+		this.pokey = new Pokey();
 
-		this.#bus = new AtariBus({
+		this.bus = new AtariBus({
 			portbBanking: xl,
-			conventionalRamSize: xl ? 64 : 48,
-			xeBankCount: model === "130XE" ? 4 : 0,
-			separateAnticAccess: model === "130XE",
+			conventionalRamSize: config.conventionalRamSize ?? (xl ? 64 : 48),
+			xeBankCount: config.xeBankCount ?? 0,
+			separateAnticAccess: config.separateAnticAccess ?? false,
 			osRom: os,
-			// 800XL: built-in BASIC, banked in via PORTB. 800: BASIC as a cart —
-			// displaced when a game cartridge is in the slot.
+			// XL/XE: built-in BASIC and game, banked in via PORTB. 400/800: BASIC
+			// is an $A000 cart — displaced when a game cartridge is in the slot.
 			basicRom: xl ? basic : undefined,
+			gameRom: game,
 			cartridge: cartridge ?? (!xl && basic ? new Cartridge(basic) : undefined),
 			gtia: this.anticGtia,
-			pokey: this.#pokey,
-			pia: this.#pia,
+			pokey: this.pokey,
+			pia: this.pia,
 			antic: this.anticGtia,
 			pbi: new Pbi(),
 		});
@@ -179,22 +190,22 @@ export class Atari implements Memory {
 
 	/** The last value driven on the data bus (see {@link AtariBus.busData}). */
 	get busData(): number {
-		return this.#bus.busData;
+		return this.bus.busData;
 	}
 
 	read(address: number, options: ReadOptions): number {
-		return this.#bus.read(address, options);
+		return this.bus.read(address, options);
 	}
 
 	write(address: number, value: number, options: ReadOptions): void {
-		this.#bus.write(address, value, options);
+		this.bus.write(address, value, options);
 	}
 
 	reset(cold: boolean): void {
-		this.#bus.reset(cold);
+		this.bus.reset(cold);
 		this.anticGtia.reset(cold);
-		this.#pia.reset(cold);
-		this.#pokey.reset(cold);
+		this.pia.reset(cold);
+		this.pokey.reset(cold);
 	}
 
 	/** The CPU the machine owns and drives. */
@@ -253,7 +264,7 @@ export class Atari implements Memory {
 			throw new Error("cycle() called mid-cycle — use resumeCycle()");
 		}
 		this.anticGtia.beforeCpu();
-		this.#audio = this.#pokey.cycle();
+		this.#audio = this.pokey.cycle();
 		this.#phase = PHASE.BUS;
 		return this.#runCycle();
 	}
@@ -290,7 +301,7 @@ export class Atari implements Memory {
 	 * like the hardware. Copy to the CPU's IRQ input every cycle.
 	 */
 	get irq(): boolean {
-		return this.#pokey.irq || this.#pia.irqA || this.#pia.irqB;
+		return this.pokey.irq || this.pia.irqA || this.pia.irqB;
 	}
 
 	/**
@@ -310,7 +321,7 @@ export class Atari implements Memory {
 	 * there is no scan timing yet.
 	 */
 	pokeyKeyDown(code: number): void {
-		this.#pokey.keyDown(code);
+		this.pokey.keyDown(code);
 	}
 
 	/**
@@ -318,7 +329,7 @@ export class Atari implements Memory {
 	 * several host keys held, call this when the last one is released.
 	 */
 	pokeyKeyUp(): void {
-		this.#pokey.keyUp();
+		this.pokey.keyUp();
 	}
 
 	/**
@@ -327,12 +338,12 @@ export class Atari implements Memory {
 	 * disagree, just like on real hardware mid-scan.
 	 */
 	shiftKeyDown(): void {
-		this.#pokey.shiftKeyDown();
+		this.pokey.shiftKeyDown();
 	}
 
 	/** Release the Shift key. */
 	shiftKeyUp(): void {
-		this.#pokey.shiftKeyUp();
+		this.pokey.shiftKeyUp();
 	}
 
 	/**
@@ -340,7 +351,7 @@ export class Atari implements Memory {
 	 * observable by software.
 	 */
 	breakKeyDown(): void {
-		this.#pokey.breakKeyDown();
+		this.pokey.breakKeyDown();
 	}
 
 	/**
@@ -373,7 +384,7 @@ export class Atari implements Memory {
 		fn: ExecuteInterceptor,
 		opts?: { once?: boolean },
 	): TrapHandle {
-		return this.#bus.interceptExecute(address, fn, opts);
+		return this.bus.interceptExecute(address, fn, opts);
 	}
 
 	observeExecute(
@@ -381,7 +392,7 @@ export class Atari implements Memory {
 		fn: ExecuteObserver,
 		opts?: { once?: boolean },
 	): TrapHandle {
-		return this.#bus.observeExecute(address, fn, opts);
+		return this.bus.observeExecute(address, fn, opts);
 	}
 
 	interceptRead(
@@ -389,7 +400,7 @@ export class Atari implements Memory {
 		fn: ReadInterceptor,
 		opts?: TrapOptions,
 	): TrapHandle {
-		return this.#bus.interceptRead(address, fn, opts);
+		return this.bus.interceptRead(address, fn, opts);
 	}
 
 	observeRead(
@@ -397,7 +408,7 @@ export class Atari implements Memory {
 		fn: ReadObserver,
 		opts?: TrapOptions,
 	): TrapHandle {
-		return this.#bus.observeRead(address, fn, opts);
+		return this.bus.observeRead(address, fn, opts);
 	}
 
 	interceptWrite(
@@ -405,7 +416,7 @@ export class Atari implements Memory {
 		fn: WriteInterceptor,
 		opts?: TrapOptions,
 	): TrapHandle {
-		return this.#bus.interceptWrite(address, fn, opts);
+		return this.bus.interceptWrite(address, fn, opts);
 	}
 
 	observeWrite(
@@ -413,7 +424,7 @@ export class Atari implements Memory {
 		fn: WriteObserver,
 		opts?: TrapOptions,
 	): TrapHandle {
-		return this.#bus.observeWrite(address, fn, opts);
+		return this.bus.observeWrite(address, fn, opts);
 	}
 
 	/**
@@ -473,10 +484,10 @@ export class Atari implements Memory {
 	#moveStick(port: number, mask: number): void {
 		this.#sticks[port] = mask;
 		if (port < 2) {
-			this.#pia.portaIn.value =
+			this.pia.portaIn.value =
 				~((this.#sticks[1]! << 4) | this.#sticks[0]!) & 0xff;
 		} else {
-			this.#pia.portbIn.value =
+			this.pia.portbIn.value =
 				~((this.#sticks[3]! << 4) | this.#sticks[2]!) & 0xff;
 		}
 	}

@@ -72,7 +72,8 @@ if (filePath) {
 }
 
 const machine = new Atari({
-	model: xe ? "130XE" : xl ? "800XL" : "800",
+	xl: xl || xe,
+	...(xe ? { xeBankCount: 4, separateAnticAccess: true } : {}),
 	os: loadRom(osPath, "--os"),
 	...(xl || !filePath ? { basic: loadRom(basicPath, "--basic") } : {}),
 	...(cartridge ? { cartridge } : {}),

@@ -6,7 +6,7 @@ import { Atari } from "./machine.ts";
 // quiet slot — no DMA fetch, no DRAM refresh, off a visible line — so the CPU
 // actually runs this cycle (halt stays false).
 function quietMachine(): Atari {
-	const machine = new Atari({ model: "800", os: new Uint8Array(10240) });
+	const machine = new Atari({ os: new Uint8Array(10240) });
 	machine.write(0x0600, 0xea, ReadOptions.NONE); // NOP
 	machine.cpu.PC = 0x0600;
 	machine.cpu.state = DECODE;

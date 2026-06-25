@@ -21,11 +21,15 @@ export const messages = {
 		home: {
 			title: "Sfotty Pie",
 			heading: "Sfotty Pie",
-			lead: "An Atari 8-bit emulator and toolkit, in your browser.",
-			launch: "Launch the emulator",
+			lead: "Sfotty Pie is a set of tools for the 6502 (Sixty-Five-Oh-Two), the 8-bit CPU behind the Atari 8-bit, Apple II, Commodore 64, NES, and many others. It spans a cycle-exact 6502 core, an Atari 8-bit machine, and a 6502 assembler.",
+			launch: "Atari 8-bit emulator",
+			github: "GitHub",
+			legal:
+				"Sfotty Pie is MIT-licensed and is not affiliated with Atari. Bundled replacement firmware images (AltirraOS, Altirra BASIC, Atari++) are used under their own licenses.",
+			thirdPartyLicenses: "Third-party licenses",
 		},
 		emu: {
-			title: "Sfotty Pie A8 Web",
+			title: "A8 Web — Sfotty Pie",
 		},
 		atari: {
 			title: "Atari 8-bit — Sfotty Pie",

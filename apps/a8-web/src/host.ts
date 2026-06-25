@@ -16,22 +16,26 @@ import {
 	type FirmwareKey,
 } from "@sfotty-pie/a8";
 import { computed, signal } from "@preact/signals";
+import type { FirmwareLibraryEntry } from "virtual:firmware-library";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { Keyboard } from "./keyboard.ts";
 import {
+	loadImageBytes,
 	loadLibraryEntry,
 	type LibraryEntry,
-	type LoadedFirmware,
 } from "./library.ts";
 import { currentPath, navigate } from "./navigate.ts";
 import { messages } from "./messages.ts";
 
 export interface HostConfig {
 	model: AtariModel;
-	/** The identified firmware library; the host ranks/picks OS + BASIC. */
-	firmware: LoadedFirmware[];
+	/**
+	 * The firmware library manifest. The host ranks/picks OS + BASIC from this
+	 * metadata and fetches only the chosen ROM's bytes, on demand.
+	 */
+	firmware: FirmwareLibraryEntry[];
 	audio: AudioOutput | null;
 	/** Why audio is unavailable, if it failed to initialize (shown on tap). */
 	audioError?: string | null;
@@ -150,13 +154,20 @@ export class EmulatorHost {
 	 */
 	readonly sidebar = signal<SidebarPanel | null>(null);
 
-	// Identified firmware, indexed by key for ranked selection.
-	readonly #firmware: Map<FirmwareKey, LoadedFirmware>;
+	// Firmware manifest, indexed by key for ranked selection (metadata only).
+	readonly #firmware: Map<FirmwareKey, FirmwareLibraryEntry>;
+	// Fetched ROM bytes, keyed by asset URL — populated lazily before each
+	// (re)build so #makeEmulator can read them synchronously.
+	readonly #bytes = new Map<string, Uint8Array>();
 	readonly #audio: AudioOutput | null;
 	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
 
-	#emulator: Emulator;
+	// Assigned by create() before the host is handed out — the constructor can't
+	// await the initial firmware fetch.
+	#emulator!: Emulator;
+	// Bumped per reboot so a slow firmware fetch can't clobber a newer config.
+	#rebootToken = 0;
 	#keyInput: HTMLInputElement | null = null;
 	#bootImagePicker: (() => void) | null = null;
 	// What to do with the next file the shared picker yields (boot vs. attach).
@@ -169,16 +180,35 @@ export class EmulatorHost {
 	#cartridge: { cart: Cartridge; name: string } | null = null;
 	#drives: ({ disk: AtrImage; name: string } | null)[] = [null];
 
+	/**
+	 * Build a host and boot its first emulator. Async because the initial OS +
+	 * BASIC bytes are fetched here (the constructor stays synchronous and the
+	 * emulator can't be built until they're cached).
+	 */
+	static async create(config: HostConfig): Promise<EmulatorHost> {
+		const host = new EmulatorHost(config);
+		await host.#ensureFirmware();
+		host.#emulator = host.#makeEmulator();
+		return host;
+	}
+
 	constructor({ model, firmware, audio, audioError }: HostConfig) {
-		// Later firmware of the same key wins; the library is already merged
-		// (local over committed), so order is preserved here.
-		this.#firmware = new Map(firmware.map((f) => [f.key, f]));
+		// Index the firmware images by key (non-firmware library entries are
+		// ignored). The manifest is already deduped — one entry per key.
+		this.#firmware = new Map(
+			firmware
+				.filter(
+					(e): e is FirmwareLibraryEntry & { firmwareKey: FirmwareKey } =>
+						e.firmwareKey !== null,
+				)
+				.map((e) => [e.firmwareKey, e]),
+		);
 		this.#audio = audio;
 		this.#audioError = audioError ?? null;
 		this.config.value = { model, tv: "ntsc", basicDisabled: false };
 		this.staged.value = this.config.peek();
 
-		this.#emulator = this.#makeEmulator();
+		// #emulator is built by create() once the initial firmware is fetched.
 		this.#keyboard = new Keyboard((command) => this.dispatch(command));
 
 		// The audio context resumes/suspends asynchronously; track it.
@@ -206,7 +236,7 @@ export class EmulatorHost {
 		// slot reflects only a real cartridge.
 		const basic =
 			model === "800" && !basicDisabled
-				? (this.#pick(preferredBasicKeys())?.entry.fileName ?? null)
+				? (this.#pick(preferredBasicKeys())?.name ?? null)
 				: null;
 		this.attachments.value = {
 			cartridge: this.#cartridge?.name ?? basic,
@@ -232,12 +262,43 @@ export class EmulatorHost {
 	}
 
 	// The best-ranked firmware present in the library for a list of keys.
-	#pick(keys: readonly FirmwareKey[]): LoadedFirmware | null {
+	#pick(keys: readonly FirmwareKey[]): FirmwareLibraryEntry | null {
 		for (const key of keys) {
-			const firmware = this.#firmware.get(key);
-			if (firmware) return firmware;
+			const entry = this.#firmware.get(key);
+			if (entry) return entry;
 		}
 		return null;
+	}
+
+	// The OS + BASIC the running config wants, picked from the manifest by rank.
+	// BASIC is omitted when the machine doesn't wire it in (the 400/800 with the
+	// cartridge slot taken; the XL/XE "disable" is the OPTION-hold at boot).
+	#resolveFirmware(): {
+		os: FirmwareLibraryEntry | null;
+		basic: FirmwareLibraryEntry | null;
+	} {
+		const { model, tv, basicDisabled } = this.config.value;
+		const xl = model !== "800";
+		const includeBasic = xl || (!basicDisabled && this.#cartridge === null);
+		return {
+			os: this.#pick(preferredOsKeys({ model, tv })),
+			basic: includeBasic ? this.#pick(preferredBasicKeys()) : null,
+		};
+	}
+
+	// Fetch (and cache) the bytes the running config's OS + BASIC need, so the
+	// next #makeEmulator can read them synchronously. Already-cached ROMs (the
+	// common reboot case) resolve immediately.
+	async #ensureFirmware(): Promise<void> {
+		const { os, basic } = this.#resolveFirmware();
+		await Promise.all(
+			[os, basic]
+				.filter((e): e is FirmwareLibraryEntry => e !== null)
+				.filter((e) => !this.#bytes.has(e.url))
+				.map(async (e) => {
+					this.#bytes.set(e.url, await loadImageBytes(e.url, e.name));
+				}),
+		);
 	}
 
 	// Build an emulator for the running config + the mounted image. The OS and
@@ -248,14 +309,17 @@ export class EmulatorHost {
 	#makeEmulator(): Emulator {
 		const { model, tv, basicDisabled } = this.config.value;
 		const xl = model !== "800";
-		const cartMounted = this.#cartridge !== null;
-		const includeBasic = xl || (!basicDisabled && !cartMounted);
 
-		const os = this.#pick(preferredOsKeys({ model, tv }));
+		const { os, basic } = this.#resolveFirmware();
 		if (!os) {
 			throw new Error(messages.errors.noCompatibleOs(model, tv.toUpperCase()));
 		}
-		const basic = includeBasic ? this.#pick(preferredBasicKeys()) : null;
+		// Bytes are cached by #ensureFirmware, which always runs before a build.
+		const osBytes = this.#bytes.get(os.url);
+		const basicBytes = basic ? this.#bytes.get(basic.url) : undefined;
+		if (!osBytes) {
+			throw new Error(`firmware bytes missing for "${os.name}"`);
+		}
 
 		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
 		console.log(
@@ -265,9 +329,9 @@ export class EmulatorHost {
 
 		const emulator = new Emulator({
 			model,
-			os: os.bytes,
+			os: osBytes,
 			tvSystem: tv,
-			...(basic && { basic: basic.bytes }),
+			...(basic && basicBytes && { basic: basicBytes }),
 			...(xl && basicDisabled && { holdOption: true }),
 			...(this.#cartridge && { cartridge: this.#cartridge.cart }),
 			...(this.#drives[0] && { disk: this.#drives[0].disk }),
@@ -305,6 +369,24 @@ export class EmulatorHost {
 		this.#emulator.start();
 		this.running.value = true;
 		this.#keyInput?.focus();
+	}
+
+	// Fetch whatever firmware the new config needs, then power-cycle into it.
+	// Async (the fetch), but the rebuild itself stays synchronous — so the old
+	// machine keeps running until the ROM is ready. Bails if a newer reboot
+	// superseded this one mid-fetch, and keeps the old machine on a fetch error.
+	async #reboot(): Promise<void> {
+		const token = ++this.#rebootToken;
+		try {
+			await this.#ensureFirmware();
+			if (token !== this.#rebootToken) return;
+			this.#rebuild();
+		} catch (error) {
+			this.toast(
+				error instanceof Error ? error.message : String(error),
+				"error",
+			);
+		}
 	}
 
 	start(): void {
@@ -432,7 +514,7 @@ export class EmulatorHost {
 	// the ROM's name; otherwise it's a plain enable/disable.
 	#basicToggleMessage(disabled: boolean, model: AtariModel): string {
 		if (model === "800" && !this.#cartridge) {
-			const name = this.#pick(preferredBasicKeys())?.entry.fileName ?? "BASIC";
+			const name = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
 			return disabled
 				? messages.toasts.detachingCartridge(name)
 				: messages.toasts.attachingCartridge(name);
@@ -510,7 +592,7 @@ export class EmulatorHost {
 		const prev = this.config.value;
 		this.config.value = this.staged.value;
 		this.#announceConfigChange(prev, this.config.value);
-		this.#rebuild();
+		void this.#reboot();
 		this.closePanel();
 	}
 
@@ -525,7 +607,7 @@ export class EmulatorHost {
 		this.config.value = next;
 		this.staged.value = next;
 		this.#announceConfigChange(prev, next);
-		this.#rebuild();
+		void this.#reboot();
 	}
 
 	applyModel(model: AtariModel): void {
@@ -624,7 +706,7 @@ export class EmulatorHost {
 		this.#drives = [disk];
 		this.config.value = { ...this.config.value, basicDisabled: true };
 		this.#refreshAttachments();
-		this.#rebuild();
+		void this.#reboot();
 	}
 
 	// Toast each boot source Boot image is about to clear: the cartridge slot
@@ -635,7 +717,7 @@ export class EmulatorHost {
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
 		} else if (model === "800" && !basicDisabled) {
-			const name = this.#pick(preferredBasicKeys())?.entry.fileName ?? "BASIC";
+			const name = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(name));
 		}
 		if (this.#drives[0]) {
@@ -745,7 +827,7 @@ export class EmulatorHost {
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
 		} else if (model === "800" && !basicDisabled) {
-			const basic = this.#pick(preferredBasicKeys())?.entry.fileName ?? "BASIC";
+			const basic = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(basic));
 		}
 		this.toast(messages.toasts.attachingCartridge(file.name));
@@ -753,7 +835,7 @@ export class EmulatorHost {
 		this.closePanel(); // get out of the way
 		this.#cartridge = { cart, name: file.name };
 		this.#refreshAttachments();
-		this.#rebuild();
+		void this.#reboot();
 	}
 
 	/**
@@ -769,7 +851,7 @@ export class EmulatorHost {
 			const { name } = this.#cartridge;
 			this.#cartridge = null;
 			this.#refreshAttachments();
-			this.#rebuild();
+			void this.#reboot();
 			this.toast(messages.toasts.detachingCartridge(name));
 			return;
 		}

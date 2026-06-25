@@ -13,8 +13,6 @@
 // This is the first slice — filename is the identity (no content hashing) and
 // there's no sidecar metadata yet.
 
-import { detectFirmware, type FirmwareInfo } from "@sfotty-pie/a8";
-
 export type LibraryCategory = "firmware" | "other";
 
 export interface LibraryEntry {
@@ -83,54 +81,33 @@ export const builtinLibrary: LibraryEntry[] = [...entries.values()].sort(
 );
 
 /**
- * Fetch an entry's raw bytes.
+ * Fetch an image's raw bytes from its (possibly fragmented) asset URL.
  *
  * A `#start-end` URL fragment (hex byte offsets, end-exclusive) selects a slice
  * of the asset — e.g. one ROM carved out of a combined dump. The fragment is
  * stripped before the fetch, so a combined's slices all share one cached
  * download and each is a `subarray` view into it. No fragment ⇒ the whole file.
  */
-export async function loadLibraryEntry(
-	entry: LibraryEntry,
+export async function loadImageBytes(
+	url: string,
+	label = url,
 ): Promise<Uint8Array> {
-	const hash = entry.url.indexOf("#");
-	const base = hash < 0 ? entry.url : entry.url.slice(0, hash);
+	const hash = url.indexOf("#");
+	const base = hash < 0 ? url : url.slice(0, hash);
 	const response = await fetch(base);
 	if (!response.ok) {
-		throw new Error(`Failed to load ${entry.id} (${response.status})`);
+		throw new Error(`Failed to load ${label} (${response.status})`);
 	}
 	const bytes = new Uint8Array(await response.arrayBuffer());
 	if (hash < 0) return bytes;
-	const [start, end] = entry.url
+	const [start, end] = url
 		.slice(hash + 1)
 		.split("-")
 		.map((h) => parseInt(h, 16));
 	return bytes.subarray(start, end);
 }
 
-/** A firmware-category library item whose bytes are loaded and identified. */
-export interface LoadedFirmware {
-	key: FirmwareInfo["key"];
-	type: FirmwareInfo["type"];
-	name: string;
-	bytes: Uint8Array;
-	entry: LibraryEntry;
-}
-
-/**
- * Load and identify every firmware-category item in the library. Entries whose
- * bytes don't match a known firmware are dropped (they can't be ranked). The
- * host picks the best OS/BASIC for the current machine from this set.
- */
-export async function loadFirmwareLibrary(): Promise<LoadedFirmware[]> {
-	const firmware = builtinLibrary.filter((e) => e.category === "firmware");
-	const loaded = await Promise.all(
-		firmware.map(async (entry): Promise<LoadedFirmware | null> => {
-			const bytes = await loadLibraryEntry(entry);
-			const info = detectFirmware(bytes);
-			if (!info) return null;
-			return { key: info.key, type: info.type, name: info.name, bytes, entry };
-		}),
-	);
-	return loaded.filter((f): f is LoadedFirmware => f !== null);
+/** Fetch a library entry's raw bytes. */
+export function loadLibraryEntry(entry: LibraryEntry): Promise<Uint8Array> {
+	return loadImageBytes(entry.url, entry.id);
 }

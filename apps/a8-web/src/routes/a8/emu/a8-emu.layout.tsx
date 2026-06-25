@@ -1,24 +1,21 @@
 import type { ComponentChildren } from "preact";
 import { useLocation } from "preact-iso";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { builtinFirmware } from "virtual:firmware-library";
 import { App } from "../../../app.tsx";
 import { AudioOutput } from "../../../audio.ts";
 import { installDevConsole } from "../../../dev-console.ts";
 import { useHead } from "../../../head.ts";
 import { EmulatorHost, type SidebarPanel } from "../../../host.ts";
-import { loadFirmwareLibrary } from "../../../library.ts";
 import { messages } from "../../../messages.ts";
 import { isToggleChord } from "../../../sidebar.tsx";
 import { EmuContext } from "./emu-context.ts";
 
-// Page-level singletons. The firmware set and the audio sink are created once
-// and reused across emulator mounts — the machine reboots on re-entry, but
-// these don't. Created lazily on first entry to /a8/emu, so content pages (the
-// welcome page, reference, …) never pay to load or build them.
-let firmwareOnce: ReturnType<typeof loadFirmwareLibrary> | null = null;
-function getFirmware() {
-	return (firmwareOnce ??= loadFirmwareLibrary());
-}
+// The audio sink is a page-level singleton — created once and reused across
+// emulator mounts (the machine reboots on re-entry, but the sink doesn't),
+// lazily on first entry to /a8/emu so content pages never pay for it. The
+// firmware manifest is a build-time constant (virtual:firmware-library); the
+// host fetches only the ROMs it picks, and the browser caches those.
 
 interface Audio {
 	audio: AudioOutput | null;
@@ -66,15 +63,19 @@ export default function A8EmuLayout({
 		let cancelled = false;
 		void (async () => {
 			try {
-				const firmware = await getFirmware();
 				const { audio, audioError } = await getAudio();
 				if (cancelled) return;
-				host = new EmulatorHost({
+				const built = await EmulatorHost.create({
 					model: "800XL",
-					firmware,
+					firmware: builtinFirmware,
 					audio,
 					audioError,
 				});
+				if (cancelled) {
+					built.pause();
+					return;
+				}
+				host = built;
 				installDevConsole(host);
 				setState({ kind: "ready", host });
 			} catch (error) {

@@ -31,10 +31,8 @@ export default defineConfig({
 	// emit them as hashed assets instead of trying to parse them as source.
 	assetsInclude: ["**/*.rom", "**/*.xex", "**/*.atr", "**/*.car"],
 	server: { host: true },
-	// Multi-page build: the emulator (index.html), the reference docs
-	// (docs/index.html, served at /docs/), and the keyboard event lab
-	// (keyboard-lab.html, served at /keyboard-lab.html) — shipped so its
-	// capturability probes can be run on borrowed/remote machines.
+	// The app is a single-page SPA (index.html). The keyboard event lab is still
+	// a separate entry (keyboard-lab.html) pending its migration into the SPA.
 	build: {
 		// Emit hashed, content-addressed assets under /_app/assets so the
 		// deploy's Nginx can serve them with a long-lived immutable cache
@@ -49,7 +47,6 @@ export default defineConfig({
 		rollupOptions: {
 			input: {
 				main: fileURLToPath(new URL("./index.html", import.meta.url)),
-				docs: fileURLToPath(new URL("./docs/index.html", import.meta.url)),
 				keyboardLab: fileURLToPath(
 					new URL("./keyboard-lab.html", import.meta.url),
 				),

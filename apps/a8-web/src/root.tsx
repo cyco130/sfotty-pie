@@ -9,6 +9,13 @@ const A8EmuLayout = lazy(() => import("./routes/a8/emu/a8-emu.layout.tsx"));
 const EmuIndex = lazy(() => import("./routes/a8/emu/(a8-emu).page.tsx"));
 const MenuPanel = lazy(() => import("./routes/a8/emu/menu.page.tsx"));
 const PalettePanel = lazy(() => import("./routes/a8/emu/palette.page.tsx"));
+const AtariIndex = lazy(() => import("./routes/a8/(a8).page.tsx"));
+const ReferenceIndex = lazy(
+	() => import("./routes/a8/reference/(reference).page.tsx"),
+);
+const AtasciiKeyboard = lazy(
+	() => import("./routes/a8/reference/atascii-and-keyboard.page.tsx"),
+);
 
 // Capture preact-iso's `route` into the module-level navigate() so non-component
 // code (the host) can navigate. Lives inside LocationProvider.
@@ -44,6 +51,7 @@ export function Root() {
 			<NavigationBridge />
 			<Router>
 				<Route path="/" component={HomePage} />
+				<Route path="/a8" component={AtariIndex} />
 				{/* Two routes, one component: preact-iso's `/*` splat needs >=1
 				    segment so it won't match the bare /a8/emu. The exact route
 				    covers the index (nested rest="" → the "/" panel route); the
@@ -51,6 +59,11 @@ export function Root() {
 				    doesn't remount EmuSection (the machine) when switching. */}
 				<Route path="/a8/emu" component={EmuSection} />
 				<Route path="/a8/emu/*" component={EmuSection} />
+				<Route path="/a8/reference" component={ReferenceIndex} />
+				<Route
+					path="/a8/reference/atascii-and-keyboard"
+					component={AtasciiKeyboard}
+				/>
 				<Route default component={NotFoundPage} />
 			</Router>
 		</LocationProvider>

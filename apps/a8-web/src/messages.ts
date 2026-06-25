@@ -27,6 +27,28 @@ export const messages = {
 		emu: {
 			title: "Sfotty Pie A8 Web",
 		},
+		atari: {
+			title: "Atari 8-bit — Sfotty Pie",
+			heading: "Atari 8-bit",
+			emu: "Emulator",
+			reference: "Reference",
+		},
+		reference: {
+			title: "Reference — Sfotty Pie",
+			heading: "Atari 8-bit reference",
+			atasciiKeyboard: "ATASCII & keyboard",
+		},
+		atasciiKeyboard: {
+			title: "ATASCII & keyboard — Sfotty Pie",
+		},
+		labs: {
+			title: "Labs — Sfotty Pie",
+			heading: "Labs",
+			keyboard: "Keyboard event lab",
+		},
+		keyboard: {
+			title: "Keyboard event lab — Sfotty Pie",
+		},
 		notFound: {
 			title: "Not found — Sfotty Pie",
 			heading: "Page not found",

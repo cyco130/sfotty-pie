@@ -1,5 +1,4 @@
 import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import tailwindcss from "@tailwindcss/vite";
@@ -31,8 +30,8 @@ export default defineConfig({
 	// emit them as hashed assets instead of trying to parse them as source.
 	assetsInclude: ["**/*.rom", "**/*.xex", "**/*.atr", "**/*.car"],
 	server: { host: true },
-	// The app is a single-page SPA (index.html). The keyboard event lab is still
-	// a separate entry (keyboard-lab.html) pending its migration into the SPA.
+	// A single-page SPA: index.html is the only entry (Vite's default), so no
+	// rollupOptions.input is needed.
 	build: {
 		// Emit hashed, content-addressed assets under /_app/assets so the
 		// deploy's Nginx can serve them with a long-lived immutable cache
@@ -44,14 +43,6 @@ export default defineConfig({
 		// `undefined` keeps Vite's default size threshold for everything else.
 		assetsInlineLimit: (filePath) =>
 			filePath.endsWith(".svg") ? false : undefined,
-		rollupOptions: {
-			input: {
-				main: fileURLToPath(new URL("./index.html", import.meta.url)),
-				keyboardLab: fileURLToPath(
-					new URL("./keyboard-lab.html", import.meta.url),
-				),
-			},
-		},
 	},
 	// @sfotty-pie/a8 is a linked workspace package built to dist. Excluding it
 	// from dep pre-bundling lets Vite pick up its rebuilds (from the root

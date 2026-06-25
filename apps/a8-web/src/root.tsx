@@ -16,6 +16,8 @@ const ReferenceIndex = lazy(
 const AtasciiKeyboard = lazy(
 	() => import("./routes/a8/reference/atascii-and-keyboard.page.tsx"),
 );
+const LabsIndex = lazy(() => import("./routes/labs/(labs).page.tsx"));
+const KeyboardLab = lazy(() => import("./routes/labs/keyboard.page.tsx"));
 
 // Capture preact-iso's `route` into the module-level navigate() so non-component
 // code (the host) can navigate. Lives inside LocationProvider.
@@ -64,6 +66,8 @@ export function Root() {
 					path="/a8/reference/atascii-and-keyboard"
 					component={AtasciiKeyboard}
 				/>
+				<Route path="/labs" component={LabsIndex} />
+				<Route path="/labs/keyboard" component={KeyboardLab} />
 				<Route default component={NotFoundPage} />
 			</Router>
 		</LocationProvider>

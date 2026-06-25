@@ -106,6 +106,17 @@ export const messages = {
 		titlePalette: "Commands",
 	},
 
+	roms: {
+		title: "ROM preferences",
+		osRoms: "OS ROMs",
+		cartRoms: "Built-in cartridge ROMs",
+		inUse: "in use",
+		unsaved: "Unsaved change",
+		save: "Save changes",
+		noSuitable: "No suitable ROMs",
+		picksReset: "Picks reset when you reload.",
+	},
+
 	keyHelp: {
 		arrowKeys: "Arrow keys",
 		joystick: "Joystick",
@@ -184,6 +195,7 @@ export const labels = {
 	AUDIO_UNMUTE: "Unmute audio",
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
 	MENU_TOGGLE: "Toggle the menu",
+	OPEN_ROMS: "ROM preferences…",
 	TOGGLE_FULLSCREEN: "Toggle full screen",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Attach a disk to D1:…",

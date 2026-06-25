@@ -76,6 +76,7 @@ export const commands = {
 
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: { label: "BOOT_IMAGE", run: ({ host }) => host.pickBootImage() },
+	OPEN_ROMS: { label: "OPEN_ROMS", run: ({ host }) => host.showPanel("roms") },
 
 	// Attach a disk to D1: of the running machine (no reboot, BASIC kept).
 	ATTACH_D1: { label: "ATTACH_D1", run: ({ host }) => host.pickAttachDisk() },

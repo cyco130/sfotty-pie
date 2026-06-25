@@ -20,6 +20,7 @@ import type { FirmwareLibraryEntry } from "virtual:firmware-library";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
+import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import { Keyboard } from "./keyboard.ts";
 import {
 	loadImageBytes,
@@ -70,9 +71,27 @@ export interface Toast {
  * The sidebar's content when open. Stable string ids so the state stays
  * serializable (a future deep-link layer can map these straight to the URL).
  */
-export type SidebarPanel = "menu" | "palette";
+export type SidebarPanel = "menu" | "palette" | "roms";
 
 export type { MachineSettings } from "./machine-config.ts";
+
+/** In-memory firmware overrides; an explicit pick beats the ranking. */
+export interface RomOverrides {
+	os: Partial<Record<OsSlot, FirmwareKey>>;
+	basic: FirmwareKey | null;
+	game: FirmwareKey | null;
+}
+
+const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
+
+function romsEqual(a: RomOverrides, b: RomOverrides): boolean {
+	if (a.basic !== b.basic || a.game !== b.game) return false;
+	const slots = new Set([...Object.keys(a.os), ...Object.keys(b.os)]);
+	for (const slot of slots) {
+		if (a.os[slot as OsSlot] !== b.os[slot as OsSlot]) return false;
+	}
+	return true;
+}
 
 /** Why a detected-but-not-loadable file can't be loaded (yet). */
 function unsupportedMessage(format: AtariFileFormat | null): string | null {
@@ -160,6 +179,25 @@ export class EmulatorHost {
 	// Fetched ROM bytes, keyed by asset URL — populated lazily before each
 	// (re)build so #makeEmulator can read them synchronously.
 	readonly #bytes = new Map<string, Uint8Array>();
+	// In-memory firmware overrides (not persisted). appliedRoms is what the
+	// running machine uses; stagedRoms is the ROMs panel's working copy. applyRoms
+	// adopts it, rebooting only when the picks change the running machine.
+	readonly appliedRoms = signal<RomOverrides>(NO_ROM_OVERRIDES);
+	readonly stagedRoms = signal<RomOverrides>(NO_ROM_OVERRIDES);
+	readonly romsDirty = computed(
+		() => !romsEqual(this.stagedRoms.value, this.appliedRoms.value),
+	);
+	// Whether applying the staged picks would change the firmware the running
+	// machine actually uses (vs. just saving a pick for a model to switch into).
+	readonly romsReboot = computed(() => {
+		const applied = this.#resolveWith(this.appliedRoms.value);
+		const staged = this.#resolveWith(this.stagedRoms.value);
+		return (
+			applied.os?.url !== staged.os?.url ||
+			applied.basic?.url !== staged.basic?.url ||
+			applied.game?.url !== staged.game?.url
+		);
+	});
 	readonly #audio: AudioOutput | null;
 	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
@@ -288,17 +326,39 @@ export class EmulatorHost {
 		basic: FirmwareLibraryEntry | null;
 		game: FirmwareLibraryEntry | null;
 	} {
+		return this.#resolveWith(this.appliedRoms.value);
+	}
+
+	// Resolve OS/BASIC/game for the running config under a given override set; an
+	// override wins over the ranking when its ROM is present.
+	#resolveWith(roms: RomOverrides): {
+		os: FirmwareLibraryEntry | null;
+		basic: FirmwareLibraryEntry | null;
+		game: FirmwareLibraryEntry | null;
+	} {
 		const { model, tv, basicDisabled } = this.config.value;
 		// Built-in BASIC (xl/xe, xegs) is always loaded — its "disable" is the
 		// OPTION-hold. Cart BASIC (400/800, 1200xl) loads only when it takes the
 		// slot: enabled and no cartridge mounted.
 		const needBasic =
 			hasBuiltinBasic(model) || (!basicDisabled && this.#cartridge === null);
+		const osSlot = osSlotFor(model, tv);
 		return {
-			os: this.#pick(preferredOsKeys({ model, tv })),
-			basic: needBasic ? this.#pick(preferredBasicKeys()) : null,
-			game: model === "xegs" ? this.#pickGame() : null,
+			os:
+				this.#fromKey(roms.os[osSlot]) ??
+				this.#pick(preferredOsKeys({ model, tv })),
+			basic: needBasic
+				? (this.#fromKey(roms.basic) ?? this.#pick(preferredBasicKeys()))
+				: null,
+			game:
+				model === "xegs"
+					? (this.#fromKey(roms.game) ?? this.#pickGame())
+					: null,
 		};
+	}
+
+	#fromKey(key: FirmwareKey | null | undefined): FirmwareLibraryEntry | null {
+		return key ? (this.#firmware.get(key) ?? null) : null;
 	}
 
 	// The XEGS built-in game — any game-type firmware in the library.
@@ -700,6 +760,39 @@ export class EmulatorHost {
 
 	applyRam(totalKB: number): void {
 		this.#applyConfigChange(ramConfig(totalKB));
+	}
+
+	// --- Firmware overrides (the ROMs panel). Staged like the machine config:
+	// picks go to stagedRoms; applyRoms commits them and reboots. ---
+
+	/** Reset the ROMs panel's working copy to what's applied (on panel open). */
+	syncStagedRoms(): void {
+		this.stagedRoms.value = this.appliedRoms.value;
+	}
+
+	// `null` clears the override (back to the automatic ranking) — so picking the
+	// default value doesn't register as a staged change.
+	stageOsRom(slot: OsSlot, key: FirmwareKey | null): void {
+		const os = { ...this.stagedRoms.value.os };
+		if (key === null) delete os[slot];
+		else os[slot] = key;
+		this.stagedRoms.value = { ...this.stagedRoms.value, os };
+	}
+
+	stageBasicRom(key: FirmwareKey | null): void {
+		this.stagedRoms.value = { ...this.stagedRoms.value, basic: key };
+	}
+
+	stageGameRom(key: FirmwareKey | null): void {
+		this.stagedRoms.value = { ...this.stagedRoms.value, game: key };
+	}
+
+	/** Adopt the staged ROM picks; reboot only if they change the running machine. */
+	applyRoms(): void {
+		if (!this.romsDirty.value) return;
+		const reboot = this.romsReboot.value;
+		this.appliedRoms.value = this.stagedRoms.value;
+		if (reboot) void this.#reboot();
 	}
 
 	applyTv(tv: "ntsc" | "pal"): void {

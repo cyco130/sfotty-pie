@@ -225,6 +225,13 @@ export function MenuView({
 				>
 					{messages.sidebar.bootImage}
 				</button>
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.showPanel("roms")}
+				>
+					{messages.roms.title}…
+				</button>
 			</section>
 
 			{software.length > 0 && (

@@ -25,6 +25,7 @@ import {
 	type LibraryEntry,
 	type LoadedFirmware,
 } from "./library.ts";
+import { currentPath, navigate } from "./navigate.ts";
 import { messages } from "./messages.ts";
 
 export interface HostConfig {
@@ -444,18 +445,27 @@ export class EmulatorHost {
 	/** Show a sidebar panel (switching directly if another is already open). */
 	showPanel(panel: SidebarPanel): void {
 		if (panel === "menu") this.staged.value = this.config.peek(); // from running config
-		this.sidebar.value = panel;
+		navigate(`/a8/emu/${panel}`, { replace: true });
 	}
 
 	closePanel(): void {
-		this.sidebar.value = null;
+		navigate("/a8/emu", { replace: true });
 		this.#keyInput?.focus(); // return keystrokes to the emulator
 	}
 
 	/** A panel's trigger: open it, or close it if it's already the one showing. */
 	togglePanel(panel: SidebarPanel): void {
-		if (this.sidebar.value === panel) this.closePanel();
+		if (currentPath() === `/a8/emu/${panel}`) this.closePanel();
 		else this.showPanel(panel);
+	}
+
+	/**
+	 * Mirror the URL-derived open panel onto the signal the top bar and OSD read.
+	 * The URL is the source of truth (the panel routes); the emulator layout
+	 * calls this on navigation.
+	 */
+	setSidebar(panel: SidebarPanel | null): void {
+		this.sidebar.value = panel;
 	}
 
 	/**
@@ -609,7 +619,7 @@ export class EmulatorHost {
 					: messages.toasts.bootDisk(name),
 		);
 
-		this.sidebar.value = null; // get out of the way
+		this.closePanel(); // get out of the way
 		this.#cartridge = cartridge;
 		this.#drives = [disk];
 		this.config.value = { ...this.config.value, basicDisabled: true };
@@ -682,7 +692,7 @@ export class EmulatorHost {
 
 		this.#drives[0] = { disk, name: file.name };
 		this.#emulator.machine.insertDisk(disk);
-		this.sidebar.value = null; // get out of the way
+		this.closePanel(); // get out of the way
 		this.#refreshAttachments();
 		this.toast(messages.toasts.attachingDisk(file.name));
 	}
@@ -740,7 +750,7 @@ export class EmulatorHost {
 		}
 		this.toast(messages.toasts.attachingCartridge(file.name));
 
-		this.sidebar.value = null; // get out of the way
+		this.closePanel(); // get out of the way
 		this.#cartridge = { cart, name: file.name };
 		this.#refreshAttachments();
 		this.#rebuild();

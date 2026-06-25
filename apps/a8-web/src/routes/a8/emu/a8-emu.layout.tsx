@@ -1,11 +1,15 @@
-import { useEffect, useState } from "preact/hooks";
+import type { ComponentChildren } from "preact";
+import { useLocation } from "preact-iso";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { App } from "../../../app.tsx";
 import { AudioOutput } from "../../../audio.ts";
 import { installDevConsole } from "../../../dev-console.ts";
 import { useHead } from "../../../head.ts";
-import { EmulatorHost } from "../../../host.ts";
+import { EmulatorHost, type SidebarPanel } from "../../../host.ts";
 import { loadFirmwareLibrary } from "../../../library.ts";
 import { messages } from "../../../messages.ts";
+import { isToggleChord } from "../../../sidebar.tsx";
+import { EmuContext } from "./emu-context.ts";
 
 // Page-level singletons. The firmware set and the audio sink are created once
 // and reused across emulator mounts — the machine reboots on re-entry, but
@@ -30,19 +34,30 @@ function getAudio(): Promise<Audio> {
 	));
 }
 
+function panelFromPath(path: string): SidebarPanel | null {
+	if (path === "/a8/emu/menu") return "menu";
+	if (path === "/a8/emu/palette") return "palette";
+	return null;
+}
+
 type BootState =
 	| { kind: "loading" }
 	| { kind: "error"; message: string }
 	| { kind: "ready"; host: EmulatorHost };
 
 /**
- * The persistent emulator shell (/a8/emu). Owns the machine: loads firmware,
- * sets up audio, builds the {@link EmulatorHost}, then renders the chrome. The
- * host is created on mount and stopped on unmount, so leaving and returning
- * reboots the machine (firmware/audio are reused). Lazily code-split, so the
- * emulator core never lands in the initial bundle.
+ * The persistent emulator shell (/a8/emu/*). Owns the machine: loads firmware,
+ * sets up audio, builds the {@link EmulatorHost}, then renders the chrome with
+ * the panel routes ({@link children}) in its sidebar slot. The host is created
+ * on mount and stopped on unmount, so leaving and returning reboots the machine
+ * (firmware/audio are reused). Lazily code-split, so the emulator core never
+ * lands in the initial bundle.
  */
-export default function A8EmuLayout() {
+export default function A8EmuLayout({
+	children,
+}: {
+	children?: ComponentChildren;
+}) {
 	useHead({ title: messages.pages.emu.title });
 	const [state, setState] = useState<BootState>({ kind: "loading" });
 
@@ -81,5 +96,82 @@ export default function A8EmuLayout() {
 			</div>
 		);
 	}
-	return <App host={state.host} />;
+	return <EmuShell host={state.host}>{children}</EmuShell>;
+}
+
+/**
+ * The chrome + cross-cutting panel behaviour, mounted only once the host is
+ * ready. The open panel is driven by the URL (the panel routes render into the
+ * sidebar slot); this mirrors it onto `host.sidebar` for the top bar and OSD,
+ * and owns the palette chord, Esc-to-close, and the iOS keyboard primer.
+ */
+function EmuShell({
+	host,
+	children,
+}: {
+	host: EmulatorHost;
+	children?: ComponentChildren;
+}) {
+	const { path } = useLocation();
+	const primerRef = useRef<HTMLInputElement>(null);
+	const panelOpen = panelFromPath(path) !== null;
+
+	// URL is the source of truth for the open panel; mirror it onto the host
+	// signal that the top bar and OSD read.
+	useEffect(() => {
+		host.setSidebar(panelFromPath(path));
+	}, [host, path]);
+
+	// The global palette chord (Cmd/Alt+K). Capture phase + stopImmediate so it
+	// preempts both the browser and the emulator's offscreen-input handler.
+	useEffect(() => {
+		const onKey = (event: KeyboardEvent) => {
+			if (!isToggleChord(event)) return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			host.togglePanel("palette");
+		};
+		window.addEventListener("keydown", onKey, true);
+		return () => window.removeEventListener("keydown", onKey, true);
+	}, [host]);
+
+	// Esc closes whatever panel is open. Capture-phase + stopPropagation so the
+	// keystroke doesn't also reach the emulator's offscreen input.
+	useEffect(() => {
+		if (!panelOpen) return;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key !== "Escape") return;
+			event.preventDefault();
+			event.stopPropagation();
+			host.closePanel();
+		};
+		document.addEventListener("keydown", onKey, true);
+		return () => document.removeEventListener("keydown", onKey, true);
+	}, [host, panelOpen]);
+
+	// Opening the palette from a tap: focus a throwaway input synchronously
+	// within the gesture so iOS Safari raises the soft keyboard (it only does so
+	// for in-gesture focus). PaletteView then moves focus to its real search box.
+	const openPalette = () => {
+		primerRef.current?.focus();
+		host.showPanel("palette");
+	};
+
+	return (
+		<EmuContext.Provider value={{ host, openPalette }}>
+			<App host={host} sidebar={children} />
+			{/* Off-screen primer (see openPalette): kept mounted so a tap can
+			    focus it within the gesture and raise the iOS soft keyboard. */}
+			<input
+				ref={primerRef}
+				type="text"
+				aria-hidden="true"
+				tabIndex={-1}
+				autocomplete="off"
+				autocapitalize="off"
+				spellcheck={false}
+				class="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
+			/>
+		</EmuContext.Provider>
+	);
 }

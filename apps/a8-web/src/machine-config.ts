@@ -89,6 +89,19 @@ export function clampRam(
 	return ramConfig(RAM_SIZES[model].includes(total) ? total : RAM_BASE[model]);
 }
 
+export type AnticPolicy = "on" | "off" | "optional";
+
+/**
+ * Whether separate ANTIC access is forced on/off or user-toggleable at a given
+ * total RAM size: 128K (130XE) is always separate; 1088K (64 banks) can't be;
+ * the sizes between are optional.
+ */
+export function anticPolicy(size: number): AnticPolicy {
+	if (size === 128) return "on";
+	if (size >= 192 && size <= 576) return "optional";
+	return "off";
+}
+
 export function settingsEqual(a: MachineSettings, b: MachineSettings): boolean {
 	return (
 		a.model === b.model &&

@@ -85,6 +85,7 @@ export const messages = {
 		machine: "Machine",
 		model: "Model",
 		ram: "RAM",
+		separateAntic: "Separate ANTIC",
 		tv: "TV",
 		basic: "BASIC",
 		on: "On",

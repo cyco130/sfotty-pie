@@ -5,27 +5,38 @@ import { messages } from "./messages.ts";
 export function BottomBar({ host }: { host: EmulatorHost }) {
 	const { cartridge, drives } = host.attachments.value;
 	const crashed = host.crashed.value;
+	const leds = host.leds.value;
 
 	return (
 		<footer class="flex h-7 shrink-0 items-center gap-4 px-3 text-sm text-neutral-400">
-			{cartridge && (
-				<span class="truncate">
-					{messages.bottomBar.cartridge} {cartridge}
-				</span>
+			<div class="flex min-w-0 flex-1 items-center gap-4">
+				{cartridge && (
+					<span class="truncate">
+						{messages.bottomBar.cartridge} {cartridge}
+					</span>
+				)}
+				{drives.map(
+					(name, index) =>
+						name && (
+							<span key={index} class="truncate">
+								D{index + 1}: {name}
+							</span>
+						),
+				)}
+			</div>
+			{leds && (
+				<div class="flex items-center gap-2 font-mono text-xs">
+					<span class={leds[0] ? "text-red-500" : "text-neutral-700"}>L1</span>
+					<span class={leds[1] ? "text-red-500" : "text-neutral-700"}>L2</span>
+				</div>
 			)}
-			{drives.map(
-				(name, index) =>
-					name && (
-						<span key={index} class="truncate">
-							D{index + 1}: {name}
-						</span>
-					),
-			)}
-			{crashed && (
-				<span class="ml-auto font-semibold text-red-500">
-					{messages.bottomBar.crashed}
-				</span>
-			)}
+			<div class="flex min-w-0 flex-1 items-center justify-end">
+				{crashed && (
+					<span class="truncate font-semibold text-red-500">
+						{messages.bottomBar.crashed}
+					</span>
+				)}
+			</div>
 		</footer>
 	);
 }

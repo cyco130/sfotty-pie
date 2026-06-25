@@ -1,6 +1,7 @@
 import type { EmulatorHost } from "./host.ts";
 import { builtinLibrary } from "./library.ts";
 import {
+	anticPolicy,
 	MODELS,
 	MODEL_LABELS,
 	RAM_SIZES,
@@ -143,6 +144,23 @@ export function MenuView({
 						}))}
 						onSelect={(value) => host.stageRam(Number(value))}
 					/>
+					{staged.portbExtendedRam && (
+						<label class="flex items-center justify-between gap-3">
+							<span class="text-sm text-neutral-600">
+								{messages.sidebar.separateAntic}
+							</span>
+							<input
+								type="checkbox"
+								checked={staged.portbExtendedRam.antic}
+								disabled={
+									anticPolicy(staged.portbExtendedRam.size) !== "optional"
+								}
+								onChange={(event) =>
+									host.stageAntic(event.currentTarget.checked)
+								}
+							/>
+						</label>
+					)}
 					<Segmented
 						label={messages.sidebar.tv}
 						value={staged.tv}

@@ -144,6 +144,9 @@ export class EmulatorHost {
 	/** Whether turbo mode (unthrottled, muted) is engaged. */
 	readonly turboMode = signal(false);
 
+	/** The 1200XL keyboard LEDs `[L1, L2]` (true = lit), or null on other models. */
+	readonly leds = signal<readonly [boolean, boolean] | null>(null);
+
 	/**
 	 * Which sidebar panel is showing, or null when closed. The sidebar is a
 	 * single docked surface that hosts the menu, the command palette, and (in
@@ -166,6 +169,8 @@ export class EmulatorHost {
 	#emulator!: Emulator;
 	// Bumped per reboot so a slow firmware fetch can't clobber a newer config.
 	#rebootToken = 0;
+	// Drops the PORTB watch feeding the 1200XL LEDs; re-pointed on each rebuild.
+	#unwatchLeds: (() => void) | null = null;
 	#keyInput: HTMLInputElement | null = null;
 	#bootImagePicker: (() => void) | null = null;
 	// What to do with the next file the shared picker yields (boot vs. attach).
@@ -187,6 +192,7 @@ export class EmulatorHost {
 		const host = new EmulatorHost(config);
 		await host.#ensureFirmware();
 		host.#emulator = host.#makeEmulator();
+		host.#wireLeds();
 		return host;
 	}
 
@@ -402,7 +408,32 @@ export class EmulatorHost {
 		this.#emulator = this.#makeEmulator();
 		this.#emulator.start();
 		this.running.value = true;
+		this.#wireLeds();
 		this.#keyInput?.focus();
+	}
+
+	// Re-point the LED watch at the current machine's PORTB. The 1200XL drives
+	// its two keyboard LEDs from PORTB bits 2 & 3 (active-low: 0 = lit); other
+	// models have none.
+	#wireLeds(): void {
+		this.#unwatchLeds?.();
+		this.#unwatchLeds = null;
+		if (this.config.value.model !== "1200xl") {
+			this.leds.value = null;
+			return;
+		}
+		const portb = this.#emulator.machine.pia.portbOut;
+		const refresh = (): void => {
+			const value = portb.value;
+			const l1 = (value & 0x04) === 0;
+			const l2 = (value & 0x08) === 0;
+			// PORTB changes on every bank switch; only repaint when an LED moves.
+			const current = this.leds.value;
+			if (current && current[0] === l1 && current[1] === l2) return;
+			this.leds.value = [l1, l2];
+		};
+		this.#unwatchLeds = portb.watch(refresh);
+		refresh();
 	}
 
 	// Fetch whatever firmware the new config needs, then power-cycle into it.
@@ -620,6 +651,15 @@ export class EmulatorHost {
 
 	stageRam(totalKB: number): void {
 		this.staged.value = { ...this.staged.value, ...ramConfig(totalKB) };
+	}
+
+	stageAntic(antic: boolean): void {
+		const ext = this.staged.value.portbExtendedRam;
+		if (!ext) return;
+		this.staged.value = {
+			...this.staged.value,
+			portbExtendedRam: { ...ext, antic },
+		};
 	}
 
 	stageTv(tv: "ntsc" | "pal"): void {

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
 import { AnticGtia } from "./antic-gtia.ts";
-import { Atari, type AtariModel } from "./machine.ts";
+import { Atari } from "./machine.ts";
 import { Pokey } from "./pokey.ts";
 
 const KBCODE = 0xd209;
@@ -133,7 +133,7 @@ test("the Reset key NMI fires at the VBLANK point and ignores NMIEN", () => {
 	expect(ag.read(NMIRES_NMIST) & 0x20).toBe(0x20);
 });
 
-function makeMachine(model: AtariModel) {
+function makeMachine(model: "800" | "800XL" | "130XE") {
 	// On the 800, BASIC goes through cartridge image sniffing: give the dummy
 	// ROM a valid $A000 cart trailer (init address $A000, start unused).
 	const basic = new Uint8Array(8192);

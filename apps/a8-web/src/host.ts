@@ -26,6 +26,14 @@ import {
 	loadLibraryEntry,
 	type LibraryEntry,
 } from "./library.ts";
+import {
+	clampRam,
+	hasBuiltinBasic,
+	MODEL_LABELS,
+	ramConfig,
+	settingsEqual,
+	type MachineSettings,
+} from "./machine-config.ts";
 import { currentPath, navigate } from "./navigate.ts";
 import { messages } from "./messages.ts";
 
@@ -64,19 +72,7 @@ export interface Toast {
  */
 export type SidebarPanel = "menu" | "palette";
 
-/** The user-facing machine configuration the menu edits. */
-export interface MachineSettings {
-	model: AtariModel;
-	tv: "ntsc" | "pal";
-	/** On the 800: no BASIC cart. On XL/XE: hold OPTION at boot (step 5). */
-	basicDisabled: boolean;
-}
-
-function settingsEqual(a: MachineSettings, b: MachineSettings): boolean {
-	return (
-		a.model === b.model && a.tv === b.tv && a.basicDisabled === b.basicDisabled
-	);
-}
+export type { MachineSettings } from "./machine-config.ts";
 
 /** Why a detected-but-not-loadable file can't be loaded (yet). */
 function unsupportedMessage(format: AtariFileFormat | null): string | null {
@@ -121,7 +117,9 @@ export class EmulatorHost {
 
 	/** The running machine configuration (drives the config indicator). */
 	readonly config = signal<MachineSettings>({
-		model: "800",
+		model: "xl/xe",
+		memory: 64,
+		portbExtendedRam: null,
 		tv: "ntsc",
 		basicDisabled: false,
 	});
@@ -205,7 +203,13 @@ export class EmulatorHost {
 		);
 		this.#audio = audio;
 		this.#audioError = audioError ?? null;
-		this.config.value = { model, tv: "ntsc", basicDisabled: false };
+		this.config.value = {
+			model,
+			memory: model === "400/800" ? 48 : 64,
+			portbExtendedRam: null,
+			tv: "ntsc",
+			basicDisabled: false,
+		};
 		this.staged.value = this.config.peek();
 
 		// #emulator is built by create() once the initial firmware is fetched.
@@ -235,7 +239,7 @@ export class EmulatorHost {
 		// show the actual ROM image's name; on XL/XE BASIC is internal and the
 		// slot reflects only a real cartridge.
 		const basic =
-			model === "800" && !basicDisabled
+			!hasBuiltinBasic(model) && !basicDisabled
 				? (this.#pick(preferredBasicKeys())?.name ?? null)
 				: null;
 		this.attachments.value = {
@@ -276,23 +280,36 @@ export class EmulatorHost {
 	#resolveFirmware(): {
 		os: FirmwareLibraryEntry | null;
 		basic: FirmwareLibraryEntry | null;
+		game: FirmwareLibraryEntry | null;
 	} {
 		const { model, tv, basicDisabled } = this.config.value;
-		const xl = model !== "800";
-		const includeBasic = xl || (!basicDisabled && this.#cartridge === null);
+		// Built-in BASIC (xl/xe, xegs) is always loaded — its "disable" is the
+		// OPTION-hold. Cart BASIC (400/800, 1200xl) loads only when it takes the
+		// slot: enabled and no cartridge mounted.
+		const needBasic =
+			hasBuiltinBasic(model) || (!basicDisabled && this.#cartridge === null);
 		return {
 			os: this.#pick(preferredOsKeys({ model, tv })),
-			basic: includeBasic ? this.#pick(preferredBasicKeys()) : null,
+			basic: needBasic ? this.#pick(preferredBasicKeys()) : null,
+			game: model === "xegs" ? this.#pickGame() : null,
 		};
+	}
+
+	// The XEGS built-in game — any game-type firmware in the library.
+	#pickGame(): FirmwareLibraryEntry | null {
+		for (const entry of this.#firmware.values()) {
+			if (entry.firmwareType === "game") return entry;
+		}
+		return null;
 	}
 
 	// Fetch (and cache) the bytes the running config's OS + BASIC need, so the
 	// next #makeEmulator can read them synchronously. Already-cached ROMs (the
 	// common reboot case) resolve immediately.
 	async #ensureFirmware(): Promise<void> {
-		const { os, basic } = this.#resolveFirmware();
+		const { os, basic, game } = this.#resolveFirmware();
 		await Promise.all(
-			[os, basic]
+			[os, basic, game]
 				.filter((e): e is FirmwareLibraryEntry => e !== null)
 				.filter((e) => !this.#bytes.has(e.url))
 				.map(async (e) => {
@@ -307,19 +324,30 @@ export class EmulatorHost {
 	// disabled and no cartridge is mounted. The XL/XE always wire BASIC in (its
 	// "disable" is the OPTION-hold at boot).
 	#makeEmulator(): Emulator {
-		const { model, tv, basicDisabled } = this.config.value;
-		const xl = model !== "800";
+		const { model, tv, basicDisabled, memory, portbExtendedRam } =
+			this.config.value;
+		const xl = model !== "400/800";
+		const builtinBasic = hasBuiltinBasic(model);
 
-		const { os, basic } = this.#resolveFirmware();
+		const { os, basic, game } = this.#resolveFirmware();
 		if (!os) {
 			throw new Error(messages.errors.noCompatibleOs(model, tv.toUpperCase()));
 		}
 		// Bytes are cached by #ensureFirmware, which always runs before a build.
 		const osBytes = this.#bytes.get(os.url);
 		const basicBytes = basic ? this.#bytes.get(basic.url) : undefined;
+		const gameBytes = game ? this.#bytes.get(game.url) : undefined;
 		if (!osBytes) {
 			throw new Error(`firmware bytes missing for "${os.name}"`);
 		}
+
+		// On 400/800 & 1200XL, BASIC is an $A000 cartridge displaced by a real
+		// cart; on XL/XE & XEGS it's built in (banked, OPTION-hold to disable).
+		const cartridge =
+			this.#cartridge?.cart ??
+			(!builtinBasic && !basicDisabled && basicBytes
+				? new Cartridge(basicBytes)
+				: undefined);
 
 		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
 		console.log(
@@ -328,19 +356,18 @@ export class EmulatorHost {
 		);
 
 		const emulator = new Emulator({
-			// Map the current model onto the machine's architecture + bus options.
-			// The fuller model classes (1200XL/XEGS, RAM sizes) land with the
-			// MachineSettings redesign.
 			xl,
-			...(model === "130XE" && {
-				xeBankCount: 4,
-				separateAnticAccess: true,
+			conventionalRamSize: memory,
+			...(portbExtendedRam && {
+				xeBankCount: (portbExtendedRam.size - 64) / 16,
+				separateAnticAccess: portbExtendedRam.antic,
 			}),
 			os: osBytes,
 			tvSystem: tv,
-			...(basic && basicBytes && { basic: basicBytes }),
-			...(xl && basicDisabled && { holdOption: true }),
-			...(this.#cartridge && { cartridge: this.#cartridge.cart }),
+			...(builtinBasic && basicBytes && { basic: basicBytes }),
+			...(builtinBasic && basicDisabled && { holdOption: true }),
+			...(model === "xegs" && gameBytes && { game: gameBytes }),
+			...(cartridge && { cartridge }),
 			...(this.#drives[0] && { disk: this.#drives[0].disk }),
 			...(this.#audio && { audio: this.#audio }),
 		});
@@ -506,7 +533,7 @@ export class EmulatorHost {
 	// the same feedback.
 	#announceConfigChange(prev: MachineSettings, next: MachineSettings): void {
 		if (next.model !== prev.model) {
-			this.toast(messages.toasts.switchingMachine(next.model));
+			this.toast(messages.toasts.switchingMachine(MODEL_LABELS[next.model]));
 		}
 		if (next.tv !== prev.tv) {
 			this.toast(messages.toasts.switchingTv(next.tv.toUpperCase()));
@@ -520,7 +547,7 @@ export class EmulatorHost {
 	// BASIC *is* the cartridge in the slot, so phrase it as attach/detach with
 	// the ROM's name; otherwise it's a plain enable/disable.
 	#basicToggleMessage(disabled: boolean, model: AtariModel): string {
-		if (model === "800" && !this.#cartridge) {
+		if (!hasBuiltinBasic(model) && !this.#cartridge) {
 			const name = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
 			return disabled
 				? messages.toasts.detachingCartridge(name)
@@ -582,7 +609,17 @@ export class EmulatorHost {
 	// them with a single reboot; the palette's config commands apply one change
 	// and reboot immediately (apply*, below that).
 	stageModel(model: AtariModel): void {
-		this.staged.value = { ...this.staged.value, model };
+		// Keep the staged RAM valid for the new class (the 400/800 caps at 48K,
+		// no extended RAM).
+		this.staged.value = {
+			...this.staged.value,
+			model,
+			...clampRam(model, this.staged.value),
+		};
+	}
+
+	stageRam(totalKB: number): void {
+		this.staged.value = { ...this.staged.value, ...ramConfig(totalKB) };
 	}
 
 	stageTv(tv: "ntsc" | "pal"): void {
@@ -618,7 +655,11 @@ export class EmulatorHost {
 	}
 
 	applyModel(model: AtariModel): void {
-		this.#applyConfigChange({ model });
+		this.#applyConfigChange({ model, ...clampRam(model, this.config.value) });
+	}
+
+	applyRam(totalKB: number): void {
+		this.#applyConfigChange(ramConfig(totalKB));
 	}
 
 	applyTv(tv: "ntsc" | "pal"): void {
@@ -723,14 +764,14 @@ export class EmulatorHost {
 		const { model, basicDisabled } = this.config.value;
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
-		} else if (model === "800" && !basicDisabled) {
+		} else if (!hasBuiltinBasic(model) && !basicDisabled) {
 			const name = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(name));
 		}
 		if (this.#drives[0]) {
 			this.toast(messages.toasts.detachingDisk(this.#drives[0].name));
 		}
-		if (model !== "800" && !basicDisabled) {
+		if (hasBuiltinBasic(model) && !basicDisabled) {
 			this.toast(messages.toasts.disablingBasic);
 		}
 	}
@@ -833,7 +874,7 @@ export class EmulatorHost {
 		const { model, basicDisabled } = this.config.value;
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
-		} else if (model === "800" && !basicDisabled) {
+		} else if (!hasBuiltinBasic(model) && !basicDisabled) {
 			const basic = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(basic));
 		}
@@ -863,7 +904,7 @@ export class EmulatorHost {
 			return;
 		}
 		const { model, basicDisabled } = this.config.value;
-		if (model === "800" && !basicDisabled) {
+		if (!hasBuiltinBasic(model) && !basicDisabled) {
 			this.applyBasicDisabled(true); // toasts "Detaching cartridge (BASIC…)"
 			return;
 		}

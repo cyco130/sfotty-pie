@@ -2,12 +2,12 @@ import { expect, test } from "vitest";
 import { DECODE, ReadOptions, Sfotty } from "@sfotty-pie/sfotty";
 import { makeAtr } from "./atr-fixture.ts";
 import { AtrImage } from "./atr.ts";
-import { Atari, type AtariModel } from "./machine.ts";
+import { Atari } from "./machine.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
 
 const DSTATS = 0x0303;
 
-function makeMachine(model: AtariModel = "800") {
+function makeMachine(model: "800" | "800XL" | "130XE" = "800") {
 	// On the 800, BASIC goes through cartridge image sniffing: give the dummy
 	// ROM a valid $A000 cart trailer (init address $A000, start unused).
 	const basic = new Uint8Array(8192);

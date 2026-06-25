@@ -19,7 +19,12 @@ import { Pokey } from "./pokey.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
-export type AtariModel = "800" | "800XL" | "130XE";
+/**
+ * The Atari 8-bit model class — what the firmware ranking and the UI key off.
+ * The machine itself only cares about `xl` (everything but the 400/800) plus
+ * the bus options; these classes map onto that.
+ */
+export type AtariModel = "400/800" | "1200xl" | "xl/xe" | "xegs";
 
 // Where cycle()/resumeCycle() are within one machine cycle. A
 // throw from a bus phase (ANTIC's DMA read in BUS, the CPU's access in CPU)

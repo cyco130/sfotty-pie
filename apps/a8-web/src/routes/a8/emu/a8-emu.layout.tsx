@@ -66,7 +66,7 @@ export default function A8EmuLayout({
 				const { audio, audioError } = await getAudio();
 				if (cancelled) return;
 				const built = await EmulatorHost.create({
-					model: "800XL",
+					model: "xl/xe",
 					firmware: builtinFirmware,
 					audio,
 					audioError,

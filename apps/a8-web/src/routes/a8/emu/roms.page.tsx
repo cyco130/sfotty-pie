@@ -1,8 +1,8 @@
 import {
 	preferredBasicKeys,
 	preferredOsKeys,
+	type AtariModel,
 	type FirmwareKey,
-	type FirmwareModel,
 } from "@sfotty-pie/a8";
 import {
 	builtinFirmware,
@@ -29,7 +29,7 @@ interface SlotDef {
 }
 
 // XL/XE-class slots ignore tv in the ranking; "ntsc" is just a filler there.
-const osRanking = (model: FirmwareModel): readonly FirmwareKey[] =>
+const osRanking = (model: AtariModel): readonly FirmwareKey[] =>
 	preferredOsKeys({ model, tv: "ntsc" });
 
 const OS_SLOTS: SlotDef[] = [
@@ -37,31 +37,31 @@ const OS_SLOTS: SlotDef[] = [
 		label: "400/800 NTSC",
 		accepts: "10K OS ROM",
 		match: (e) => e.format === "os-rom-10k",
-		ranking: preferredOsKeys({ model: "800", tv: "ntsc" }),
+		ranking: preferredOsKeys({ model: "400/800", tv: "ntsc" }),
 	},
 	{
 		label: "400/800 PAL",
 		accepts: "10K OS ROM",
 		match: (e) => e.format === "os-rom-10k",
-		ranking: preferredOsKeys({ model: "800", tv: "pal" }),
+		ranking: preferredOsKeys({ model: "400/800", tv: "pal" }),
 	},
 	{
 		label: "XL/XE",
 		accepts: "16K OS ROM",
 		match: (e) => e.format === "os-rom-16k",
-		ranking: osRanking("800XL"),
+		ranking: osRanking("xl/xe"),
 	},
 	{
 		label: "1200XL",
 		accepts: "16K OS ROM",
 		match: (e) => e.format === "os-rom-16k",
-		ranking: osRanking("1200XL"),
+		ranking: osRanking("1200xl"),
 	},
 	{
 		label: "XEGS",
 		accepts: "16K OS ROM",
 		match: (e) => e.format === "os-rom-16k",
-		ranking: osRanking("XEGS"),
+		ranking: osRanking("xegs"),
 	},
 ];
 

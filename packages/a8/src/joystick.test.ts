@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
 import { Cartridge } from "./cartridge.ts";
-import { Atari, type AtariModel } from "./machine.ts";
+import { Atari } from "./machine.ts";
 
 const TRIG0 = 0xd010;
 const TRIG2 = 0xd012;
@@ -11,7 +11,7 @@ const PORTB = 0xd301;
 const PACTL = 0xd302;
 const PBCTL = 0xd303;
 
-function makeMachine(model: AtariModel) {
+function makeMachine(model: "800" | "800XL" | "130XE") {
 	// On the 800, BASIC goes through cartridge image sniffing: give the dummy
 	// ROM a valid $A000 cart trailer (init address $A000, start unused).
 	const basic = new Uint8Array(8192);

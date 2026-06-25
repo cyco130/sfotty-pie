@@ -17,7 +17,6 @@ export {
 	preferredOsKeys,
 	preferredBasicKeys,
 	type FirmwareContext,
-	type FirmwareModel,
 } from "./firmware-preferences.ts";
 export { Atari, type AtariModel, type MachineConfig } from "./machine.ts";
 export { buildNtscPalette, buildPalPalette, paletteFor } from "./palette.ts";

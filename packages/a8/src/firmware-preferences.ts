@@ -1,18 +1,9 @@
 import type { FirmwareKey } from "./detect-firmware.ts";
 import type { AtariModel } from "./machine.ts";
 
-/**
- * Models the firmware ranking knows about. A superset of the currently-emulated
- * `AtariModel`: `1200XL` and `XEGS` get their own OS rankings ahead of full
- * machine support, so the firmware selector can rank those slots today. The
- * emulator runs them as XL/XE for now; once they're real machines this widening
- * collapses back into `AtariModel` and the `switch` below already handles them.
- */
-export type FirmwareModel = AtariModel | "1200XL" | "XEGS";
-
 /** The machine context that decides which OS firmware is preferred. */
 export interface FirmwareContext {
-	model: FirmwareModel;
+	model: AtariModel;
 	tv: "ntsc" | "pal";
 }
 
@@ -90,13 +81,13 @@ const OS_XEGS: readonly FirmwareKey[] = [
 /** OS firmware keys, best-first, for the given machine. */
 export function preferredOsKeys(ctx: FirmwareContext): readonly FirmwareKey[] {
 	switch (ctx.model) {
-		case "800":
+		case "400/800":
 			return ctx.tv === "pal" ? OS_800_PAL : OS_800_NTSC;
-		case "1200XL":
+		case "1200xl":
 			return OS_1200XL;
-		case "XEGS":
+		case "xegs":
 			return OS_XEGS;
-		default: // 800XL, 130XE
+		default: // xl/xe
 			return OS_XLXE;
 	}
 }

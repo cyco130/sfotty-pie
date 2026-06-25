@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { type Command, labelOf, paletteCommands } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { messages } from "./messages.ts";
+import { currentPath } from "./navigate.ts";
 
 interface FuzzyMatch {
 	score: number;
@@ -189,7 +190,10 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 	const run = (command: Command | undefined) => {
 		if (!command) return;
 		host.dispatch(command);
-		host.closePanel();
+		// A command that opened another panel (the menu, ROM preferences) has
+		// already navigated; closing now would clobber it. Only close if we're
+		// still on the palette.
+		if (currentPath() === "/a8/emu/palette") host.closePanel();
 	};
 
 	const onKeyDown = (event: KeyboardEvent) => {

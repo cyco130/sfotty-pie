@@ -194,7 +194,7 @@ export const labels = {
 	AUDIO_MUTE: "Mute audio",
 	AUDIO_UNMUTE: "Unmute audio",
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
-	MENU_TOGGLE: "Toggle the menu",
+	MENU_TOGGLE: "Menu",
 	OPEN_ROMS: "ROM preferences…",
 	TOGGLE_FULLSCREEN: "Toggle full screen",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",

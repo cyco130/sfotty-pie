@@ -16,17 +16,14 @@ import {
 	type FirmwareKey,
 } from "@sfotty-pie/a8";
 import { computed, signal } from "@preact/signals";
-import type { FirmwareLibraryEntry } from "virtual:firmware-library";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
+import { getImage, getImageBytes, libraryEntries } from "./images/library.ts";
+import type { ImageEntry } from "./images/metadata.ts";
 import { Keyboard } from "./keyboard.ts";
-import {
-	loadImageBytes,
-	loadLibraryEntry,
-	type LibraryEntry,
-} from "./library.ts";
+import { loadLibraryEntry, type LibraryEntry } from "./library.ts";
 import {
 	clampRam,
 	hasBuiltinBasic,
@@ -40,11 +37,6 @@ import { messages } from "./messages.ts";
 
 export interface HostConfig {
 	model: AtariModel;
-	/**
-	 * The firmware library manifest. The host ranks/picks OS + BASIC from this
-	 * metadata and fetches only the chosen ROM's bytes, on demand.
-	 */
-	firmware: FirmwareLibraryEntry[];
 	audio: AudioOutput | null;
 	/** Why audio is unavailable, if it failed to initialize (shown on tap). */
 	audioError?: string | null;
@@ -174,10 +166,8 @@ export class EmulatorHost {
 	 */
 	readonly sidebar = signal<SidebarPanel | null>(null);
 
-	// Firmware manifest, indexed by key for ranked selection (metadata only).
-	readonly #firmware: Map<FirmwareKey, FirmwareLibraryEntry>;
-	// Fetched ROM bytes, keyed by asset URL — populated lazily before each
-	// (re)build so #makeEmulator can read them synchronously.
+	// Fetched ROM bytes, keyed by the resolved image's id — populated lazily
+	// before each (re)build so #makeEmulator can read them synchronously.
 	readonly #bytes = new Map<string, Uint8Array>();
 	// In-memory firmware overrides (not persisted). appliedRoms is what the
 	// running machine uses; stagedRoms is the ROMs panel's working copy. applyRoms
@@ -193,9 +183,9 @@ export class EmulatorHost {
 		const applied = this.#resolveWith(this.appliedRoms.value);
 		const staged = this.#resolveWith(this.stagedRoms.value);
 		return (
-			applied.os?.url !== staged.os?.url ||
-			applied.basic?.url !== staged.basic?.url ||
-			applied.game?.url !== staged.game?.url
+			applied.os?.id !== staged.os?.id ||
+			applied.basic?.id !== staged.basic?.id ||
+			applied.game?.id !== staged.game?.id
 		);
 	});
 	readonly #audio: AudioOutput | null;
@@ -234,17 +224,7 @@ export class EmulatorHost {
 		return host;
 	}
 
-	constructor({ model, firmware, audio, audioError }: HostConfig) {
-		// Index the firmware images by key (non-firmware library entries are
-		// ignored). The manifest is already deduped — one entry per key.
-		this.#firmware = new Map(
-			firmware
-				.filter(
-					(e): e is FirmwareLibraryEntry & { firmwareKey: FirmwareKey } =>
-						e.firmwareKey !== null,
-				)
-				.map((e) => [e.firmwareKey, e]),
-		);
+	constructor({ model, audio, audioError }: HostConfig) {
 		this.#audio = audio;
 		this.#audioError = audioError ?? null;
 		this.config.value = {
@@ -284,7 +264,7 @@ export class EmulatorHost {
 		// slot reflects only a real cartridge.
 		const basic =
 			!hasBuiltinBasic(model) && !basicDisabled
-				? (this.#pick(preferredBasicKeys())?.name ?? null)
+				? (this.#pick(preferredBasicKeys())?.user.displayName ?? null)
 				: null;
 		this.attachments.value = {
 			cartridge: this.#cartridge?.name ?? basic,
@@ -309,32 +289,34 @@ export class EmulatorHost {
 		machine.joystickDown(0, mask);
 	}
 
-	// The best-ranked firmware present in the library for a list of keys.
-	#pick(keys: readonly FirmwareKey[]): FirmwareLibraryEntry | null {
+	// The best-ranked built-in firmware present in the library for a list of
+	// keys (a built-in's image id is its firmware key).
+	#pick(keys: readonly FirmwareKey[]): ImageEntry | null {
 		for (const key of keys) {
-			const entry = this.#firmware.get(key);
+			const entry = getImage(key);
 			if (entry) return entry;
 		}
 		return null;
 	}
 
-	// The OS + BASIC the running config wants, picked from the manifest by rank.
+	// The OS + BASIC the running config wants, picked from the library by rank.
 	// BASIC is omitted when the machine doesn't wire it in (the 400/800 with the
 	// cartridge slot taken; the XL/XE "disable" is the OPTION-hold at boot).
 	#resolveFirmware(): {
-		os: FirmwareLibraryEntry | null;
-		basic: FirmwareLibraryEntry | null;
-		game: FirmwareLibraryEntry | null;
+		os: ImageEntry | null;
+		basic: ImageEntry | null;
+		game: ImageEntry | null;
 	} {
 		return this.#resolveWith(this.appliedRoms.value);
 	}
 
 	// Resolve OS/BASIC/game for the running config under a given override set; an
-	// override wins over the ranking when its ROM is present.
+	// override wins over the ranking when its image is present (a missing one —
+	// e.g. a built-in dropped by a deploy — falls back to the ranking).
 	#resolveWith(roms: RomOverrides): {
-		os: FirmwareLibraryEntry | null;
-		basic: FirmwareLibraryEntry | null;
-		game: FirmwareLibraryEntry | null;
+		os: ImageEntry | null;
+		basic: ImageEntry | null;
+		game: ImageEntry | null;
 	} {
 		const { model, tv, basicDisabled } = this.config.value;
 		// Built-in BASIC (xl/xe, xegs) is always loaded — its "disable" is the
@@ -345,28 +327,29 @@ export class EmulatorHost {
 		const osSlot = osSlotFor(model, tv);
 		return {
 			os:
-				this.#fromKey(roms.os[osSlot]) ??
+				this.#fromId(roms.os[osSlot]) ??
 				this.#pick(preferredOsKeys({ model, tv })),
 			basic: needBasic
-				? (this.#fromKey(roms.basic) ?? this.#pick(preferredBasicKeys()))
+				? (this.#fromId(roms.basic) ?? this.#pick(preferredBasicKeys()))
 				: null,
 			game:
-				model === "xegs"
-					? (this.#fromKey(roms.game) ?? this.#pickGame())
-					: null,
+				model === "xegs" ? (this.#fromId(roms.game) ?? this.#pickGame()) : null,
 		};
 	}
 
-	#fromKey(key: FirmwareKey | null | undefined): FirmwareLibraryEntry | null {
-		return key ? (this.#firmware.get(key) ?? null) : null;
+	// Resolve an override to its library image — null when it doesn't resolve
+	// (no override, or one pointing at an image the library no longer has).
+	#fromId(id: string | null | undefined): ImageEntry | null {
+		return id ? (getImage(id) ?? null) : null;
 	}
 
-	// The XEGS built-in game — any game-type firmware in the library.
-	#pickGame(): FirmwareLibraryEntry | null {
-		for (const entry of this.#firmware.values()) {
-			if (entry.firmwareType === "game") return entry;
-		}
-		return null;
+	// The XEGS built-in game — a bundled game-slot image.
+	#pickGame(): ImageEntry | null {
+		return (
+			libraryEntries.value.find(
+				(e) => e.source === "builtin" && e.user.slots?.includes("game"),
+			) ?? null
+		);
 	}
 
 	// Fetch (and cache) the bytes the running config's OS + BASIC need, so the
@@ -376,10 +359,10 @@ export class EmulatorHost {
 		const { os, basic, game } = this.#resolveFirmware();
 		await Promise.all(
 			[os, basic, game]
-				.filter((e): e is FirmwareLibraryEntry => e !== null)
-				.filter((e) => !this.#bytes.has(e.url))
+				.filter((e): e is ImageEntry => e !== null)
+				.filter((e) => !this.#bytes.has(e.id))
 				.map(async (e) => {
-					this.#bytes.set(e.url, await loadImageBytes(e.url, e.name));
+					this.#bytes.set(e.id, await getImageBytes(e.id));
 				}),
 		);
 	}
@@ -400,11 +383,11 @@ export class EmulatorHost {
 			throw new Error(messages.errors.noCompatibleOs(model, tv.toUpperCase()));
 		}
 		// Bytes are cached by #ensureFirmware, which always runs before a build.
-		const osBytes = this.#bytes.get(os.url);
-		const basicBytes = basic ? this.#bytes.get(basic.url) : undefined;
-		const gameBytes = game ? this.#bytes.get(game.url) : undefined;
+		const osBytes = this.#bytes.get(os.id);
+		const basicBytes = basic ? this.#bytes.get(basic.id) : undefined;
+		const gameBytes = game ? this.#bytes.get(game.id) : undefined;
 		if (!osBytes) {
-			throw new Error(`firmware bytes missing for "${os.name}"`);
+			throw new Error(`firmware bytes missing for "${os.user.displayName}"`);
 		}
 
 		// On 400/800 & 1200XL, BASIC is an $A000 cartridge displaced by a real
@@ -417,8 +400,8 @@ export class EmulatorHost {
 
 		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
 		console.log(
-			`Firmware for ${model} ${tv.toUpperCase()}: OS "${os.name}"` +
-				(basic ? `, BASIC "${basic.name}"` : ", no BASIC"),
+			`Firmware for ${model} ${tv.toUpperCase()}: OS "${os.user.displayName}"` +
+				(basic ? `, BASIC "${basic.user.displayName}"` : ", no BASIC"),
 		);
 
 		const emulator = new Emulator({
@@ -639,7 +622,8 @@ export class EmulatorHost {
 	// the ROM's name; otherwise it's a plain enable/disable.
 	#basicToggleMessage(disabled: boolean, model: AtariModel): string {
 		if (!hasBuiltinBasic(model) && !this.#cartridge) {
-			const name = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
+			const name =
+				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			return disabled
 				? messages.toasts.detachingCartridge(name)
 				: messages.toasts.attachingCartridge(name);
@@ -898,7 +882,8 @@ export class EmulatorHost {
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
 		} else if (!hasBuiltinBasic(model) && !basicDisabled) {
-			const name = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
+			const name =
+				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(name));
 		}
 		if (this.#drives[0]) {
@@ -1008,7 +993,8 @@ export class EmulatorHost {
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
 		} else if (!hasBuiltinBasic(model) && !basicDisabled) {
-			const basic = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
+			const basic =
+				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(basic));
 		}
 		this.toast(messages.toasts.attachingCartridge(file.name));

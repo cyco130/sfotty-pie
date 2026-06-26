@@ -1,7 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { useLocation } from "preact-iso";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { builtinFirmware } from "virtual:firmware-library";
 import { App } from "../../../app.tsx";
 import { AudioOutput } from "../../../audio.ts";
 import { installDevConsole } from "../../../dev-console.ts";
@@ -13,9 +12,9 @@ import { EmuContext } from "./emu-context.ts";
 
 // The audio sink is a page-level singleton — created once and reused across
 // emulator mounts (the machine reboots on re-entry, but the sink doesn't),
-// lazily on first entry to /a8/emu so content pages never pay for it. The
-// firmware manifest is a build-time constant (virtual:firmware-library); the
-// host fetches only the ROMs it picks, and the browser caches those.
+// lazily on first entry to /a8/emu so content pages never pay for it. The host
+// resolves firmware through the image library (built-ins ∪ user uploads) and
+// fetches only the ROMs it picks, which the browser caches.
 
 interface Audio {
 	audio: AudioOutput | null;
@@ -68,7 +67,6 @@ export default function A8EmuLayout({
 				if (cancelled) return;
 				const built = await EmulatorHost.create({
 					model: "xl/xe",
-					firmware: builtinFirmware,
 					audio,
 					audioError,
 				});

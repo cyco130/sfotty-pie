@@ -5,8 +5,9 @@ import type { EmulatorHost } from "./host.ts";
 import { Icon, type IconName } from "./icon.tsx";
 import { messages } from "./messages.ts";
 import { KeyboardView } from "./osd-keyboard.tsx";
+import { storageName } from "./storage.ts";
 
-const LEFTY_KEY = "a8.osd.lefty";
+const LEFTY_KEY = storageName("osd", "lefty");
 
 type OsdView = "stick" | "keyboard" | "off";
 

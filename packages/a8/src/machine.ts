@@ -12,7 +12,7 @@ import {
 	type WriteInterceptor,
 	type WriteObserver,
 } from "./bus-manager.ts";
-import { Cartridge } from "./cartridge.ts";
+import { builtinSlotRom, Cartridge } from "./cartridge.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
@@ -152,10 +152,12 @@ export class Atari implements Memory {
 			xeBankCount: config.xeBankCount ?? 0,
 			separateAnticAccess: config.separateAnticAccess ?? false,
 			osRom: os,
-			// XL/XE: built-in BASIC and game, banked in via PORTB. 400/800: BASIC
-			// is an $A000 cart — displaced when a game cartridge is in the slot.
-			basicRom: xl ? basic : undefined,
-			gameRom: game,
+			// XL/XE: built-in BASIC and game, banked in via PORTB — each accepts a
+			// raw 8K ROM or a standard-8K `.car` (unwrapped here). 400/800: BASIC is
+			// an $A000 cart (Cartridge parses raw or `.car`) — displaced when a game
+			// cartridge is in the slot.
+			basicRom: xl && basic ? builtinSlotRom(basic) : undefined,
+			gameRom: game ? builtinSlotRom(game) : undefined,
 			cartridge: cartridge ?? (!xl && basic ? new Cartridge(basic) : undefined),
 			gtia: this.anticGtia,
 			pokey: this.pokey,

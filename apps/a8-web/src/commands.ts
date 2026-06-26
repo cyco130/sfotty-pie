@@ -77,6 +77,14 @@ export const commands = {
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: { label: "BOOT_IMAGE", run: ({ host }) => host.pickBootImage() },
 	OPEN_ROMS: { label: "OPEN_ROMS", run: ({ host }) => host.showPanel("roms") },
+	OPEN_LIBRARY: {
+		label: "OPEN_LIBRARY",
+		run: ({ host }) => host.showPanel("library"),
+	},
+	CLEAR_LIBRARY: {
+		label: "CLEAR_LIBRARY",
+		run: ({ host }) => host.clearLibrary(),
+	},
 
 	// Attach a disk to D1: of the running machine (no reboot, BASIC kept).
 	ATTACH_D1: { label: "ATTACH_D1", run: ({ host }) => host.pickAttachDisk() },
@@ -93,6 +101,10 @@ export const commands = {
 	},
 	// Save the D1: disk (with any in-session writes) to a file.
 	DOWNLOAD_D1: { label: "DOWNLOAD_D1", run: ({ host }) => host.downloadDisk() },
+	SAVE_D1_TO_LIBRARY: {
+		label: "SAVE_D1_TO_LIBRARY",
+		run: ({ host }) => void host.saveD1ToLibrary(),
+	},
 
 	// Machine configuration. Each applies the change and reboots into it
 	// immediately. (The menu's config form does its own stage/apply instead, so

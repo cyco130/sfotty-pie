@@ -12,6 +12,13 @@
  * Fire), and hardware tokens (800/XL/130XE, NTSC/PAL, the "D1:" device name).
  * Those are nomenclature or glyphs, not translatable copy, and stay inline.
  */
+
+/** Human-readable duration: `"42s"` under a minute, else `"4m 12s"`. */
+function formatDuration(seconds: number): string {
+	if (seconds < 60) return `${Math.round(seconds)}s`;
+	return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+}
+
 export const messages = {
 	app: {
 		loadingFirmware: "Loading firmware…",
@@ -115,6 +122,87 @@ export const messages = {
 		save: "Save changes",
 		noSuitable: "No suitable ROMs",
 		picksReset: "Picks reset when you reload.",
+		manageLibrary: "Manage library",
+		builtin: "Built-in",
+		yourRoms: "Your ROMs",
+	},
+
+	library: {
+		title: "Library",
+		drop: "Drop ROM files or folders here, or",
+		browse: "browse files",
+		browseFolder: "a folder",
+		empty: "No images yet.",
+		noMatches: "No images match your filters.",
+		loading: "Loading…",
+		notFound: "Image not found.",
+		hash: "Hash",
+		copyHash: "click to copy",
+		deleted: (name: string): string => `Removed ${name}`,
+		confirmDelete: (name: string): string =>
+			`Delete ${name}? This can't be undone.`,
+		clear: "Clear your library",
+		confirmClear:
+			"Clear your entire library? This removes all your uploads and can't be undone.",
+		cleared: "Library cleared",
+		actions: {
+			boot: "Boot",
+			attachDisk: "Attach to D1:",
+			attachCart: "Attach cartridge",
+			download: "Download",
+			delete: "Delete",
+		},
+		preparing: "Preparing…",
+		adding: "Adding…",
+		eta: (seconds: number): string => `~${formatDuration(seconds)} left`,
+		search: "Filter by name…",
+		allTypes: "All types",
+		allSources: "All sources",
+		sourceBuiltin: "Built-in",
+		sourceUser: "Yours",
+		prev: "Prev",
+		next: "Next",
+		columns: {
+			name: "Name",
+			type: "Type",
+			size: "Size",
+			source: "Source",
+		},
+		typeName: {
+			os: "OS",
+			cart: "Cartridge",
+			disk: "Disk",
+			xex: "Executable",
+		},
+		// Compact forms for the dense table column.
+		typeShort: {
+			os: "os",
+			cart: "cart",
+			disk: "disk",
+			xex: "exe",
+		},
+		range: (from: number, to: number, total: number): string =>
+			`${from}–${to} of ${total}`,
+		uploaded: (
+			added: number,
+			deduped: number,
+			failed: number,
+			seconds: number,
+		): string => {
+			const parts: string[] = [];
+			if (added > 0) {
+				parts.push(added === 1 ? "Added 1 image" : `Added ${added} images`);
+			}
+			if (deduped > 0) parts.push(`${deduped} already in your library`);
+			if (failed > 0) {
+				parts.push(
+					failed === 1 ? "1 not recognized" : `${failed} not recognized`,
+				);
+			}
+			const summary =
+				parts.length > 0 ? `${parts.join(". ")}.` : "Nothing to add.";
+			return `${summary} (${formatDuration(seconds)})`;
+		},
 	},
 
 	keyHelp: {
@@ -148,6 +236,8 @@ export const messages = {
 		audioUnavailable: "Audio is unavailable in this browser.",
 		audioUnavailableReason: (reason: string) => `Audio unavailable: ${reason}`,
 		noWritableDisk: "No writable disk in D1: to download.",
+		noDiskToSave: "No disk in D1: to save.",
+		notLibraryDisk: "Only a disk attached from your library can be saved.",
 		noDiskToDetach: "No disk in D1: to detach.",
 		notACartridge: "not a cartridge image",
 		noCartridge: "No cartridge to detach.",
@@ -172,6 +262,7 @@ export const messages = {
 		switchingTv: (tv: string) => `Switching TV to ${tv}`,
 		powerCycling: "Power cycling",
 		saving: (name: string) => `Saving (${name})`,
+		savedToLibrary: (name: string) => `Saved (${name}) to your library`,
 		copy: "Copy",
 		copied: "Copied",
 		dismiss: "Dismiss",
@@ -196,6 +287,8 @@ export const labels = {
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
 	MENU_TOGGLE: "Menu",
 	OPEN_ROMS: "ROM preferences…",
+	OPEN_LIBRARY: "Library…",
+	CLEAR_LIBRARY: "Clear your library…",
 	TOGGLE_FULLSCREEN: "Toggle full screen",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Attach a disk to D1:…",
@@ -203,6 +296,7 @@ export const labels = {
 	ATTACH_CARTRIDGE: "Attach a cartridge… (reboots)",
 	DETACH_CARTRIDGE: "Detach the cartridge (reboots)",
 	DOWNLOAD_D1: "Download the D1: disk image…",
+	SAVE_D1_TO_LIBRARY: "Save D1: to your library",
 	SET_MODEL_400_800: "Set model to Atari 400/800 (reboots)",
 	SET_MODEL_1200XL: "Set model to Atari 1200XL (reboots)",
 	SET_MODEL_XLXE: "Set model to Atari XL/XE (reboots)",

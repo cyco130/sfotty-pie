@@ -232,6 +232,13 @@ export function MenuView({
 				>
 					{messages.roms.title}…
 				</button>
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.showPanel("library")}
+				>
+					{messages.library.title}…
+				</button>
 			</section>
 
 			{software.length > 0 && (

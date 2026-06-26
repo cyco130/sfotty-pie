@@ -16,17 +16,21 @@ import {
 	type FirmwareKey,
 } from "@sfotty-pie/a8";
 import { computed, signal } from "@preact/signals";
-import type { FirmwareLibraryEntry } from "virtual:firmware-library";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
-import { Keyboard } from "./keyboard.ts";
 import {
-	loadImageBytes,
-	loadLibraryEntry,
-	type LibraryEntry,
-} from "./library.ts";
+	getImage,
+	getImageBytes,
+	libraryEntries,
+	nukeLibrary,
+	readyLibrary,
+	updateImage,
+} from "./images/library.ts";
+import type { ImageEntry } from "./images/metadata.ts";
+import { Keyboard } from "./keyboard.ts";
+import { loadLibraryEntry, type LibraryEntry } from "./library.ts";
 import {
 	clampRam,
 	hasBuiltinBasic,
@@ -40,11 +44,6 @@ import { messages } from "./messages.ts";
 
 export interface HostConfig {
 	model: AtariModel;
-	/**
-	 * The firmware library manifest. The host ranks/picks OS + BASIC from this
-	 * metadata and fetches only the chosen ROM's bytes, on demand.
-	 */
-	firmware: FirmwareLibraryEntry[];
 	audio: AudioOutput | null;
 	/** Why audio is unavailable, if it failed to initialize (shown on tap). */
 	audioError?: string | null;
@@ -71,15 +70,18 @@ export interface Toast {
  * The sidebar's content when open. Stable string ids so the state stays
  * serializable (a future deep-link layer can map these straight to the URL).
  */
-export type SidebarPanel = "menu" | "palette" | "roms";
+export type SidebarPanel = "menu" | "palette" | "roms" | "library";
 
 export type { MachineSettings } from "./machine-config.ts";
 
-/** In-memory firmware overrides; an explicit pick beats the ranking. */
+/**
+ * In-memory firmware overrides; an explicit pick beats the ranking. Values are
+ * library image ids — a built-in's firmware key, or a user upload's UUID.
+ */
 export interface RomOverrides {
-	os: Partial<Record<OsSlot, FirmwareKey>>;
-	basic: FirmwareKey | null;
-	game: FirmwareKey | null;
+	os: Partial<Record<OsSlot, string>>;
+	basic: string | null;
+	game: string | null;
 }
 
 const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
@@ -174,10 +176,8 @@ export class EmulatorHost {
 	 */
 	readonly sidebar = signal<SidebarPanel | null>(null);
 
-	// Firmware manifest, indexed by key for ranked selection (metadata only).
-	readonly #firmware: Map<FirmwareKey, FirmwareLibraryEntry>;
-	// Fetched ROM bytes, keyed by asset URL — populated lazily before each
-	// (re)build so #makeEmulator can read them synchronously.
+	// Fetched ROM bytes, keyed by the resolved image's id — populated lazily
+	// before each (re)build so #makeEmulator can read them synchronously.
 	readonly #bytes = new Map<string, Uint8Array>();
 	// In-memory firmware overrides (not persisted). appliedRoms is what the
 	// running machine uses; stagedRoms is the ROMs panel's working copy. applyRoms
@@ -193,9 +193,9 @@ export class EmulatorHost {
 		const applied = this.#resolveWith(this.appliedRoms.value);
 		const staged = this.#resolveWith(this.stagedRoms.value);
 		return (
-			applied.os?.url !== staged.os?.url ||
-			applied.basic?.url !== staged.basic?.url ||
-			applied.game?.url !== staged.game?.url
+			applied.os?.id !== staged.os?.id ||
+			applied.basic?.id !== staged.basic?.id ||
+			applied.game?.id !== staged.game?.id
 		);
 	});
 	readonly #audio: AudioOutput | null;
@@ -219,7 +219,11 @@ export class EmulatorHost {
 	// cartridge slot and the disk drives are independent (a cart and a disk can
 	// coexist); #drives is indexed by drive number (0 = D1:), one slot for now.
 	#cartridge: { cart: Cartridge; name: string } | null = null;
-	#drives: ({ disk: AtrImage; name: string } | null)[] = [null];
+	// `sourceId` is the library entry a disk came from, if any — what
+	// `saveD1ToLibrary` writes back to.
+	#drives: ({ disk: AtrImage; name: string; sourceId?: string } | null)[] = [
+		null,
+	];
 
 	/**
 	 * Build a host and boot its first emulator. Async because the initial OS +
@@ -234,17 +238,7 @@ export class EmulatorHost {
 		return host;
 	}
 
-	constructor({ model, firmware, audio, audioError }: HostConfig) {
-		// Index the firmware images by key (non-firmware library entries are
-		// ignored). The manifest is already deduped — one entry per key.
-		this.#firmware = new Map(
-			firmware
-				.filter(
-					(e): e is FirmwareLibraryEntry & { firmwareKey: FirmwareKey } =>
-						e.firmwareKey !== null,
-				)
-				.map((e) => [e.firmwareKey, e]),
-		);
+	constructor({ model, audio, audioError }: HostConfig) {
 		this.#audio = audio;
 		this.#audioError = audioError ?? null;
 		this.config.value = {
@@ -284,7 +278,7 @@ export class EmulatorHost {
 		// slot reflects only a real cartridge.
 		const basic =
 			!hasBuiltinBasic(model) && !basicDisabled
-				? (this.#pick(preferredBasicKeys())?.name ?? null)
+				? (this.#pick(preferredBasicKeys())?.user.displayName ?? null)
 				: null;
 		this.attachments.value = {
 			cartridge: this.#cartridge?.name ?? basic,
@@ -309,32 +303,34 @@ export class EmulatorHost {
 		machine.joystickDown(0, mask);
 	}
 
-	// The best-ranked firmware present in the library for a list of keys.
-	#pick(keys: readonly FirmwareKey[]): FirmwareLibraryEntry | null {
+	// The best-ranked built-in firmware present in the library for a list of
+	// keys (a built-in's image id is its firmware key).
+	#pick(keys: readonly FirmwareKey[]): ImageEntry | null {
 		for (const key of keys) {
-			const entry = this.#firmware.get(key);
+			const entry = getImage(key);
 			if (entry) return entry;
 		}
 		return null;
 	}
 
-	// The OS + BASIC the running config wants, picked from the manifest by rank.
+	// The OS + BASIC the running config wants, picked from the library by rank.
 	// BASIC is omitted when the machine doesn't wire it in (the 400/800 with the
 	// cartridge slot taken; the XL/XE "disable" is the OPTION-hold at boot).
 	#resolveFirmware(): {
-		os: FirmwareLibraryEntry | null;
-		basic: FirmwareLibraryEntry | null;
-		game: FirmwareLibraryEntry | null;
+		os: ImageEntry | null;
+		basic: ImageEntry | null;
+		game: ImageEntry | null;
 	} {
 		return this.#resolveWith(this.appliedRoms.value);
 	}
 
 	// Resolve OS/BASIC/game for the running config under a given override set; an
-	// override wins over the ranking when its ROM is present.
+	// override wins over the ranking when its image is present (a missing one —
+	// e.g. a built-in dropped by a deploy — falls back to the ranking).
 	#resolveWith(roms: RomOverrides): {
-		os: FirmwareLibraryEntry | null;
-		basic: FirmwareLibraryEntry | null;
-		game: FirmwareLibraryEntry | null;
+		os: ImageEntry | null;
+		basic: ImageEntry | null;
+		game: ImageEntry | null;
 	} {
 		const { model, tv, basicDisabled } = this.config.value;
 		// Built-in BASIC (xl/xe, xegs) is always loaded — its "disable" is the
@@ -345,41 +341,45 @@ export class EmulatorHost {
 		const osSlot = osSlotFor(model, tv);
 		return {
 			os:
-				this.#fromKey(roms.os[osSlot]) ??
+				this.#fromId(roms.os[osSlot]) ??
 				this.#pick(preferredOsKeys({ model, tv })),
 			basic: needBasic
-				? (this.#fromKey(roms.basic) ?? this.#pick(preferredBasicKeys()))
+				? (this.#fromId(roms.basic) ?? this.#pick(preferredBasicKeys()))
 				: null,
 			game:
-				model === "xegs"
-					? (this.#fromKey(roms.game) ?? this.#pickGame())
-					: null,
+				model === "xegs" ? (this.#fromId(roms.game) ?? this.#pickGame()) : null,
 		};
 	}
 
-	#fromKey(key: FirmwareKey | null | undefined): FirmwareLibraryEntry | null {
-		return key ? (this.#firmware.get(key) ?? null) : null;
+	// Resolve an override to its library image — null when it doesn't resolve
+	// (no override, or one pointing at an image the library no longer has).
+	#fromId(id: string | null | undefined): ImageEntry | null {
+		return id ? (getImage(id) ?? null) : null;
 	}
 
-	// The XEGS built-in game — any game-type firmware in the library.
-	#pickGame(): FirmwareLibraryEntry | null {
-		for (const entry of this.#firmware.values()) {
-			if (entry.firmwareType === "game") return entry;
-		}
-		return null;
+	// The XEGS built-in game — a bundled game-slot image.
+	#pickGame(): ImageEntry | null {
+		return (
+			libraryEntries.value.find(
+				(e) => e.source === "builtin" && e.user.slots?.includes("game"),
+			) ?? null
+		);
 	}
 
 	// Fetch (and cache) the bytes the running config's OS + BASIC need, so the
 	// next #makeEmulator can read them synchronously. Already-cached ROMs (the
-	// common reboot case) resolve immediately.
+	// common reboot case) resolve immediately. Ensures the user library is loaded
+	// first so an override pointing at an upload resolves (resilient: an IDB
+	// failure just leaves built-ins).
 	async #ensureFirmware(): Promise<void> {
+		await readyLibrary();
 		const { os, basic, game } = this.#resolveFirmware();
 		await Promise.all(
 			[os, basic, game]
-				.filter((e): e is FirmwareLibraryEntry => e !== null)
-				.filter((e) => !this.#bytes.has(e.url))
+				.filter((e): e is ImageEntry => e !== null)
+				.filter((e) => !this.#bytes.has(e.id))
 				.map(async (e) => {
-					this.#bytes.set(e.url, await loadImageBytes(e.url, e.name));
+					this.#bytes.set(e.id, await getImageBytes(e.id));
 				}),
 		);
 	}
@@ -400,11 +400,11 @@ export class EmulatorHost {
 			throw new Error(messages.errors.noCompatibleOs(model, tv.toUpperCase()));
 		}
 		// Bytes are cached by #ensureFirmware, which always runs before a build.
-		const osBytes = this.#bytes.get(os.url);
-		const basicBytes = basic ? this.#bytes.get(basic.url) : undefined;
-		const gameBytes = game ? this.#bytes.get(game.url) : undefined;
+		const osBytes = this.#bytes.get(os.id);
+		const basicBytes = basic ? this.#bytes.get(basic.id) : undefined;
+		const gameBytes = game ? this.#bytes.get(game.id) : undefined;
 		if (!osBytes) {
-			throw new Error(`firmware bytes missing for "${os.name}"`);
+			throw new Error(`firmware bytes missing for "${os.user.displayName}"`);
 		}
 
 		// On 400/800 & 1200XL, BASIC is an $A000 cartridge displaced by a real
@@ -417,8 +417,8 @@ export class EmulatorHost {
 
 		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
 		console.log(
-			`Firmware for ${model} ${tv.toUpperCase()}: OS "${os.name}"` +
-				(basic ? `, BASIC "${basic.name}"` : ", no BASIC"),
+			`Firmware for ${model} ${tv.toUpperCase()}: OS "${os.user.displayName}"` +
+				(basic ? `, BASIC "${basic.user.displayName}"` : ", no BASIC"),
 		);
 
 		const emulator = new Emulator({
@@ -639,7 +639,8 @@ export class EmulatorHost {
 	// the ROM's name; otherwise it's a plain enable/disable.
 	#basicToggleMessage(disabled: boolean, model: AtariModel): string {
 		if (!hasBuiltinBasic(model) && !this.#cartridge) {
-			const name = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
+			const name =
+				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			return disabled
 				? messages.toasts.detachingCartridge(name)
 				: messages.toasts.attachingCartridge(name);
@@ -771,20 +772,21 @@ export class EmulatorHost {
 	}
 
 	// `null` clears the override (back to the automatic ranking) — so picking the
-	// default value doesn't register as a staged change.
-	stageOsRom(slot: OsSlot, key: FirmwareKey | null): void {
+	// default value doesn't register as a staged change. `id` is a library image
+	// id (a built-in's firmware key, or a user upload's UUID).
+	stageOsRom(slot: OsSlot, id: string | null): void {
 		const os = { ...this.stagedRoms.value.os };
-		if (key === null) delete os[slot];
-		else os[slot] = key;
+		if (id === null) delete os[slot];
+		else os[slot] = id;
 		this.stagedRoms.value = { ...this.stagedRoms.value, os };
 	}
 
-	stageBasicRom(key: FirmwareKey | null): void {
-		this.stagedRoms.value = { ...this.stagedRoms.value, basic: key };
+	stageBasicRom(id: string | null): void {
+		this.stagedRoms.value = { ...this.stagedRoms.value, basic: id };
 	}
 
-	stageGameRom(key: FirmwareKey | null): void {
-		this.stagedRoms.value = { ...this.stagedRoms.value, game: key };
+	stageGameRom(id: string | null): void {
+		this.stagedRoms.value = { ...this.stagedRoms.value, game: id };
 	}
 
 	/** Adopt the staged ROM picks; reboot only if they change the running machine. */
@@ -838,12 +840,48 @@ export class EmulatorHost {
 		this.#bootImage(await loadLibraryEntry(entry), entry.fileName);
 	}
 
+	// --- Image library actions (by id; built-in or user). The id-based entry
+	// points fetch the bytes through the facade and reuse the boot/attach cores
+	// below. ---
+
+	/** Boot a library image as a fresh machine. */
+	async bootImage(id: string): Promise<void> {
+		await readyLibrary();
+		const entry = getImage(id);
+		if (!entry) return;
+		this.#bootImage(await getImageBytes(id), entry.user.displayName, id);
+	}
+
+	/** Attach a library disk image to D1: (live, no reboot). */
+	async attachDisk(id: string): Promise<void> {
+		await readyLibrary();
+		const entry = getImage(id);
+		if (!entry) return;
+		this.#attachDiskBytes(await getImageBytes(id), entry.user.displayName, id);
+	}
+
+	/** Attach a library cartridge (cold boots). */
+	async attachCartridge(id: string): Promise<void> {
+		await readyLibrary();
+		const entry = getImage(id);
+		if (!entry) return;
+		this.#attachCartridgeBytes(await getImageBytes(id), entry.user.displayName);
+	}
+
+	/** Wipe all of the user's library uploads (after a confirm). Built-ins stay. */
+	clearLibrary(): void {
+		if (!window.confirm(messages.library.confirmClear)) return;
+		void nukeLibrary().then(() => this.toast(messages.library.cleared));
+	}
+
 	// Mount an image (disk/cartridge/executable) and power-cycle into it.
 	// Booting an image always disables BASIC so it can't intercept the boot; on
 	// the 800 the BASIC cart also comes out for a game cartridge anyway (handled
 	// by #makeEmulator).
-	#bootImage(contents: Uint8Array, name: string): void {
-		const format = detectFileFormat(contents, name);
+	#bootImage(contents: Uint8Array, name: string, sourceId?: string): void {
+		// Content-based detection (no filename hint): the bytes carry their own
+		// magic/heuristics, and library images may have no meaningful extension.
+		const format = detectFileFormat(contents);
 
 		// An unrecognized/unloadable file changes nothing — just warn.
 		const unsupported = unsupportedMessage(format);
@@ -855,15 +893,17 @@ export class EmulatorHost {
 		// Boot image starts fresh: fill the one slot it boots from and clear the
 		// rest. (Attach, below, instead adds to the running machine in place.)
 		let cartridge: { cart: Cartridge; name: string } | null = null;
-		let disk: { disk: AtrImage; name: string } | null = null;
+		let disk: { disk: AtrImage; name: string; sourceId?: string } | null = null;
 		try {
 			if (format === "atr") {
-				disk = { disk: new AtrImage(contents), name };
+				// Only a real disk carries a library source to save back to (a XEX's
+				// synthetic boot disk doesn't).
+				disk = { disk: new AtrImage(contents), name, sourceId };
 			} else if (format === "xex") {
 				// XEX boots from a generated in-memory disk (its loader).
 				disk = { disk: buildBootDisk(contents), name };
 			} else {
-				cartridge = { cart: new Cartridge(contents, name), name };
+				cartridge = { cart: new Cartridge(contents), name };
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -898,7 +938,8 @@ export class EmulatorHost {
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
 		} else if (!hasBuiltinBasic(model) && !basicDisabled) {
-			const name = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
+			const name =
+				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(name));
 		}
 		if (this.#drives[0]) {
@@ -937,27 +978,58 @@ export class EmulatorHost {
 	}
 
 	/**
+	 * Save the D1: disk back to the library item it was attached from — keeping
+	 * any sectors written this session. Only a disk attached from one of your
+	 * library uploads can be saved (built-ins are read-only; a file-loaded disk
+	 * has no library item — use Download D1: to export those).
+	 */
+	async saveD1ToLibrary(): Promise<void> {
+		const drive = this.#drives[0];
+		if (!drive) {
+			this.toast(messages.errors.noDiskToSave, "warning");
+			return;
+		}
+		if (
+			!drive.sourceId ||
+			!(await updateImage(drive.sourceId, drive.disk.toBytes()))
+		) {
+			this.toast(messages.errors.notLibraryDisk, "warning");
+			return;
+		}
+		this.toast(messages.toasts.savedToLibrary(drive.name));
+	}
+
+	/**
 	 * Attach an ATR to D1: of the running machine — live, no reboot, BASIC
 	 * untouched (unlike Boot image, which power-cycles into the image). The
 	 * disk also becomes D1: for the next cold start and is what Download D1:
 	 * saves.
 	 */
 	async attachDiskFile(file: File): Promise<void> {
-		const contents = new Uint8Array(await file.arrayBuffer());
+		this.#attachDiskBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+	}
+
+	// Attach an ATR's bytes to D1: live — shared by the file picker and the
+	// library's `attachDisk(id)` (which passes the source entry for saving back).
+	#attachDiskBytes(
+		contents: Uint8Array,
+		name: string,
+		sourceId?: string,
+	): void {
 		let disk: AtrImage;
 		try {
 			disk = new AtrImage(contents);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.toast(`${file.name}: ${message}`, "error");
+			this.toast(`${name}: ${message}`, "error");
 			return;
 		}
 
-		this.#drives[0] = { disk, name: file.name };
+		this.#drives[0] = { disk, name, sourceId };
 		this.#emulator.machine.insertDisk(disk);
 		this.closePanel(); // get out of the way
 		this.#refreshAttachments();
-		this.toast(messages.toasts.attachingDisk(file.name));
+		this.toast(messages.toasts.attachingDisk(name));
 	}
 
 	/** Detach the disk from D1: of the running machine (live, no reboot). */
@@ -981,24 +1053,33 @@ export class EmulatorHost {
 	 * "stage it without rebooting" can come later.
 	 */
 	async attachCartridgeFile(file: File): Promise<void> {
-		const contents = new Uint8Array(await file.arrayBuffer());
-		const format = detectFileFormat(contents, file.name);
+		this.#attachCartridgeBytes(
+			new Uint8Array(await file.arrayBuffer()),
+			file.name,
+		);
+	}
+
+	// Attach a cartridge's bytes (cold boots) — shared by the file picker and the
+	// library's `attachCartridge(id)`. Content-based detection so canonical `.car`
+	// and raw built-in bytes both load without a filename hint.
+	#attachCartridgeBytes(contents: Uint8Array, name: string): void {
+		const format = detectFileFormat(contents);
 		const isCartridge =
 			format !== null &&
 			format !== "atr" &&
 			format !== "xex" &&
 			unsupportedMessage(format) === null;
 		if (!isCartridge) {
-			this.toast(`${file.name}: ${messages.errors.notACartridge}`, "warning");
+			this.toast(`${name}: ${messages.errors.notACartridge}`, "warning");
 			return;
 		}
 
 		let cart: Cartridge;
 		try {
-			cart = new Cartridge(contents, file.name);
+			cart = new Cartridge(contents);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.toast(`${file.name}: ${message}`, "error");
+			this.toast(`${name}: ${message}`, "error");
 			return;
 		}
 
@@ -1008,13 +1089,14 @@ export class EmulatorHost {
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
 		} else if (!hasBuiltinBasic(model) && !basicDisabled) {
-			const basic = this.#pick(preferredBasicKeys())?.name ?? "BASIC";
+			const basic =
+				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(basic));
 		}
-		this.toast(messages.toasts.attachingCartridge(file.name));
+		this.toast(messages.toasts.attachingCartridge(name));
 
 		this.closePanel(); // get out of the way
-		this.#cartridge = { cart, name: file.name };
+		this.#cartridge = { cart, name };
 		this.#refreshAttachments();
 		void this.#reboot();
 	}

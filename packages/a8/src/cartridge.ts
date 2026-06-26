@@ -701,6 +701,40 @@ export type CartridgeMapping = {
 	areaA000: AreaMapping; // no default
 };
 
+const CART_HEADER_SIZE = 16;
+
+/**
+ * The raw ROM bytes for a built-in (PORTB-banked) 8K slot — XL/XE BASIC or the
+ * XEGS game. Raw ROM passes through unchanged; a standard-8K `.car` (CART
+ * type 1, the canonical form for an $A000 8K image) is unwrapped to its ROM.
+ * Any other `.car` (a banked or wrong-size cartridge) is rejected: it can't
+ * stand in for an internal 8K ROM. This lets a host hand the machine canonical
+ * `.car` bytes for these slots without unwrapping them itself.
+ */
+export function builtinSlotRom(bytes: Uint8Array): Uint8Array {
+	const isCar =
+		bytes[0] === 0x43 && // 'C'
+		bytes[1] === 0x41 && // 'A'
+		bytes[2] === 0x52 && // 'R'
+		bytes[3] === 0x54; // 'T'
+	if (!isCar) return bytes;
+
+	const type =
+		(((bytes[4] ?? 0) << 24) |
+			((bytes[5] ?? 0) << 16) |
+			((bytes[6] ?? 0) << 8) |
+			(bytes[7] ?? 0)) >>>
+		0;
+	const rom = bytes.subarray(CART_HEADER_SIZE);
+	if (type !== 1 || rom.length !== 8192) {
+		throw new Error(
+			`built-in 8K slot needs a standard-8K cartridge (CART type 1); ` +
+				`got type ${type} of ${rom.length} bytes`,
+		);
+	}
+	return rom;
+}
+
 export class Cartridge implements Memory {
 	#rom: Uint8Array;
 	#type: CartType;

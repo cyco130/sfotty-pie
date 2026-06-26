@@ -1,4 +1,4 @@
-// The image library's IndexedDB store: `a8-library`, three object stores.
+// The image library's IndexedDB store: `a8.library`, three object stores.
 //
 //   entries    one row per USER image, keyed by its UUID `id`
 //   blobs      content-addressed bytes (keyPath = the hash), shared across
@@ -8,9 +8,10 @@
 // The entries/blobs split keeps listing and filtering from ever deserializing
 // megabyte blobs. Schema changes bump DB_VERSION and extend migrate().
 
+import { storageName } from "../storage.ts";
 import type { BlobEncoding } from "./metadata.ts";
 
-const DB_NAME = "a8-library";
+const DB_NAME = storageName("library");
 const DB_VERSION = 1;
 
 export const STORE_ENTRIES = "entries";

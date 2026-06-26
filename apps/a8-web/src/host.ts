@@ -47,7 +47,9 @@ import {
 	clearAllPersisted,
 	clearSessionPersisted,
 	loadPersisted,
+	loadSession,
 	savePersisted,
+	saveSession,
 } from "./persist.ts";
 
 export interface HostConfig {
@@ -97,6 +99,30 @@ const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
 // Persisted-state keys (namespaced by storageName) — see persist.ts.
 const CONFIG_KEY = "config";
 const ROMS_KEY = "roms";
+// The mounted media is per-tab (sessionStorage only) — a fresh tab starts empty
+// rather than auto-booting the last session's image.
+const MEDIA_KEY = "media";
+
+/** This tab's persisted mounted media: the library ids in each slot. */
+interface PersistedMedia {
+	cart: string | null;
+	disk: string | null;
+	/** The live BASIC-disabled state (a boot turns it off without touching the
+	 *  saved config seed), so a resume matches the booted machine. */
+	basicDisabled: boolean;
+}
+
+// Coerce an untrusted persisted value into a PersistedMedia, or null if absent
+// or malformed (ids are resolved against the library lazily, on restore).
+function sanitizeMedia(value: unknown): PersistedMedia | null {
+	if (typeof value !== "object" || value === null) return null;
+	const v = value as Partial<PersistedMedia>;
+	return {
+		cart: typeof v.cart === "string" ? v.cart : null,
+		disk: typeof v.disk === "string" ? v.disk : null,
+		basicDisabled: Boolean(v.basicDisabled),
+	};
+}
 
 function romsEqual(a: RomOverrides, b: RomOverrides): boolean {
 	if (a.basic !== b.basic || a.game !== b.game) return false;
@@ -247,12 +273,16 @@ export class EmulatorHost {
 	// What's mounted, kept across reboots and re-applied by #makeEmulator. The
 	// cartridge slot and the disk drives are independent (a cart and a disk can
 	// coexist); #drives is indexed by drive number (0 = D1:), one slot for now.
-	#cartridge: { cart: Cartridge; name: string } | null = null;
-	// `sourceId` is the library entry a disk came from, if any — what
-	// `saveD1ToLibrary` writes back to.
+	// `sourceId` is the library entry the cart/disk came from, if any — used to
+	// persist what's mounted (and, for a disk, what `saveD1ToLibrary` writes back).
+	#cartridge: { cart: Cartridge; name: string; sourceId?: string } | null =
+		null;
 	#drives: ({ disk: AtrImage; name: string; sourceId?: string } | null)[] = [
 		null,
 	];
+	// Media to re-mount once the library is ready (set from sessionStorage in the
+	// constructor, consumed by create()/#restoreMedia). Null when nothing to do.
+	#pendingMedia: PersistedMedia | null = null;
 
 	/**
 	 * Build a host and boot its first emulator. Async because the initial OS +
@@ -262,6 +292,7 @@ export class EmulatorHost {
 	static async create(config: HostConfig): Promise<EmulatorHost> {
 		const host = new EmulatorHost(config);
 		await host.#ensureFirmware();
+		await host.#restoreMedia();
 		host.#emulator = host.#makeEmulator();
 		host.#wireLeds();
 		return host;
@@ -277,6 +308,16 @@ export class EmulatorHost {
 			loadPersisted(CONFIG_KEY),
 			this.#defaultSettings(),
 		);
+		// This tab's mounted media (if any) is restored by create() once the
+		// library loads; its live BASIC state overrides the saved config seed so
+		// a resumed boot matches the machine it left.
+		this.#pendingMedia = sanitizeMedia(loadSession(MEDIA_KEY));
+		if (this.#pendingMedia) {
+			this.config.value = {
+				...this.config.value,
+				basicDisabled: this.#pendingMedia.basicDisabled,
+			};
+		}
 		this.staged.value = this.config.peek();
 		// Restore firmware picks (ids resolve lazily; a stale one falls back to
 		// the ranking).
@@ -317,6 +358,64 @@ export class EmulatorHost {
 			cartridge: this.#cartridge?.name ?? basic,
 			drives: this.#drives.map((drive) => drive?.name ?? null),
 		};
+	}
+
+	// Persist this tab's mounted media (the library ids in each slot) plus the
+	// live BASIC state, so reloading the tab resumes the running machine. Only
+	// slots backed by a library entry persist; an id-less mount is dropped (it
+	// can't be reconstructed). Session-only — a fresh tab starts empty.
+	#saveMedia(): void {
+		saveSession(MEDIA_KEY, {
+			cart: this.#cartridge?.sourceId ?? null,
+			disk: this.#drives[0]?.sourceId ?? null,
+			basicDisabled: this.config.value.basicDisabled,
+		} satisfies PersistedMedia);
+	}
+
+	// Re-mount the media persisted for this tab, resolving ids against the
+	// library; an image deleted since (or any read error) is silently skipped, so
+	// a stale pointer just yields an empty slot. Runs in create() after the
+	// library has loaded, before the first emulator is built.
+	async #restoreMedia(): Promise<void> {
+		const media = this.#pendingMedia;
+		this.#pendingMedia = null;
+		if (!media) return;
+		await readyLibrary();
+		if (media.disk) {
+			try {
+				const entry = getImage(media.disk);
+				if (entry) {
+					const bytes = await getImageBytes(media.disk);
+					const disk =
+						entry.derived.type === "xex"
+							? buildBootDisk(bytes)
+							: new AtrImage(bytes);
+					this.#drives[0] = {
+						disk,
+						name: entry.user.displayName,
+						sourceId: media.disk,
+					};
+				}
+			} catch {
+				// corrupt or missing blob — leave D1: empty
+			}
+		}
+		if (media.cart) {
+			try {
+				const entry = getImage(media.cart);
+				if (entry) {
+					const bytes = await getImageBytes(media.cart);
+					this.#cartridge = {
+						cart: new Cartridge(bytes),
+						name: entry.user.displayName,
+						sourceId: media.cart,
+					};
+				}
+			} catch {
+				// corrupt or missing blob — leave the cart slot empty
+			}
+		}
+		this.#refreshAttachments();
 	}
 
 	/** Run a bound command (from a key binding, the UI, or the palette). */
@@ -770,6 +869,7 @@ export class EmulatorHost {
 		const prev = this.config.value;
 		this.config.value = this.staged.value;
 		savePersisted(CONFIG_KEY, this.config.value);
+		this.#saveMedia(); // keep the resume's live BASIC state in sync
 		this.#announceConfigChange(prev, this.config.value);
 		void this.#reboot();
 		this.closePanel();
@@ -786,6 +886,7 @@ export class EmulatorHost {
 		this.config.value = next;
 		this.staged.value = next;
 		savePersisted(CONFIG_KEY, next);
+		this.#saveMedia(); // keep the resume's live BASIC state in sync
 		this.#announceConfigChange(prev, next);
 		void this.#reboot();
 	}
@@ -908,7 +1009,11 @@ export class EmulatorHost {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
-		this.#attachCartridgeBytes(await getImageBytes(id), entry.user.displayName);
+		this.#attachCartridgeBytes(
+			await getImageBytes(id),
+			entry.user.displayName,
+			id,
+		);
 	}
 
 	/**
@@ -929,12 +1034,14 @@ export class EmulatorHost {
 		if (!window.confirm(messages.reset.confirmEverything)) return;
 		const before = this.#resolvedFirmwareIds();
 		const prev = this.config.value;
+		const hadMedia = this.#mediaMounted();
 		clearAllPersisted();
 		void nukeLibrary().then(() => {
 			this.#setConfigAndRoms(this.#defaultSettings(), NO_ROM_OVERRIDES);
+			this.#clearMedia();
 			this.#rebootIfFirmwareChanged(
 				before,
-				!settingsEqual(prev, this.config.value),
+				!settingsEqual(prev, this.config.value) || hadMedia,
 			);
 			this.toast(messages.reset.everything);
 		});
@@ -944,14 +1051,16 @@ export class EmulatorHost {
 	resetTabSettings(): void {
 		const before = this.#resolvedFirmwareIds();
 		const prev = this.config.value;
+		const hadMedia = this.#mediaMounted();
 		clearSessionPersisted();
 		this.#setConfigAndRoms(
 			sanitizeSettings(loadPersisted(CONFIG_KEY), this.#defaultSettings()),
 			sanitizeRoms(loadPersisted(ROMS_KEY)),
 		);
+		this.#clearMedia();
 		this.#rebootIfFirmwareChanged(
 			before,
-			!settingsEqual(prev, this.config.value),
+			!settingsEqual(prev, this.config.value) || hadMedia,
 		);
 		this.toast(messages.reset.tab);
 	}
@@ -960,11 +1069,13 @@ export class EmulatorHost {
 	resetDefaultSettings(): void {
 		const before = this.#resolvedFirmwareIds();
 		const prev = this.config.value;
+		const hadMedia = this.#mediaMounted();
 		clearAllPersisted();
 		this.#setConfigAndRoms(this.#defaultSettings(), NO_ROM_OVERRIDES);
+		this.#clearMedia();
 		this.#rebootIfFirmwareChanged(
 			before,
-			!settingsEqual(prev, this.config.value),
+			!settingsEqual(prev, this.config.value) || hadMedia,
 		);
 		this.toast(messages.reset.defaults);
 	}
@@ -989,6 +1100,18 @@ export class EmulatorHost {
 		this.staged.value = config;
 		this.appliedRoms.value = roms;
 		this.stagedRoms.value = roms;
+	}
+
+	#mediaMounted(): boolean {
+		return this.#cartridge !== null || this.#drives.some((d) => d !== null);
+	}
+
+	// Unmount everything in memory (the persisted media is cleared separately by
+	// the reset's storage wipe). The caller reboots into the now-empty machine.
+	#clearMedia(): void {
+		this.#cartridge = null;
+		this.#drives = [null];
+		this.#refreshAttachments();
 	}
 
 	#resolvedFirmwareIds(): { os?: string; basic?: string; game?: string } {
@@ -1031,18 +1154,19 @@ export class EmulatorHost {
 
 		// Boot image starts fresh: fill the one slot it boots from and clear the
 		// rest. (Attach, below, instead adds to the running machine in place.)
-		let cartridge: { cart: Cartridge; name: string } | null = null;
+		let cartridge: { cart: Cartridge; name: string; sourceId?: string } | null =
+			null;
 		let disk: { disk: AtrImage; name: string; sourceId?: string } | null = null;
 		try {
 			if (format === "atr") {
-				// Only a real disk carries a library source to save back to (a XEX's
-				// synthetic boot disk doesn't).
 				disk = { disk: new AtrImage(contents), name, sourceId };
 			} else if (format === "xex") {
-				// XEX boots from a generated in-memory disk (its loader).
-				disk = { disk: buildBootDisk(contents), name };
+				// XEX boots from a generated in-memory disk (its loader). The source
+				// id is kept so the boot can be resumed (re-built from the XEX), but
+				// saveD1ToLibrary refuses it — its synthetic disk isn't the XEX.
+				disk = { disk: buildBootDisk(contents), name, sourceId };
 			} else {
-				cartridge = { cart: new Cartridge(contents), name };
+				cartridge = { cart: new Cartridge(contents), name, sourceId };
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -1066,6 +1190,7 @@ export class EmulatorHost {
 		this.#drives = [disk];
 		this.config.value = { ...this.config.value, basicDisabled: true };
 		this.#refreshAttachments();
+		this.#saveMedia();
 		void this.#reboot();
 	}
 
@@ -1128,9 +1253,13 @@ export class EmulatorHost {
 			this.toast(messages.errors.noDiskToSave, "warning");
 			return;
 		}
+		// Only a real disk entry can be overwritten — not a XEX (its D1: is a
+		// synthetic boot disk), nor a built-in or since-deleted source.
+		const source = drive.sourceId ? getImage(drive.sourceId) : undefined;
 		if (
-			!drive.sourceId ||
-			!(await updateImage(drive.sourceId, drive.disk.toBytes()))
+			!source ||
+			source.derived.type !== "disk" ||
+			!(await updateImage(source.id, drive.disk.toBytes()))
 		) {
 			this.toast(messages.errors.notLibraryDisk, "warning");
 			return;
@@ -1171,6 +1300,7 @@ export class EmulatorHost {
 		this.#emulator.machine.insertDisk(disk);
 		this.closePanel(); // get out of the way
 		this.#refreshAttachments();
+		this.#saveMedia();
 		this.toast(messages.toasts.attachingDisk(name));
 	}
 
@@ -1184,6 +1314,7 @@ export class EmulatorHost {
 		this.#drives[0] = null;
 		this.#emulator.machine.ejectDisk();
 		this.#refreshAttachments();
+		this.#saveMedia();
 		this.toast(messages.toasts.detachingDisk(drive.name));
 	}
 
@@ -1204,7 +1335,11 @@ export class EmulatorHost {
 	// Attach a cartridge's bytes (cold boots) — shared by the file picker and the
 	// library's `attachCartridge(id)`. Content-based detection so canonical `.car`
 	// and raw built-in bytes both load without a filename hint.
-	#attachCartridgeBytes(contents: Uint8Array, name: string): void {
+	#attachCartridgeBytes(
+		contents: Uint8Array,
+		name: string,
+		sourceId?: string,
+	): void {
 		const format = detectFileFormat(contents);
 		const isCartridge =
 			format !== null &&
@@ -1238,8 +1373,9 @@ export class EmulatorHost {
 		this.toast(messages.toasts.attachingCartridge(name));
 
 		this.closePanel(); // get out of the way
-		this.#cartridge = { cart, name };
+		this.#cartridge = { cart, name, sourceId };
 		this.#refreshAttachments();
+		this.#saveMedia();
 		void this.#reboot();
 	}
 
@@ -1256,6 +1392,7 @@ export class EmulatorHost {
 			const { name } = this.#cartridge;
 			this.#cartridge = null;
 			this.#refreshAttachments();
+			this.#saveMedia();
 			void this.#reboot();
 			this.toast(messages.toasts.detachingCartridge(name));
 			return;

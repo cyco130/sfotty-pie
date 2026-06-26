@@ -36,6 +36,25 @@ export function savePersisted(key: string, value: unknown): void {
 	}
 }
 
+/** Read a value from this tab's session only — no cross-tab seed fallback. */
+export function loadSession(key: string): unknown {
+	try {
+		const raw = sessionStorage.getItem(storageName(key));
+		return raw === null ? undefined : JSON.parse(raw);
+	} catch {
+		return undefined;
+	}
+}
+
+/** Persist a value to this tab's session only (not the cross-tab seed). */
+export function saveSession(key: string, value: unknown): void {
+	try {
+		sessionStorage.setItem(storageName(key), JSON.stringify(value));
+	} catch {
+		// Storage unavailable or full — run without persistence this session.
+	}
+}
+
 // Remove every `a8.*`-namespaced key from a storage area (leaves other sites'
 // keys alone).
 function clearArea(area: Storage): void {

@@ -121,7 +121,6 @@ export const messages = {
 		unsaved: "Unsaved change",
 		save: "Save changes",
 		noSuitable: "No suitable ROMs",
-		picksReset: "Picks reset when you reload.",
 		manageLibrary: "Manage library",
 		builtin: "Built-in",
 		yourRoms: "Your ROMs",
@@ -203,6 +202,14 @@ export const messages = {
 				parts.length > 0 ? `${parts.join(". ")}.` : "Nothing to add.";
 			return `${summary} (${formatDuration(seconds)})`;
 		},
+	},
+
+	reset: {
+		confirmEverything:
+			"Wipe your entire library AND all saved settings? This can't be undone.",
+		everything: "Reset everything — library and settings",
+		tab: "This tab reset to your saved settings",
+		defaults: "All settings reset to defaults",
 	},
 
 	keyHelp: {
@@ -289,6 +296,9 @@ export const labels = {
 	OPEN_ROMS: "ROM preferences…",
 	OPEN_LIBRARY: "Library…",
 	CLEAR_LIBRARY: "Clear your library…",
+	NUKE_EVERYTHING: "Reset everything: wipe library and settings…",
+	RESET_TAB_SETTINGS: "Reset this tab to saved settings",
+	RESET_DEFAULT_SETTINGS: "Reset all settings to defaults",
 	TOGGLE_FULLSCREEN: "Toggle full screen",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Attach a disk to D1:…",

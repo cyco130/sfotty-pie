@@ -36,11 +36,18 @@ import {
 	hasBuiltinBasic,
 	MODEL_LABELS,
 	ramConfig,
+	sanitizeSettings,
 	settingsEqual,
 	type MachineSettings,
 } from "./machine-config.ts";
 import { currentPath, navigate } from "./navigate.ts";
 import { messages } from "./messages.ts";
+import {
+	clearAllPersisted,
+	clearSessionPersisted,
+	loadPersisted,
+	savePersisted,
+} from "./persist.ts";
 
 export interface HostConfig {
 	model: AtariModel;
@@ -86,6 +93,10 @@ export interface RomOverrides {
 
 const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
 
+// Persisted-state keys (namespaced by storageName) — see persist.ts.
+const CONFIG_KEY = "config";
+const ROMS_KEY = "roms";
+
 function romsEqual(a: RomOverrides, b: RomOverrides): boolean {
 	if (a.basic !== b.basic || a.game !== b.game) return false;
 	const slots = new Set([...Object.keys(a.os), ...Object.keys(b.os)]);
@@ -93,6 +104,21 @@ function romsEqual(a: RomOverrides, b: RomOverrides): boolean {
 		if (a.os[slot as OsSlot] !== b.os[slot as OsSlot]) return false;
 	}
 	return true;
+}
+
+// Coerce a persisted/untrusted value into a RomOverrides shape; ids are
+// validated lazily at resolve time (a stale one falls back to the ranking).
+function sanitizeRoms(value: unknown): RomOverrides {
+	if (typeof value !== "object" || value === null) return NO_ROM_OVERRIDES;
+	const v = value as Partial<RomOverrides>;
+	return {
+		os:
+			v.os && typeof v.os === "object"
+				? (v.os as Partial<Record<OsSlot, string>>)
+				: {},
+		basic: typeof v.basic === "string" ? v.basic : null,
+		game: typeof v.game === "string" ? v.game : null,
+	};
 }
 
 /** Why a detected-but-not-loadable file can't be loaded (yet). */
@@ -201,6 +227,8 @@ export class EmulatorHost {
 	readonly #audio: AudioOutput | null;
 	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
+	// The model a brand-new install starts from (and resets fall back to).
+	readonly #defaultModel: AtariModel;
 
 	// Assigned by create() before the host is handed out — the constructor can't
 	// await the initial firmware fetch.
@@ -241,14 +269,18 @@ export class EmulatorHost {
 	constructor({ model, audio, audioError }: HostConfig) {
 		this.#audio = audio;
 		this.#audioError = audioError ?? null;
-		this.config.value = {
-			model,
-			memory: model === "400/800" ? 48 : 64,
-			portbExtendedRam: null,
-			tv: "ntsc",
-			basicDisabled: false,
-		};
+		this.#defaultModel = model;
+		// Start from the last persisted machine config (this tab's, else the
+		// last-used seed), falling back to a default for the requested model.
+		this.config.value = sanitizeSettings(
+			loadPersisted(CONFIG_KEY),
+			this.#defaultSettings(),
+		);
 		this.staged.value = this.config.peek();
+		// Restore firmware picks (ids resolve lazily; a stale one falls back to
+		// the ranking).
+		this.appliedRoms.value = sanitizeRoms(loadPersisted(ROMS_KEY));
+		this.stagedRoms.value = this.appliedRoms.peek();
 
 		// #emulator is built by create() once the initial firmware is fetched.
 		this.#keyboard = new Keyboard((command) => this.dispatch(command));
@@ -736,6 +768,7 @@ export class EmulatorHost {
 		if (!this.dirty.value) return;
 		const prev = this.config.value;
 		this.config.value = this.staged.value;
+		savePersisted(CONFIG_KEY, this.config.value);
 		this.#announceConfigChange(prev, this.config.value);
 		void this.#reboot();
 		this.closePanel();
@@ -751,6 +784,7 @@ export class EmulatorHost {
 		const prev = this.config.value;
 		this.config.value = next;
 		this.staged.value = next;
+		savePersisted(CONFIG_KEY, next);
 		this.#announceConfigChange(prev, next);
 		void this.#reboot();
 	}
@@ -794,6 +828,7 @@ export class EmulatorHost {
 		if (!this.romsDirty.value) return;
 		const reboot = this.romsReboot.value;
 		this.appliedRoms.value = this.stagedRoms.value;
+		savePersisted(ROMS_KEY, this.appliedRoms.value);
 		if (reboot) void this.#reboot();
 	}
 
@@ -868,10 +903,106 @@ export class EmulatorHost {
 		this.#attachCartridgeBytes(await getImageBytes(id), entry.user.displayName);
 	}
 
-	/** Wipe all of the user's library uploads (after a confirm). Built-ins stay. */
+	/**
+	 * Wipe all of the user's library uploads (after a confirm); reboots if the
+	 * running machine was using one (it falls back to a built-in). Built-ins stay.
+	 */
 	clearLibrary(): void {
 		if (!window.confirm(messages.library.confirmClear)) return;
-		void nukeLibrary().then(() => this.toast(messages.library.cleared));
+		const before = this.#resolvedFirmwareIds();
+		void nukeLibrary().then(() => {
+			this.toast(messages.library.cleared);
+			this.#rebootIfFirmwareChanged(before, false);
+		});
+	}
+
+	/** Reset everything (testing): wipe the library AND all saved settings. */
+	nukeEverything(): void {
+		if (!window.confirm(messages.reset.confirmEverything)) return;
+		const before = this.#resolvedFirmwareIds();
+		const prev = this.config.value;
+		clearAllPersisted();
+		void nukeLibrary().then(() => {
+			this.#setConfigAndRoms(this.#defaultSettings(), NO_ROM_OVERRIDES);
+			this.#rebootIfFirmwareChanged(
+				before,
+				!settingsEqual(prev, this.config.value),
+			);
+			this.toast(messages.reset.everything);
+		});
+	}
+
+	/** Drop this tab's overrides, reverting to the last-saved (seed) config + picks. */
+	resetTabSettings(): void {
+		const before = this.#resolvedFirmwareIds();
+		const prev = this.config.value;
+		clearSessionPersisted();
+		this.#setConfigAndRoms(
+			sanitizeSettings(loadPersisted(CONFIG_KEY), this.#defaultSettings()),
+			sanitizeRoms(loadPersisted(ROMS_KEY)),
+		);
+		this.#rebootIfFirmwareChanged(
+			before,
+			!settingsEqual(prev, this.config.value),
+		);
+		this.toast(messages.reset.tab);
+	}
+
+	/** Clear all saved settings, reverting to factory config + picks (library kept). */
+	resetDefaultSettings(): void {
+		const before = this.#resolvedFirmwareIds();
+		const prev = this.config.value;
+		clearAllPersisted();
+		this.#setConfigAndRoms(this.#defaultSettings(), NO_ROM_OVERRIDES);
+		this.#rebootIfFirmwareChanged(
+			before,
+			!settingsEqual(prev, this.config.value),
+		);
+		this.toast(messages.reset.defaults);
+	}
+
+	// --- reset helpers ------------------------------------------------------
+
+	#defaultSettings(): MachineSettings {
+		const model = this.#defaultModel;
+		return {
+			model,
+			memory: model === "400/800" ? 48 : 64,
+			portbExtendedRam: null,
+			tv: "ntsc",
+			basicDisabled: false,
+		};
+	}
+
+	// Set config + applied/staged ROM picks without persisting (resets clear the
+	// store deliberately; a later explicit change re-persists).
+	#setConfigAndRoms(config: MachineSettings, roms: RomOverrides): void {
+		this.config.value = config;
+		this.staged.value = config;
+		this.appliedRoms.value = roms;
+		this.stagedRoms.value = roms;
+	}
+
+	#resolvedFirmwareIds(): { os?: string; basic?: string; game?: string } {
+		const { os, basic, game } = this.#resolveFirmware();
+		return { os: os?.id, basic: basic?.id, game: game?.id };
+	}
+
+	// Reboot when the config changed or the firmware the running machine resolves
+	// to differs from `before` (so resets only power-cycle when they have to).
+	#rebootIfFirmwareChanged(
+		before: { os?: string; basic?: string; game?: string },
+		configChanged: boolean,
+	): void {
+		const after = this.#resolvedFirmwareIds();
+		if (
+			configChanged ||
+			before.os !== after.os ||
+			before.basic !== after.basic ||
+			before.game !== after.game
+		) {
+			void this.#reboot();
+		}
 	}
 
 	// Mount an image (disk/cartridge/executable) and power-cycle into it.

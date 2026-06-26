@@ -85,6 +85,18 @@ export const commands = {
 		label: "CLEAR_LIBRARY",
 		run: ({ host }) => host.clearLibrary(),
 	},
+	NUKE_EVERYTHING: {
+		label: "NUKE_EVERYTHING",
+		run: ({ host }) => host.nukeEverything(),
+	},
+	RESET_TAB_SETTINGS: {
+		label: "RESET_TAB_SETTINGS",
+		run: ({ host }) => host.resetTabSettings(),
+	},
+	RESET_DEFAULT_SETTINGS: {
+		label: "RESET_DEFAULT_SETTINGS",
+		run: ({ host }) => host.resetDefaultSettings(),
+	},
 
 	// Attach a disk to D1: of the running machine (no reboot, BASIC kept).
 	ATTACH_D1: { label: "ATTACH_D1", run: ({ host }) => host.pickAttachDisk() },

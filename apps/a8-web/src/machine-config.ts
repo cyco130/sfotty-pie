@@ -89,6 +89,33 @@ export function clampRam(
 	return ramConfig(RAM_SIZES[model].includes(total) ? total : RAM_BASE[model]);
 }
 
+/**
+ * Coerce a persisted/untrusted value into valid {@link MachineSettings},
+ * clamping RAM to the model — returns `fallback` if it isn't a recognizable
+ * settings object (e.g. an unknown model from an older or corrupt store).
+ */
+export function sanitizeSettings(
+	value: unknown,
+	fallback: MachineSettings,
+): MachineSettings {
+	if (typeof value !== "object" || value === null) return fallback;
+	const v = value as Partial<MachineSettings>;
+	if (!MODELS.includes(v.model as AtariModel)) return fallback;
+	const model = v.model as AtariModel;
+	const ext = v.portbExtendedRam;
+	const base: MachineSettings = {
+		model,
+		memory: typeof v.memory === "number" ? v.memory : RAM_BASE[model],
+		portbExtendedRam:
+			ext && typeof ext === "object"
+				? { size: Number(ext.size) || 0, antic: Boolean(ext.antic) }
+				: null,
+		tv: v.tv === "pal" ? "pal" : "ntsc",
+		basicDisabled: Boolean(v.basicDisabled),
+	};
+	return { ...base, ...clampRam(model, base) };
+}
+
 export type AnticPolicy = "on" | "off" | "optional";
 
 /**

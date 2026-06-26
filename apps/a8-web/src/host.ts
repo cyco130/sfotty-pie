@@ -25,6 +25,7 @@ import {
 	getImageBytes,
 	libraryEntries,
 	readyLibrary,
+	updateImage,
 } from "./images/library.ts";
 import type { ImageEntry } from "./images/metadata.ts";
 import { Keyboard } from "./keyboard.ts";
@@ -217,7 +218,11 @@ export class EmulatorHost {
 	// cartridge slot and the disk drives are independent (a cart and a disk can
 	// coexist); #drives is indexed by drive number (0 = D1:), one slot for now.
 	#cartridge: { cart: Cartridge; name: string } | null = null;
-	#drives: ({ disk: AtrImage; name: string } | null)[] = [null];
+	// `sourceId` is the library entry a disk came from, if any — what
+	// `saveD1ToLibrary` writes back to.
+	#drives: ({ disk: AtrImage; name: string; sourceId?: string } | null)[] = [
+		null,
+	];
 
 	/**
 	 * Build a host and boot its first emulator. Async because the initial OS +
@@ -843,7 +848,7 @@ export class EmulatorHost {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
-		this.#bootImage(await getImageBytes(id), entry.user.displayName);
+		this.#bootImage(await getImageBytes(id), entry.user.displayName, id);
 	}
 
 	/** Attach a library disk image to D1: (live, no reboot). */
@@ -851,7 +856,7 @@ export class EmulatorHost {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
-		this.#attachDiskBytes(await getImageBytes(id), entry.user.displayName);
+		this.#attachDiskBytes(await getImageBytes(id), entry.user.displayName, id);
 	}
 
 	/** Attach a library cartridge (cold boots). */
@@ -866,7 +871,7 @@ export class EmulatorHost {
 	// Booting an image always disables BASIC so it can't intercept the boot; on
 	// the 800 the BASIC cart also comes out for a game cartridge anyway (handled
 	// by #makeEmulator).
-	#bootImage(contents: Uint8Array, name: string): void {
+	#bootImage(contents: Uint8Array, name: string, sourceId?: string): void {
 		// Content-based detection (no filename hint): the bytes carry their own
 		// magic/heuristics, and library images may have no meaningful extension.
 		const format = detectFileFormat(contents);
@@ -881,10 +886,12 @@ export class EmulatorHost {
 		// Boot image starts fresh: fill the one slot it boots from and clear the
 		// rest. (Attach, below, instead adds to the running machine in place.)
 		let cartridge: { cart: Cartridge; name: string } | null = null;
-		let disk: { disk: AtrImage; name: string } | null = null;
+		let disk: { disk: AtrImage; name: string; sourceId?: string } | null = null;
 		try {
 			if (format === "atr") {
-				disk = { disk: new AtrImage(contents), name };
+				// Only a real disk carries a library source to save back to (a XEX's
+				// synthetic boot disk doesn't).
+				disk = { disk: new AtrImage(contents), name, sourceId };
 			} else if (format === "xex") {
 				// XEX boots from a generated in-memory disk (its loader).
 				disk = { disk: buildBootDisk(contents), name };
@@ -964,6 +971,28 @@ export class EmulatorHost {
 	}
 
 	/**
+	 * Save the D1: disk back to the library item it was attached from — keeping
+	 * any sectors written this session. Only a disk attached from one of your
+	 * library uploads can be saved (built-ins are read-only; a file-loaded disk
+	 * has no library item — use Download D1: to export those).
+	 */
+	async saveD1ToLibrary(): Promise<void> {
+		const drive = this.#drives[0];
+		if (!drive) {
+			this.toast(messages.errors.noDiskToSave, "warning");
+			return;
+		}
+		if (
+			!drive.sourceId ||
+			!(await updateImage(drive.sourceId, drive.disk.toBytes()))
+		) {
+			this.toast(messages.errors.notLibraryDisk, "warning");
+			return;
+		}
+		this.toast(messages.toasts.savedToLibrary(drive.name));
+	}
+
+	/**
 	 * Attach an ATR to D1: of the running machine — live, no reboot, BASIC
 	 * untouched (unlike Boot image, which power-cycles into the image). The
 	 * disk also becomes D1: for the next cold start and is what Download D1:
@@ -974,8 +1003,12 @@ export class EmulatorHost {
 	}
 
 	// Attach an ATR's bytes to D1: live — shared by the file picker and the
-	// library's `attachDisk(id)`.
-	#attachDiskBytes(contents: Uint8Array, name: string): void {
+	// library's `attachDisk(id)` (which passes the source entry for saving back).
+	#attachDiskBytes(
+		contents: Uint8Array,
+		name: string,
+		sourceId?: string,
+	): void {
 		let disk: AtrImage;
 		try {
 			disk = new AtrImage(contents);
@@ -985,7 +1018,7 @@ export class EmulatorHost {
 			return;
 		}
 
-		this.#drives[0] = { disk, name };
+		this.#drives[0] = { disk, name, sourceId };
 		this.#emulator.machine.insertDisk(disk);
 		this.closePanel(); // get out of the way
 		this.#refreshAttachments();

@@ -285,6 +285,40 @@ export async function nukeLibrary(): Promise<void> {
 	loadPromise = null;
 }
 
+/**
+ * Overwrite a user image's bytes in place — e.g. saving a disk the machine has
+ * written to. Re-hashes, rewrites the (content-addressed) blob and reclaims the
+ * old one, keeping the entry id. Returns false (a no-op) for built-ins or an
+ * unknown id, which aren't writable.
+ */
+export async function updateImage(
+	id: string,
+	bytes: Uint8Array,
+): Promise<boolean> {
+	await readyLibrary();
+	const entry = userEntries.value.find((e) => e.id === id);
+	if (!entry) return false;
+
+	const hash = await sha256Hex(bytes);
+	const oldRef = entry.locator.ref;
+	await blobs.put(hash, bytes);
+	const updated: StoredEntry = {
+		...entry,
+		hash,
+		size: bytes.length,
+		locator: { ...entry.locator, ref: hash },
+	};
+	await putEntry(updated);
+	userEntries.value = userEntries.value.map((e) => (e.id === id ? updated : e));
+	if (
+		oldRef !== hash &&
+		!userEntries.value.some((e) => e.locator.ref === oldRef)
+	) {
+		await blobs.delete(oldRef);
+	}
+	return true;
+}
+
 /** Remove a user image; reclaim its blob if no other entry still references it. */
 export async function removeImage(id: string): Promise<void> {
 	await readyLibrary();

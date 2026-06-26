@@ -97,6 +97,10 @@ export const commands = {
 	},
 	// Save the D1: disk (with any in-session writes) to a file.
 	DOWNLOAD_D1: { label: "DOWNLOAD_D1", run: ({ host }) => host.downloadDisk() },
+	SAVE_D1_TO_LIBRARY: {
+		label: "SAVE_D1_TO_LIBRARY",
+		run: ({ host }) => void host.saveD1ToLibrary(),
+	},
 
 	// Machine configuration. Each applies the change and reboots into it
 	// immediately. (The menu's config form does its own stage/apply instead, so

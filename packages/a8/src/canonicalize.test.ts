@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canonicalize } from "./canonicalize.ts";
-import { Cartridge } from "./cartridge.ts";
+import { builtinSlotRom, Cartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 
 // Minimal synthetic fixtures that satisfy the structural detectors.
@@ -113,5 +113,22 @@ describe("canonicalize", () => {
 		expect(() => canonicalize(new Uint8Array([1, 2, 3, 4]))).toThrow(
 			/Unrecognized/,
 		);
+	});
+});
+
+describe("builtinSlotRom", () => {
+	it("passes a raw 8K ROM through and unwraps a standard-8K .car back to it", () => {
+		const raw = rawCart8kA000();
+		expect(builtinSlotRom(raw)).toBe(raw); // raw passes straight through
+
+		const car = canonicalize(raw)[0]!.bytes; // type-1 .car (8208 bytes)
+		const unwrapped = builtinSlotRom(car);
+		expect(unwrapped).toHaveLength(8192);
+		expect([...unwrapped]).toEqual([...raw]);
+	});
+
+	it("rejects a non-standard .car for a built-in 8K slot", () => {
+		const car16 = canonicalize(rawCart16k())[0]!.bytes; // CART type 2 (16K)
+		expect(() => builtinSlotRom(car16)).toThrow(/standard-8K/);
 	});
 });

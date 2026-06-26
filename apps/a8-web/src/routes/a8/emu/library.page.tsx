@@ -7,6 +7,7 @@ import {
 } from "../../../images/library.ts";
 import type { ImageEntry, ImageType } from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
+import { navigate } from "../../../navigate.ts";
 import { useUrlParams } from "../../../url-params.ts";
 import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
@@ -338,11 +339,18 @@ export default function LibraryPage() {
 						<tbody>
 							{rows.map((entry) => (
 								<tr key={entry.id} class="border-b border-neutral-100">
-									<td
-										class="truncate px-2 py-1 text-neutral-800"
-										title={entry.user.displayName}
-									>
-										{entry.user.displayName}
+									<td class="truncate px-2 py-1" title={entry.user.displayName}>
+										<button
+											type="button"
+											class="block w-full truncate text-left text-neutral-800 hover:underline"
+											onClick={() =>
+												navigate(
+													`/a8/emu/library/${encodeURIComponent(entry.id)}`,
+												)
+											}
+										>
+											{entry.user.displayName}
+										</button>
 									</td>
 									<td class="px-2 py-1 text-neutral-500">
 										{messages.library.typeName[entry.derived.type]}

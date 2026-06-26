@@ -34,7 +34,9 @@ function panelFromPath(path: string): SidebarPanel | null {
 	if (path === "/a8/emu/menu") return "menu";
 	if (path === "/a8/emu/palette") return "palette";
 	if (path === "/a8/emu/roms") return "roms";
-	if (path === "/a8/emu/library") return "library";
+	if (path === "/a8/emu/library" || path.startsWith("/a8/emu/library/")) {
+		return "library";
+	}
 	return null;
 }
 

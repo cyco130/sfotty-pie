@@ -834,12 +834,42 @@ export class EmulatorHost {
 		this.#bootImage(await loadLibraryEntry(entry), entry.fileName);
 	}
 
+	// --- Image library actions (by id; built-in or user). The id-based entry
+	// points fetch the bytes through the facade and reuse the boot/attach cores
+	// below. ---
+
+	/** Boot a library image as a fresh machine. */
+	async bootImage(id: string): Promise<void> {
+		await readyLibrary();
+		const entry = getImage(id);
+		if (!entry) return;
+		this.#bootImage(await getImageBytes(id), entry.user.displayName);
+	}
+
+	/** Attach a library disk image to D1: (live, no reboot). */
+	async attachDisk(id: string): Promise<void> {
+		await readyLibrary();
+		const entry = getImage(id);
+		if (!entry) return;
+		this.#attachDiskBytes(await getImageBytes(id), entry.user.displayName);
+	}
+
+	/** Attach a library cartridge (cold boots). */
+	async attachCartridge(id: string): Promise<void> {
+		await readyLibrary();
+		const entry = getImage(id);
+		if (!entry) return;
+		this.#attachCartridgeBytes(await getImageBytes(id), entry.user.displayName);
+	}
+
 	// Mount an image (disk/cartridge/executable) and power-cycle into it.
 	// Booting an image always disables BASIC so it can't intercept the boot; on
 	// the 800 the BASIC cart also comes out for a game cartridge anyway (handled
 	// by #makeEmulator).
 	#bootImage(contents: Uint8Array, name: string): void {
-		const format = detectFileFormat(contents, name);
+		// Content-based detection (no filename hint): the bytes carry their own
+		// magic/heuristics, and library images may have no meaningful extension.
+		const format = detectFileFormat(contents);
 
 		// An unrecognized/unloadable file changes nothing — just warn.
 		const unsupported = unsupportedMessage(format);
@@ -859,7 +889,7 @@ export class EmulatorHost {
 				// XEX boots from a generated in-memory disk (its loader).
 				disk = { disk: buildBootDisk(contents), name };
 			} else {
-				cartridge = { cart: new Cartridge(contents, name), name };
+				cartridge = { cart: new Cartridge(contents), name };
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -940,21 +970,26 @@ export class EmulatorHost {
 	 * saves.
 	 */
 	async attachDiskFile(file: File): Promise<void> {
-		const contents = new Uint8Array(await file.arrayBuffer());
+		this.#attachDiskBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+	}
+
+	// Attach an ATR's bytes to D1: live — shared by the file picker and the
+	// library's `attachDisk(id)`.
+	#attachDiskBytes(contents: Uint8Array, name: string): void {
 		let disk: AtrImage;
 		try {
 			disk = new AtrImage(contents);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.toast(`${file.name}: ${message}`, "error");
+			this.toast(`${name}: ${message}`, "error");
 			return;
 		}
 
-		this.#drives[0] = { disk, name: file.name };
+		this.#drives[0] = { disk, name };
 		this.#emulator.machine.insertDisk(disk);
 		this.closePanel(); // get out of the way
 		this.#refreshAttachments();
-		this.toast(messages.toasts.attachingDisk(file.name));
+		this.toast(messages.toasts.attachingDisk(name));
 	}
 
 	/** Detach the disk from D1: of the running machine (live, no reboot). */
@@ -978,24 +1013,33 @@ export class EmulatorHost {
 	 * "stage it without rebooting" can come later.
 	 */
 	async attachCartridgeFile(file: File): Promise<void> {
-		const contents = new Uint8Array(await file.arrayBuffer());
-		const format = detectFileFormat(contents, file.name);
+		this.#attachCartridgeBytes(
+			new Uint8Array(await file.arrayBuffer()),
+			file.name,
+		);
+	}
+
+	// Attach a cartridge's bytes (cold boots) — shared by the file picker and the
+	// library's `attachCartridge(id)`. Content-based detection so canonical `.car`
+	// and raw built-in bytes both load without a filename hint.
+	#attachCartridgeBytes(contents: Uint8Array, name: string): void {
+		const format = detectFileFormat(contents);
 		const isCartridge =
 			format !== null &&
 			format !== "atr" &&
 			format !== "xex" &&
 			unsupportedMessage(format) === null;
 		if (!isCartridge) {
-			this.toast(`${file.name}: ${messages.errors.notACartridge}`, "warning");
+			this.toast(`${name}: ${messages.errors.notACartridge}`, "warning");
 			return;
 		}
 
 		let cart: Cartridge;
 		try {
-			cart = new Cartridge(contents, file.name);
+			cart = new Cartridge(contents);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.toast(`${file.name}: ${message}`, "error");
+			this.toast(`${name}: ${message}`, "error");
 			return;
 		}
 
@@ -1009,10 +1053,10 @@ export class EmulatorHost {
 				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(basic));
 		}
-		this.toast(messages.toasts.attachingCartridge(file.name));
+		this.toast(messages.toasts.attachingCartridge(name));
 
 		this.closePanel(); // get out of the way
-		this.#cartridge = { cart, name: file.name };
+		this.#cartridge = { cart, name };
 		this.#refreshAttachments();
 		void this.#reboot();
 	}

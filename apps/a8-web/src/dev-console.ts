@@ -13,6 +13,7 @@ import {
 } from "./images/db.ts";
 import { sha256Hex } from "./images/hash.ts";
 import { builtinLibrary } from "./library.ts";
+import { builtinFirmware } from "virtual:firmware-library";
 
 function hex(value: number, width: number): string {
 	return value.toString(16).padStart(width, "0");
@@ -69,6 +70,8 @@ async function toBytes(
 const images = {
 	pick: pickFile,
 	sha256: sha256Hex,
+	// The built-in firmware manifest (with precomputed canonical hash + kind).
+	builtin: builtinFirmware,
 	deflate: deflateRaw,
 	inflate: inflateRaw,
 	blobs: idbBlobStore(),

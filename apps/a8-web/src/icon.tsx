@@ -9,6 +9,7 @@ import iconsUrl from "./icons.svg";
 export const ICON_NAMES = [
 	"menu",
 	"close",
+	"bookmark",
 	"joystick",
 	"keyboard",
 	"chevron-down",

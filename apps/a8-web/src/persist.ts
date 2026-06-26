@@ -55,6 +55,25 @@ export function saveSession(key: string, value: unknown): void {
 	}
 }
 
+/** Read a value shared across all tabs (localStorage only). */
+export function loadLocal(key: string): unknown {
+	try {
+		const raw = localStorage.getItem(storageName(key));
+		return raw === null ? undefined : JSON.parse(raw);
+	} catch {
+		return undefined;
+	}
+}
+
+/** Persist a value shared across all tabs (localStorage only). */
+export function saveLocal(key: string, value: unknown): void {
+	try {
+		localStorage.setItem(storageName(key), JSON.stringify(value));
+	} catch {
+		// Storage unavailable or full — run without persistence this session.
+	}
+}
+
 // Remove every `a8.*`-namespaced key from a storage area (leaves other sites'
 // keys alone).
 function clearArea(area: Storage): void {

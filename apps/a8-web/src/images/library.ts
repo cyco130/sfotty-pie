@@ -142,6 +142,55 @@ export function getImage(id: string): ImageEntry | undefined {
 	return libraryEntries.value.find((e) => e.id === id);
 }
 
+// Built-in bootable software (a recognized non-firmware image), by unified id —
+// the recents seed. Detection ignores the on-disk folder, so "software" is just
+// a recognized image with no firmware identity.
+const BUILTIN_SOFTWARE_IDS = new Set(
+	builtinFirmware
+		.filter((fw) => fw.kind !== null && fw.firmwareType === null)
+		.map(builtinId),
+);
+
+/** Built-in bootable software entries (non-firmware), sorted by display name. */
+export const builtinSoftware = computed<ImageEntry[]>(() =>
+	libraryEntries.value
+		.filter((e) => BUILTIN_SOFTWARE_IDS.has(e.id))
+		.sort((a, b) => a.user.displayName.localeCompare(b.user.displayName)),
+);
+
+/** Promote a transient (auto-added) image into the curated library. */
+export async function keepImage(id: string): Promise<void> {
+	await readyLibrary();
+	const entry = userEntries.value.find((e) => e.id === id);
+	if (!entry?.transient) return;
+	const kept: StoredEntry = { ...entry };
+	delete kept.transient;
+	await putEntry(kept);
+	userEntries.value = userEntries.value.map((e) => (e.id === id ? kept : e));
+}
+
+/**
+ * Delete transient (auto-added) images whose ids aren't in `keep` — e.g. ones
+ * that fell off the recents list — reclaiming any blob no survivor references.
+ * Curated and built-in entries are never touched.
+ */
+export async function sweepTransients(keep: Set<string>): Promise<void> {
+	await readyLibrary();
+	const doomed = userEntries.value.filter(
+		(e) => e.transient && !keep.has(e.id),
+	);
+	if (doomed.length === 0) return;
+	for (const entry of doomed) await deleteEntry(entry.id);
+	const gone = new Set(doomed.map((e) => e.id));
+	const remaining = userEntries.value.filter((e) => !gone.has(e.id));
+	for (const entry of doomed) {
+		if (!remaining.some((e) => e.hash === entry.hash)) {
+			await blobs.delete(entry.hash);
+		}
+	}
+	userEntries.value = remaining;
+}
+
 /**
  * Resolve an image's bytes: a built-in serves its raw asset (a `#slice` of it);
  * a user image serves its canonical blob (decompressed by the blob store).

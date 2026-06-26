@@ -24,14 +24,16 @@ import {
 	addOrFindImage,
 	getImage,
 	getImageBytes,
+	keepImage,
 	libraryEntries,
 	nukeLibrary,
 	readyLibrary,
+	removeImage,
+	sweepTransients,
 	updateImage,
 } from "./images/library.ts";
 import type { ImageEntry } from "./images/metadata.ts";
 import { Keyboard } from "./keyboard.ts";
-import { loadLibraryEntry, type LibraryEntry } from "./library.ts";
 import {
 	clampRam,
 	hasBuiltinBasic,
@@ -43,6 +45,7 @@ import {
 } from "./machine-config.ts";
 import { currentPath, navigate } from "./navigate.ts";
 import { messages } from "./messages.ts";
+import { recentIds, removeRecent, touchRecent } from "./recents.ts";
 import {
 	clearAllPersisted,
 	clearSessionPersisted,
@@ -370,6 +373,22 @@ export class EmulatorHost {
 			disk: this.#drives[0]?.sourceId ?? null,
 			basicDisabled: this.config.value.basicDisabled,
 		} satisfies PersistedMedia);
+	}
+
+	// Record a just-booted/attached library image in the recents history, then
+	// sweep transient (auto-added) images that have fallen off it — keeping any
+	// still mounted, so a resume never loses its backing blob.
+	#noteUsed(sourceId: string | undefined): void {
+		if (!sourceId) return;
+		touchRecent(sourceId);
+		const keep = new Set(recentIds.value);
+		if (this.#cartridge?.sourceId) keep.add(this.#cartridge.sourceId);
+		if (this.#drives[0]?.sourceId) keep.add(this.#drives[0].sourceId);
+		void sweepTransients(keep);
+	}
+
+	#mountsImage(id: string): boolean {
+		return this.#cartridge?.sourceId === id || this.#drives[0]?.sourceId === id;
 	}
 
 	// Re-mount the media persisted for this tab, resolving ids against the
@@ -979,11 +998,6 @@ export class EmulatorHost {
 		else this.#bootImage(bytes, file.name);
 	}
 
-	/** Boot a software item from the built-in library. */
-	async bootLibraryEntry(entry: LibraryEntry): Promise<void> {
-		this.#bootImage(await loadLibraryEntry(entry), entry.fileName);
-	}
-
 	// --- Image library actions (by id; built-in or user). The id-based entry
 	// points fetch the bytes through the facade and reuse the boot/attach cores
 	// below. ---
@@ -1014,6 +1028,23 @@ export class EmulatorHost {
 			entry.user.displayName,
 			id,
 		);
+	}
+
+	/** Promote a transient (auto-added) recents item into the curated library. */
+	keepRecent(id: string): void {
+		const entry = getImage(id);
+		if (!entry?.transient) return;
+		void keepImage(id).then(() =>
+			this.toast(messages.recents.kept(entry.user.displayName)),
+		);
+	}
+
+	// Drop an item from the recents history. A transient image that's no longer
+	// recent and isn't mounted is then orphaned, so it's deleted outright.
+	removeFromRecents(id: string): void {
+		const entry = getImage(id);
+		removeRecent(id);
+		if (entry?.transient && !this.#mountsImage(id)) void removeImage(id);
 	}
 
 	/**
@@ -1191,6 +1222,7 @@ export class EmulatorHost {
 		this.config.value = { ...this.config.value, basicDisabled: true };
 		this.#refreshAttachments();
 		this.#saveMedia();
+		this.#noteUsed(sourceId);
 		void this.#reboot();
 	}
 
@@ -1301,6 +1333,7 @@ export class EmulatorHost {
 		this.closePanel(); // get out of the way
 		this.#refreshAttachments();
 		this.#saveMedia();
+		this.#noteUsed(sourceId);
 		this.toast(messages.toasts.attachingDisk(name));
 	}
 
@@ -1376,6 +1409,7 @@ export class EmulatorHost {
 		this.#cartridge = { cart, name, sourceId };
 		this.#refreshAttachments();
 		this.#saveMedia();
+		this.#noteUsed(sourceId);
 		void this.#reboot();
 	}
 

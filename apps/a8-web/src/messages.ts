@@ -100,7 +100,6 @@ export const messages = {
 		rebootToApply: "Reboot to apply",
 		commandPalette: "Command palette…",
 		bootImage: "Boot image…",
-		software: "Software",
 		keys: "Keys",
 		about: "About",
 		aboutBlurb: "Sfotty Pie A8 Web — an Atari 8-bit emulator. MIT-licensed.",
@@ -124,6 +123,13 @@ export const messages = {
 		manageLibrary: "Manage library",
 		builtin: "Built-in",
 		yourRoms: "Your ROMs",
+	},
+
+	recents: {
+		title: "Recents",
+		keepTitle: "Keep in your library",
+		remove: "Remove from recents",
+		kept: (name: string): string => `Kept ${name} in your library`,
 	},
 
 	library: {

@@ -24,7 +24,9 @@ type Status = "pass" | "fail" | "skip";
 
 async function runSuite(): Promise<Record<string, Status>> {
 	const machine = new Atari({
-		model: "130XE",
+		xl: true,
+		xeBankCount: 4,
+		separateAnticAccess: true,
 		os: new Uint8Array(readFileSync(join(FIRMWARE, "AltirraOS XL-XE.rom"))),
 		basic: new Uint8Array(readFileSync(join(FIRMWARE, "Altirra BASIC.rom"))),
 		...(process.argv.includes("--pal") ? { tvSystem: "pal" as const } : {}),

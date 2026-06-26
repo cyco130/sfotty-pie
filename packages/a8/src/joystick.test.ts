@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
 import { Cartridge } from "./cartridge.ts";
-import { Atari, type AtariModel } from "./machine.ts";
+import { Atari } from "./machine.ts";
 
 const TRIG0 = 0xd010;
 const TRIG2 = 0xd012;
@@ -11,15 +11,16 @@ const PORTB = 0xd301;
 const PACTL = 0xd302;
 const PBCTL = 0xd303;
 
-function makeMachine(model: AtariModel) {
+function makeMachine(model: "800" | "800XL" | "130XE") {
 	// On the 800, BASIC goes through cartridge image sniffing: give the dummy
 	// ROM a valid $A000 cart trailer (init address $A000, start unused).
 	const basic = new Uint8Array(8192);
 	basic[8191] = 0xa0;
 
 	return new Atari({
-		model,
-		os: new Uint8Array(model === "800XL" ? 16384 : 10240),
+		xl: model !== "800",
+		...(model === "130XE" && { xeBankCount: 4, separateAnticAccess: true }),
+		os: new Uint8Array(model === "800" ? 10240 : 16384),
 		basic,
 	});
 }
@@ -82,7 +83,7 @@ test("XL/XE TRIG3 senses the cartridge (RD5)", () => {
 	const cart = new Uint8Array(8192);
 	cart[8191] = 0xa0; // valid $A000 cart trailer
 	const withCart = new Atari({
-		model: "800XL",
+		xl: true,
 		os: new Uint8Array(16384),
 		basic: new Uint8Array(8192),
 		cartridge: new Cartridge(cart),

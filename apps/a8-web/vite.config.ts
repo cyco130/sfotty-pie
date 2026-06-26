@@ -3,6 +3,7 @@ import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
+import { firmwareLibrary } from "./firmware-library-plugin.ts";
 
 // The commit the build was made from, surfaced in the UI to identify manual
 // deployments. Marked `-dirty` when the tree has uncommitted changes, and
@@ -25,7 +26,7 @@ export default defineConfig({
 	// testing on a real device. Expect a one-time "untrusted certificate"
 	// prompt in the browser. `host: true` exposes the server on the LAN so the
 	// device can reach it in the first place.
-	plugins: [preact(), tailwindcss(), basicSsl()],
+	plugins: [preact(), tailwindcss(), basicSsl(), firmwareLibrary()],
 	// Treat ROM/image files as binary assets so the library's globbed imports
 	// emit them as hashed assets instead of trying to parse them as source.
 	assetsInclude: ["**/*.rom", "**/*.xex", "**/*.atr", "**/*.car"],

@@ -76,6 +76,7 @@ export const commands = {
 
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: { label: "BOOT_IMAGE", run: ({ host }) => host.pickBootImage() },
+	OPEN_ROMS: { label: "OPEN_ROMS", run: ({ host }) => host.showPanel("roms") },
 
 	// Attach a disk to D1: of the running machine (no reboot, BASIC kept).
 	ATTACH_D1: { label: "ATTACH_D1", run: ({ host }) => host.pickAttachDisk() },
@@ -96,17 +97,21 @@ export const commands = {
 	// Machine configuration. Each applies the change and reboots into it
 	// immediately. (The menu's config form does its own stage/apply instead, so
 	// the palette stays a one-shot surface.)
-	SET_TYPE_800: {
-		label: "SET_TYPE_800",
-		run: ({ host }) => host.applyModel("800"),
+	SET_MODEL_400_800: {
+		label: "SET_MODEL_400_800",
+		run: ({ host }) => host.applyModel("400/800"),
 	},
-	SET_TYPE_800XL: {
-		label: "SET_TYPE_800XL",
-		run: ({ host }) => host.applyModel("800XL"),
+	SET_MODEL_1200XL: {
+		label: "SET_MODEL_1200XL",
+		run: ({ host }) => host.applyModel("1200xl"),
 	},
-	SET_TYPE_130XE: {
-		label: "SET_TYPE_130XE",
-		run: ({ host }) => host.applyModel("130XE"),
+	SET_MODEL_XLXE: {
+		label: "SET_MODEL_XLXE",
+		run: ({ host }) => host.applyModel("xl/xe"),
+	},
+	SET_MODEL_XEGS: {
+		label: "SET_MODEL_XEGS",
+		run: ({ host }) => host.applyModel("xegs"),
 	},
 	SET_TV_NTSC: {
 		label: "SET_TV_NTSC",

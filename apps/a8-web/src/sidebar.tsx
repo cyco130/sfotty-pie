@@ -1,5 +1,13 @@
 import type { EmulatorHost } from "./host.ts";
 import { builtinLibrary } from "./library.ts";
+import {
+	anticPolicy,
+	MODELS,
+	MODEL_LABELS,
+	RAM_SIZES,
+	ramTotal,
+	type AtariModel,
+} from "./machine-config.ts";
 import { messages } from "./messages.ts";
 
 // The bootable software in the library (the firmware/ items are auto-selected
@@ -57,6 +65,36 @@ function Segmented({
 	);
 }
 
+/** A labelled dropdown; selecting a value calls `onSelect`. */
+function LabeledSelect({
+	label,
+	value,
+	options,
+	onSelect,
+}: {
+	label: string;
+	value: string;
+	options: { value: string; label: string }[];
+	onSelect: (value: string) => void;
+}) {
+	return (
+		<div class="flex items-center justify-between gap-3">
+			<span class="text-sm text-neutral-600">{label}</span>
+			<select
+				class="rounded border border-neutral-300 bg-white px-2 py-0.5 text-sm text-neutral-700"
+				value={value}
+				onChange={(event) => onSelect(event.currentTarget.value)}
+			>
+				{options.map((option) => (
+					<option key={option.value} value={option.value}>
+						{option.label}
+					</option>
+				))}
+			</select>
+		</div>
+	);
+}
+
 /** A row in the key-mappings help. */
 function KeyRow({ keys, action }: { keys: string; action: string }) {
 	return (
@@ -88,27 +126,41 @@ export function MenuView({
 					{messages.sidebar.machine}
 				</h2>
 				<div class="flex flex-col gap-2">
-					<Segmented
-						label={messages.sidebar.type}
+					<LabeledSelect
+						label={messages.sidebar.model}
 						value={staged.model}
-						options={[
-							{
-								value: "800",
-								label: "800",
-								onSelect: () => host.stageModel("800"),
-							},
-							{
-								value: "800XL",
-								label: "XL",
-								onSelect: () => host.stageModel("800XL"),
-							},
-							{
-								value: "130XE",
-								label: "130XE",
-								onSelect: () => host.stageModel("130XE"),
-							},
-						]}
+						options={MODELS.map((model) => ({
+							value: model,
+							label: MODEL_LABELS[model],
+						}))}
+						onSelect={(value) => host.stageModel(value as AtariModel)}
 					/>
+					<LabeledSelect
+						label={messages.sidebar.ram}
+						value={String(ramTotal(staged))}
+						options={RAM_SIZES[staged.model].map((kb) => ({
+							value: String(kb),
+							label: `${kb}K`,
+						}))}
+						onSelect={(value) => host.stageRam(Number(value))}
+					/>
+					{staged.portbExtendedRam && (
+						<label class="flex items-center justify-between gap-3">
+							<span class="text-sm text-neutral-600">
+								{messages.sidebar.separateAntic}
+							</span>
+							<input
+								type="checkbox"
+								checked={staged.portbExtendedRam.antic}
+								disabled={
+									anticPolicy(staged.portbExtendedRam.size) !== "optional"
+								}
+								onChange={(event) =>
+									host.stageAntic(event.currentTarget.checked)
+								}
+							/>
+						</label>
+					)}
 					<Segmented
 						label={messages.sidebar.tv}
 						value={staged.tv}
@@ -172,6 +224,13 @@ export function MenuView({
 					onClick={() => host.dispatch("BOOT_IMAGE")}
 				>
 					{messages.sidebar.bootImage}
+				</button>
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.showPanel("roms")}
+				>
+					{messages.roms.title}…
 				</button>
 			</section>
 

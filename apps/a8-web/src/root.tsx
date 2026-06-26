@@ -9,6 +9,7 @@ const A8EmuLayout = lazy(() => import("./routes/a8/emu/a8-emu.layout.tsx"));
 const EmuIndex = lazy(() => import("./routes/a8/emu/(a8-emu).page.tsx"));
 const MenuPanel = lazy(() => import("./routes/a8/emu/menu.page.tsx"));
 const PalettePanel = lazy(() => import("./routes/a8/emu/palette.page.tsx"));
+const RomsPanel = lazy(() => import("./routes/a8/emu/roms.page.tsx"));
 const AtariIndex = lazy(() => import("./routes/a8/(a8).page.tsx"));
 const ReferenceIndex = lazy(
 	() => import("./routes/a8/reference/(reference).page.tsx"),
@@ -37,6 +38,7 @@ function EmuSection() {
 				<Route path="/" component={EmuIndex} />
 				<Route path="/menu" component={MenuPanel} />
 				<Route path="/palette" component={PalettePanel} />
+				<Route path="/roms" component={RomsPanel} />
 				<Route default component={EmuIndex} />
 			</Router>
 		</A8EmuLayout>

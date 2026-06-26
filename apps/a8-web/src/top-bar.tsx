@@ -1,5 +1,6 @@
 import type { AudioState, EmulatorHost } from "./host.ts";
 import { Icon, type IconName } from "./icon.tsx";
+import { MODEL_LABELS, ramTotal } from "./machine-config.ts";
 import { messages } from "./messages.ts";
 
 // The audio indicator's icon per state: full waves when on, an X when muted,
@@ -51,7 +52,8 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 				class="text-neutral-300 hover:text-white"
 				onClick={() => host.showPanel("menu")}
 			>
-				{config.model} · {config.tv.toUpperCase()}
+				{MODEL_LABELS[config.model]} · {ramTotal(config)}K ·{" "}
+				{config.tv.toUpperCase()}
 			</button>
 
 			<div class="ml-auto flex items-center gap-3 text-neutral-400 sm:gap-5">

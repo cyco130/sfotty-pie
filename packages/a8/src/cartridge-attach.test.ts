@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
 import { Cartridge } from "./cartridge.ts";
-import { Atari, type AtariModel } from "./machine.ts";
+import { Atari } from "./machine.ts";
 
 // A standard 8K $A000 cartridge: init address $A000, start unused.
 function makeCart(marker: number) {
@@ -11,14 +11,15 @@ function makeCart(marker: number) {
 	return new Cartridge(rom);
 }
 
-function makeMachine(model: AtariModel, cartridge?: Cartridge) {
+function makeMachine(model: "800" | "800XL" | "130XE", cartridge?: Cartridge) {
 	const basic = new Uint8Array(8192);
 	basic[0] = 0xbb; // marker to tell BASIC from a game cart
 	basic[8191] = 0xa0;
 
 	return new Atari({
-		model,
-		os: new Uint8Array(model === "800XL" ? 16384 : 10240),
+		xl: model !== "800",
+		...(model === "130XE" && { xeBankCount: 4, separateAnticAccess: true }),
+		os: new Uint8Array(model === "800" ? 10240 : 16384),
 		basic,
 		cartridge,
 	});
@@ -33,14 +34,8 @@ test("a cartridge takes the 800's BASIC slot", () => {
 });
 
 test("the 800's cartridge slot can be left empty", () => {
-	const machine = new Atari({ model: "800", os: new Uint8Array(10240) });
+	const machine = new Atari({ os: new Uint8Array(10240) });
 	expect(machine.read(0xa000, ReadOptions.NONE)).toBe(0x00); // RAM
-});
-
-test("the XL requires its built-in BASIC ROM", () => {
-	expect(
-		() => new Atari({ model: "800XL", os: new Uint8Array(16384) }),
-	).toThrow("BASIC ROM");
 });
 
 test("a cartridge shadows the XL's built-in BASIC", () => {

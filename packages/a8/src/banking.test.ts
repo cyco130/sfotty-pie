@@ -6,7 +6,7 @@ test("the XL self-test window requires the OS ROM to be enabled", () => {
 	const basic = new Uint8Array(8192);
 	basic[8191] = 0xa0;
 	const machine = new Atari({
-		model: "800XL",
+		xl: true,
 		os: new Uint8Array(16384).fill(0xaa),
 		basic,
 	});
@@ -34,7 +34,9 @@ test("the 130XE separates CPU and ANTIC extended RAM access", () => {
 	const basic = new Uint8Array(8192);
 	basic[8191] = 0xa0;
 	const machine = new Atari({
-		model: "130XE",
+		xl: true,
+		xeBankCount: 4,
+		separateAnticAccess: true,
 		os: new Uint8Array(16384),
 		basic,
 	});

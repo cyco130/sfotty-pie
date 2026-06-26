@@ -12,6 +12,13 @@
  * Fire), and hardware tokens (800/XL/130XE, NTSC/PAL, the "D1:" device name).
  * Those are nomenclature or glyphs, not translatable copy, and stay inline.
  */
+
+/** Human-readable duration: `"42s"` under a minute, else `"4m 12s"`. */
+function formatDuration(seconds: number): string {
+	if (seconds < 60) return `${Math.round(seconds)}s`;
+	return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+}
+
 export const messages = {
 	app: {
 		loadingFirmware: "Loading firmware…",
@@ -122,10 +129,14 @@ export const messages = {
 
 	library: {
 		title: "Library",
-		drop: "Drop ROM files here, or",
-		browse: "Browse…",
+		drop: "Drop ROM files or folders here, or",
+		browse: "browse files",
+		browseFolder: "a folder",
 		empty: "No images yet.",
 		noMatches: "No images match your filters.",
+		preparing: "Preparing…",
+		adding: "Adding…",
+		eta: (seconds: number): string => `~${formatDuration(seconds)} left`,
 		search: "Filter by name…",
 		allTypes: "All types",
 		allSources: "All sources",
@@ -147,7 +158,12 @@ export const messages = {
 		},
 		range: (from: number, to: number, total: number): string =>
 			`${from}–${to} of ${total}`,
-		uploaded: (added: number, deduped: number, failed: number): string => {
+		uploaded: (
+			added: number,
+			deduped: number,
+			failed: number,
+			seconds: number,
+		): string => {
 			const parts: string[] = [];
 			if (added > 0) {
 				parts.push(added === 1 ? "Added 1 image" : `Added ${added} images`);
@@ -158,7 +174,9 @@ export const messages = {
 					failed === 1 ? "1 not recognized" : `${failed} not recognized`,
 				);
 			}
-			return parts.length > 0 ? `${parts.join(". ")}.` : "Nothing to add.";
+			const summary =
+				parts.length > 0 ? `${parts.join(". ")}.` : "Nothing to add.";
+			return `${summary} (${formatDuration(seconds)})`;
 		},
 	},
 

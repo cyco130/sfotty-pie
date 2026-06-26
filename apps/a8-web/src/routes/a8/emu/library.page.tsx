@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
-	addImage,
+	addFiles,
+	importProgress,
 	libraryEntries,
 	readyLibrary,
 } from "../../../images/library.ts";
@@ -28,6 +29,46 @@ function sizeLabel(bytes: number): string {
 	return `${Math.round(bytes / 1024)}K`;
 }
 
+// Read a directory reader's entries — it returns them in batches, so call until
+// it yields none.
+function readEntries(
+	reader: FileSystemDirectoryReader,
+): Promise<FileSystemEntry[]> {
+	return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+}
+
+// Collect files from a dropped entry, recursing into directories.
+async function walkEntry(entry: FileSystemEntry, out: File[]): Promise<void> {
+	if (entry.isFile) {
+		out.push(
+			await new Promise<File>((resolve, reject) =>
+				(entry as FileSystemFileEntry).file(resolve, reject),
+			),
+		);
+	} else if (entry.isDirectory) {
+		const reader = (entry as FileSystemDirectoryEntry).createReader();
+		let batch = await readEntries(reader);
+		while (batch.length > 0) {
+			await Promise.all(batch.map((child) => walkEntry(child, out)));
+			batch = await readEntries(reader);
+		}
+	}
+}
+
+// Every file from a drop, recursing into any dropped folders. Entries are
+// grabbed synchronously — the DataTransferItems are only valid during the drop
+// event — then traversed async. Falls back to the flat file list where the
+// entry API is unavailable.
+async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
+	const entries = Array.from(transfer.items)
+		.map((item) => item.webkitGetAsEntry())
+		.filter((entry): entry is FileSystemEntry => entry !== null);
+	if (entries.length === 0) return Array.from(transfer.files);
+	const out: File[] = [];
+	await Promise.all(entries.map((entry) => walkEntry(entry, out)));
+	return out;
+}
+
 // Compare by the chosen key, then by name as a stable tiebreak.
 function comparator(key: SortKey): (a: ImageEntry, b: ImageEntry) => number {
 	const byName = (a: ImageEntry, b: ImageEntry) =>
@@ -48,7 +89,14 @@ function comparator(key: SortKey): (a: ImageEntry, b: ImageEntry) => number {
 export default function LibraryPage() {
 	const { host } = useEmu();
 	const inputRef = useRef<HTMLInputElement>(null);
+	const folderInputRef = useRef<HTMLInputElement>(null);
 	const [dragging, setDragging] = useState(false);
+
+	// `webkitdirectory` makes the second picker choose a folder (all files in it).
+	// Set imperatively — it isn't in the JSX input attribute types.
+	useEffect(() => {
+		if (folderInputRef.current) folderInputRef.current.webkitdirectory = true;
+	}, []);
 	const [params, setParams] = useUrlParams([
 		"q",
 		"type",
@@ -61,24 +109,35 @@ export default function LibraryPage() {
 	// Pull the user's uploads into the merged list (built-ins are already there).
 	useEffect(() => void readyLibrary(), []);
 
-	const handleFiles = async (files: FileList | null): Promise<void> => {
-		if (!files || files.length === 0) return;
-		let added = 0;
-		let deduped = 0;
-		const failed: string[] = [];
-		for (const file of Array.from(files)) {
-			try {
-				const bytes = new Uint8Array(await file.arrayBuffer());
-				const result = await addImage(bytes, file.name);
-				added += result.added.length;
-				deduped += result.deduped;
-			} catch {
-				failed.push(file.name); // unrecognized — canonicalize threw
-			}
+	// Orchestrate an import: show "Preparing…" immediately (the folder walk has no
+	// count and can take a moment at thousands of files), collect the files, then
+	// ingest them live. The top-level indicator (app.tsx) tracks it even if this
+	// panel is closed mid-import; the summary toast reports the elapsed time.
+	const runImport = async (collect: () => Promise<File[]>): Promise<void> => {
+		if (importProgress.value) return; // an import is already running
+		importProgress.value = { phase: "preparing" };
+		const start = performance.now();
+		let files: File[];
+		try {
+			files = await collect();
+		} catch {
+			importProgress.value = null;
+			return;
 		}
+		if (files.length === 0) {
+			importProgress.value = null;
+			return;
+		}
+		const result = await addFiles(files); // takes over the indicator, clears it
+		const seconds = (performance.now() - start) / 1000;
 		host.toast(
-			messages.library.uploaded(added, deduped, failed.length),
-			failed.length > 0 ? "warning" : "info",
+			messages.library.uploaded(
+				result.added,
+				result.deduped,
+				result.failed,
+				seconds,
+			),
+			result.failed > 0 ? "warning" : "info",
 		);
 	};
 
@@ -167,7 +226,8 @@ export default function LibraryPage() {
 						// that boots a dropped file (app.tsx).
 						event.stopPropagation();
 						setDragging(false);
-						void handleFiles(event.dataTransfer?.files ?? null);
+						const transfer = event.dataTransfer;
+						if (transfer) void runImport(() => filesFromDrop(transfer));
 					}}
 				>
 					{messages.library.drop}{" "}
@@ -177,6 +237,14 @@ export default function LibraryPage() {
 						onClick={() => inputRef.current?.click()}
 					>
 						{messages.library.browse}
+					</button>{" "}
+					·{" "}
+					<button
+						type="button"
+						class="font-medium text-neutral-800 underline hover:text-neutral-900"
+						onClick={() => folderInputRef.current?.click()}
+					>
+						{messages.library.browseFolder}
 					</button>
 					<input
 						ref={inputRef}
@@ -184,8 +252,19 @@ export default function LibraryPage() {
 						multiple
 						class="hidden"
 						onChange={(event) => {
-							void handleFiles(event.currentTarget.files);
+							const files = Array.from(event.currentTarget.files ?? []);
 							event.currentTarget.value = ""; // allow re-picking the same file
+							void runImport(async () => files);
+						}}
+					/>
+					<input
+						ref={folderInputRef}
+						type="file"
+						class="hidden"
+						onChange={(event) => {
+							const files = Array.from(event.currentTarget.files ?? []);
+							event.currentTarget.value = "";
+							void runImport(async () => files);
 						}}
 					/>
 				</div>

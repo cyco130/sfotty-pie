@@ -33,6 +33,25 @@ import {
 
 const blobs = idbBlobStore();
 
+/**
+ * A bulk import's phase: `preparing` while the dropped folder tree is walked
+ * (no count yet), then `adding` while files are ingested. `elapsedMs` is the
+ * ingest time so far — computed here (not in render) so an indicator can derive
+ * an ETA purely.
+ */
+export type ImportProgress =
+	| { phase: "preparing" }
+	| { phase: "adding"; done: number; total: number; elapsedMs: number };
+
+/**
+ * Live progress of an in-flight bulk import, or null when none is running.
+ * Module-level (not panel state) so a top-level indicator keeps tracking it
+ * after the library panel is closed — the import runs to completion regardless.
+ * The `preparing` phase is set by the caller (it owns the folder walk); this
+ * module drives `adding`.
+ */
+export const importProgress = signal<ImportProgress | null>(null);
+
 // Live user state, loaded from IndexedDB once on first use, then kept in sync by
 // add/remove. The merge below is reactive on these.
 const userEntries = signal<StoredEntry[]>([]);
@@ -143,28 +162,35 @@ export interface AddResult {
 	deduped: number;
 }
 
-/**
- * Ingest an uploaded file: canonicalize it (splitting a combined dump), hash
- * each piece, dedup against existing *user* entries, and store the new ones in
- * IndexedDB. A built-in match is never a reason to skip storing — a later
- * deploy may drop that built-in. Throws if the file isn't a recognized image.
- */
-export async function addImage(
+/** Summary counts for a bulk {@link addFiles}. */
+export interface BulkAddResult {
+	added: number;
+	deduped: number;
+	failed: number;
+}
+
+// Ingest one file's canonical pieces into `into`, deduping against `seen` (a set
+// of hashes it updates — including earlier pieces in the same batch). Does the
+// blob + metadata writes. Throws if the file isn't a recognized image. A
+// built-in match is never a reason to skip storing (a later deploy may drop the
+// built-in), so `seen` holds only user hashes.
+async function ingestFile(
 	bytes: Uint8Array,
 	fileName: string,
-): Promise<AddResult> {
-	await readyLibrary();
+	seen: Set<string>,
+	into: StoredEntry[],
+): Promise<{ added: number; deduped: number }> {
 	const pieces = canonicalize(bytes, fileName); // throws on an unrecognized file
 	const baseName = fileName.replace(/\.[^./]+$/, "");
-	const added: ImageEntry[] = [];
+	let added = 0;
 	let deduped = 0;
-
 	for (const piece of pieces) {
 		const hash = await sha256Hex(piece.bytes);
-		if (userEntries.value.some((e) => e.hash === hash)) {
+		if (seen.has(hash)) {
 			deduped++; // already in the user's library
 			continue;
 		}
+		seen.add(hash);
 		const raw = bytes.subarray(piece.from, piece.to);
 		const fw = detectFirmware(raw);
 		const slots = primeSlots(fw?.type ?? null, piece.kind);
@@ -183,10 +209,69 @@ export async function addImage(
 		};
 		await blobs.put(hash, piece.bytes);
 		await putEntry(entry);
-		userEntries.value = [...userEntries.value, entry];
-		added.push(userImageEntry(entry));
+		into.push(entry);
+		added++;
 	}
 	return { added, deduped };
+}
+
+/**
+ * Ingest one uploaded file: canonicalize (splitting a combined dump), hash, dedup
+ * against existing user entries, store the new pieces. Throws if unrecognized.
+ */
+export async function addImage(
+	bytes: Uint8Array,
+	fileName: string,
+): Promise<AddResult> {
+	await readyLibrary();
+	const seen = new Set(userEntries.value.map((e) => e.hash));
+	const into: StoredEntry[] = [];
+	const { deduped } = await ingestFile(bytes, fileName, seen, into);
+	if (into.length > 0) userEntries.value = [...userEntries.value, ...into];
+	return { added: into.map(userImageEntry), deduped };
+}
+
+/**
+ * Bulk-ingest many files (a folder drop). Dedups via a Set (O(1) per file) and
+ * commits each file to the merged list *as it lands*, so the library stays
+ * usable mid-import (preferred over finishing faster). Drives {@link
+ * importProgress} so a top-level indicator can track it independent of any
+ * panel. Unrecognized files are counted, not thrown. Slow but live at thousands
+ * of items — chunked batching is the lever if that changes.
+ */
+export async function addFiles(files: File[]): Promise<BulkAddResult> {
+	await readyLibrary();
+	const seen = new Set(userEntries.value.map((e) => e.hash));
+	let added = 0;
+	let deduped = 0;
+	let failed = 0;
+	let done = 0;
+	const total = files.length;
+	const startedAt = performance.now();
+	importProgress.value = { phase: "adding", done: 0, total, elapsedMs: 0 };
+	try {
+		for (const file of files) {
+			const into: StoredEntry[] = [];
+			try {
+				const bytes = new Uint8Array(await file.arrayBuffer());
+				const result = await ingestFile(bytes, file.name, seen, into);
+				added += result.added;
+				deduped += result.deduped;
+			} catch {
+				failed++; // unrecognized — canonicalize threw
+			}
+			if (into.length > 0) userEntries.value = [...userEntries.value, ...into];
+			importProgress.value = {
+				phase: "adding",
+				done: ++done,
+				total,
+				elapsedMs: performance.now() - startedAt,
+			};
+		}
+	} finally {
+		importProgress.value = null;
+	}
+	return { added, deduped, failed };
 }
 
 /**

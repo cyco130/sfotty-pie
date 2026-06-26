@@ -4,6 +4,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { Toasts } from "./toasts.tsx";
 import { BottomBar } from "./bottom-bar.tsx";
 import type { EmulatorHost } from "./host.ts";
+import { ImportProgress } from "./import-progress.tsx";
 import { Osd } from "./osd.tsx";
 import { TopBar } from "./top-bar.tsx";
 
@@ -69,6 +70,7 @@ export function App({
 
 			<div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 				<TopBar host={host} />
+				<ImportProgress />
 
 				{/* The screen: canvas centered, sized by the host, letterboxed.
 				    Double-click anywhere on it toggles full screen. */}

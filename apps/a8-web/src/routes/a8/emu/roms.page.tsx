@@ -241,7 +241,16 @@ export default function RomsPage() {
 							: messages.roms.save}
 					</button>
 				)}
-				<p class="text-xs text-neutral-400">{messages.roms.picksReset}</p>
+				<div class="flex items-baseline justify-between gap-2">
+					<p class="text-xs text-neutral-400">{messages.roms.picksReset}</p>
+					<button
+						type="button"
+						class="shrink-0 text-xs text-neutral-500 hover:underline"
+						onClick={() => host.showPanel("library")}
+					>
+						{messages.roms.manageLibrary} →
+					</button>
+				</div>
 			</div>
 		</PanelFrame>
 	);

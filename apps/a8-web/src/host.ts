@@ -63,7 +63,7 @@ export interface Toast {
  * The sidebar's content when open. Stable string ids so the state stays
  * serializable (a future deep-link layer can map these straight to the URL).
  */
-export type SidebarPanel = "menu" | "palette" | "roms";
+export type SidebarPanel = "menu" | "palette" | "roms" | "library";
 
 export type { MachineSettings } from "./machine-config.ts";
 

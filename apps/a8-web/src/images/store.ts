@@ -4,6 +4,7 @@
 
 import {
 	openLibraryDb,
+	STORE_BLOBS,
 	STORE_ENTRIES,
 	STORE_OVERRIDES,
 	withStore,
@@ -38,5 +39,15 @@ export async function putOverride(record: OverrideRecord): Promise<void> {
 	const db = await openLibraryDb();
 	await withStore(db, STORE_OVERRIDES, "readwrite", (store) =>
 		store.put(record),
+	);
+}
+
+/** Wipe every store — entries, blobs, and overrides. A dev/test reset. */
+export async function clearAll(): Promise<void> {
+	const db = await openLibraryDb();
+	await Promise.all(
+		[STORE_ENTRIES, STORE_BLOBS, STORE_OVERRIDES].map((name) =>
+			withStore(db, name, "readwrite", (store) => store.clear()),
+		),
 	);
 }

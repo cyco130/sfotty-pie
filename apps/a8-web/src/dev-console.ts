@@ -17,6 +17,7 @@ import {
 	getImage,
 	getImageBytes,
 	libraryEntries,
+	nukeLibrary,
 	readyLibrary,
 	removeImage,
 } from "./images/library.ts";
@@ -84,6 +85,7 @@ const images = {
 	//   await a8.images.library.ready()
 	//   const f = await a8.images.pick(); await a8.images.library.add(f.bytes, f.name)
 	//   a8.images.library.entries.value
+	//   await a8.images.library.nuke()   // wipe IndexedDB and reset
 	library: {
 		ready: readyLibrary,
 		entries: libraryEntries,
@@ -91,6 +93,7 @@ const images = {
 		get: getImage,
 		bytes: getImageBytes,
 		remove: removeImage,
+		nuke: nukeLibrary,
 	},
 	deflate: deflateRaw,
 	inflate: inflateRaw,

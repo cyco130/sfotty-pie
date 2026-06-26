@@ -23,7 +23,13 @@ import type {
 	StoredEntry,
 	UserMeta,
 } from "./metadata.ts";
-import { deleteEntry, loadEntries, loadOverrides, putEntry } from "./store.ts";
+import {
+	clearAll,
+	deleteEntry,
+	loadEntries,
+	loadOverrides,
+	putEntry,
+} from "./store.ts";
 
 const blobs = idbBlobStore();
 
@@ -172,6 +178,17 @@ export async function addImage(
 		added.push(userImageEntry(entry));
 	}
 	return { added, deduped };
+}
+
+/**
+ * Wipe the entire library store (entries, blobs, overrides) and reset the
+ * in-memory state — a dev/test reset, exposed on the console, not the UI.
+ */
+export async function nukeLibrary(): Promise<void> {
+	await clearAll();
+	userEntries.value = [];
+	builtinOverrides.value = new Map();
+	loadPromise = null;
 }
 
 /** Remove a user image; reclaim its blob if no other entry still references it. */

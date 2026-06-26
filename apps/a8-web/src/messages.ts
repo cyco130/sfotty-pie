@@ -115,6 +115,34 @@ export const messages = {
 		save: "Save changes",
 		noSuitable: "No suitable ROMs",
 		picksReset: "Picks reset when you reload.",
+		manageLibrary: "Manage library",
+	},
+
+	library: {
+		title: "Library",
+		drop: "Drop ROM files here, or",
+		browse: "Browse…",
+		empty: "No images yet.",
+		builtin: "built-in",
+		sections: {
+			os: "OS ROMs",
+			cart: "Cartridges",
+			disk: "Disks",
+			xex: "Executables",
+		},
+		uploaded: (added: number, deduped: number, failed: number): string => {
+			const parts: string[] = [];
+			if (added > 0) {
+				parts.push(added === 1 ? "Added 1 image" : `Added ${added} images`);
+			}
+			if (deduped > 0) parts.push(`${deduped} already in your library`);
+			if (failed > 0) {
+				parts.push(
+					failed === 1 ? "1 not recognized" : `${failed} not recognized`,
+				);
+			}
+			return parts.length > 0 ? `${parts.join(". ")}.` : "Nothing to add.";
+		},
 	},
 
 	keyHelp: {
@@ -196,6 +224,7 @@ export const labels = {
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
 	MENU_TOGGLE: "Menu",
 	OPEN_ROMS: "ROM preferences…",
+	OPEN_LIBRARY: "Library…",
 	TOGGLE_FULLSCREEN: "Toggle full screen",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Attach a disk to D1:…",

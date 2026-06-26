@@ -119,6 +119,7 @@ function userImageEntry(e: StoredEntry): ImageEntry {
 		hash: e.hash,
 		source: "user",
 		size: e.size,
+		...(e.transient && { transient: true }),
 		locator: { kind: "user", backend: e.locator.backend, ref: e.locator.ref },
 		derived: e.derived,
 		user: e.user,
@@ -179,6 +180,7 @@ async function ingestFile(
 	fileName: string,
 	seen: Set<string>,
 	into: StoredEntry[],
+	transient = false,
 ): Promise<{ added: number; deduped: number }> {
 	const pieces = canonicalize(bytes, fileName); // throws on an unrecognized file
 	const baseName = fileName.replace(/\.[^./]+$/, "");
@@ -199,6 +201,7 @@ async function ingestFile(
 			hash,
 			size: piece.bytes.length,
 			createdAt: Date.now(),
+			...(transient && { transient: true }),
 			locator: { backend: "idb", ref: hash },
 			derived: piece.kind,
 			user: {
@@ -213,6 +216,43 @@ async function ingestFile(
 		added++;
 	}
 	return { added, deduped };
+}
+
+/**
+ * Resolve an in-memory image (e.g. one being booted/attached from the file
+ * picker) to a library id: return the existing entry's id if its canonical bytes
+ * are already in the library, else add it (as `transient` when so flagged) and
+ * return the new id. Returns null if the bytes aren't a recognized image.
+ */
+export async function addOrFindImage(
+	bytes: Uint8Array,
+	fileName: string,
+	transient: boolean,
+): Promise<string | null> {
+	await readyLibrary();
+	let hash: string;
+	try {
+		const piece = canonicalize(bytes, fileName)[0];
+		if (!piece) return null;
+		hash = await sha256Hex(piece.bytes);
+	} catch {
+		return null; // unrecognized
+	}
+	const existing = userEntries.value.find((e) => e.hash === hash);
+	if (existing) return existing.id;
+
+	const into: StoredEntry[] = [];
+	await ingestFile(
+		bytes,
+		fileName,
+		new Set(userEntries.value.map((e) => e.hash)),
+		into,
+		transient,
+	);
+	const added = into[0];
+	if (!added) return null;
+	userEntries.value = [...userEntries.value, ...into];
+	return added.id;
 }
 
 /**

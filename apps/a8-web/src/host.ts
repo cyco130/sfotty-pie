@@ -21,6 +21,7 @@ import { commands, type Command } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
+	addOrFindImage,
 	getImage,
 	getImageBytes,
 	libraryEntries,
@@ -865,9 +866,16 @@ export class EmulatorHost {
 		}
 	}
 
-	/** Boot a user-supplied file (the "Boot image…" picker / drag-and-drop). */
+	/**
+	 * Boot a user-supplied file (the "Boot image…" picker / drag-and-drop). The
+	 * file is auto-added to the library (transient) so it has an id — for resume
+	 * and save — and booted through it; unrecognized bytes still warn directly.
+	 */
 	async loadFile(file: File): Promise<void> {
-		this.#bootImage(new Uint8Array(await file.arrayBuffer()), file.name);
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		const id = await addOrFindImage(bytes, file.name, true);
+		if (id) await this.bootImage(id);
+		else this.#bootImage(bytes, file.name);
 	}
 
 	/** Boot a software item from the built-in library. */
@@ -1137,7 +1145,10 @@ export class EmulatorHost {
 	 * saves.
 	 */
 	async attachDiskFile(file: File): Promise<void> {
-		this.#attachDiskBytes(new Uint8Array(await file.arrayBuffer()), file.name);
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		const id = await addOrFindImage(bytes, file.name, true);
+		if (id) await this.attachDisk(id);
+		else this.#attachDiskBytes(bytes, file.name);
 	}
 
 	// Attach an ATR's bytes to D1: live — shared by the file picker and the
@@ -1184,10 +1195,10 @@ export class EmulatorHost {
 	 * "stage it without rebooting" can come later.
 	 */
 	async attachCartridgeFile(file: File): Promise<void> {
-		this.#attachCartridgeBytes(
-			new Uint8Array(await file.arrayBuffer()),
-			file.name,
-		);
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		const id = await addOrFindImage(bytes, file.name, true);
+		if (id) await this.attachCartridge(id);
+		else this.#attachCartridgeBytes(bytes, file.name);
 	}
 
 	// Attach a cartridge's bytes (cold boots) — shared by the file picker and the

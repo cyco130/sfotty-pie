@@ -60,6 +60,9 @@ export interface ImageEntry {
 	source: "builtin" | "user";
 	/** Total canonical file size in bytes. */
 	size: number;
+	/** Auto-added by booting/attaching a file (not deliberately imported) — hidden
+	 *  from the curated list until "kept". */
+	transient?: boolean;
 	locator: BlobLocator;
 	derived: DerivedMeta;
 	user: UserMeta;
@@ -75,6 +78,8 @@ export interface StoredEntry {
 	size: number;
 	/** Creation time, ms since epoch; indexed. */
 	createdAt: number;
+	/** Auto-added by a file boot/attach rather than deliberately imported. */
+	transient?: boolean;
 	locator: { backend: BlobBackend; ref: string };
 	derived: DerivedMeta;
 	user: UserMeta;

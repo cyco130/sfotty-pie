@@ -148,8 +148,11 @@ export default function LibraryPage() {
 			: "";
 	const query = params.q.trim().toLowerCase();
 
-	const entries = libraryEntries.value;
-	const hasUploads = entries.some((entry) => entry.source === "user");
+	// Auto-added (transient) images are hidden from the curated list; recents
+	// surface them later.
+	const allEntries = libraryEntries.value;
+	const entries = allEntries.filter((entry) => !entry.transient);
+	const hasUploads = allEntries.some((entry) => entry.source === "user");
 
 	// Sort once per (entries, key, dir); filtering below preserves order, so
 	// typing in the filter never re-sorts.

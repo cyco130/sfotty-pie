@@ -4,8 +4,9 @@
 // backends slot in behind the same interface later.
 //
 // Blobs are content-addressed (`ref` = the canonical hash), so two entries with
-// identical bytes share one row. Compression-at-rest is deferred: bytes are
-// stored and returned raw, with the `encoding` field reserved for it.
+// identical bytes share one row. Bytes are compressed at rest with deflate-raw
+// when that wins (store-smaller); the hash is always over the uncompressed
+// payload, so dedup and identity never see the compressed form.
 
 import {
 	type BlobRecord,
@@ -13,12 +14,12 @@ import {
 	STORE_BLOBS,
 	withStore,
 } from "./db.ts";
-import type { BlobEncoding } from "./metadata.ts";
+import { deflateRaw, inflateRaw } from "./compress.ts";
 
 export interface BlobStore {
 	readonly backend: "idb";
 	/** Store `bytes` under content-addressed `ref`; idempotent (overwrites). */
-	put(ref: string, bytes: Uint8Array, encoding?: BlobEncoding): Promise<void>;
+	put(ref: string, bytes: Uint8Array): Promise<void>;
 	get(ref: string): Promise<Uint8Array | undefined>;
 	delete(ref: string): Promise<void>;
 }
@@ -28,16 +29,16 @@ export function idbBlobStore(): BlobStore {
 	return {
 		backend: "idb",
 
-		async put(ref, bytes, encoding = "raw") {
+		async put(ref, bytes) {
 			const db = await openLibraryDb();
-			// Copy into a standalone ArrayBuffer — `bytes` may be a subarray view
-			// over a larger buffer (e.g. an XEGS split), which structured-clone
-			// would otherwise persist whole.
-			const record: BlobRecord = {
-				ref,
-				bytes: bytes.slice().buffer,
-				encoding,
-			};
+			const compressed = await deflateRaw(bytes);
+			// Store-smaller: keep the compressed form only when it actually wins,
+			// so incompressible blobs (ROMs) never inflate. `compressed.buffer` is
+			// exact; a raw subarray view is copied to its own buffer.
+			const record: BlobRecord =
+				compressed.length < bytes.length
+					? { ref, bytes: compressed.buffer, encoding: "deflate-raw" }
+					: { ref, bytes: bytes.slice().buffer, encoding: "raw" };
 			await withStore(db, STORE_BLOBS, "readwrite", (store) =>
 				store.put(record),
 			);
@@ -52,11 +53,8 @@ export function idbBlobStore(): BlobStore {
 				(store) => store.get(ref),
 			);
 			if (!record) return undefined;
-			if (record.encoding !== "raw") {
-				// Only raw is written today; a non-raw row would predate its decoder.
-				throw new Error(`Unsupported blob encoding "${record.encoding}"`);
-			}
-			return new Uint8Array(record.bytes);
+			const stored = new Uint8Array(record.bytes);
+			return record.encoding === "deflate-raw" ? inflateRaw(stored) : stored;
 		},
 
 		async delete(ref) {

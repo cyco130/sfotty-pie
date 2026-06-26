@@ -39,15 +39,24 @@ const userEntries = signal<StoredEntry[]>([]);
 const builtinOverrides = signal<Map<string, Partial<UserMeta>>>(new Map());
 let loadPromise: Promise<void> | null = null;
 
-/** Load the user's entries + built-in overrides from IndexedDB (idempotent). */
+/**
+ * Load the user's entries + built-in overrides from IndexedDB (idempotent).
+ * Resilient: if IndexedDB is unavailable (private mode, quota, blocked), the
+ * library runs with built-ins only rather than failing — callers (including the
+ * host's boot path) can always await it.
+ */
 export function readyLibrary(): Promise<void> {
 	return (loadPromise ??= (async () => {
-		const [entries, overrides] = await Promise.all([
-			loadEntries(),
-			loadOverrides(),
-		]);
-		userEntries.value = entries;
-		builtinOverrides.value = new Map(overrides.map((o) => [o.id, o.user]));
+		try {
+			const [entries, overrides] = await Promise.all([
+				loadEntries(),
+				loadOverrides(),
+			]);
+			userEntries.value = entries;
+			builtinOverrides.value = new Map(overrides.map((o) => [o.id, o.user]));
+		} catch {
+			// No persistent library this session; built-ins still work.
+		}
 	})());
 }
 

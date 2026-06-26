@@ -116,6 +116,8 @@ export const messages = {
 		noSuitable: "No suitable ROMs",
 		picksReset: "Picks reset when you reload.",
 		manageLibrary: "Manage library",
+		builtin: "Built-in",
+		yourRoms: "Your ROMs",
 	},
 
 	library: {

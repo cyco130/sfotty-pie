@@ -20,7 +20,12 @@ import type { AudioOutput } from "./audio.ts";
 import { commands, type Command } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
-import { getImage, getImageBytes, libraryEntries } from "./images/library.ts";
+import {
+	getImage,
+	getImageBytes,
+	libraryEntries,
+	readyLibrary,
+} from "./images/library.ts";
 import type { ImageEntry } from "./images/metadata.ts";
 import { Keyboard } from "./keyboard.ts";
 import { loadLibraryEntry, type LibraryEntry } from "./library.ts";
@@ -67,11 +72,14 @@ export type SidebarPanel = "menu" | "palette" | "roms" | "library";
 
 export type { MachineSettings } from "./machine-config.ts";
 
-/** In-memory firmware overrides; an explicit pick beats the ranking. */
+/**
+ * In-memory firmware overrides; an explicit pick beats the ranking. Values are
+ * library image ids — a built-in's firmware key, or a user upload's UUID.
+ */
 export interface RomOverrides {
-	os: Partial<Record<OsSlot, FirmwareKey>>;
-	basic: FirmwareKey | null;
-	game: FirmwareKey | null;
+	os: Partial<Record<OsSlot, string>>;
+	basic: string | null;
+	game: string | null;
 }
 
 const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
@@ -354,8 +362,11 @@ export class EmulatorHost {
 
 	// Fetch (and cache) the bytes the running config's OS + BASIC need, so the
 	// next #makeEmulator can read them synchronously. Already-cached ROMs (the
-	// common reboot case) resolve immediately.
+	// common reboot case) resolve immediately. Ensures the user library is loaded
+	// first so an override pointing at an upload resolves (resilient: an IDB
+	// failure just leaves built-ins).
 	async #ensureFirmware(): Promise<void> {
+		await readyLibrary();
 		const { os, basic, game } = this.#resolveFirmware();
 		await Promise.all(
 			[os, basic, game]
@@ -755,20 +766,21 @@ export class EmulatorHost {
 	}
 
 	// `null` clears the override (back to the automatic ranking) — so picking the
-	// default value doesn't register as a staged change.
-	stageOsRom(slot: OsSlot, key: FirmwareKey | null): void {
+	// default value doesn't register as a staged change. `id` is a library image
+	// id (a built-in's firmware key, or a user upload's UUID).
+	stageOsRom(slot: OsSlot, id: string | null): void {
 		const os = { ...this.stagedRoms.value.os };
-		if (key === null) delete os[slot];
-		else os[slot] = key;
+		if (id === null) delete os[slot];
+		else os[slot] = id;
 		this.stagedRoms.value = { ...this.stagedRoms.value, os };
 	}
 
-	stageBasicRom(key: FirmwareKey | null): void {
-		this.stagedRoms.value = { ...this.stagedRoms.value, basic: key };
+	stageBasicRom(id: string | null): void {
+		this.stagedRoms.value = { ...this.stagedRoms.value, basic: id };
 	}
 
-	stageGameRom(key: FirmwareKey | null): void {
-		this.stagedRoms.value = { ...this.stagedRoms.value, game: key };
+	stageGameRom(id: string | null): void {
+		this.stagedRoms.value = { ...this.stagedRoms.value, game: id };
 	}
 
 	/** Adopt the staged ROM picks; reboot only if they change the running machine. */

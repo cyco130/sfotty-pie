@@ -143,6 +143,7 @@ export const messages = {
 			boot: "Boot",
 			attachDisk: "Attach to D1:",
 			attachCart: "Attach cartridge",
+			download: "Download",
 			delete: "Delete",
 		},
 		preparing: "Preparing…",

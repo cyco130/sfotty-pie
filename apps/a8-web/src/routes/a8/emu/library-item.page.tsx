@@ -1,10 +1,12 @@
+import { canonicalize } from "@sfotty-pie/a8";
 import { useEffect, useState } from "preact/hooks";
 import {
 	getImage,
+	getImageBytes,
 	readyLibrary,
 	removeImage,
 } from "../../../images/library.ts";
-import type { ImageEntry } from "../../../images/metadata.ts";
+import type { ImageEntry, ImageType } from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
 import { useEmu } from "./emu-context.ts";
@@ -18,6 +20,16 @@ const LIBRARY = "/a8/emu/library";
 function sizeLabel(bytes: number): string {
 	return `${Math.round(bytes / 1024)}K`;
 }
+
+// Canonical download extension per type: a cartridge is a `.car`, an OS a raw
+// `.rom`, a disk an `.atr`, an executable a `.xex`. Stored names carry no
+// extension; this is added only on download.
+const CANON_EXT: Record<ImageType, string> = {
+	os: "rom",
+	cart: "car",
+	disk: "atr",
+	xex: "xex",
+};
 
 // The type plus its one discriminating fact, e.g. "Cartridge · CART 1".
 function typeDetail(entry: ImageEntry): string {
@@ -98,6 +110,28 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 		host.toast(messages.toasts.copied);
 	};
 
+	const download = async (): Promise<void> => {
+		const served = await getImageBytes(entry.id);
+		// Download the canonical form — a raw built-in cart becomes a real `.car`.
+		let bytes = served;
+		try {
+			const piece = canonicalize(served)[0];
+			if (piece) bytes = piece.bytes;
+		} catch {
+			/* keep the served bytes if canonicalization fails */
+		}
+		const filename = `${entry.user.displayName}.${CANON_EXT[entry.derived.type]}`;
+		const url = URL.createObjectURL(
+			new Blob([bytes as BufferSource], { type: "application/octet-stream" }),
+		);
+		const anchor = document.createElement("a");
+		anchor.href = url;
+		anchor.download = filename;
+		anchor.click();
+		URL.revokeObjectURL(url);
+		host.toast(messages.toasts.saving(filename));
+	};
+
 	return (
 		<PanelFrame title={entry.user.displayName}>
 			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
@@ -163,6 +197,13 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 							{messages.library.actions.attachCart}
 						</button>
 					)}
+					<button
+						type="button"
+						class="w-full rounded border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
+						onClick={() => void download()}
+					>
+						{messages.library.actions.download}
+					</button>
 					{entry.source === "user" && (
 						<button
 							type="button"

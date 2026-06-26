@@ -7,6 +7,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "pnpm run /^test:/",
+    "test:unit": "vitest run",
     "test:typecheck": "tsc -p tsconfig.json",
     "test:lint": "eslint . --max-warnings 0",
     "deploy": "pnpm build && wrangler pages deploy dist --project-name a8-web"
@@ -25,9 +26,11 @@
     "@tailwindcss/vite": "^4.3.1",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
     "eslint": "^10.5.0",
+    "fake-indexeddb": "^6.2.5",
     "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",
     "vite": "^8.1.0",
+    "vitest": "^4.1.9",
     "wrangler": "^4.104.0"
   }
 }

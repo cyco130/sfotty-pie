@@ -100,6 +100,11 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	const canBoot = type === "cart" || type === "disk" || type === "xex";
 
 	const remove = async (): Promise<void> => {
+		if (
+			!window.confirm(messages.library.confirmDelete(entry.user.displayName))
+		) {
+			return;
+		}
 		await removeImage(entry.id);
 		navigate(LIBRARY, { replace: true });
 		host.toast(messages.library.deleted(entry.user.displayName));

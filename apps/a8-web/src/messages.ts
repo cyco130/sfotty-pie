@@ -139,6 +139,12 @@ export const messages = {
 		hash: "Hash",
 		copyHash: "click to copy",
 		deleted: (name: string): string => `Removed ${name}`,
+		confirmDelete: (name: string): string =>
+			`Delete ${name}? This can't be undone.`,
+		clear: "Clear your library",
+		confirmClear:
+			"Clear your entire library? This removes all your uploads and can't be undone.",
+		cleared: "Library cleared",
 		actions: {
 			boot: "Boot",
 			attachDisk: "Attach to D1:",
@@ -282,6 +288,7 @@ export const labels = {
 	MENU_TOGGLE: "Menu",
 	OPEN_ROMS: "ROM preferences…",
 	OPEN_LIBRARY: "Library…",
+	CLEAR_LIBRARY: "Clear your library…",
 	TOGGLE_FULLSCREEN: "Toggle full screen",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Attach a disk to D1:…",

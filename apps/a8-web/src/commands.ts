@@ -81,6 +81,10 @@ export const commands = {
 		label: "OPEN_LIBRARY",
 		run: ({ host }) => host.showPanel("library"),
 	},
+	CLEAR_LIBRARY: {
+		label: "CLEAR_LIBRARY",
+		run: ({ host }) => host.clearLibrary(),
+	},
 
 	// Attach a disk to D1: of the running machine (no reboot, BASIC kept).
 	ATTACH_D1: { label: "ATTACH_D1", run: ({ host }) => host.pickAttachDisk() },

@@ -149,6 +149,7 @@ export default function LibraryPage() {
 	const query = params.q.trim().toLowerCase();
 
 	const entries = libraryEntries.value;
+	const hasUploads = entries.some((entry) => entry.source === "user");
 
 	// Sort once per (entries, key, dir); filtering below preserves order, so
 	// typing in the filter never re-sorts.
@@ -371,6 +372,16 @@ export default function LibraryPage() {
 							</button>
 						</div>
 					</div>
+				)}
+
+				{hasUploads && (
+					<button
+						type="button"
+						class="mt-1 self-start text-xs text-red-600 hover:underline"
+						onClick={() => host.clearLibrary()}
+					>
+						{messages.library.clear}
+					</button>
 				)}
 			</div>
 		</PanelFrame>

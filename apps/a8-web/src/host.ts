@@ -24,6 +24,7 @@ import {
 	getImage,
 	getImageBytes,
 	libraryEntries,
+	nukeLibrary,
 	readyLibrary,
 	updateImage,
 } from "./images/library.ts";
@@ -865,6 +866,12 @@ export class EmulatorHost {
 		const entry = getImage(id);
 		if (!entry) return;
 		this.#attachCartridgeBytes(await getImageBytes(id), entry.user.displayName);
+	}
+
+	/** Wipe all of the user's library uploads (after a confirm). Built-ins stay. */
+	clearLibrary(): void {
+		if (!window.confirm(messages.library.confirmClear)) return;
+		void nukeLibrary().then(() => this.toast(messages.library.cleared));
 	}
 
 	// Mount an image (disk/cartridge/executable) and power-cycle into it.

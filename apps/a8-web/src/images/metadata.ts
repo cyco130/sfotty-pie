@@ -8,22 +8,20 @@
 // recomputed from the bytes (index/cache), `user` is the overridable layer
 // primed from the known-image registry.
 
+import type { ImageKind } from "@sfotty-pie/a8";
+
+/**
+ * Content-derived facts, recomputed from the bytes — the package's
+ * canonicalization result reused verbatim (`os`→`sizeClass`, `cart`→`cartType`,
+ * `disk`→`sectorSize`/`sectors`, `xex`).
+ */
+export type DerivedMeta = ImageKind;
+
 /** The coarse, canonical kind of an image — what it intrinsically is. */
-export type ImageType = "os" | "cart" | "disk" | "xex";
+export type ImageType = ImageKind["type"];
 
 /** A slot picker an image can be surfaced in (standard-8K carts only). */
 export type ImageSlot = "basic" | "game";
-
-/**
- * Content-derived facts, recomputed from the bytes. A coarse {@link ImageType}
- * plus the one discriminating fact per type; the `detect-file-format`
- * granularity collapses into this (e.g. the raw-cart variants → `cartType`).
- */
-export type DerivedMeta =
-	| { type: "os"; sizeClass: 10 | 16 }
-	| { type: "cart"; cartType: number } // the CART-table number = mapper/subtype
-	| { type: "disk"; sectorSize: 128 | 256; sectors: number }
-	| { type: "xex" };
 
 /** User-editable metadata, primed for known firmware/software. */
 export interface UserMeta {
@@ -41,16 +39,17 @@ export type BlobEncoding = "raw" | "deflate-raw";
 export type BlobBackend = "idb"; // opfs / fsa later
 
 /**
- * Where an entry's bytes come from. `getBytes` always materializes the
- * canonical form; this is the one place that knows how.
+ * Where an entry's bytes come from — the one thing `getBytes` switches on. The
+ * blob store self-describes its encoding, so the user locator carries only the
+ * backend + ref (no encoding here).
  */
 export type BlobLocator =
 	| {
 			kind: "builtin";
-			/** Asset URL; may carry a `#header=<hex>&from=<start>&to=<end>` fragment. */
+			/** Asset URL; may carry a `#start-end` slice fragment. */
 			url: string;
 	  }
-	| { kind: "user"; backend: BlobBackend; ref: string; encoding: BlobEncoding };
+	| { kind: "user"; backend: BlobBackend; ref: string };
 
 /** A library image — built-in or user — as the merged library presents it. */
 export interface ImageEntry {
@@ -76,7 +75,7 @@ export interface StoredEntry {
 	size: number;
 	/** Creation time, ms since epoch; indexed. */
 	createdAt: number;
-	locator: { backend: BlobBackend; ref: string; encoding: BlobEncoding };
+	locator: { backend: BlobBackend; ref: string };
 	derived: DerivedMeta;
 	user: UserMeta;
 }

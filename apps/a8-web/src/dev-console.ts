@@ -12,6 +12,14 @@ import {
 	withStore,
 } from "./images/db.ts";
 import { sha256Hex } from "./images/hash.ts";
+import {
+	addImage,
+	getImage,
+	getImageBytes,
+	libraryEntries,
+	readyLibrary,
+	removeImage,
+} from "./images/library.ts";
 import { builtinLibrary } from "./library.ts";
 import { builtinFirmware } from "virtual:firmware-library";
 
@@ -72,6 +80,18 @@ const images = {
 	sha256: sha256Hex,
 	// The built-in firmware manifest (with precomputed canonical hash + kind).
 	builtin: builtinFirmware,
+	// The unified library (built-ins ∪ user uploads) and its operations.
+	//   await a8.images.library.ready()
+	//   const f = await a8.images.pick(); await a8.images.library.add(f.bytes, f.name)
+	//   a8.images.library.entries.value
+	library: {
+		ready: readyLibrary,
+		entries: libraryEntries,
+		add: addImage,
+		get: getImage,
+		bytes: getImageBytes,
+		remove: removeImage,
+	},
 	deflate: deflateRaw,
 	inflate: inflateRaw,
 	blobs: idbBlobStore(),

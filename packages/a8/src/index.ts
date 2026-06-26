@@ -1,5 +1,10 @@
 export { AnticGtia } from "./antic-gtia.ts";
 export { AtrImage } from "./atr.ts";
+export {
+	canonicalize,
+	type CanonicalPiece,
+	type ImageKind,
+} from "./canonicalize.ts";
 export { Cartridge } from "./cartridge.ts";
 export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
 export { buildBootDisk } from "./xex-boot.ts";

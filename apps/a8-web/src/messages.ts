@@ -167,6 +167,13 @@ export const messages = {
 			disk: "Disk",
 			xex: "Executable",
 		},
+		// Compact forms for the dense table column.
+		typeShort: {
+			os: "os",
+			cart: "cart",
+			disk: "disk",
+			xex: "exe",
+		},
 		range: (from: number, to: number, total: number): string =>
 			`${from}–${to} of ${total}`,
 		uploaded: (

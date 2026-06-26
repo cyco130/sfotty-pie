@@ -22,13 +22,9 @@ import { PanelFrame } from "./panel-frame.tsx";
 
 const PAGE_SIZE = 100;
 
-type SortKey = "name" | "type" | "size" | "source";
-const SORT_KEYS: readonly SortKey[] = ["name", "type", "size", "source"];
+type SortKey = "name" | "type";
+const SORT_KEYS: readonly SortKey[] = ["name", "type"];
 const TYPE_VALUES: readonly ImageType[] = ["os", "cart", "disk", "xex"];
-
-function sizeLabel(bytes: number): string {
-	return `${Math.round(bytes / 1024)}K`;
-}
 
 // Read a directory reader's entries — it returns them in batches, so call until
 // it yields none.
@@ -80,10 +76,6 @@ function comparator(key: SortKey): (a: ImageEntry, b: ImageEntry) => number {
 		case "type":
 			return (a, b) =>
 				a.derived.type.localeCompare(b.derived.type) || byName(a, b);
-		case "size":
-			return (a, b) => a.size - b.size || byName(a, b);
-		case "source":
-			return (a, b) => a.source.localeCompare(b.source) || byName(a, b);
 	}
 }
 
@@ -327,13 +319,7 @@ export default function LibraryPage() {
 						<thead class="border-b border-neutral-200 text-left text-xs tracking-wide text-neutral-500 uppercase">
 							<tr>
 								{sortHeader("name", messages.library.columns.name)}
-								{sortHeader("type", messages.library.columns.type, "w-24")}
-								{sortHeader(
-									"size",
-									messages.library.columns.size,
-									"w-14 text-right",
-								)}
-								{sortHeader("source", messages.library.columns.source, "w-20")}
+								{sortHeader("type", messages.library.columns.type, "w-16")}
 							</tr>
 						</thead>
 						<tbody>
@@ -353,15 +339,7 @@ export default function LibraryPage() {
 										</button>
 									</td>
 									<td class="px-2 py-1 text-neutral-500">
-										{messages.library.typeName[entry.derived.type]}
-									</td>
-									<td class="px-2 py-1 text-right text-neutral-500">
-										{sizeLabel(entry.size)}
-									</td>
-									<td class="px-2 py-1 text-neutral-500">
-										{entry.source === "builtin"
-											? messages.library.sourceBuiltin
-											: messages.library.sourceUser}
+										{messages.library.typeShort[entry.derived.type]}
 									</td>
 								</tr>
 							))}

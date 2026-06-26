@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
 	addImage,
 	libraryEntries,
@@ -6,43 +6,57 @@ import {
 } from "../../../images/library.ts";
 import type { ImageEntry, ImageType } from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
+import { useUrlParams } from "../../../url-params.ts";
 import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
-// /a8/emu/library — the image library: an uploader plus a read-only list of
-// every image (built-in ∪ your uploads), grouped by type and sorted by name.
-// Deliberately minimal — the seed of what will become a unified
-// view/edit/filter/sort table. Selecting which image fills a slot is the
+// /a8/emu/library — the image library: an uploader over a sortable, filterable,
+// paged table of every image (built-in ∪ your uploads). Sort/filter/page state
+// lives in the URL query so it survives reload and is shareable. The whole
+// (metadata-only) set is held in memory and sorted/filtered/sliced in JS —
+// fine into the tens of thousands; the IndexedDB indexes are the escape hatch
+// if a collection ever outgrows that. Selecting which image fills a slot is the
 // separate ROM-preferences panel.
 
-const TYPE_ORDER: ImageType[] = ["os", "cart", "disk", "xex"];
+const PAGE_SIZE = 100;
+
+type SortKey = "name" | "type" | "size" | "source";
+const SORT_KEYS: readonly SortKey[] = ["name", "type", "size", "source"];
+const TYPE_VALUES: readonly ImageType[] = ["os", "cart", "disk", "xex"];
 
 function sizeLabel(bytes: number): string {
 	return `${Math.round(bytes / 1024)}K`;
 }
 
-function Row({ entry }: { entry: ImageEntry }) {
-	return (
-		<li class="flex items-baseline justify-between gap-2 text-sm">
-			<span class="flex min-w-0 items-center gap-1.5 text-neutral-800">
-				<span class="truncate">{entry.user.displayName}</span>
-				{entry.source === "builtin" && (
-					<span class="shrink-0 rounded bg-neutral-100 px-1.5 text-[10px] font-medium tracking-wide text-neutral-500 uppercase">
-						{messages.library.builtin}
-					</span>
-				)}
-			</span>
-			<span class="shrink-0 text-xs text-neutral-400">
-				{sizeLabel(entry.size)}
-			</span>
-		</li>
-	);
+// Compare by the chosen key, then by name as a stable tiebreak.
+function comparator(key: SortKey): (a: ImageEntry, b: ImageEntry) => number {
+	const byName = (a: ImageEntry, b: ImageEntry) =>
+		a.user.displayName.localeCompare(b.user.displayName);
+	switch (key) {
+		case "name":
+			return byName;
+		case "type":
+			return (a, b) =>
+				a.derived.type.localeCompare(b.derived.type) || byName(a, b);
+		case "size":
+			return (a, b) => a.size - b.size || byName(a, b);
+		case "source":
+			return (a, b) => a.source.localeCompare(b.source) || byName(a, b);
+	}
 }
 
 export default function LibraryPage() {
 	const { host } = useEmu();
 	const inputRef = useRef<HTMLInputElement>(null);
 	const [dragging, setDragging] = useState(false);
+	const [params, setParams] = useUrlParams([
+		"q",
+		"type",
+		"source",
+		"sort",
+		"dir",
+		"page",
+	]);
 
 	// Pull the user's uploads into the merged list (built-ins are already there).
 	useEffect(() => void readyLibrary(), []);
@@ -68,19 +82,76 @@ export default function LibraryPage() {
 		);
 	};
 
+	// Read view state from the URL, ignoring anything malformed.
+	const sortKey: SortKey = SORT_KEYS.includes(params.sort as SortKey)
+		? (params.sort as SortKey)
+		: "name";
+	const desc = params.dir === "desc";
+	const typeFilter = TYPE_VALUES.includes(params.type as ImageType)
+		? (params.type as ImageType)
+		: "";
+	const sourceFilter =
+		params.source === "builtin" || params.source === "user"
+			? params.source
+			: "";
+	const query = params.q.trim().toLowerCase();
+
 	const entries = libraryEntries.value;
-	const sections = TYPE_ORDER.map((type) => ({
-		type,
-		items: entries
-			.filter((entry) => entry.derived.type === type)
-			.sort((a, b) => a.user.displayName.localeCompare(b.user.displayName)),
-	})).filter((section) => section.items.length > 0);
+
+	// Sort once per (entries, key, dir); filtering below preserves order, so
+	// typing in the filter never re-sorts.
+	const sorted = useMemo(() => {
+		const cmp = comparator(sortKey);
+		const arr = [...entries].sort(cmp);
+		return desc ? arr.reverse() : arr;
+	}, [entries, sortKey, desc]);
+
+	const filtered = sorted.filter(
+		(e) =>
+			(typeFilter === "" || e.derived.type === typeFilter) &&
+			(sourceFilter === "" || e.source === sourceFilter) &&
+			(query === "" || e.user.displayName.toLowerCase().includes(query)),
+	);
+
+	const total = filtered.length;
+	const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+	const page = Math.min(Math.max(1, Number(params.page) || 1), pages);
+	const start = (page - 1) * PAGE_SIZE;
+	const rows = filtered.slice(start, start + PAGE_SIZE);
+
+	const toggleSort = (key: SortKey): void => {
+		const nextDesc = key === sortKey ? !desc : false;
+		setParams({ sort: key, dir: nextDesc ? "desc" : null, page: null });
+	};
+	const goToPage = (next: number): void =>
+		setParams({ page: next > 1 ? String(next) : null });
+
+	const sortHeader = (
+		key: SortKey,
+		label: string,
+		cls = "",
+	): preact.JSX.Element => (
+		<th class={`px-2 py-1.5 font-medium ${cls}`}>
+			<button
+				type="button"
+				class="inline-flex items-center gap-1 hover:text-neutral-800"
+				onClick={() => toggleSort(key)}
+			>
+				{label}
+				{sortKey === key && (
+					<span aria-hidden class="text-[9px]">
+						{desc ? "▼" : "▲"}
+					</span>
+				)}
+			</button>
+		</th>
+	);
 
 	return (
 		<PanelFrame title={messages.library.title}>
-			<div class="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
+			<div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
 				<div
-					class={`rounded border-2 border-dashed p-4 text-center text-sm ${
+					class={`rounded border-2 border-dashed p-3 text-center text-sm ${
 						dragging
 							? "border-emerald-400 bg-emerald-50 text-emerald-700"
 							: "border-neutral-300 text-neutral-500"
@@ -92,6 +163,9 @@ export default function LibraryPage() {
 					onDragLeave={() => setDragging(false)}
 					onDrop={(event) => {
 						event.preventDefault();
+						// Keep the drop here — don't let it bubble to the window handler
+						// that boots a dropped file (app.tsx).
+						event.stopPropagation();
 						setDragging(false);
 						void handleFiles(event.dataTransfer?.files ?? null);
 					}}
@@ -116,21 +190,122 @@ export default function LibraryPage() {
 					/>
 				</div>
 
-				{sections.length === 0 ? (
-					<p class="text-sm text-neutral-400">{messages.library.empty}</p>
+				<div class="flex flex-col gap-2">
+					<input
+						type="text"
+						value={params.q}
+						placeholder={messages.library.search}
+						autocapitalize="off"
+						autocomplete="off"
+						spellcheck={false}
+						class="w-full rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+						onInput={(event) =>
+							setParams({ q: event.currentTarget.value || null, page: null })
+						}
+					/>
+					<div class="flex gap-2">
+						<select
+							aria-label={messages.library.columns.type}
+							value={typeFilter}
+							class="flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+							onChange={(event) =>
+								setParams({
+									type: event.currentTarget.value || null,
+									page: null,
+								})
+							}
+						>
+							<option value="">{messages.library.allTypes}</option>
+							{TYPE_VALUES.map((type) => (
+								<option key={type} value={type}>
+									{messages.library.typeName[type]}
+								</option>
+							))}
+						</select>
+						<select
+							aria-label={messages.library.columns.source}
+							value={sourceFilter}
+							class="flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+							onChange={(event) =>
+								setParams({
+									source: event.currentTarget.value || null,
+									page: null,
+								})
+							}
+						>
+							<option value="">{messages.library.allSources}</option>
+							<option value="builtin">{messages.library.sourceBuiltin}</option>
+							<option value="user">{messages.library.sourceUser}</option>
+						</select>
+					</div>
+				</div>
+
+				{total === 0 ? (
+					<p class="text-sm text-neutral-400">{messages.library.noMatches}</p>
 				) : (
-					sections.map((section) => (
-						<section key={section.type}>
-							<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-								{messages.library.sections[section.type]}
-							</h2>
-							<ul class="flex flex-col gap-1">
-								{section.items.map((entry) => (
-									<Row key={entry.id} entry={entry} />
-								))}
-							</ul>
-						</section>
-					))
+					<table class="w-full table-fixed border-collapse text-sm">
+						<thead class="border-b border-neutral-200 text-left text-xs tracking-wide text-neutral-500 uppercase">
+							<tr>
+								{sortHeader("name", messages.library.columns.name)}
+								{sortHeader("type", messages.library.columns.type, "w-24")}
+								{sortHeader(
+									"size",
+									messages.library.columns.size,
+									"w-14 text-right",
+								)}
+								{sortHeader("source", messages.library.columns.source, "w-20")}
+							</tr>
+						</thead>
+						<tbody>
+							{rows.map((entry) => (
+								<tr key={entry.id} class="border-b border-neutral-100">
+									<td
+										class="truncate px-2 py-1 text-neutral-800"
+										title={entry.user.displayName}
+									>
+										{entry.user.displayName}
+									</td>
+									<td class="px-2 py-1 text-neutral-500">
+										{messages.library.typeName[entry.derived.type]}
+									</td>
+									<td class="px-2 py-1 text-right text-neutral-500">
+										{sizeLabel(entry.size)}
+									</td>
+									<td class="px-2 py-1 text-neutral-500">
+										{entry.source === "builtin"
+											? messages.library.sourceBuiltin
+											: messages.library.sourceUser}
+									</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				)}
+
+				{pages > 1 && (
+					<div class="flex shrink-0 items-center justify-between gap-2 text-xs text-neutral-500">
+						<span>
+							{messages.library.range(start + 1, start + rows.length, total)}
+						</span>
+						<div class="flex gap-1">
+							<button
+								type="button"
+								disabled={page <= 1}
+								class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100 disabled:opacity-40"
+								onClick={() => goToPage(page - 1)}
+							>
+								{messages.library.prev}
+							</button>
+							<button
+								type="button"
+								disabled={page >= pages}
+								class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100 disabled:opacity-40"
+								onClick={() => goToPage(page + 1)}
+							>
+								{messages.library.next}
+							</button>
+						</div>
+					</div>
 				)}
 			</div>
 		</PanelFrame>

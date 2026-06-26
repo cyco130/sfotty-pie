@@ -125,13 +125,28 @@ export const messages = {
 		drop: "Drop ROM files here, or",
 		browse: "Browse…",
 		empty: "No images yet.",
-		builtin: "built-in",
-		sections: {
-			os: "OS ROMs",
-			cart: "Cartridges",
-			disk: "Disks",
-			xex: "Executables",
+		noMatches: "No images match your filters.",
+		search: "Filter by name…",
+		allTypes: "All types",
+		allSources: "All sources",
+		sourceBuiltin: "Built-in",
+		sourceUser: "Yours",
+		prev: "Prev",
+		next: "Next",
+		columns: {
+			name: "Name",
+			type: "Type",
+			size: "Size",
+			source: "Source",
 		},
+		typeName: {
+			os: "OS",
+			cart: "Cartridge",
+			disk: "Disk",
+			xex: "Executable",
+		},
+		range: (from: number, to: number, total: number): string =>
+			`${from}–${to} of ${total}`,
 		uploaded: (added: number, deduped: number, failed: number): string => {
 			const parts: string[] = [];
 			if (added > 0) {

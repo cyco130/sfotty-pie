@@ -189,6 +189,8 @@ export const messages = {
 			sectors: "Sectors",
 			sectorSize: "Sector size",
 		},
+		// Heading for the item view's recognized-firmware section.
+		firmwareTitle: "Well-known firmware",
 		typeName: {
 			os: "OS",
 			cart: "Cartridge",

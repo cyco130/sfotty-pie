@@ -1,4 +1,9 @@
-import { canonicalize, CART_TYPES } from "@sfotty-pie/a8";
+import {
+	canonicalize,
+	CART_TYPES,
+	detectFirmware,
+	type FirmwareInfo,
+} from "@sfotty-pie/a8";
 import { useEffect, useState } from "preact/hooks";
 import {
 	getImage,
@@ -19,6 +24,18 @@ const LIBRARY = "/a8/emu/library";
 
 function sizeLabel(bytes: number): string {
 	return `${Math.round(bytes / 1024)}K`;
+}
+
+// A canonical cartridge blob is a 16-byte CART header + the raw ROM; firmware
+// detection wants the unwrapped ROM (built-ins already serve it raw).
+function isCar(bytes: Uint8Array): boolean {
+	return (
+		bytes.length > 16 &&
+		bytes[0] === 0x43 && // C
+		bytes[1] === 0x41 && // A
+		bytes[2] === 0x52 && // R
+		bytes[3] === 0x54 // T
+	);
 }
 
 // Canonical download extension per type: a cartridge is a `.car`, an OS a raw
@@ -90,6 +107,32 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	} catch {
 		/* keep the raw id if it isn't valid percent-encoding */
 	}
+
+	// Detect well-known firmware from the bytes — only OS/cartridge images can
+	// be one, so other types skip the (potentially large) read.
+	const [firmware, setFirmware] = useState<FirmwareInfo | null>(null);
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				await readyLibrary();
+				const e = getImage(id);
+				if (e?.derived.type !== "os" && e?.derived.type !== "cart") {
+					if (!cancelled) setFirmware(null);
+					return;
+				}
+				const bytes = await getImageBytes(id);
+				const rom = isCar(bytes) ? bytes.subarray(16) : bytes;
+				if (!cancelled) setFirmware(detectFirmware(rom));
+			} catch {
+				if (!cancelled) setFirmware(null);
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [id]);
+
 	const entry = getImage(id); // reactive on the merged library
 
 	if (!entry) {
@@ -231,6 +274,19 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 						</button>
 					)}
 				</div>
+
+				{firmware && (
+					<div class="flex flex-col gap-1 border-t border-neutral-200 pt-3">
+						<h3 class="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+							{messages.library.firmwareTitle}
+						</h3>
+						<p class="text-sm font-medium text-neutral-800">{firmware.name}</p>
+						<p class="text-xs text-neutral-500">{firmware.origin}</p>
+						{firmware.notes && (
+							<p class="text-xs text-neutral-500">{firmware.notes}</p>
+						)}
+					</div>
+				)}
 			</div>
 		</PanelFrame>
 	);

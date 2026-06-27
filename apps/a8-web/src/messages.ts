@@ -175,9 +175,13 @@ export const messages = {
 			source: "Source",
 		},
 		// Extra table head for a type-filtered disk view — sectors×bytes-per-sector.
+		// `sectors`/`bps` label the dismissable filter chips for each part.
 		detail: {
 			geometry: "Geometry",
+			sectors: "sectors",
+			bps: "BPS",
 		},
+		removeFilter: "Remove filter",
 		typeName: {
 			os: "OS",
 			cart: "Cartridge",

@@ -1,4 +1,6 @@
+import type { VNode } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { Icon } from "../../../icon.tsx";
 import {
 	addFiles,
 	importProgress,
@@ -25,17 +27,41 @@ const PAGE_SIZE = 100;
 
 const TYPE_VALUES: readonly ImageType[] = ["os", "cart", "disk", "xex"];
 
+// The attribute filters a detail value can set (URL params); only meaningful
+// within the matching type-filtered view.
+type AttrParam = "sizeClass" | "cartType" | "sectors" | "bps";
+type SetAttr = (param: AttrParam, value: number) => void;
+
+// A clickable detail value: sets an attribute filter; underlines on hover.
+function FilterValue({
+	value,
+	onClick,
+}: {
+	value: number | string;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			class="cursor-pointer hover:underline"
+			onClick={onClick}
+		>
+			{value}
+		</button>
+	);
+}
+
 interface DetailCol {
 	head: string;
 	width: string;
-	cell: (kind: DerivedMeta) => string;
+	render: (kind: DerivedMeta, set: SetAttr) => VNode;
 }
 
 // The extra table columns for a type-filtered view (the pill is dropped — the
 // type is known from the filter): OS size class, cartridge subtype, disk
-// geometry split into sectors + sector size. xex has no extra facts. Each cell
-// guards on the kind, though the active filter guarantees it. Values are inline
-// tokens (hardware/numeric), per messages.ts.
+// geometry (sectors × bytes-per-sector, each clickable). Clicking a value sets
+// that attribute filter. Each render guards on the kind, though the active
+// filter guarantees it.
 function detailCols(type: ImageType): DetailCol[] {
 	switch (type) {
 		case "os":
@@ -43,7 +69,15 @@ function detailCols(type: ImageType): DetailCol[] {
 				{
 					head: messages.library.columns.size,
 					width: "w-14",
-					cell: (k) => (k.type === "os" ? `${k.sizeClass}K` : ""),
+					render: (k, set) =>
+						k.type === "os" ? (
+							<FilterValue
+								value={`${k.sizeClass}K`}
+								onClick={() => set("sizeClass", k.sizeClass)}
+							/>
+						) : (
+							<></>
+						),
 				},
 			];
 		case "cart":
@@ -51,7 +85,15 @@ function detailCols(type: ImageType): DetailCol[] {
 				{
 					head: messages.library.columns.type,
 					width: "w-14",
-					cell: (k) => (k.type === "cart" ? String(k.cartType) : ""),
+					render: (k, set) =>
+						k.type === "cart" ? (
+							<FilterValue
+								value={k.cartType}
+								onClick={() => set("cartType", k.cartType)}
+							/>
+						) : (
+							<></>
+						),
 				},
 			];
 		case "disk":
@@ -59,8 +101,22 @@ function detailCols(type: ImageType): DetailCol[] {
 				{
 					head: messages.library.detail.geometry,
 					width: "w-24",
-					cell: (k) =>
-						k.type === "disk" ? `${k.sectors}×${k.sectorSize}` : "",
+					render: (k, set) =>
+						k.type === "disk" ? (
+							<>
+								<FilterValue
+									value={k.sectors}
+									onClick={() => set("sectors", k.sectors)}
+								/>
+								×
+								<FilterValue
+									value={k.sectorSize}
+									onClick={() => set("bps", k.sectorSize)}
+								/>
+							</>
+						) : (
+							<></>
+						),
 				},
 			];
 		case "xex":
@@ -119,7 +175,25 @@ export default function LibraryPage() {
 	useEffect(() => {
 		if (folderInputRef.current) folderInputRef.current.webkitdirectory = true;
 	}, []);
-	const [params, setParams] = useUrlParams(["q", "type", "source", "page"]);
+	const [params, setParams] = useUrlParams([
+		"q",
+		"type",
+		"source",
+		"page",
+		"sizeClass",
+		"cartType",
+		"sectors",
+		"bps",
+	]);
+
+	// Set / clear an attribute filter (a detail value, or its chip's ×). The
+	// computed key is a known param, but TS can't see that through the union.
+	const setAttr: SetAttr = (param, value) =>
+		setParams({ [param]: String(value), page: null } as Parameters<
+			typeof setParams
+		>[0]);
+	const clearAttr = (param: AttrParam): void =>
+		setParams({ [param]: null, page: null } as Parameters<typeof setParams>[0]);
 
 	// Pull the user's uploads into the merged list (built-ins are already there).
 	useEffect(() => void readyLibrary(), []);
@@ -182,12 +256,23 @@ export default function LibraryPage() {
 		[entries],
 	);
 
-	const filtered = sorted.filter(
-		(e) =>
-			(typeFilter === "" || e.derived.type === typeFilter) &&
-			(sourceFilter === "" || e.source === sourceFilter) &&
-			(query === "" || e.user.displayName.toLowerCase().includes(query)),
-	);
+	const filtered = sorted.filter((e) => {
+		if (typeFilter !== "" && e.derived.type !== typeFilter) return false;
+		if (sourceFilter !== "" && e.source !== sourceFilter) return false;
+		if (query !== "" && !e.user.displayName.toLowerCase().includes(query))
+			return false;
+		// Attribute filters — apply only to entries of the matching kind.
+		const k = e.derived;
+		if (params.sizeClass && k.type === "os")
+			return String(k.sizeClass) === params.sizeClass;
+		if (params.cartType && k.type === "cart")
+			return String(k.cartType) === params.cartType;
+		if (k.type === "disk") {
+			if (params.sectors && String(k.sectors) !== params.sectors) return false;
+			if (params.bps && String(k.sectorSize) !== params.bps) return false;
+		}
+		return true;
+	});
 
 	const total = filtered.length;
 	const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -201,6 +286,26 @@ export default function LibraryPage() {
 	// All-types is a flat list with leading type pills; a type-filtered view is a
 	// table whose extra columns carry that type's attributes.
 	const cols = typeFilter === "" ? [] : detailCols(typeFilter);
+
+	// Active attribute filters, as dismissable chips (only the current type's).
+	const attrFilters: { param: AttrParam; label: string }[] = [];
+	if (typeFilter === "os" && params.sizeClass)
+		attrFilters.push({ param: "sizeClass", label: `${params.sizeClass}K` });
+	if (typeFilter === "cart" && params.cartType)
+		attrFilters.push({
+			param: "cartType",
+			label: `${messages.library.columns.type} ${params.cartType}`,
+		});
+	if (typeFilter === "disk" && params.sectors)
+		attrFilters.push({
+			param: "sectors",
+			label: `${params.sectors} ${messages.library.detail.sectors}`,
+		});
+	if (typeFilter === "disk" && params.bps)
+		attrFilters.push({
+			param: "bps",
+			label: `${params.bps} ${messages.library.detail.bps}`,
+		});
 
 	return (
 		<PanelFrame title={messages.library.title}>
@@ -284,9 +389,15 @@ export default function LibraryPage() {
 							value={typeFilter}
 							class="flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
 							onChange={(event) =>
+								// Changing the type clears any attribute filters — they
+								// only apply within their own type.
 								setParams({
 									type: event.currentTarget.value || null,
 									page: null,
+									sizeClass: null,
+									cartType: null,
+									sectors: null,
+									bps: null,
 								})
 							}
 						>
@@ -313,6 +424,26 @@ export default function LibraryPage() {
 							<option value="user">{messages.library.sourceUser}</option>
 						</select>
 					</div>
+					{attrFilters.length > 0 && (
+						<div class="flex flex-wrap gap-1.5">
+							{attrFilters.map((f) => (
+								<span
+									key={f.param}
+									class="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700"
+								>
+									{f.label}
+									<button
+										type="button"
+										aria-label={messages.library.removeFilter}
+										class="cursor-pointer text-neutral-400 hover:text-neutral-700"
+										onClick={() => clearAttr(f.param)}
+									>
+										<Icon name="close" class="size-3" />
+									</button>
+								</span>
+							))}
+						</div>
+					)}
 				</div>
 
 				{total === 0 ? (
@@ -377,7 +508,7 @@ export default function LibraryPage() {
 											key={c.head}
 											class="px-2 py-1 text-right tabular-nums text-neutral-500"
 										>
-											{c.cell(entry.derived)}
+											{c.render(entry.derived, setAttr)}
 										</td>
 									))}
 								</tr>

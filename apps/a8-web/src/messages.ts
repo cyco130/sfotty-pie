@@ -182,6 +182,13 @@ export const messages = {
 			bps: "BPS",
 		},
 		removeFilter: "Remove filter",
+		// Per-type fact rows in the item detail view.
+		fields: {
+			cartType: "Cartridge type",
+			sizeClass: "Size class",
+			sectors: "Sectors",
+			sectorSize: "Sector size",
+		},
 		typeName: {
 			os: "OS",
 			cart: "Cartridge",

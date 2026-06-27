@@ -1,4 +1,4 @@
-import { canonicalize } from "@sfotty-pie/a8";
+import { canonicalize, CART_TYPES } from "@sfotty-pie/a8";
 import { useEffect, useState } from "preact/hooks";
 import {
 	getImage,
@@ -31,19 +31,28 @@ const CANON_EXT: Record<ImageType, string> = {
 	xex: "xex",
 };
 
-// The type plus its one discriminating fact, e.g. "Cartridge · CART 1".
-function typeDetail(entry: ImageEntry): string {
-	const name = messages.library.typeName;
-	const derived = entry.derived;
-	switch (derived.type) {
+// The per-type facts, each its own detail row (the kind itself is a separate
+// "Type" row). A cartridge resolves to its full CART_TYPES name; xex has none.
+function detailRows(entry: ImageEntry): { label: string; value: string }[] {
+	const f = messages.library.fields;
+	const k = entry.derived;
+	switch (k.type) {
 		case "os":
-			return `${name.os} · ${derived.sizeClass}K`;
+			return [{ label: f.sizeClass, value: `${k.sizeClass}K` }];
 		case "cart":
-			return `${name.cart} · CART ${derived.cartType}`;
+			return [
+				{
+					label: f.cartType,
+					value: CART_TYPES[k.cartType]?.name ?? `CART ${k.cartType}`,
+				},
+			];
 		case "disk":
-			return `${name.disk} · ${derived.sectorSize}B × ${derived.sectors}`;
+			return [
+				{ label: f.sectors, value: String(k.sectors) },
+				{ label: f.sectorSize, value: `${k.sectorSize} B` },
+			];
 		case "xex":
-			return name.xex;
+			return [];
 	}
 }
 
@@ -153,8 +162,11 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 					/>
 					<Detail
 						label={messages.library.columns.type}
-						value={typeDetail(entry)}
+						value={messages.library.typeName[entry.derived.type]}
 					/>
+					{detailRows(entry).map((d) => (
+						<Detail key={d.label} label={d.label} value={d.value} />
+					))}
 					<Detail
 						label={messages.library.columns.size}
 						value={sizeLabel(entry.size)}

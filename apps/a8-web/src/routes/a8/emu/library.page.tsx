@@ -5,9 +5,10 @@ import {
 	libraryEntries,
 	readyLibrary,
 } from "../../../images/library.ts";
-import type { ImageEntry, ImageType } from "../../../images/metadata.ts";
+import type { DerivedMeta, ImageType } from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
+import { TypePill } from "../../../type-pill.tsx";
 import { useUrlParams } from "../../../url-params.ts";
 import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
@@ -22,9 +23,50 @@ import { PanelFrame } from "./panel-frame.tsx";
 
 const PAGE_SIZE = 100;
 
-type SortKey = "name" | "type";
-const SORT_KEYS: readonly SortKey[] = ["name", "type"];
 const TYPE_VALUES: readonly ImageType[] = ["os", "cart", "disk", "xex"];
+
+interface DetailCol {
+	head: string;
+	width: string;
+	cell: (kind: DerivedMeta) => string;
+}
+
+// The extra table columns for a type-filtered view (the pill is dropped — the
+// type is known from the filter): OS size class, cartridge subtype, disk
+// geometry split into sectors + sector size. xex has no extra facts. Each cell
+// guards on the kind, though the active filter guarantees it. Values are inline
+// tokens (hardware/numeric), per messages.ts.
+function detailCols(type: ImageType): DetailCol[] {
+	switch (type) {
+		case "os":
+			return [
+				{
+					head: messages.library.columns.size,
+					width: "w-14",
+					cell: (k) => (k.type === "os" ? `${k.sizeClass}K` : ""),
+				},
+			];
+		case "cart":
+			return [
+				{
+					head: messages.library.columns.type,
+					width: "w-14",
+					cell: (k) => (k.type === "cart" ? String(k.cartType) : ""),
+				},
+			];
+		case "disk":
+			return [
+				{
+					head: messages.library.detail.geometry,
+					width: "w-24",
+					cell: (k) =>
+						k.type === "disk" ? `${k.sectors}×${k.sectorSize}` : "",
+				},
+			];
+		case "xex":
+			return [];
+	}
+}
 
 // Read a directory reader's entries — it returns them in batches, so call until
 // it yields none.
@@ -66,19 +108,6 @@ async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
 	return out;
 }
 
-// Compare by the chosen key, then by name as a stable tiebreak.
-function comparator(key: SortKey): (a: ImageEntry, b: ImageEntry) => number {
-	const byName = (a: ImageEntry, b: ImageEntry) =>
-		a.user.displayName.localeCompare(b.user.displayName);
-	switch (key) {
-		case "name":
-			return byName;
-		case "type":
-			return (a, b) =>
-				a.derived.type.localeCompare(b.derived.type) || byName(a, b);
-	}
-}
-
 export default function LibraryPage() {
 	const { host } = useEmu();
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -90,14 +119,7 @@ export default function LibraryPage() {
 	useEffect(() => {
 		if (folderInputRef.current) folderInputRef.current.webkitdirectory = true;
 	}, []);
-	const [params, setParams] = useUrlParams([
-		"q",
-		"type",
-		"source",
-		"sort",
-		"dir",
-		"page",
-	]);
+	const [params, setParams] = useUrlParams(["q", "type", "source", "page"]);
 
 	// Pull the user's uploads into the merged list (built-ins are already there).
 	useEffect(() => void readyLibrary(), []);
@@ -135,10 +157,6 @@ export default function LibraryPage() {
 	};
 
 	// Read view state from the URL, ignoring anything malformed.
-	const sortKey: SortKey = SORT_KEYS.includes(params.sort as SortKey)
-		? (params.sort as SortKey)
-		: "name";
-	const desc = params.dir === "desc";
 	const typeFilter = TYPE_VALUES.includes(params.type as ImageType)
 		? (params.type as ImageType)
 		: "";
@@ -154,13 +172,15 @@ export default function LibraryPage() {
 	const entries = allEntries.filter((entry) => !entry.transient);
 	const hasUploads = allEntries.some((entry) => entry.source === "user");
 
-	// Sort once per (entries, key, dir); filtering below preserves order, so
-	// typing in the filter never re-sorts.
-	const sorted = useMemo(() => {
-		const cmp = comparator(sortKey);
-		const arr = [...entries].sort(cmp);
-		return desc ? arr.reverse() : arr;
-	}, [entries, sortKey, desc]);
+	// Fixed alphabetical order (sorting was dropped — direction wasn't
+	// meaningful); filtering below preserves order, so typing never re-sorts.
+	const sorted = useMemo(
+		() =>
+			[...entries].sort((a, b) =>
+				a.user.displayName.localeCompare(b.user.displayName),
+			),
+		[entries],
+	);
 
 	const filtered = sorted.filter(
 		(e) =>
@@ -175,33 +195,12 @@ export default function LibraryPage() {
 	const start = (page - 1) * PAGE_SIZE;
 	const rows = filtered.slice(start, start + PAGE_SIZE);
 
-	const toggleSort = (key: SortKey): void => {
-		const nextDesc = key === sortKey ? !desc : false;
-		setParams({ sort: key, dir: nextDesc ? "desc" : null, page: null });
-	};
 	const goToPage = (next: number): void =>
 		setParams({ page: next > 1 ? String(next) : null });
 
-	const sortHeader = (
-		key: SortKey,
-		label: string,
-		cls = "",
-	): preact.JSX.Element => (
-		<th class={`px-2 py-1.5 font-medium ${cls}`}>
-			<button
-				type="button"
-				class="inline-flex items-center gap-1 hover:text-neutral-800"
-				onClick={() => toggleSort(key)}
-			>
-				{label}
-				{sortKey === key && (
-					<span aria-hidden class="text-[9px]">
-						{desc ? "▼" : "▲"}
-					</span>
-				)}
-			</button>
-		</th>
-	);
+	// All-types is a flat list with leading type pills; a type-filtered view is a
+	// table whose extra columns carry that type's attributes.
+	const cols = typeFilter === "" ? [] : detailCols(typeFilter);
 
 	return (
 		<PanelFrame title={messages.library.title}>
@@ -318,12 +317,43 @@ export default function LibraryPage() {
 
 				{total === 0 ? (
 					<p class="text-sm text-neutral-400">{messages.library.noMatches}</p>
+				) : typeFilter === "" ? (
+					<ul class="flex flex-col text-sm">
+						{rows.map((entry) => (
+							<li key={entry.id}>
+								<button
+									type="button"
+									class="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-neutral-100"
+									onClick={() =>
+										navigate(`/a8/emu/library/${encodeURIComponent(entry.id)}`)
+									}
+								>
+									<TypePill type={entry.derived.type} />
+									<span
+										class="min-w-0 flex-1 truncate text-neutral-800"
+										title={entry.user.displayName}
+									>
+										{entry.user.displayName}
+									</span>
+								</button>
+							</li>
+						))}
+					</ul>
 				) : (
 					<table class="w-full table-fixed border-collapse text-sm">
 						<thead class="border-b border-neutral-200 text-left text-xs tracking-wide text-neutral-500 uppercase">
 							<tr>
-								{sortHeader("name", messages.library.columns.name)}
-								{sortHeader("type", messages.library.columns.type, "w-16")}
+								<th class="px-2 py-1.5 font-medium">
+									{messages.library.columns.name}
+								</th>
+								{cols.map((c) => (
+									<th
+										key={c.head}
+										class={`px-2 py-1.5 text-right font-medium ${c.width}`}
+									>
+										{c.head}
+									</th>
+								))}
 							</tr>
 						</thead>
 						<tbody>
@@ -342,9 +372,14 @@ export default function LibraryPage() {
 											{entry.user.displayName}
 										</button>
 									</td>
-									<td class="px-2 py-1 text-neutral-500">
-										{messages.library.typeShort[entry.derived.type]}
-									</td>
+									{cols.map((c) => (
+										<td
+											key={c.head}
+											class="px-2 py-1 text-right tabular-nums text-neutral-500"
+										>
+											{c.cell(entry.derived)}
+										</td>
+									))}
 								</tr>
 							))}
 						</tbody>

@@ -1,5 +1,6 @@
 import type { EmulatorHost } from "./host.ts";
-import { builtinLibrary } from "./library.ts";
+import { Icon } from "./icon.tsx";
+import type { ImageType } from "./images/metadata.ts";
 import {
 	anticPolicy,
 	MODELS,
@@ -9,10 +10,7 @@ import {
 	type AtariModel,
 } from "./machine-config.ts";
 import { messages } from "./messages.ts";
-
-// The bootable software in the library (the firmware/ items are auto-selected
-// by the host, not listed here).
-const software = builtinLibrary.filter((entry) => entry.category === "other");
+import { recentsView } from "./recents.ts";
 
 /**
  * The chord that opens the command palette: Cmd+K on macOS, Alt+K elsewhere.
@@ -102,6 +100,85 @@ function KeyRow({ keys, action }: { keys: string; action: string }) {
 			<dt class="whitespace-nowrap text-neutral-500">{keys}</dt>
 			<dd>{action}</dd>
 		</>
+	);
+}
+
+// Per-type leading pill: a three-letter format code — monospace so they align
+// into a column — tinted by kind. disk → atr, cart → car, xex → xex, os → rom.
+const TYPE_PILL: Record<ImageType, { code: string; tint: string }> = {
+	disk: { code: "atr", tint: "bg-sky-100 text-sky-700" },
+	cart: { code: "car", tint: "bg-amber-100 text-amber-700" },
+	xex: { code: "xex", tint: "bg-emerald-100 text-emerald-700" },
+	os: { code: "rom", tint: "bg-violet-100 text-violet-700" },
+};
+
+/** The leading type pill for a recents row; the full type name is its tooltip. */
+function TypePill({ type }: { type: ImageType }) {
+	const { code, tint } = TYPE_PILL[type];
+	return (
+		<span
+			class={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] leading-none ${tint}`}
+			title={messages.library.typeName[type]}
+		>
+			{code}
+		</span>
+	);
+}
+
+/**
+ * The recents list: images you've booted (newest first), then the built-in
+ * software you haven't, so it's never empty. Click to boot; a transient
+ * (file-booted) item can be kept in the library, and any history item removed.
+ */
+function RecentsSection({ host }: { host: EmulatorHost }) {
+	const items = recentsView.value;
+	if (items.length === 0) return null;
+	return (
+		<section>
+			<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+				{messages.recents.title}
+			</h2>
+			<ul class="flex flex-col gap-1">
+				{items.map(({ entry, recent }) => (
+					<li
+						key={entry.id}
+						class="flex items-center gap-2 rounded px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
+					>
+						<TypePill type={entry.derived.type} />
+						<button
+							type="button"
+							class="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+							title={entry.user.displayName}
+							onClick={() => void host.bootImage(entry.id)}
+						>
+							{entry.user.displayName}
+						</button>
+						{entry.transient && (
+							<button
+								type="button"
+								class="shrink-0 text-neutral-400 hover:text-neutral-700"
+								title={messages.recents.keepTitle}
+								aria-label={messages.recents.keepTitle}
+								onClick={() => host.keepRecent(entry.id)}
+							>
+								<Icon name="bookmark" class="size-4" />
+							</button>
+						)}
+						{recent && (
+							<button
+								type="button"
+								class="shrink-0 text-neutral-400 hover:text-neutral-700"
+								title={messages.recents.remove}
+								aria-label={messages.recents.remove}
+								onClick={() => host.removeFromRecents(entry.id)}
+							>
+								<Icon name="close" class="size-4" />
+							</button>
+						)}
+					</li>
+				))}
+			</ul>
+		</section>
 	);
 }
 
@@ -241,26 +318,7 @@ export function MenuView({
 				</button>
 			</section>
 
-			{software.length > 0 && (
-				<section>
-					<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-						{messages.sidebar.software}
-					</h2>
-					<ul class="flex flex-col gap-1">
-						{software.map((entry) => (
-							<li key={entry.id}>
-								<button
-									type="button"
-									class="text-left text-sm hover:underline"
-									onClick={() => void host.bootLibraryEntry(entry)}
-								>
-									{entry.displayName}
-								</button>
-							</li>
-						))}
-					</ul>
-				</section>
-			)}
+			<RecentsSection host={host} />
 
 			{/* The key-mappings help is moot without a physical keyboard. Gate
 			    on pointer capability, not width: a phone in landscape is wide

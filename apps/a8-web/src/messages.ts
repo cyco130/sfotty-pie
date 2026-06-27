@@ -92,7 +92,7 @@ export const messages = {
 		machine: "Machine",
 		model: "Model",
 		ram: "RAM",
-		separateAntic: "Separate ANTIC",
+		separateAntic: "Separate ANTIC access",
 		tv: "TV",
 		basic: "BASIC",
 		on: "On",
@@ -100,7 +100,6 @@ export const messages = {
 		rebootToApply: "Reboot to apply",
 		commandPalette: "Command palette…",
 		bootImage: "Boot image…",
-		software: "Software",
 		keys: "Keys",
 		about: "About",
 		aboutBlurb: "Sfotty Pie A8 Web — an Atari 8-bit emulator. MIT-licensed.",
@@ -121,10 +120,16 @@ export const messages = {
 		unsaved: "Unsaved change",
 		save: "Save changes",
 		noSuitable: "No suitable ROMs",
-		picksReset: "Picks reset when you reload.",
 		manageLibrary: "Manage library",
 		builtin: "Built-in",
 		yourRoms: "Your ROMs",
+	},
+
+	recents: {
+		title: "Recents",
+		keepTitle: "Add to library",
+		remove: "Remove from recents",
+		kept: (name: string): string => `Added ${name} to the library`,
 	},
 
 	library: {
@@ -141,9 +146,9 @@ export const messages = {
 		deleted: (name: string): string => `Removed ${name}`,
 		confirmDelete: (name: string): string =>
 			`Delete ${name}? This can't be undone.`,
-		clear: "Clear your library",
+		clear: "Clear library",
 		confirmClear:
-			"Clear your entire library? This removes all your uploads and can't be undone.",
+			"Clear the entire library? This removes all uploads and can't be undone.",
 		cleared: "Library cleared",
 		actions: {
 			boot: "Boot",
@@ -193,7 +198,7 @@ export const messages = {
 			if (added > 0) {
 				parts.push(added === 1 ? "Added 1 image" : `Added ${added} images`);
 			}
-			if (deduped > 0) parts.push(`${deduped} already in your library`);
+			if (deduped > 0) parts.push(`${deduped} already in the library`);
 			if (failed > 0) {
 				parts.push(
 					failed === 1 ? "1 not recognized" : `${failed} not recognized`,
@@ -203,6 +208,14 @@ export const messages = {
 				parts.length > 0 ? `${parts.join(". ")}.` : "Nothing to add.";
 			return `${summary} (${formatDuration(seconds)})`;
 		},
+	},
+
+	reset: {
+		confirmEverything:
+			"Wipe the entire library AND all saved settings? This can't be undone.",
+		everything: "Reset everything — library and settings",
+		tab: "This tab reset to your saved settings",
+		defaults: "All settings reset to defaults",
 	},
 
 	keyHelp: {
@@ -237,7 +250,7 @@ export const messages = {
 		audioUnavailableReason: (reason: string) => `Audio unavailable: ${reason}`,
 		noWritableDisk: "No writable disk in D1: to download.",
 		noDiskToSave: "No disk in D1: to save.",
-		notLibraryDisk: "Only a disk attached from your library can be saved.",
+		notLibraryDisk: "Only a disk attached from the library can be saved.",
 		noDiskToDetach: "No disk in D1: to detach.",
 		notACartridge: "not a cartridge image",
 		noCartridge: "No cartridge to detach.",
@@ -262,7 +275,7 @@ export const messages = {
 		switchingTv: (tv: string) => `Switching TV to ${tv}`,
 		powerCycling: "Power cycling",
 		saving: (name: string) => `Saving (${name})`,
-		savedToLibrary: (name: string) => `Saved (${name}) to your library`,
+		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
 		copy: "Copy",
 		copied: "Copied",
 		dismiss: "Dismiss",
@@ -288,7 +301,10 @@ export const labels = {
 	MENU_TOGGLE: "Menu",
 	OPEN_ROMS: "ROM preferences…",
 	OPEN_LIBRARY: "Library…",
-	CLEAR_LIBRARY: "Clear your library…",
+	CLEAR_LIBRARY: "Clear library…",
+	NUKE_EVERYTHING: "Reset everything: wipe library and settings…",
+	RESET_TAB_SETTINGS: "Reset this tab to saved settings",
+	RESET_DEFAULT_SETTINGS: "Reset all settings to defaults",
 	TOGGLE_FULLSCREEN: "Toggle full screen",
 	BOOT_IMAGE: "Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Attach a disk to D1:…",
@@ -296,7 +312,7 @@ export const labels = {
 	ATTACH_CARTRIDGE: "Attach a cartridge… (reboots)",
 	DETACH_CARTRIDGE: "Detach the cartridge (reboots)",
 	DOWNLOAD_D1: "Download the D1: disk image…",
-	SAVE_D1_TO_LIBRARY: "Save D1: to your library",
+	SAVE_D1_TO_LIBRARY: "Save D1: to library",
 	SET_MODEL_400_800: "Set model to Atari 400/800 (reboots)",
 	SET_MODEL_1200XL: "Set model to Atari 1200XL (reboots)",
 	SET_MODEL_XLXE: "Set model to Atari XL/XE (reboots)",

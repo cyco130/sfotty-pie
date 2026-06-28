@@ -1,3 +1,4 @@
+import { hasKnownExtension } from "@sfotty-pie/a8";
 import type { VNode } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Icon } from "../../../icon.tsx";
@@ -143,9 +144,12 @@ function readEntries(
 	return new Promise((resolve, reject) => reader.readEntries(resolve, reject));
 }
 
-// Collect files from a dropped entry, recursing into directories.
+// Collect files from a dropped entry, recursing into directories. Files whose
+// name can't be a recognized image (e.g. the PNGs in a ROM archive) are skipped
+// by extension before being read.
 async function walkEntry(entry: FileSystemEntry, out: File[]): Promise<void> {
 	if (entry.isFile) {
+		if (!hasKnownExtension(entry.name)) return;
 		out.push(
 			await new Promise<File>((resolve, reject) =>
 				(entry as FileSystemFileEntry).file(resolve, reject),
@@ -169,7 +173,8 @@ async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
 	const entries = Array.from(transfer.items)
 		.map((item) => item.webkitGetAsEntry())
 		.filter((entry): entry is FileSystemEntry => entry !== null);
-	if (entries.length === 0) return Array.from(transfer.files);
+	if (entries.length === 0)
+		return Array.from(transfer.files).filter((f) => hasKnownExtension(f.name));
 	const out: File[] = [];
 	await Promise.all(entries.map((entry) => walkEntry(entry, out)));
 	return out;
@@ -377,7 +382,11 @@ export default function LibraryPage() {
 						type="file"
 						class="hidden"
 						onChange={(event) => {
-							const files = Array.from(event.currentTarget.files ?? []);
+							// A folder picker yields everything in the tree; drop names
+							// that can't be images before reading them.
+							const files = Array.from(event.currentTarget.files ?? []).filter(
+								(f) => hasKnownExtension(f.name),
+							);
 							event.currentTarget.value = "";
 							void runImport(async () => files);
 						}}

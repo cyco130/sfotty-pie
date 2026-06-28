@@ -10,6 +10,7 @@ export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
 export { buildBootDisk } from "./xex-boot.ts";
 export {
 	detectFileFormat,
+	hasKnownExtension,
 	type AtariFileFormat,
 } from "./detect-file-format.ts";
 export {

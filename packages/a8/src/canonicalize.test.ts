@@ -54,6 +54,21 @@ function xegsCombined(): Uint8Array {
 	return dump;
 }
 
+// A synthetic ATR: the 16-byte header (magic, paragraph count, sector size)
+// over `dataBytes` of zeroed image data. detectFileFormat only needs the magic.
+function makeAtr(sectorSize: 128 | 256, dataBytes: number): Uint8Array {
+	const atr = new Uint8Array(16 + dataBytes);
+	atr[0] = 0x96;
+	atr[1] = 0x02; // magic 0x0296
+	const paras = dataBytes / 16;
+	atr[2] = paras & 0xff;
+	atr[3] = (paras >> 8) & 0xff;
+	atr[6] = (paras >> 16) & 0xff;
+	atr[4] = sectorSize & 0xff;
+	atr[5] = (sectorSize >> 8) & 0xff;
+	return atr;
+}
+
 const CART_MAGIC = [0x43, 0x41, 0x52, 0x54];
 
 describe("canonicalize", () => {
@@ -107,6 +122,31 @@ describe("canonicalize", () => {
 		expect(detectFileFormat(pieces[0]!.bytes)).toBe("cart");
 		expect(detectFileFormat(pieces[1]!.bytes)).toBe("cart");
 		expect(pieces[2]!.bytes).toHaveLength(16384);
+	});
+
+	it("counts SD disk sectors by a flat 128-byte division", () => {
+		expect(canonicalize(makeAtr(128, 720 * 128))[0]!.kind).toEqual({
+			type: "disk",
+			sectorSize: 128,
+			sectors: 720,
+		});
+	});
+
+	it("counts DD disk sectors honoring the 128-byte boot sectors", () => {
+		// Standard DD: 3 boot sectors at 128 B, the rest at 256 B.
+		expect(canonicalize(makeAtr(256, 3 * 128 + 717 * 256))[0]!.kind).toEqual({
+			type: "disk",
+			sectorSize: 256,
+			sectors: 720,
+		});
+	});
+
+	it("counts a non-standard all-256 DD image by a flat division", () => {
+		expect(canonicalize(makeAtr(256, 720 * 256))[0]!.kind).toEqual({
+			type: "disk",
+			sectorSize: 256,
+			sectors: 720,
+		});
 	});
 
 	it("throws on an unrecognized format", () => {

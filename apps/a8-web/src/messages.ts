@@ -167,24 +167,35 @@ export const messages = {
 		sourceUser: "Yours",
 		prev: "Prev",
 		next: "Next",
+		// Field labels — filter selects, the item detail view, and table heads.
 		columns: {
 			name: "Name",
 			type: "Type",
 			size: "Size",
 			source: "Source",
 		},
+		// Extra table head for a type-filtered disk view — sectors×bytes-per-sector.
+		// `sectors`/`bps` label the dismissable filter chips for each part.
+		detail: {
+			geometry: "Geometry",
+			sectors: "sectors",
+			bps: "BPS",
+		},
+		removeFilter: "Remove filter",
+		// Per-type fact rows in the item detail view.
+		fields: {
+			cartType: "Cartridge type",
+			osType: "OS type",
+			sectors: "Sectors",
+			sectorSize: "Sector size",
+		},
+		// Heading for the item view's recognized-firmware section.
+		firmwareTitle: "Well-known firmware",
 		typeName: {
 			os: "OS",
 			cart: "Cartridge",
 			disk: "Disk",
 			xex: "Executable",
-		},
-		// Compact forms for the dense table column.
-		typeShort: {
-			os: "os",
-			cart: "cart",
-			disk: "disk",
-			xex: "exe",
 		},
 		range: (from: number, to: number, total: number): string =>
 			`${from}–${to} of ${total}`,

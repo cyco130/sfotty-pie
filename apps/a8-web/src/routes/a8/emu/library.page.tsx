@@ -1,13 +1,16 @@
+import type { VNode } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { Icon } from "../../../icon.tsx";
 import {
 	addFiles,
 	importProgress,
 	libraryEntries,
 	readyLibrary,
 } from "../../../images/library.ts";
-import type { ImageEntry, ImageType } from "../../../images/metadata.ts";
+import type { DerivedMeta, ImageType } from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
+import { TypePill } from "../../../type-pill.tsx";
 import { useUrlParams } from "../../../url-params.ts";
 import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
@@ -22,9 +25,115 @@ import { PanelFrame } from "./panel-frame.tsx";
 
 const PAGE_SIZE = 100;
 
-type SortKey = "name" | "type";
-const SORT_KEYS: readonly SortKey[] = ["name", "type"];
 const TYPE_VALUES: readonly ImageType[] = ["os", "cart", "disk", "xex"];
+
+// An OS ROM's target machine family: the stored size class (10K → 400/800,
+// 16K → the XL/XE class) maps to a URL-clean slug and a display label, so the
+// query param reads like the UI. Hardware tokens, kept inline.
+const OS_FAMILY = {
+	"400-800": { sizeClass: 10, label: "400/800" },
+	"xl-xe": { sizeClass: 16, label: "XL/XE" },
+} as const;
+type OsFamily = keyof typeof OS_FAMILY;
+const osFamilyOf = (sizeClass: number): OsFamily =>
+	sizeClass === 10 ? "400-800" : "xl-xe";
+
+// The attribute filters a detail value can set (URL params); only meaningful
+// within the matching type-filtered view.
+type AttrParam = "os" | "cartType" | "sectors" | "bps";
+type SetAttr = (param: AttrParam, value: number | string) => void;
+
+// A clickable detail value: sets an attribute filter; underlines on hover.
+function FilterValue({
+	value,
+	onClick,
+}: {
+	value: number | string;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			class="cursor-pointer hover:underline"
+			onClick={onClick}
+		>
+			{value}
+		</button>
+	);
+}
+
+interface DetailCol {
+	head: string;
+	width: string;
+	render: (kind: DerivedMeta, set: SetAttr) => VNode;
+}
+
+// The extra table columns for a type-filtered view (the pill is dropped — the
+// type is known from the filter): OS size class, cartridge subtype, disk
+// geometry (sectors × bytes-per-sector, each clickable). Clicking a value sets
+// that attribute filter. Each render guards on the kind, though the active
+// filter guarantees it.
+function detailCols(type: ImageType): DetailCol[] {
+	switch (type) {
+		case "os":
+			return [
+				{
+					head: messages.library.columns.type,
+					width: "w-20",
+					render: (k, set) =>
+						k.type === "os" ? (
+							<FilterValue
+								value={OS_FAMILY[osFamilyOf(k.sizeClass)].label}
+								onClick={() => set("os", osFamilyOf(k.sizeClass))}
+							/>
+						) : (
+							<></>
+						),
+				},
+			];
+		case "cart":
+			return [
+				{
+					head: messages.library.columns.type,
+					width: "w-14",
+					render: (k, set) =>
+						k.type === "cart" ? (
+							<FilterValue
+								value={k.cartType}
+								onClick={() => set("cartType", k.cartType)}
+							/>
+						) : (
+							<></>
+						),
+				},
+			];
+		case "disk":
+			return [
+				{
+					head: messages.library.detail.geometry,
+					width: "w-24",
+					render: (k, set) =>
+						k.type === "disk" ? (
+							<>
+								<FilterValue
+									value={k.sectors}
+									onClick={() => set("sectors", k.sectors)}
+								/>
+								×
+								<FilterValue
+									value={k.sectorSize}
+									onClick={() => set("bps", k.sectorSize)}
+								/>
+							</>
+						) : (
+							<></>
+						),
+				},
+			];
+		case "xex":
+			return [];
+	}
+}
 
 // Read a directory reader's entries — it returns them in batches, so call until
 // it yields none.
@@ -66,19 +175,6 @@ async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
 	return out;
 }
 
-// Compare by the chosen key, then by name as a stable tiebreak.
-function comparator(key: SortKey): (a: ImageEntry, b: ImageEntry) => number {
-	const byName = (a: ImageEntry, b: ImageEntry) =>
-		a.user.displayName.localeCompare(b.user.displayName);
-	switch (key) {
-		case "name":
-			return byName;
-		case "type":
-			return (a, b) =>
-				a.derived.type.localeCompare(b.derived.type) || byName(a, b);
-	}
-}
-
 export default function LibraryPage() {
 	const { host } = useEmu();
 	const inputRef = useRef<HTMLInputElement>(null);
@@ -94,10 +190,21 @@ export default function LibraryPage() {
 		"q",
 		"type",
 		"source",
-		"sort",
-		"dir",
 		"page",
+		"os",
+		"cartType",
+		"sectors",
+		"bps",
 	]);
+
+	// Set / clear an attribute filter (a detail value, or its chip's ×). The
+	// computed key is a known param, but TS can't see that through the union.
+	const setAttr: SetAttr = (param, value) =>
+		setParams({ [param]: String(value), page: null } as Parameters<
+			typeof setParams
+		>[0]);
+	const clearAttr = (param: AttrParam): void =>
+		setParams({ [param]: null, page: null } as Parameters<typeof setParams>[0]);
 
 	// Pull the user's uploads into the merged list (built-ins are already there).
 	useEffect(() => void readyLibrary(), []);
@@ -135,10 +242,6 @@ export default function LibraryPage() {
 	};
 
 	// Read view state from the URL, ignoring anything malformed.
-	const sortKey: SortKey = SORT_KEYS.includes(params.sort as SortKey)
-		? (params.sort as SortKey)
-		: "name";
-	const desc = params.dir === "desc";
 	const typeFilter = TYPE_VALUES.includes(params.type as ImageType)
 		? (params.type as ImageType)
 		: "";
@@ -154,20 +257,33 @@ export default function LibraryPage() {
 	const entries = allEntries.filter((entry) => !entry.transient);
 	const hasUploads = allEntries.some((entry) => entry.source === "user");
 
-	// Sort once per (entries, key, dir); filtering below preserves order, so
-	// typing in the filter never re-sorts.
-	const sorted = useMemo(() => {
-		const cmp = comparator(sortKey);
-		const arr = [...entries].sort(cmp);
-		return desc ? arr.reverse() : arr;
-	}, [entries, sortKey, desc]);
-
-	const filtered = sorted.filter(
-		(e) =>
-			(typeFilter === "" || e.derived.type === typeFilter) &&
-			(sourceFilter === "" || e.source === sourceFilter) &&
-			(query === "" || e.user.displayName.toLowerCase().includes(query)),
+	// Fixed alphabetical order (sorting was dropped — direction wasn't
+	// meaningful); filtering below preserves order, so typing never re-sorts.
+	const sorted = useMemo(
+		() =>
+			[...entries].sort((a, b) =>
+				a.user.displayName.localeCompare(b.user.displayName),
+			),
+		[entries],
 	);
+
+	const filtered = sorted.filter((e) => {
+		if (typeFilter !== "" && e.derived.type !== typeFilter) return false;
+		if (sourceFilter !== "" && e.source !== sourceFilter) return false;
+		if (query !== "" && !e.user.displayName.toLowerCase().includes(query))
+			return false;
+		// Attribute filters — apply only to entries of the matching kind.
+		const k = e.derived;
+		if (params.os && k.type === "os")
+			return osFamilyOf(k.sizeClass) === params.os;
+		if (params.cartType && k.type === "cart")
+			return String(k.cartType) === params.cartType;
+		if (k.type === "disk") {
+			if (params.sectors && String(k.sectors) !== params.sectors) return false;
+			if (params.bps && String(k.sectorSize) !== params.bps) return false;
+		}
+		return true;
+	});
 
 	const total = filtered.length;
 	const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -175,33 +291,35 @@ export default function LibraryPage() {
 	const start = (page - 1) * PAGE_SIZE;
 	const rows = filtered.slice(start, start + PAGE_SIZE);
 
-	const toggleSort = (key: SortKey): void => {
-		const nextDesc = key === sortKey ? !desc : false;
-		setParams({ sort: key, dir: nextDesc ? "desc" : null, page: null });
-	};
 	const goToPage = (next: number): void =>
 		setParams({ page: next > 1 ? String(next) : null });
 
-	const sortHeader = (
-		key: SortKey,
-		label: string,
-		cls = "",
-	): preact.JSX.Element => (
-		<th class={`px-2 py-1.5 font-medium ${cls}`}>
-			<button
-				type="button"
-				class="inline-flex items-center gap-1 hover:text-neutral-800"
-				onClick={() => toggleSort(key)}
-			>
-				{label}
-				{sortKey === key && (
-					<span aria-hidden class="text-[9px]">
-						{desc ? "▼" : "▲"}
-					</span>
-				)}
-			</button>
-		</th>
-	);
+	// All-types is a flat list with leading type pills; a type-filtered view is a
+	// table whose extra columns carry that type's attributes.
+	const cols = typeFilter === "" ? [] : detailCols(typeFilter);
+
+	// Active attribute filters, as dismissable chips (only the current type's).
+	const attrFilters: { param: AttrParam; label: string }[] = [];
+	if (typeFilter === "os" && params.os)
+		attrFilters.push({
+			param: "os",
+			label: OS_FAMILY[params.os as OsFamily]?.label ?? params.os,
+		});
+	if (typeFilter === "cart" && params.cartType)
+		attrFilters.push({
+			param: "cartType",
+			label: `${messages.library.columns.type} ${params.cartType}`,
+		});
+	if (typeFilter === "disk" && params.sectors)
+		attrFilters.push({
+			param: "sectors",
+			label: `${params.sectors} ${messages.library.detail.sectors}`,
+		});
+	if (typeFilter === "disk" && params.bps)
+		attrFilters.push({
+			param: "bps",
+			label: `${params.bps} ${messages.library.detail.bps}`,
+		});
 
 	return (
 		<PanelFrame title={messages.library.title}>
@@ -285,9 +403,15 @@ export default function LibraryPage() {
 							value={typeFilter}
 							class="flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
 							onChange={(event) =>
+								// Changing the type clears any attribute filters — they
+								// only apply within their own type.
 								setParams({
 									type: event.currentTarget.value || null,
 									page: null,
+									os: null,
+									cartType: null,
+									sectors: null,
+									bps: null,
 								})
 							}
 						>
@@ -314,16 +438,67 @@ export default function LibraryPage() {
 							<option value="user">{messages.library.sourceUser}</option>
 						</select>
 					</div>
+					{attrFilters.length > 0 && (
+						<div class="flex flex-wrap gap-1.5">
+							{attrFilters.map((f) => (
+								<span
+									key={f.param}
+									class="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700"
+								>
+									{f.label}
+									<button
+										type="button"
+										aria-label={messages.library.removeFilter}
+										class="cursor-pointer text-neutral-400 hover:text-neutral-700"
+										onClick={() => clearAttr(f.param)}
+									>
+										<Icon name="close" class="size-3" />
+									</button>
+								</span>
+							))}
+						</div>
+					)}
 				</div>
 
 				{total === 0 ? (
 					<p class="text-sm text-neutral-400">{messages.library.noMatches}</p>
+				) : typeFilter === "" ? (
+					<ul class="flex flex-col text-sm">
+						{rows.map((entry) => (
+							<li key={entry.id}>
+								<button
+									type="button"
+									class="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-neutral-100"
+									onClick={() =>
+										navigate(`/a8/emu/library/${encodeURIComponent(entry.id)}`)
+									}
+								>
+									<TypePill type={entry.derived.type} />
+									<span
+										class="min-w-0 flex-1 truncate text-neutral-800"
+										title={entry.user.displayName}
+									>
+										{entry.user.displayName}
+									</span>
+								</button>
+							</li>
+						))}
+					</ul>
 				) : (
 					<table class="w-full table-fixed border-collapse text-sm">
 						<thead class="border-b border-neutral-200 text-left text-xs tracking-wide text-neutral-500 uppercase">
 							<tr>
-								{sortHeader("name", messages.library.columns.name)}
-								{sortHeader("type", messages.library.columns.type, "w-16")}
+								<th class="px-2 py-1.5 font-medium">
+									{messages.library.columns.name}
+								</th>
+								{cols.map((c) => (
+									<th
+										key={c.head}
+										class={`px-2 py-1.5 text-right font-medium ${c.width}`}
+									>
+										{c.head}
+									</th>
+								))}
 							</tr>
 						</thead>
 						<tbody>
@@ -342,9 +517,14 @@ export default function LibraryPage() {
 											{entry.user.displayName}
 										</button>
 									</td>
-									<td class="px-2 py-1 text-neutral-500">
-										{messages.library.typeShort[entry.derived.type]}
-									</td>
+									{cols.map((c) => (
+										<td
+											key={c.head}
+											class="px-2 py-1 text-right tabular-nums text-neutral-500"
+										>
+											{c.render(entry.derived, setAttr)}
+										</td>
+									))}
 								</tr>
 							))}
 						</tbody>

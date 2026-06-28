@@ -141,11 +141,17 @@ function carPiece(source: Uint8Array): CanonicalPiece {
 function diskPiece(source: Uint8Array): CanonicalPiece {
 	const sectorSize =
 		((source[4] ?? 0) | ((source[5] ?? 0) << 8)) === 256 ? 256 : 128;
-	// Paragraph (16-byte) count → total image bytes; the 128-byte boot-sector
-	// quirk on DD disks is ignored until we actually strip the container.
+	// Paragraph (16-byte) count → total image bytes.
 	const paragraphs =
 		(source[2] ?? 0) | ((source[3] ?? 0) << 8) | ((source[6] ?? 0) << 16);
-	const sectors = Math.floor((paragraphs * 16) / sectorSize);
+	const dataBytes = paragraphs * 16;
+	// DD disks keep the 3 boot sectors at 128 bytes (single density), so dividing
+	// the whole image by 256 undercounts by 2. Honor that layout when the size
+	// fits it; fall back to a flat division (SD, or a non-standard all-256 image).
+	const sectors =
+		sectorSize === 256 && dataBytes >= 384 && (dataBytes - 384) % 256 === 0
+			? 3 + (dataBytes - 384) / 256
+			: Math.floor(dataBytes / sectorSize);
 	return {
 		from: 0,
 		to: source.length,

@@ -5,7 +5,7 @@ export {
 	type CanonicalPiece,
 	type ImageKind,
 } from "./canonicalize.ts";
-export { Cartridge } from "./cartridge.ts";
+export { Cartridge, CART_TYPES, type CartType } from "./cartridge.ts";
 export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
 export { buildBootDisk } from "./xex-boot.ts";
 export {

@@ -1,6 +1,5 @@
 import type { EmulatorHost } from "./host.ts";
 import { Icon } from "./icon.tsx";
-import type { ImageType } from "./images/metadata.ts";
 import {
 	anticPolicy,
 	MODELS,
@@ -11,6 +10,7 @@ import {
 } from "./machine-config.ts";
 import { messages } from "./messages.ts";
 import { recentsView } from "./recents.ts";
+import { TypePill } from "./type-pill.tsx";
 
 /**
  * The chord that opens the command palette: Cmd+K on macOS, Alt+K elsewhere.
@@ -100,28 +100,6 @@ function KeyRow({ keys, action }: { keys: string; action: string }) {
 			<dt class="whitespace-nowrap text-neutral-500">{keys}</dt>
 			<dd>{action}</dd>
 		</>
-	);
-}
-
-// Per-type leading pill: a three-letter format code — monospace so they align
-// into a column — tinted by kind. disk → atr, cart → car, xex → xex, os → rom.
-const TYPE_PILL: Record<ImageType, { code: string; tint: string }> = {
-	disk: { code: "atr", tint: "bg-sky-100 text-sky-700" },
-	cart: { code: "car", tint: "bg-amber-100 text-amber-700" },
-	xex: { code: "xex", tint: "bg-emerald-100 text-emerald-700" },
-	os: { code: "rom", tint: "bg-violet-100 text-violet-700" },
-};
-
-/** The leading type pill for a recents row; the full type name is its tooltip. */
-function TypePill({ type }: { type: ImageType }) {
-	const { code, tint } = TYPE_PILL[type];
-	return (
-		<span
-			class={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] leading-none ${tint}`}
-			title={messages.library.typeName[type]}
-		>
-			{code}
-		</span>
 	);
 }
 

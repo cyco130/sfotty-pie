@@ -26,6 +26,12 @@ function sizeLabel(bytes: number): string {
 	return `${Math.round(bytes / 1024)}K`;
 }
 
+// An OS ROM's target machine family, from its size class (10K → 400/800,
+// 16K → the XL/XE class). Hardware tokens, kept inline.
+function osTypeLabel(sizeClass: number): string {
+	return sizeClass === 10 ? "400/800" : "XL/XE";
+}
+
 // A canonical cartridge blob is a 16-byte CART header + the raw ROM; firmware
 // detection wants the unwrapped ROM (built-ins already serve it raw).
 function isCar(bytes: Uint8Array): boolean {
@@ -55,7 +61,7 @@ function detailRows(entry: ImageEntry): { label: string; value: string }[] {
 	const k = entry.derived;
 	switch (k.type) {
 		case "os":
-			return [{ label: f.sizeClass, value: `${k.sizeClass}K` }];
+			return [{ label: f.osType, value: osTypeLabel(k.sizeClass) }];
 		case "cart":
 			return [
 				{

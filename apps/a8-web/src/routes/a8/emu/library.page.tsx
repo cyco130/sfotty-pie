@@ -27,10 +27,21 @@ const PAGE_SIZE = 100;
 
 const TYPE_VALUES: readonly ImageType[] = ["os", "cart", "disk", "xex"];
 
+// An OS ROM's target machine family: the stored size class (10K → 400/800,
+// 16K → the XL/XE class) maps to a URL-clean slug and a display label, so the
+// query param reads like the UI. Hardware tokens, kept inline.
+const OS_FAMILY = {
+	"400-800": { sizeClass: 10, label: "400/800" },
+	"xl-xe": { sizeClass: 16, label: "XL/XE" },
+} as const;
+type OsFamily = keyof typeof OS_FAMILY;
+const osFamilyOf = (sizeClass: number): OsFamily =>
+	sizeClass === 10 ? "400-800" : "xl-xe";
+
 // The attribute filters a detail value can set (URL params); only meaningful
 // within the matching type-filtered view.
-type AttrParam = "sizeClass" | "cartType" | "sectors" | "bps";
-type SetAttr = (param: AttrParam, value: number) => void;
+type AttrParam = "os" | "cartType" | "sectors" | "bps";
+type SetAttr = (param: AttrParam, value: number | string) => void;
 
 // A clickable detail value: sets an attribute filter; underlines on hover.
 function FilterValue({
@@ -67,13 +78,13 @@ function detailCols(type: ImageType): DetailCol[] {
 		case "os":
 			return [
 				{
-					head: messages.library.columns.size,
-					width: "w-14",
+					head: messages.library.columns.type,
+					width: "w-20",
 					render: (k, set) =>
 						k.type === "os" ? (
 							<FilterValue
-								value={`${k.sizeClass}K`}
-								onClick={() => set("sizeClass", k.sizeClass)}
+								value={OS_FAMILY[osFamilyOf(k.sizeClass)].label}
+								onClick={() => set("os", osFamilyOf(k.sizeClass))}
 							/>
 						) : (
 							<></>
@@ -180,7 +191,7 @@ export default function LibraryPage() {
 		"type",
 		"source",
 		"page",
-		"sizeClass",
+		"os",
 		"cartType",
 		"sectors",
 		"bps",
@@ -263,8 +274,8 @@ export default function LibraryPage() {
 			return false;
 		// Attribute filters — apply only to entries of the matching kind.
 		const k = e.derived;
-		if (params.sizeClass && k.type === "os")
-			return String(k.sizeClass) === params.sizeClass;
+		if (params.os && k.type === "os")
+			return osFamilyOf(k.sizeClass) === params.os;
 		if (params.cartType && k.type === "cart")
 			return String(k.cartType) === params.cartType;
 		if (k.type === "disk") {
@@ -289,8 +300,11 @@ export default function LibraryPage() {
 
 	// Active attribute filters, as dismissable chips (only the current type's).
 	const attrFilters: { param: AttrParam; label: string }[] = [];
-	if (typeFilter === "os" && params.sizeClass)
-		attrFilters.push({ param: "sizeClass", label: `${params.sizeClass}K` });
+	if (typeFilter === "os" && params.os)
+		attrFilters.push({
+			param: "os",
+			label: OS_FAMILY[params.os as OsFamily]?.label ?? params.os,
+		});
 	if (typeFilter === "cart" && params.cartType)
 		attrFilters.push({
 			param: "cartType",
@@ -394,7 +408,7 @@ export default function LibraryPage() {
 								setParams({
 									type: event.currentTarget.value || null,
 									page: null,
-									sizeClass: null,
+									os: null,
 									cartType: null,
 									sectors: null,
 									bps: null,

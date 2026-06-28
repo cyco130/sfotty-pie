@@ -185,7 +185,7 @@ export const messages = {
 		// Per-type fact rows in the item detail view.
 		fields: {
 			cartType: "Cartridge type",
-			sizeClass: "Size class",
+			osType: "OS type",
 			sectors: "Sectors",
 			sectorSize: "Sector size",
 		},

@@ -284,7 +284,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 				{firmware && (
 					<div class="flex flex-col gap-1 border-t border-neutral-200 pt-3">
 						<h3 class="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-							{messages.library.firmwareTitle}
+							{messages.library.knownTitle}
 						</h3>
 						<p class="text-sm font-medium text-neutral-800">{firmware.name}</p>
 						<p class="text-xs text-neutral-500">{firmware.origin}</p>

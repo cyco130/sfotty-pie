@@ -134,7 +134,7 @@ export const messages = {
 
 	library: {
 		title: "Library",
-		drop: "Drop ROM files or folders here, or",
+		drop: "Drop files or folders here, or",
 		browse: "browse files",
 		browseFolder: "a folder",
 		empty: "No images yet.",
@@ -189,8 +189,9 @@ export const messages = {
 			sectors: "Sectors",
 			sectorSize: "Sector size",
 		},
-		// Heading for the item view's recognized-firmware section.
-		firmwareTitle: "Well-known firmware",
+		// Heading for the item view's recognized-image section (firmware today;
+		// DOSes and other known software later).
+		knownTitle: "Well-known image",
 		typeName: {
 			os: "OS",
 			cart: "Cartridge",

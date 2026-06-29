@@ -9,12 +9,43 @@ export type AtariFileFormat =
 	| "os-rom-16k"
 	| "xegs-rom-32k";
 
+// Filename extensions each detector accepts (the content check still confirms).
+// A format matches a named file only when its extension is in its list; a
+// nameless blob (e.g. a built-in served raw) matches on content alone.
+const ATR = ["atr"];
+const XEX = ["xex", "axe", "exe", "com", "obj", "bin", "obx"];
+// Raw ROM dumps: raw cartridges, OS ROMs, and the XEGS 32K dump.
+const RAW_ROM = ["rom", "bin", "raw"];
+const CAR = ["car"];
+
+const extMatcher = (exts: readonly string[]): RegExp =>
+	new RegExp(`\\.(?:${exts.join("|")})$`, "i");
+
+const ATR_RE = extMatcher(ATR);
+const XEX_RE = extMatcher(XEX);
+const RAW_ROM_RE = extMatcher(RAW_ROM);
+const CAR_RE = extMatcher(CAR);
+
+// The union of every accepted extension, derived from the lists above so it
+// can't drift out of sync.
+const KNOWN_RE = extMatcher([...new Set([...ATR, ...XEX, ...RAW_ROM, ...CAR])]);
+
+/**
+ * Whether a filename's extension is one any detector accepts — a cheap,
+ * name-only pre-filter (the content check still confirms the actual format). Use
+ * it to skip clearly-irrelevant files (e.g. the PNGs in a ROM archive) before
+ * reading them when bulk-importing a directory.
+ */
+export function hasKnownExtension(name: string): boolean {
+	return KNOWN_RE.test(name);
+}
+
 export function detectFileFormat(
 	contents: Uint8Array,
 	name?: string,
 ): AtariFileFormat | null {
 	if (
-		(!name || name.match(/\.atr$/i)) &&
+		(!name || ATR_RE.test(name)) &&
 		contents[0] === 0x96 &&
 		contents[1] === 0x02
 	) {
@@ -22,40 +53,40 @@ export function detectFileFormat(
 	}
 
 	if (
-		(!name || name.match(/\.(?:xex|axe|exe|com|obj|bin|obx)$/i)) &&
+		(!name || XEX_RE.test(name)) &&
 		contents[0] === 0xff &&
 		contents[1] === 0xff
 	) {
 		return "xex";
 	}
 
-	if (!name || name.match(/\.(?:rom|bin|raw)$/i)) {
+	if (!name || RAW_ROM_RE.test(name)) {
 		const cartType = getRawCartType(contents);
 		if (cartType) {
 			return cartType;
 		}
+
+		if (isOsRom(contents)) {
+			return contents.length === 16384 ? "os-rom-16k" : "os-rom-10k";
+		}
+
+		// The XEGS internal ROM is a 32K dump laid out as two 8K $A000-$BFFF
+		// carts (the built-in game and BASIC) followed by the 16K XL/XE OS.
+		// Detect it structurally from its pieces rather than by signature.
+		if (
+			contents.length === 32768 &&
+			getRawCartType(contents.subarray(0, 0x2000)) ===
+				"raw-cart-8k-a000-bfff" &&
+			getRawCartType(contents.subarray(0x2000, 0x4000)) ===
+				"raw-cart-8k-a000-bfff" &&
+			isOsRom(contents.subarray(0x4000, 0x8000))
+		) {
+			return "xegs-rom-32k";
+		}
 	}
 
-	if ((!name || name.match(/\.(?:rom|bin)$/i)) && isOsRom(contents)) {
-		return contents.length === 16384 ? "os-rom-16k" : "os-rom-10k";
-	}
-
-	// The XEGS internal ROM is a 32K dump laid out as two 8K $A000-$BFFF carts
-	// (the built-in game and BASIC) followed by the 16K XL/XE OS. Detect it
-	// structurally from its pieces rather than by signature.
 	if (
-		(!name || name.match(/\.(?:rom|bin|raw)$/i)) &&
-		contents.length === 32768 &&
-		getRawCartType(contents.subarray(0, 0x2000)) === "raw-cart-8k-a000-bfff" &&
-		getRawCartType(contents.subarray(0x2000, 0x4000)) ===
-			"raw-cart-8k-a000-bfff" &&
-		isOsRom(contents.subarray(0x4000, 0x8000))
-	) {
-		return "xegs-rom-32k";
-	}
-
-	if (
-		(!name || name.match(/\.car$/i)) &&
+		(!name || CAR_RE.test(name)) &&
 		contents[0] === 0x43 && // 'C'
 		contents[1] === 0x41 && // 'A'
 		contents[2] === 0x52 && // 'R'

@@ -121,8 +121,6 @@ export const messages = {
 		save: "Save changes",
 		noSuitable: "No suitable ROMs",
 		manageLibrary: "Manage library",
-		builtin: "Built-in",
-		yourRoms: "Your ROMs",
 	},
 
 	recents: {

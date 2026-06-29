@@ -8,7 +8,7 @@
 // recomputed from the bytes (index/cache), `user` is the overridable layer
 // primed from the known-image registry.
 
-import type { ImageKind } from "@sfotty-pie/a8";
+import type { FirmwareKey, ImageKind } from "@sfotty-pie/a8";
 
 /**
  * Content-derived facts, recomputed from the bytes — the package's
@@ -63,6 +63,9 @@ export interface ImageEntry {
 	/** Auto-added by booting/attaching a file (not deliberately imported) — hidden
 	 *  from the curated list until "kept". */
 	transient?: boolean;
+	/** Detected known-firmware identity, if any — drives the ROM-slot ranking
+	 *  (a built-in's id is also its key; an upload records it here). */
+	firmwareKey?: FirmwareKey;
 	locator: BlobLocator;
 	derived: DerivedMeta;
 	user: UserMeta;
@@ -80,6 +83,8 @@ export interface StoredEntry {
 	createdAt: number;
 	/** Auto-added by a file boot/attach rather than deliberately imported. */
 	transient?: boolean;
+	/** Detected known-firmware identity at ingest, if any (for ROM-slot ranking). */
+	firmwareKey?: FirmwareKey;
 	locator: { backend: BlobBackend; ref: string };
 	derived: DerivedMeta;
 	user: UserMeta;

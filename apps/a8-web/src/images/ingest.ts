@@ -61,6 +61,7 @@ export async function ingestFile(
 			size: piece.bytes.length,
 			createdAt: Date.now(),
 			...(transient && { transient: true }),
+			...(fw && { firmwareKey: fw.key }),
 			locator: { backend: "idb", ref: hash },
 			derived: piece.kind,
 			user: {

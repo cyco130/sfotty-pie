@@ -78,8 +78,9 @@ function fuzzyMatch(query: string, target: string): FuzzyMatch | null {
 
 // Contiguous matches win decisively over scattered subsequences, tiered like
 // VSCode's: exact > prefix > word-boundary substring > mid-word substring. The
-// gaps (1000) sit far above any fuzzy-subsequence score, and subtracting the
-// length ranks shorter targets first within a tier.
+// gaps (1000) sit far above any fuzzy-subsequence score. Within a tier the score
+// is flat, so ties hold the list's alphabetical order (rather than ranking
+// shorter labels first, which would scatter otherwise-sequential entries).
 const EXACT = 4000;
 const PREFIX = 3000;
 const WORD = 2000;
@@ -105,7 +106,7 @@ function matchCommand(query: string, target: string): FuzzyMatch | null {
 						: SUBSTRING;
 		const positions: number[] = [];
 		for (let i = 0; i < q.length; i++) positions.push(index + i);
-		return { score: tier - target.length, positions };
+		return { score: tier, positions };
 	}
 	return fuzzyMatch(q, target);
 }
@@ -176,7 +177,7 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 				.sort(
 					(a, b) =>
 						b.match.score - a.match.score ||
-						labelOf(a.command).length - labelOf(b.command).length,
+						labelOf(a.command).localeCompare(labelOf(b.command)),
 				)
 				.map(({ command, match }) => ({ command, positions: match.positions }))
 		: paletteCommands.map((command) => ({ command, positions: [] }));

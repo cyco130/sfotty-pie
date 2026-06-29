@@ -157,7 +157,12 @@ export class Emulator {
 
 	// BASIC-disable: hold OPTION for a few frames after each cold boot.
 	readonly #holdOption: boolean;
-	#optionFramesLeft = 0;
+
+	// One-shot callbacks fired after a countdown of presented frames — timed key
+	// releases (the boot OPTION-hold, momentary "tap" pulses). Frame-paced rather
+	// than wall-clock so they stay correct under turbo (where real-time timers
+	// would span dozens of emulated frames) and across tab-hidden stalls.
+	#pending: { framesLeft: number; fn: () => void }[] = [];
 
 	// Wall-clock pacing is per-TV-standard (NTSC ~1.79MHz, PAL ~1.77MHz).
 	readonly #msPerScanline: number;
@@ -232,15 +237,25 @@ export class Emulator {
 	coldStart(): void {
 		this.machine.reset(true);
 		this.machine.cpu.reset(true);
+		// Drop any timed releases queued against the old machine — a stale OPTION
+		// release could otherwise cut the fresh boot's hold short.
+		this.#pending = [];
 		this.#startOptionHold();
 	}
 
-	// Press OPTION at boot (BASIC-disable); the frame loop releases it after
-	// OPTION_HOLD_FRAMES.
+	/**
+	 * Run `fn` after `frames` presented frames (clamped to at least one). Paced by
+	 * the emulated frame clock — see {@link #pending}.
+	 */
+	afterFrames(frames: number, fn: () => void): void {
+		this.#pending.push({ framesLeft: Math.max(1, frames), fn });
+	}
+
+	// Press OPTION at boot (BASIC-disable); release it after OPTION_HOLD_FRAMES.
 	#startOptionHold(): void {
 		if (!this.#holdOption) return;
 		this.machine.consoleKeyDown(0x04);
-		this.#optionFramesLeft = OPTION_HOLD_FRAMES;
+		this.afterFrames(OPTION_HOLD_FRAMES, () => this.machine.consoleKeyUp(0x04));
 	}
 
 	async #loop(): Promise<void> {
@@ -343,9 +358,17 @@ export class Emulator {
 			this.machine.setFrameBuffer(this.#frames[this.#back === 0 ? 0 : 1]);
 			this.frameCount++;
 
-			// Release the BASIC-disable OPTION hold once the OS has booted.
-			if (this.#optionFramesLeft > 0 && --this.#optionFramesLeft === 0) {
-				this.machine.consoleKeyUp(0x04);
+			// Fire any timed callbacks that come due this frame (e.g. the boot
+			// OPTION-hold release). Collect first, then run — a callback may itself
+			// queue a new pulse without disturbing this pass.
+			if (this.#pending.length > 0) {
+				const due: (() => void)[] = [];
+				this.#pending = this.#pending.filter((p) => {
+					if (--p.framesLeft > 0) return true;
+					due.push(p.fn);
+					return false;
+				});
+				for (const fn of due) fn();
 			}
 		}
 	}

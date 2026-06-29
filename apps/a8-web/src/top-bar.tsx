@@ -43,7 +43,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 				class="text-neutral-400 hover:text-white"
 				aria-label={messages.topBar.menu}
 				title={messages.topBar.menu}
-				onClick={() => host.dispatch("MENU_TOGGLE")}
+				onClick={() => host.togglePanel("menu")}
 			>
 				<Icon name="menu" class="size-6" />
 			</button>

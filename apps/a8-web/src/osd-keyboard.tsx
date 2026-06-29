@@ -302,12 +302,14 @@ function KeyButton({
 		e.preventDefault();
 		switch (k.t) {
 			case "char":
-				host.dispatch(charCommand(k.base, shiftOn, controlOn));
+				// Sustained: held while the key is touched (matrix key).
+				host.press(charCommand(k.base, shiftOn, controlOn));
 				break;
 			case "lit":
-				host.dispatch(k.cmd);
+				host.press(k.cmd);
 				break;
 			case "tap":
+				// Momentary: a one-shot key that auto-releases.
 				host.dispatch(k.cmd);
 				consumeMods();
 				break;
@@ -323,7 +325,7 @@ function KeyButton({
 	function release(e: { preventDefault(): void }) {
 		e.preventDefault();
 		if (k.t === "char" || k.t === "lit") {
-			host.dispatch("RELEASE_POKEY_KEY");
+			host.releaseMatrix();
 			consumeMods();
 		}
 	}

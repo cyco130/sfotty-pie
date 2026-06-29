@@ -28,13 +28,11 @@ function useCoarsePointer(): boolean {
 /** A momentary control: presses on touch-down, releases on touch-up. */
 function HoldButton({
 	host,
-	press,
-	release,
+	command,
 	label,
 }: {
 	host: EmulatorHost;
-	press: Command;
-	release: Command;
+	command: Command;
 	label: string;
 }) {
 	return (
@@ -43,13 +41,13 @@ function HoldButton({
 			class="flex-1 touch-none rounded bg-neutral-700/70 px-1 py-2 text-xs text-white select-none active:bg-neutral-500"
 			onTouchStart={(e) => {
 				e.preventDefault();
-				host.dispatch(press);
+				host.press(command);
 			}}
 			onTouchEnd={(e) => {
 				e.preventDefault();
-				host.dispatch(release);
+				host.release(command);
 			}}
-			onTouchCancel={() => host.dispatch(release)}
+			onTouchCancel={() => host.release(command)}
 		>
 			{label}
 		</button>
@@ -65,13 +63,13 @@ function TriggerButton({ host }: { host: EmulatorHost }) {
 			class="aspect-square w-[22vw] touch-none rounded-full bg-red-600/40 select-none active:bg-red-600/70"
 			onTouchStart={(e) => {
 				e.preventDefault();
-				host.dispatch("PRESS_JOY0_TRIGGER");
+				host.press("PRESS_JOY0_TRIGGER");
 			}}
 			onTouchEnd={(e) => {
 				e.preventDefault();
-				host.dispatch("RELEASE_JOY0_TRIGGER");
+				host.release("PRESS_JOY0_TRIGGER");
 			}}
-			onTouchCancel={() => host.dispatch("RELEASE_JOY0_TRIGGER")}
+			onTouchCancel={() => host.release("PRESS_JOY0_TRIGGER")}
 		/>
 	);
 }
@@ -186,13 +184,13 @@ function ResetButton({ host }: { host: EmulatorHost }) {
 			class="touch-none rounded bg-neutral-700/70 px-3 py-1 text-xs text-white select-none active:bg-neutral-500"
 			onTouchStart={(e) => {
 				e.preventDefault();
-				host.dispatch("PRESS_RESET");
+				host.press("PRESS_RESET");
 			}}
 			onTouchEnd={(e) => {
 				e.preventDefault();
-				host.dispatch("RELEASE_RESET");
+				host.release("PRESS_RESET");
 			}}
-			onTouchCancel={() => host.dispatch("RELEASE_RESET")}
+			onTouchCancel={() => host.release("PRESS_RESET")}
 		>
 			Reset
 		</button>
@@ -267,36 +265,11 @@ export function Osd({ host }: { host: EmulatorHost }) {
 			{view === "stick" && (
 				<>
 					<div class="flex gap-1">
-						<HoldButton
-							host={host}
-							press="PRESS_OPTION"
-							release="RELEASE_OPTION"
-							label="Option"
-						/>
-						<HoldButton
-							host={host}
-							press="PRESS_SELECT"
-							release="RELEASE_SELECT"
-							label="Select"
-						/>
-						<HoldButton
-							host={host}
-							press="PRESS_START"
-							release="RELEASE_START"
-							label="Start"
-						/>
-						<HoldButton
-							host={host}
-							press="PRESS_SPACE"
-							release="RELEASE_POKEY_KEY"
-							label="Space"
-						/>
-						<HoldButton
-							host={host}
-							press="PRESS_ESC"
-							release="RELEASE_POKEY_KEY"
-							label="Esc"
-						/>
+						<HoldButton host={host} command="PRESS_OPTION" label="Option" />
+						<HoldButton host={host} command="PRESS_SELECT" label="Select" />
+						<HoldButton host={host} command="PRESS_START" label="Start" />
+						<HoldButton host={host} command="PRESS_SPACE" label="Space" />
+						<HoldButton host={host} command="PRESS_ESC" label="Esc" />
 					</div>
 
 					<div class="flex items-center justify-between py-4">

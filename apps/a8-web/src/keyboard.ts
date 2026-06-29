@@ -2,6 +2,19 @@ import { commands } from "./commands.ts";
 
 type Command = keyof typeof commands;
 
+/**
+ * How the keyboard actuates commands. A physical key is sustained: `press` on
+ * key-down, `release` on key-up. `tap` is momentary (a composed character or an
+ * instant action) — it presses and schedules its own release. `releaseMatrix`
+ * lets up the shared POKEY matrix register once the last held matrix key is up.
+ */
+export interface KeyboardActions {
+	press(command: Command): void;
+	release(command: Command): void;
+	tap(command: Command): void;
+	releaseMatrix(): void;
+}
+
 // How long a composed character (arriving without a correlatable keydown)
 // stays pressed before the synthetic release. ~3 frames is plenty for the OS
 // keyboard IRQ handler.
@@ -21,19 +34,19 @@ const TAP_MS = 50;
  * via `compositionend`.
  */
 export class Keyboard {
-	#dispatch: (command: Command) => void;
+	#actions: KeyboardActions;
 	#isMac = navigator.userAgent.includes("Mac");
 
 	// Physical keys (event.code) currently holding the POKEY matrix key.
 	#matrixHeld = new Set<string>();
-	// Physical keys holding a key with a dedicated release command.
+	// Physical keys holding a sustained command (its key-up releases it).
 	#held = new Map<string, Command>();
 	// Bumped on every matrix press so composition taps can tell whether the
 	// matrix is still theirs to release.
 	#pressGeneration = 0;
 
-	constructor(dispatch: (command: Command) => void) {
-		this.#dispatch = dispatch;
+	constructor(actions: KeyboardActions) {
+		this.#actions = actions;
 	}
 
 	attach(input: HTMLInputElement): void {
@@ -67,13 +80,14 @@ export class Keyboard {
 	releaseAll(): void {
 		if (this.#matrixHeld.size > 0) {
 			this.#matrixHeld.clear();
-			this.#dispatch("RELEASE_POKEY_KEY");
+			this.#actions.releaseMatrix();
 		}
-		for (const release of this.#held.values()) {
-			this.#dispatch(release);
+		for (const command of this.#held.values()) {
+			this.#actions.release(command);
 		}
 		this.#held.clear();
-		this.#dispatch("RELEASE_SHIFT");
+		// Belt and suspenders: clear Shift even if tracking lost it.
+		this.#actions.release("PRESS_SHIFT");
 	}
 
 	#keyDown(event: KeyboardEvent): void {
@@ -98,9 +112,9 @@ export class Keyboard {
 			// Shift+Reset need a real one). Typing is unaffected either way —
 			// the Shift bit inside KBCODE comes from the produced character.
 			if (event.code === "ShiftLeft") {
-				this.#pressHeld(event, "PRESS_JOY0_TRIGGER", "RELEASE_JOY0_TRIGGER");
+				this.#pressHeld(event, "PRESS_JOY0_TRIGGER");
 			} else {
-				this.#pressHeld(event, "PRESS_SHIFT", "RELEASE_SHIFT");
+				this.#pressHeld(event, "PRESS_SHIFT");
 			}
 			return;
 		}
@@ -161,19 +175,19 @@ export class Keyboard {
 				}
 			}
 			if (changed && this.#matrixHeld.size === 0) {
-				this.#dispatch("RELEASE_POKEY_KEY");
+				this.#actions.releaseMatrix();
 			}
 			return;
 		}
 
-		const release = this.#held.get(event.code);
-		if (release) {
+		const held = this.#held.get(event.code);
+		if (held) {
 			this.#held.delete(event.code);
-			this.#dispatch(release);
+			this.#actions.release(held);
 		}
 
 		if (this.#matrixHeld.delete(event.code) && this.#matrixHeld.size === 0) {
-			this.#dispatch("RELEASE_POKEY_KEY");
+			this.#actions.releaseMatrix();
 		}
 	}
 
@@ -208,17 +222,17 @@ export class Keyboard {
 				} else {
 					// Plain F5 is Reset. With physical Shift held the machine
 					// sees Shift+Reset, which OS ROM replacements can sense.
-					this.#pressHeld(event, "PRESS_RESET", "RELEASE_RESET");
+					this.#pressHeld(event, "PRESS_RESET");
 				}
 				return true;
 			case "F2":
-				this.#pressHeld(event, "PRESS_OPTION", "RELEASE_OPTION");
+				this.#pressHeld(event, "PRESS_OPTION");
 				return true;
 			case "F3":
-				this.#pressHeld(event, "PRESS_SELECT", "RELEASE_SELECT");
+				this.#pressHeld(event, "PRESS_SELECT");
 				return true;
 			case "F4":
-				this.#pressHeld(event, "PRESS_START", "RELEASE_START");
+				this.#pressHeld(event, "PRESS_START");
 				return true;
 			case "F9":
 			case "Pause":
@@ -255,22 +269,22 @@ export class Keyboard {
 			case "ArrowUp":
 				if (mod) return this.#pressComposed(event, "F1", ctrl, shift);
 				if (ctrl) return this.#pressComposed(event, "MINUS", true, shift);
-				this.#pressHeld(event, "PRESS_JOY0_UP", "RELEASE_JOY0_UP");
+				this.#pressHeld(event, "PRESS_JOY0_UP");
 				return true;
 			case "ArrowDown":
 				if (mod) return this.#pressComposed(event, "F2", ctrl, shift);
 				if (ctrl) return this.#pressComposed(event, "EQUALS", true, shift);
-				this.#pressHeld(event, "PRESS_JOY0_DOWN", "RELEASE_JOY0_DOWN");
+				this.#pressHeld(event, "PRESS_JOY0_DOWN");
 				return true;
 			case "ArrowLeft":
 				if (mod) return this.#pressComposed(event, "F3", ctrl, shift);
 				if (ctrl) return this.#pressComposed(event, "PLUS", true, shift);
-				this.#pressHeld(event, "PRESS_JOY0_LEFT", "RELEASE_JOY0_LEFT");
+				this.#pressHeld(event, "PRESS_JOY0_LEFT");
 				return true;
 			case "ArrowRight":
 				if (mod) return this.#pressComposed(event, "F4", ctrl, shift);
 				if (ctrl) return this.#pressComposed(event, "ASTERISK", true, shift);
-				this.#pressHeld(event, "PRESS_JOY0_RIGHT", "RELEASE_JOY0_RIGHT");
+				this.#pressHeld(event, "PRESS_JOY0_RIGHT");
 				return true;
 		}
 		return false;
@@ -358,19 +372,20 @@ export class Keyboard {
 	#pressMatrix(event: KeyboardEvent, command: Command): void {
 		event.preventDefault();
 		this.#pressGeneration++;
-		this.#dispatch(command);
+		this.#actions.press(command);
 		this.#matrixHeld.add(event.code);
 	}
 
-	#pressHeld(event: KeyboardEvent, press: Command, release: Command): void {
+	// Press a sustained command; its key-up (tracked by code) releases it.
+	#pressHeld(event: KeyboardEvent, command: Command): void {
 		event.preventDefault();
-		this.#dispatch(press);
-		this.#held.set(event.code, release);
+		this.#actions.press(command);
+		this.#held.set(event.code, command);
 	}
 
 	#instant(event: KeyboardEvent, command: Command): void {
 		event.preventDefault();
-		this.#dispatch(command);
+		this.#actions.tap(command);
 	}
 
 	/** Characters delivered by dead-key composition (e.g. `^` + space). */
@@ -385,10 +400,10 @@ export class Keyboard {
 	#tap(command: Command): void {
 		this.#pressGeneration++;
 		const generation = this.#pressGeneration;
-		this.#dispatch(command);
+		this.#actions.press(command);
 		setTimeout(() => {
 			if (generation === this.#pressGeneration && this.#matrixHeld.size === 0) {
-				this.#dispatch("RELEASE_POKEY_KEY");
+				this.#actions.releaseMatrix();
 			}
 		}, TAP_MS);
 	}

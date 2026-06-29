@@ -4,25 +4,16 @@
 // uploaded, and where its bytes physically live.
 
 import { computed, signal } from "@preact/signals";
-import {
-	canonicalize,
-	detectFirmware,
-	type FirmwareType,
-	type ImageKind,
-} from "@sfotty-pie/a8";
+import { canonicalize, type ImageKind } from "@sfotty-pie/a8";
 import {
 	builtinFirmware,
 	type FirmwareLibraryEntry,
 } from "virtual:firmware-library";
-import { idbBlobStore } from "./blob-store.ts";
 import { loadImageBytes } from "./fetch.ts";
 import { sha256Hex } from "./hash.ts";
-import type {
-	ImageEntry,
-	ImageSlot,
-	StoredEntry,
-	UserMeta,
-} from "./metadata.ts";
+import type { ImportRequest, ImportResponse } from "./import.worker.ts";
+import { blobs, ingestFile, primeSlots } from "./ingest.ts";
+import type { ImageEntry, StoredEntry, UserMeta } from "./metadata.ts";
 import {
 	clearAll,
 	deleteEntry,
@@ -30,8 +21,6 @@ import {
 	loadOverrides,
 	putEntry,
 } from "./store.ts";
-
-const blobs = idbBlobStore();
 
 /**
  * A bulk import's phase: `preparing` while the dropped folder tree is walked
@@ -84,17 +73,6 @@ export function readyLibrary(): Promise<void> {
 /** A built-in's stable identity: its firmware key when known, else its path id. */
 function builtinId(fw: FirmwareLibraryEntry): string {
 	return fw.firmwareKey ?? fw.id;
-}
-
-/** Prime the slot pickers from a firmware type — standard-8K carts only. */
-function primeSlots(
-	type: FirmwareType | null,
-	kind: ImageKind,
-): ImageSlot[] | undefined {
-	if (kind.type !== "cart") return undefined;
-	if (type === "basic") return ["basic"];
-	if (type === "game") return ["game"];
-	return undefined;
 }
 
 function builtinEntry(
@@ -219,54 +197,6 @@ export interface BulkAddResult {
 	failed: number;
 }
 
-// Ingest one file's canonical pieces into `into`, deduping against `seen` (a set
-// of hashes it updates — including earlier pieces in the same batch). Does the
-// blob + metadata writes. Throws if the file isn't a recognized image. A
-// built-in match is never a reason to skip storing (a later deploy may drop the
-// built-in), so `seen` holds only user hashes.
-async function ingestFile(
-	bytes: Uint8Array,
-	fileName: string,
-	seen: Set<string>,
-	into: StoredEntry[],
-	transient = false,
-): Promise<{ added: number; deduped: number }> {
-	const pieces = canonicalize(bytes, fileName); // throws on an unrecognized file
-	const baseName = fileName.replace(/\.[^./]+$/, "");
-	let added = 0;
-	let deduped = 0;
-	for (const piece of pieces) {
-		const hash = await sha256Hex(piece.bytes);
-		if (seen.has(hash)) {
-			deduped++; // already in the user's library
-			continue;
-		}
-		seen.add(hash);
-		const raw = bytes.subarray(piece.from, piece.to);
-		const fw = detectFirmware(raw);
-		const slots = primeSlots(fw?.type ?? null, piece.kind);
-		const entry: StoredEntry = {
-			id: crypto.randomUUID(),
-			hash,
-			size: piece.bytes.length,
-			createdAt: Date.now(),
-			...(transient && { transient: true }),
-			locator: { backend: "idb", ref: hash },
-			derived: piece.kind,
-			user: {
-				displayName:
-					fw?.name ?? (piece.role ? `${baseName} (${piece.role})` : baseName),
-				...(slots && { slots }),
-			},
-		};
-		await blobs.put(hash, piece.bytes);
-		await putEntry(entry);
-		into.push(entry);
-		added++;
-	}
-	return { added, deduped };
-}
-
 /**
  * Resolve an in-memory image (e.g. one being booted/attached from the file
  * picker) to a library id: return the existing entry's id if its canonical bytes
@@ -328,39 +258,49 @@ export async function addImage(
  * panel. Unrecognized files are counted, not thrown. Slow but live at thousands
  * of items — chunked batching is the lever if that changes.
  */
-export async function addFiles(files: File[]): Promise<BulkAddResult> {
-	await readyLibrary();
-	const seen = new Set(userEntries.value.map((e) => e.hash));
-	let added = 0;
-	let deduped = 0;
-	let failed = 0;
-	let done = 0;
+export function addFiles(files: File[]): Promise<BulkAddResult> {
 	const total = files.length;
 	const startedAt = performance.now();
 	importProgress.value = { phase: "adding", done: 0, total, elapsedMs: 0 };
-	try {
-		for (const file of files) {
-			const into: StoredEntry[] = [];
-			try {
-				const bytes = new Uint8Array(await file.arrayBuffer());
-				const result = await ingestFile(bytes, file.name, seen, into);
-				added += result.added;
-				deduped += result.deduped;
-			} catch {
-				failed++; // unrecognized — canonicalize threw
-			}
-			if (into.length > 0) userEntries.value = [...userEntries.value, ...into];
-			importProgress.value = {
-				phase: "adding",
-				done: ++done,
-				total,
-				elapsedMs: performance.now() - startedAt,
+	return new Promise<BulkAddResult>((resolve) => {
+		// Load existing entries first so the worker's live-appended results land on
+		// top of the full set (the worker independently reads the same IDB snapshot
+		// to dedup; it's the sole writer for the import's duration).
+		void readyLibrary().then(() => {
+			const worker = new Worker(
+				new URL("./import.worker.ts", import.meta.url),
+				{ type: "module" },
+			);
+			const finish = (result: BulkAddResult): void => {
+				importProgress.value = null;
+				worker.terminate();
+				resolve(result);
 			};
-		}
-	} finally {
-		importProgress.value = null;
-	}
-	return { added, deduped, failed };
+			worker.onmessage = (event: MessageEvent<ImportResponse>) => {
+				const message = event.data;
+				if (message.type === "done") {
+					finish({
+						added: message.added,
+						deduped: message.deduped,
+						failed: message.failed,
+					});
+					return;
+				}
+				// Merge the batch of just-written entries so the library fills in live.
+				if (message.newEntries.length > 0) {
+					userEntries.value = [...userEntries.value, ...message.newEntries];
+				}
+				importProgress.value = {
+					phase: "adding",
+					done: message.done,
+					total,
+					elapsedMs: performance.now() - startedAt,
+				};
+			};
+			worker.onerror = () => finish({ added: 0, deduped: 0, failed: total });
+			worker.postMessage({ files } satisfies ImportRequest);
+		});
+	});
 }
 
 /**

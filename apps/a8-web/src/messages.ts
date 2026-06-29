@@ -149,6 +149,11 @@ export const messages = {
 		confirmClear:
 			"Clear the entire library? This removes all uploads and can't be undone.",
 		cleared: "Library cleared",
+		exportLibrary: "Export",
+		importLibrary: "Import",
+		exporting: "Exporting…",
+		compressing: "Compressing…",
+		exportFailed: "Library export failed.",
 		actions: {
 			boot: "Boot",
 			attachDisk: "Attach to D1:",

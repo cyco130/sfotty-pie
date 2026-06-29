@@ -13,11 +13,8 @@ import {
 	removeImage,
 	updateUserMeta,
 } from "../../../images/library.ts";
-import type {
-	ImageEntry,
-	ImageSlot,
-	ImageType,
-} from "../../../images/metadata.ts";
+import { CANON_EXT } from "../../../images/metadata.ts";
+import type { ImageEntry, ImageSlot } from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
 import { useEmu } from "./emu-context.ts";
@@ -49,16 +46,6 @@ function isCar(bytes: Uint8Array): boolean {
 		bytes[3] === 0x54 // T
 	);
 }
-
-// Canonical download extension per type: a cartridge is a `.car`, an OS a raw
-// `.rom`, a disk an `.atr`, an executable a `.xex`. Stored names carry no
-// extension; this is added only on download.
-const CANON_EXT: Record<ImageType, string> = {
-	os: "rom",
-	cart: "car",
-	disk: "atr",
-	xex: "xex",
-};
 
 // The per-type facts, each its own detail row (the kind itself is a separate
 // "Type" row). A cartridge resolves to its full CART_TYPES name; xex has none.

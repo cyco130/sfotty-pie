@@ -14,6 +14,7 @@ import { sha256Hex } from "./hash.ts";
 import type { ImportRequest, ImportResponse } from "./import.worker.ts";
 import { blobs, ingestFile, primeSlots } from "./ingest.ts";
 import type { ImageEntry, StoredEntry, UserMeta } from "./metadata.ts";
+import type { ZipRequest, ZipResponse } from "./zip.worker.ts";
 import {
 	clearAll,
 	deleteEntry,
@@ -24,14 +25,18 @@ import {
 } from "./store.ts";
 
 /**
- * A bulk import's phase: `preparing` while the dropped folder tree is walked
- * (no count yet), then `adding` while files are ingested. `elapsedMs` is the
- * ingest time so far — computed here (not in render) so an indicator can derive
- * an ETA purely.
+ * A long-running library task's phase, for the top-level indicator. Import:
+ * `preparing` while the dropped folder tree is walked (no count yet), then
+ * `adding` while files are ingested. Export: `exporting` while images are read +
+ * decompressed, then `compressing` (no count) while the zip is packed.
+ * `elapsedMs` is the time so far — computed here (not in render) so an indicator
+ * can derive an ETA purely.
  */
 export type ImportProgress =
 	| { phase: "preparing" }
-	| { phase: "adding"; done: number; total: number; elapsedMs: number };
+	| { phase: "adding"; done: number; total: number; elapsedMs: number }
+	| { phase: "exporting"; done: number; total: number; elapsedMs: number }
+	| { phase: "compressing" };
 
 /**
  * Live progress of an in-flight bulk import, or null when none is running.
@@ -335,6 +340,120 @@ export function addFiles(
 			};
 			worker.onerror = () => finish({ added: 0, deduped: 0, failed: total });
 			worker.postMessage({ files, tags } satisfies ImportRequest);
+		});
+	});
+}
+
+/**
+ * Export the curated library to a `.zip` Blob: a manifest plus every
+ * non-transient image's decompressed ROM bytes under a human-friendly filename.
+ * Runs in the zip worker (the zip library lives there only); the caller triggers
+ * the download.
+ */
+export function exportLibrary(): Promise<Blob> {
+	const startedAt = performance.now();
+	importProgress.value = {
+		phase: "exporting",
+		done: 0,
+		total: 0,
+		elapsedMs: 0,
+	};
+	return new Promise<Blob>((resolve, reject) => {
+		void readyLibrary().then(() => {
+			const worker = new Worker(new URL("./zip.worker.ts", import.meta.url), {
+				type: "module",
+			});
+			const settle = (fn: () => void): void => {
+				importProgress.value = null;
+				worker.terminate();
+				fn();
+			};
+			worker.onmessage = (event: MessageEvent<ZipResponse>) => {
+				const message = event.data;
+				if (message.type === "exportProgress") {
+					importProgress.value = {
+						phase: "exporting",
+						done: message.done,
+						total: message.total,
+						elapsedMs: performance.now() - startedAt,
+					};
+				} else if (message.type === "compressing") {
+					importProgress.value = { phase: "compressing" };
+				} else if (message.type === "exported") {
+					const blob = new Blob([message.bytes as BlobPart], {
+						type: "application/zip",
+					});
+					settle(() => resolve(blob));
+				} else if (message.type === "error") {
+					settle(() => reject(new Error(message.message)));
+				}
+			};
+			worker.onerror = () =>
+				settle(() => reject(new Error("library export failed")));
+			worker.postMessage({ type: "export" } satisfies ZipRequest);
+		});
+	});
+}
+
+/**
+ * Import a previously exported library `.zip`: re-ingest each bundled ROM
+ * (recomputing hash/derived/firmware) and apply the manifest's authored
+ * metadata + built-in overrides. Mirrors {@link addFiles} — runs in the zip
+ * worker, fills the library live, and drives {@link importProgress}. Entries
+ * already present (by content hash) are deduped, not duplicated.
+ */
+export function importZip(zip: Uint8Array): Promise<BulkAddResult> {
+	const startedAt = performance.now();
+	importProgress.value = { phase: "preparing" };
+	return new Promise<BulkAddResult>((resolve) => {
+		void readyLibrary().then(() => {
+			const worker = new Worker(new URL("./zip.worker.ts", import.meta.url), {
+				type: "module",
+			});
+			const finish = (result: BulkAddResult): void => {
+				importProgress.value = null;
+				worker.terminate();
+				resolve(result);
+			};
+			worker.onmessage = async (event: MessageEvent<ZipResponse>) => {
+				const message = event.data;
+				if (message.type === "done") {
+					// Pick up any built-in overrides the worker applied to IndexedDB.
+					try {
+						const overrides = await loadOverrides();
+						builtinOverrides.value = new Map(
+							overrides.map((o) => [o.id, o.user]),
+						);
+					} catch {
+						// Overrides unavailable this session; imported images still landed.
+					}
+					finish({
+						added: message.added,
+						deduped: message.deduped,
+						failed: message.failed,
+					});
+					return;
+				}
+				if (message.type === "error") {
+					finish({ added: 0, deduped: 0, failed: 0 });
+					return;
+				}
+				if (message.type === "progress") {
+					if (message.newEntries.length > 0) {
+						userEntries.value = [...userEntries.value, ...message.newEntries];
+					}
+					importProgress.value = {
+						phase: "adding",
+						done: message.done,
+						total: message.total,
+						elapsedMs: performance.now() - startedAt,
+					};
+				}
+			};
+			worker.onerror = () => finish({ added: 0, deduped: 0, failed: 0 });
+			worker.postMessage({ type: "import", zip } satisfies ZipRequest, [
+				zip.buffer,
+			]);
 		});
 	});
 }

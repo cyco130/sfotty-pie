@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Icon } from "../../../icon.tsx";
 import {
 	addFiles,
+	exportLibrary,
 	importProgress,
+	importZip,
 	libraryEntries,
 	readyLibrary,
 } from "../../../images/library.ts";
@@ -196,7 +198,9 @@ export default function LibraryPage() {
 	const { host } = useEmu();
 	const inputRef = useRef<HTMLInputElement>(null);
 	const folderInputRef = useRef<HTMLInputElement>(null);
+	const zipInputRef = useRef<HTMLInputElement>(null);
 	const [dragging, setDragging] = useState(false);
+	const [exporting, setExporting] = useState(false);
 	// Tags stamped onto everything imported next (applies to drop + both pickers).
 	const [importTags, setImportTags] = useState("");
 
@@ -250,6 +254,43 @@ export default function LibraryPage() {
 		}
 		// takes over the indicator, clears it; stamps the tags entered above
 		const result = await addFiles(files, parseTags(importTags));
+		const seconds = (performance.now() - start) / 1000;
+		host.toast(
+			messages.library.uploaded(
+				result.added,
+				result.deduped,
+				result.failed,
+				seconds,
+			),
+			result.failed > 0 ? "warning" : "info",
+		);
+	};
+
+	// Download the whole curated library as a `.zip` (manifest + ROM bytes).
+	const runExport = async (): Promise<void> => {
+		if (exporting) return;
+		setExporting(true);
+		try {
+			const blob = await exportLibrary();
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = "sfotty-pie-a8-library.zip";
+			anchor.click();
+			URL.revokeObjectURL(url);
+		} catch {
+			host.toast(messages.library.exportFailed, "warning");
+		} finally {
+			setExporting(false);
+		}
+	};
+
+	// Re-ingest a previously exported library `.zip`, applying its metadata.
+	const runZipImport = async (file: File): Promise<void> => {
+		if (importProgress.value) return; // an import is already running
+		const start = performance.now();
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		const result = await importZip(bytes);
 		const seconds = (performance.now() - start) / 1000;
 		host.toast(
 			messages.library.uploaded(
@@ -619,15 +660,43 @@ export default function LibraryPage() {
 					</div>
 				)}
 
-				{hasUploads && (
+				<div class="mt-1 flex items-center gap-3 text-xs">
 					<button
 						type="button"
-						class="mt-1 self-start text-xs text-red-600 hover:underline"
-						onClick={() => host.clearLibrary()}
+						disabled={exporting}
+						class="text-neutral-600 hover:underline disabled:opacity-40"
+						onClick={() => void runExport()}
 					>
-						{messages.library.clear}
+						{messages.library.exportLibrary}
 					</button>
-				)}
+					<button
+						type="button"
+						class="text-neutral-600 hover:underline"
+						onClick={() => zipInputRef.current?.click()}
+					>
+						{messages.library.importLibrary}
+					</button>
+					{hasUploads && (
+						<button
+							type="button"
+							class="ml-auto text-red-600 hover:underline"
+							onClick={() => host.clearLibrary()}
+						>
+							{messages.library.clear}
+						</button>
+					)}
+				</div>
+				<input
+					ref={zipInputRef}
+					type="file"
+					accept=".zip"
+					class="hidden"
+					onChange={(event) => {
+						const file = event.currentTarget.files?.[0];
+						event.currentTarget.value = ""; // allow re-picking the same file
+						if (file) void runZipImport(file);
+					}}
+				/>
 			</div>
 		</PanelFrame>
 	);

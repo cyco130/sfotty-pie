@@ -12,13 +12,22 @@ export function ImportProgress() {
 	const progress = importProgress.value;
 	if (!progress) return null;
 
-	const preparing = progress.phase === "preparing";
-	const pct = preparing
-		? 100
-		: Math.round((progress.done / progress.total) * 100);
-	// ETA from the rate so far (elapsed per file × files remaining).
+	// `preparing` / `compressing` are indeterminate (no count, pulsing full bar);
+	// `adding` / `exporting` are counted with an ETA.
+	const counted = progress.phase === "adding" || progress.phase === "exporting";
+	const label = {
+		preparing: messages.library.preparing,
+		adding: messages.library.adding,
+		exporting: messages.library.exporting,
+		compressing: messages.library.compressing,
+	}[progress.phase];
+	const pct =
+		counted && progress.total > 0
+			? Math.round((progress.done / progress.total) * 100)
+			: 100;
+	// ETA from the rate so far (elapsed per item × items remaining).
 	const eta =
-		!preparing && progress.done > 0
+		counted && progress.done > 0
 			? (progress.elapsedMs / 1000 / progress.done) *
 				(progress.total - progress.done)
 			: 0;
@@ -26,10 +35,8 @@ export function ImportProgress() {
 	return (
 		<div class="shrink-0 border-b border-neutral-800 bg-neutral-900 px-3 py-1 text-xs text-neutral-300">
 			<div class="flex items-center justify-between gap-2">
-				<span>
-					{preparing ? messages.library.preparing : messages.library.adding}
-				</span>
-				{!preparing && (
+				<span>{label}</span>
+				{counted && (
 					<span>
 						{progress.done} / {progress.total}
 						{eta > 0 ? ` · ${messages.library.eta(eta)}` : ""}
@@ -38,7 +45,7 @@ export function ImportProgress() {
 			</div>
 			<div class="mt-1 h-1 w-full overflow-hidden rounded bg-neutral-700">
 				<div
-					class={`h-full rounded bg-emerald-500 ${preparing ? "animate-pulse" : ""}`}
+					class={`h-full rounded bg-emerald-500 ${counted ? "" : "animate-pulse"}`}
 					style={{ width: `${pct}%` }}
 				/>
 			</div>

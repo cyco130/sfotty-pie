@@ -114,26 +114,52 @@ type MatrixBase =
 	| "F3"
 	| "F4";
 
-// A matrix key reached by `on`, expanded to its four exact-modifier bindings:
-// plain / Shift / Ctrl / Ctrl+Shift → PRESS_[CONTROL_][SHIFT_]<base>. `extra`
-// carries a held base modifier onto all four (e.g. Option for the mac F1–F4).
+// Bases whose Ctrl+Shift press can't be scanned on real hardware (base scan code
+// $00–$07 / $10–$17), so it does nothing — its `CONTROL_SHIFT` binding is omitted
+// (a no-op binding is pointless; the keystroke is left to fall through to nothing).
+const DEAD_CTRL_SHIFT: ReadonlySet<MatrixBase> = new Set<MatrixBase>([
+	"L",
+	"J",
+	"SEMICOLON",
+	"F1",
+	"F2",
+	"K",
+	"PLUS",
+	"ASTERISK",
+	"V",
+	"HELP",
+	"C",
+	"F3",
+	"F4",
+	"B",
+	"X",
+	"Z",
+]);
+
+// A matrix key reached by `on`, expanded to its exact-modifier bindings: plain /
+// Shift / Ctrl / Ctrl+Shift → PRESS_[CONTROL_][SHIFT_]<base>. `extra` carries a
+// held base modifier onto all of them (e.g. Option for the mac F1–F4). The
+// Ctrl+Shift variant is dropped for bases that can't be scanned (see above).
 function modVariants(
 	on: KeyId,
 	base: MatrixBase,
 	extra: Partial<Pick<Binding, "shift" | "ctrl" | "alt" | "meta">> = {},
 ): Binding[] {
-	return [
+	const out: Binding[] = [
 		{ on, ...extra, command: `PRESS_${base}` },
 		{ on, ...extra, shift: true, command: `PRESS_SHIFT_${base}` },
 		{ on, ...extra, ctrl: true, command: `PRESS_CONTROL_${base}` },
-		{
+	];
+	if (!DEAD_CTRL_SHIFT.has(base)) {
+		out.push({
 			on,
 			...extra,
 			ctrl: true,
 			shift: true,
 			command: `PRESS_CONTROL_SHIFT_${base}`,
-		},
-	];
+		});
+	}
+	return out;
 }
 
 // A 1200XL function key (F1–F4) reached by a host navigation key whose
@@ -141,11 +167,12 @@ function modVariants(
 // = line-start = Shift+F3, …). So host Shift is INVERTED — plain → Shift+Fn,
 // Shift → plain Fn — while Ctrl stays direct.
 function navKey(on: KeyId, base: "F1" | "F2" | "F3" | "F4"): Binding[] {
+	// F1–F4's Ctrl+Shift can't be scanned on real hardware, so there's no
+	// Ctrl+Shift variant here.
 	return [
 		{ on, command: `PRESS_SHIFT_${base}` },
 		{ on, shift: true, command: `PRESS_${base}` },
 		{ on, ctrl: true, command: `PRESS_CONTROL_${base}` },
-		{ on, ctrl: true, shift: true, command: `PRESS_CONTROL_SHIFT_${base}` },
 	];
 }
 
@@ -157,7 +184,7 @@ function altCtrl(code: string, base: MatrixBase, shift = true): Binding[] {
 	const out: Binding[] = [
 		{ on: { code }, alt: true, command: `PRESS_CONTROL_${base}` },
 	];
-	if (shift) {
+	if (shift && !DEAD_CTRL_SHIFT.has(base)) {
 		out.push({
 			on: { code },
 			alt: true,
@@ -188,20 +215,19 @@ const base: Binding[] = [
 	{ on: { key: "F8" }, command: "PRESS_BREAK" },
 	{ on: { key: "Pause" }, command: "PRESS_BREAK" },
 
-	// Named Atari keys — each with all four Ctrl/Shift variants. Help/Inverse/Esc
-	// moved off the browser/OS-grabbed F1/F6/F8 to free F-keys; Esc and Tab also
-	// keep their natural keys, the F-key home adding the reliable Ctrl/Shift combos
-	// (notably Ctrl+F9 → Ctrl+Tab, which Ctrl+Tab itself can't reach anywhere). Esc
-	// takes F11 (dead on Mac) since it's covered elsewhere too; Inverse, which
-	// isn't, takes F12.
+	// Named Atari keys — each with all four Ctrl/Shift variants. Caps/Tab/Esc/
+	// Inverse have no natural F-key home, so they take F-keys the browser leaves
+	// alone (F7/F9/F11/F12); Esc and Tab keep their own keys too, the F-key adding
+	// the reliable Ctrl/Shift combos — notably Ctrl+F9 → Atari Ctrl+Tab, which the
+	// real Ctrl+Tab can't reach.
 	...modVariants({ key: "F7" }, "CAPS"),
 	...modVariants({ key: "F9" }, "TAB"),
-	...modVariants({ key: "F10" }, "HELP"),
-	// Help is also double-bound to F1: Shift+F10 is the Windows context-menu key
-	// (not preventable), so Shift+Help (cursor home) would be lost there — but
-	// Shift+F1 is clear on both OSes. (Plain F1 is browser Help on Windows; that's
-	// fine, F10 is the primary home.)
+	// Help's natural home is F1 — F2–F5 are the console keys (Option/Select/Start/
+	// Reset), so F1 extends that row as on the XE. Plain F1 is browser Help on
+	// Windows, so F10 is bound too as a reliable alternate; and Shift+F1 (clear
+	// everywhere) covers Shift+Help, since Windows Shift+F10 is the context menu.
 	...modVariants({ key: "F1" }, "HELP"),
+	...modVariants({ key: "F10" }, "HELP"),
 	...modVariants({ key: "F11" }, "ESC"),
 	...modVariants({ key: "F12" }, "INVERSE_VIDEO"),
 	...modVariants({ key: "Escape" }, "ESC"),
@@ -222,8 +248,9 @@ const base: Binding[] = [
 		note: "Insert char (Ctrl+>)",
 	},
 	{ on: { key: "Insert" }, shift: true, command: "PRESS_SHIFT_GREATER_THAN" },
-	// (Home was Clear; it's now a navigation key → F3 below. Clear is still
-	// reachable as Ctrl+< / Shift+Ctrl+,.)
+	// (Home was Clear; it's now a navigation key → F3 below. Clear stays reachable
+	// as Ctrl+-, since the Atari < key sits at the - position positionally — Ctrl
+	// resolves by code, so host Ctrl+< would hit the , key instead.)
 
 	// Shift keys — by `code` for left/right location. Shift-agnostic (a Shift key
 	// can't require Shift up: pressing it sets Shift).

@@ -33,6 +33,14 @@ interface CommandSpec {
 	matrix?: boolean;
 }
 
+// On real hardware the keyboard matrix can't scan a key whose base scan code is
+// $00–$07 or $10–$17 while both Ctrl and Shift are held, so the press does
+// nothing. Those Ctrl+Shift commands ($C0–$C7, $D0–$D7 — bits $08 and $20 both
+// clear) stay bound (harmlessly) but are hidden from the palette, where a no-op
+// is just clutter.
+const isDeadCtrlShift = (code: number): boolean =>
+	code >= 0xc0 && (code & 0x28) === 0;
+
 /** Factory for the POKEY matrix key presses, which differ only by key code. The
  *  matrix is one shared register, so every key releases the same way. Palette
  *  picks pulse a single keystroke. */
@@ -41,6 +49,7 @@ const press = (code: number, label: LabelKey): CommandSpec => ({
 	run: ({ emulator }) => emulator.machine.pokeyKeyDown(code),
 	release: ({ emulator }) => emulator.machine.pokeyKeyUp(),
 	matrix: true,
+	...(isDeadCtrlShift(code) && { palette: false }),
 });
 
 export const commands = {

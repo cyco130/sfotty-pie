@@ -51,8 +51,22 @@ test("nav keys → 1200XL F1–F4 with inverted Shift (universal)", () => {
 	expect(resolve({ key: "PageUp", shift: true })).toBe("PRESS_F1");
 	expect(resolve({ key: "Home" })).toBe("PRESS_SHIFT_F3");
 	expect(resolve({ key: "Home", ctrl: true })).toBe("PRESS_CONTROL_F3");
-	expect(resolve({ key: "End", ctrl: true, shift: true })).toBe(
-		"PRESS_CONTROL_SHIFT_F4",
+	expect(resolve({ key: "End", ctrl: true })).toBe("PRESS_CONTROL_F4");
+});
+
+test("unscannable Ctrl+Shift combos get no binding", () => {
+	// F1–F4 and the matrix keys L/J/;/K/+/*/V/C/B/X/Z can't be scanned with both
+	// Ctrl and Shift, so the Ctrl+Shift variant is dropped.
+	expect(resolve({ key: "End", ctrl: true, shift: true })).toBeNull(); // → F4
+	expect(
+		resolve({ code: "KeyL", ctrl: true, shift: true }, "positional"),
+	).toBeNull();
+	expect(
+		resolve({ code: "Semicolon", ctrl: true, shift: true }, "positional"),
+	).toBeNull();
+	// A scannable key keeps its Ctrl+Shift binding.
+	expect(resolve({ code: "KeyA", ctrl: true, shift: true }, "positional")).toBe(
+		"PRESS_CONTROL_SHIFT_A",
 	);
 });
 

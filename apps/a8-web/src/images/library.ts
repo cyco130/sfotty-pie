@@ -291,7 +291,10 @@ export async function addImage(
  * panel. Unrecognized files are counted, not thrown. Slow but live at thousands
  * of items — chunked batching is the lever if that changes.
  */
-export function addFiles(files: File[]): Promise<BulkAddResult> {
+export function addFiles(
+	files: File[],
+	tags: string[] = [],
+): Promise<BulkAddResult> {
 	const total = files.length;
 	const startedAt = performance.now();
 	importProgress.value = { phase: "adding", done: 0, total, elapsedMs: 0 };
@@ -331,7 +334,7 @@ export function addFiles(files: File[]): Promise<BulkAddResult> {
 				};
 			};
 			worker.onerror = () => finish({ added: 0, deduped: 0, failed: total });
-			worker.postMessage({ files } satisfies ImportRequest);
+			worker.postMessage({ files, tags } satisfies ImportRequest);
 		});
 	});
 }

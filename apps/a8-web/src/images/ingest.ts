@@ -40,6 +40,7 @@ export async function ingestFile(
 	seen: Set<string>,
 	into: StoredEntry[],
 	transient = false,
+	tags: string[] = [],
 ): Promise<{ added: number; deduped: number }> {
 	const pieces = canonicalize(bytes, fileName); // throws on an unrecognized file
 	const baseName = fileName.replace(/\.[^./]+$/, "");
@@ -68,6 +69,7 @@ export async function ingestFile(
 				displayName:
 					fw?.name ?? (piece.role ? `${baseName} (${piece.role})` : baseName),
 				...(slots && { slots }),
+				...(tags.length > 0 && { tags }),
 			},
 		};
 		await blobs.put(hash, piece.bytes);

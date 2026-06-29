@@ -39,6 +39,18 @@ type OsFamily = keyof typeof OS_FAMILY;
 const osFamilyOf = (sizeClass: number): OsFamily =>
 	sizeClass === 10 ? "400-800" : "xl-xe";
 
+// Comma-separated tag text → normalized tags (trimmed, lower-cased, deduped).
+function parseTags(text: string): string[] {
+	return [
+		...new Set(
+			text
+				.split(",")
+				.map((t) => t.trim().toLowerCase())
+				.filter(Boolean),
+		),
+	];
+}
+
 // The attribute filters a detail value can set (URL params); only meaningful
 // within the matching type-filtered view.
 type AttrParam = "os" | "cartType" | "sectors" | "bps";
@@ -185,6 +197,8 @@ export default function LibraryPage() {
 	const inputRef = useRef<HTMLInputElement>(null);
 	const folderInputRef = useRef<HTMLInputElement>(null);
 	const [dragging, setDragging] = useState(false);
+	// Tags stamped onto everything imported next (applies to drop + both pickers).
+	const [importTags, setImportTags] = useState("");
 
 	// `webkitdirectory` makes the second picker choose a folder (all files in it).
 	// Set imperatively — it isn't in the JSX input attribute types.
@@ -195,6 +209,7 @@ export default function LibraryPage() {
 		"q",
 		"type",
 		"source",
+		"tag",
 		"page",
 		"os",
 		"cartType",
@@ -233,7 +248,8 @@ export default function LibraryPage() {
 			importProgress.value = null;
 			return;
 		}
-		const result = await addFiles(files); // takes over the indicator, clears it
+		// takes over the indicator, clears it; stamps the tags entered above
+		const result = await addFiles(files, parseTags(importTags));
 		const seconds = (performance.now() - start) / 1000;
 		host.toast(
 			messages.library.uploaded(
@@ -255,12 +271,17 @@ export default function LibraryPage() {
 			? params.source
 			: "";
 	const query = params.q.trim().toLowerCase();
+	const tagFilter = params.tag;
 
 	// Auto-added (transient) images are hidden from the curated list; recents
 	// surface them later.
 	const allEntries = libraryEntries.value;
 	const entries = allEntries.filter((entry) => !entry.transient);
 	const hasUploads = allEntries.some((entry) => entry.source === "user");
+	// Distinct tags across the curated set — the tag filter's options.
+	const tagOptions = [
+		...new Set(entries.flatMap((e) => e.user.tags ?? [])),
+	].sort();
 
 	// Fixed alphabetical order (sorting was dropped — direction wasn't
 	// meaningful); filtering below preserves order, so typing never re-sorts.
@@ -275,6 +296,7 @@ export default function LibraryPage() {
 	const filtered = sorted.filter((e) => {
 		if (typeFilter !== "" && e.derived.type !== typeFilter) return false;
 		if (sourceFilter !== "" && e.source !== sourceFilter) return false;
+		if (tagFilter !== "" && !e.user.tags?.includes(tagFilter)) return false;
 		if (query !== "" && !e.user.displayName.toLowerCase().includes(query))
 			return false;
 		// Attribute filters — apply only to entries of the matching kind.
@@ -393,6 +415,17 @@ export default function LibraryPage() {
 					/>
 				</div>
 
+				<input
+					type="text"
+					value={importTags}
+					placeholder={messages.library.importTags}
+					autocapitalize="off"
+					autocomplete="off"
+					spellcheck={false}
+					class="w-full rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+					onInput={(event) => setImportTags(event.currentTarget.value)}
+				/>
+
 				<div class="flex flex-col gap-2">
 					<input
 						type="text"
@@ -406,11 +439,11 @@ export default function LibraryPage() {
 							setParams({ q: event.currentTarget.value || null, page: null })
 						}
 					/>
-					<div class="flex gap-2">
+					<div class="flex flex-wrap gap-2">
 						<select
 							aria-label={messages.library.columns.type}
 							value={typeFilter}
-							class="flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+							class="min-w-32 flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
 							onChange={(event) =>
 								// Changing the type clears any attribute filters — they
 								// only apply within their own type.
@@ -434,7 +467,7 @@ export default function LibraryPage() {
 						<select
 							aria-label={messages.library.columns.source}
 							value={sourceFilter}
-							class="flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+							class="min-w-32 flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
 							onChange={(event) =>
 								setParams({
 									source: event.currentTarget.value || null,
@@ -446,6 +479,26 @@ export default function LibraryPage() {
 							<option value="builtin">{messages.library.sourceBuiltin}</option>
 							<option value="user">{messages.library.sourceUser}</option>
 						</select>
+						{tagOptions.length > 0 && (
+							<select
+								aria-label={messages.library.tags.label}
+								value={tagFilter}
+								class="min-w-32 flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+								onChange={(event) =>
+									setParams({
+										tag: event.currentTarget.value || null,
+										page: null,
+									})
+								}
+							>
+								<option value="">{messages.library.allTags}</option>
+								{tagOptions.map((tag) => (
+									<option key={tag} value={tag}>
+										{tag}
+									</option>
+								))}
+							</select>
+						)}
 					</div>
 					{attrFilters.length > 0 && (
 						<div class="flex flex-wrap gap-1.5">

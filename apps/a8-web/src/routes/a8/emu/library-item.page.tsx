@@ -5,6 +5,7 @@ import {
 	type FirmwareInfo,
 } from "@sfotty-pie/a8";
 import { useEffect, useState } from "preact/hooks";
+import { Icon } from "../../../icon.tsx";
 import {
 	getImage,
 	getImageBytes,
@@ -154,6 +155,64 @@ function NameEditor({
 	);
 }
 
+// Free-form tags as removable chips plus an add field. Tags are normalized
+// (trimmed, lower-cased, deduped); changes apply immediately (the chip is the
+// feedback). Keyed by id by the caller so the draft resets between images.
+function TagEditor({ entry }: { entry: ImageEntry }) {
+	const [draft, setDraft] = useState("");
+	const tags = entry.user.tags ?? [];
+	const add = (raw: string): void => {
+		const tag = raw.trim().toLowerCase();
+		setDraft("");
+		if (tag && !tags.includes(tag)) {
+			void updateUserMeta(entry.id, { tags: [...tags, tag] });
+		}
+	};
+	const remove = (tag: string): void => {
+		void updateUserMeta(entry.id, { tags: tags.filter((t) => t !== tag) });
+	};
+	return (
+		<div class="flex flex-col gap-1">
+			<span class="text-xs text-neutral-500">
+				{messages.library.tags.label}
+			</span>
+			<div class="flex flex-wrap items-center gap-1">
+				{tags.map((tag) => (
+					<span
+						key={tag}
+						class="inline-flex items-center gap-1 rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700"
+					>
+						{tag}
+						<button
+							type="button"
+							aria-label={messages.library.tags.remove}
+							class="text-neutral-400 hover:text-neutral-700"
+							onClick={() => remove(tag)}
+						>
+							<Icon name="close" class="size-3" />
+						</button>
+					</span>
+				))}
+				<input
+					type="text"
+					value={draft}
+					placeholder={messages.library.tags.add}
+					autocapitalize="off"
+					class="min-w-24 flex-1 rounded border border-neutral-300 px-2 py-0.5 text-xs text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+					onInput={(event) => setDraft(event.currentTarget.value)}
+					onKeyDown={(event) => {
+						if (event.key === "Enter" || event.key === ",") {
+							event.preventDefault();
+							add(draft);
+						}
+					}}
+					onBlur={() => add(draft)}
+				/>
+			</div>
+		</div>
+	);
+}
+
 export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	const { host } = useEmu();
 	const [ready, setReady] = useState(false);
@@ -270,6 +329,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 					entry={entry}
 					toast={(message) => host.toast(message)}
 				/>
+				<TagEditor key={`tags-${entry.id}`} entry={entry} />
 
 				<div class="flex flex-col gap-1.5">
 					<Detail

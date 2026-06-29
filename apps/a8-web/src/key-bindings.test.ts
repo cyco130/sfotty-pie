@@ -1,10 +1,7 @@
 import { expect, test } from "vitest";
 import {
-	bindingsForMode,
-	defaultBindings,
 	defaultBindingSet,
 	labelFor,
-	type KeyboardMode,
 	type KeyEventLike,
 	resolveBinding,
 } from "./key-bindings.ts";
@@ -22,12 +19,10 @@ function ev(partial: Partial<KeyEventLike>): KeyEventLike {
 	};
 }
 
-function resolve(
-	event: Partial<KeyEventLike>,
-	mode: KeyboardMode = "character",
-	mac = false,
-): string | null {
-	return resolveBinding(defaultBindings(mac, mode), ev(event))?.command ?? null;
+// Resolve an event against the flat default set (one set; the mode lives in the
+// keyboard, not the table — see keyboard.test.ts for character-channel behavior).
+function resolve(event: Partial<KeyEventLike>, mac = false): string | null {
+	return resolveBinding(defaultBindingSet(mac), ev(event))?.command ?? null;
 }
 
 test("Shift-agnostic device keys fire with or without Shift", () => {
@@ -61,14 +56,10 @@ test("unscannable Ctrl+Shift combos get no binding", () => {
 	// F1–F4 and the matrix keys L/J/;/K/+/*/V/C/B/X/Z can't be scanned with both
 	// Ctrl and Shift, so the Ctrl+Shift variant is dropped.
 	expect(resolve({ key: "End", ctrl: true, shift: true })).toBeNull(); // → F4
-	expect(
-		resolve({ code: "KeyL", ctrl: true, shift: true }, "positional"),
-	).toBeNull();
-	expect(
-		resolve({ code: "Semicolon", ctrl: true, shift: true }, "positional"),
-	).toBeNull();
+	expect(resolve({ code: "KeyL", ctrl: true, shift: true })).toBeNull();
+	expect(resolve({ code: "Semicolon", ctrl: true, shift: true })).toBeNull();
 	// A scannable key keeps its Ctrl+Shift binding.
-	expect(resolve({ code: "KeyA", ctrl: true, shift: true }, "positional")).toBe(
+	expect(resolve({ code: "KeyA", ctrl: true, shift: true })).toBe(
 		"PRESS_CONTROL_SHIFT_A",
 	);
 });
@@ -77,46 +68,26 @@ test("Cmd (mac) / Alt (win) on -/= reach the Shift+Clear / insert-line forms", (
 	// The Atari </ > (Clear / Insert) sit at the -/= positions. Their Ctrl forms
 	// are positional (Ctrl+-/Ctrl+=), but host Shift+-/= type characters, so the
 	// Shift forms have no positional route — Cmd/Alt supply them.
-	expect(resolve({ code: "Minus", meta: true }, "character", true)).toBe(
+	expect(resolve({ code: "Minus", meta: true }, true)).toBe(
 		"PRESS_SHIFT_LESS_THAN",
 	);
-	expect(resolve({ code: "Equal", meta: true }, "character", true)).toBe(
+	expect(resolve({ code: "Equal", meta: true }, true)).toBe(
 		"PRESS_SHIFT_GREATER_THAN",
 	);
 	// Shift-agnostic, so Cmd++ (Cmd+Shift+=) lands the same as Cmd+=.
-	expect(
-		resolve({ code: "Equal", meta: true, shift: true }, "character", true),
-	).toBe("PRESS_SHIFT_GREATER_THAN");
-	// Windows uses Alt for the same; the modifier doesn't cross platforms.
-	expect(resolve({ code: "Minus", alt: true }, "character", false)).toBe(
-		"PRESS_SHIFT_LESS_THAN",
-	);
-	expect(resolve({ code: "Equal", alt: true }, "character", false)).toBe(
+	expect(resolve({ code: "Equal", meta: true, shift: true }, true)).toBe(
 		"PRESS_SHIFT_GREATER_THAN",
 	);
-	expect(resolve({ code: "Minus", alt: true }, "character", true)).toBeNull();
-	expect(resolve({ code: "Minus", meta: true }, "character", false)).toBeNull();
+	// Windows uses Alt for the same; the modifier doesn't cross platforms.
+	expect(resolve({ code: "Minus", alt: true })).toBe("PRESS_SHIFT_LESS_THAN");
+	expect(resolve({ code: "Equal", alt: true })).toBe(
+		"PRESS_SHIFT_GREATER_THAN",
+	);
+	expect(resolve({ code: "Minus", alt: true }, true)).toBeNull();
+	expect(resolve({ code: "Minus", meta: true })).toBeNull();
 	// The Ctrl forms still resolve positionally (unchanged by the Cmd/Alt route).
-	expect(resolve({ code: "Minus", ctrl: true }, "positional")).toBe(
+	expect(resolve({ code: "Minus", ctrl: true })).toBe(
 		"PRESS_CONTROL_LESS_THAN",
-	);
-});
-
-test("the flat default set narrows to the per-mode views", () => {
-	const set = defaultBindingSet(false);
-	const hasKeyA = (bs: { on: object }[]) =>
-		bs.some((b) => "code" in b.on && b.on.code === "KeyA");
-	// The positional layer (character keys by code) lives in the flat set and the
-	// positional view, but not the character view.
-	expect(hasKeyA(set)).toBe(true);
-	expect(hasKeyA(bindingsForMode(set, "positional"))).toBe(true);
-	expect(hasKeyA(bindingsForMode(set, "character"))).toBe(false);
-	// The per-mode view matches the dedicated helper (defaultBindings).
-	expect(bindingsForMode(set, "character")).toEqual(
-		defaultBindings(false, "character"),
-	);
-	expect(bindingsForMode(set, "positional")).toEqual(
-		defaultBindings(false, "positional"),
 	);
 });
 
@@ -132,36 +103,23 @@ test("a committed label wins over the live layout (editable legends)", () => {
 	).toBe("★");
 });
 
-test("space is bound in the positional layer (plain / Shift / Ctrl)", () => {
-	expect(resolve({ code: "Space" }, "positional")).toBe("PRESS_SPACE");
-	expect(resolve({ code: "Space", shift: true }, "positional")).toBe(
-		"PRESS_SHIFT_SPACE",
-	);
-	// Ctrl+Space resolves by code — the path the character mode uses for Ctrl too.
-	expect(resolve({ code: "Space", ctrl: true }, "positional")).toBe(
-		"PRESS_CONTROL_SPACE",
-	);
-	// In Character mode space belongs to the character channel, not a binding.
-	expect(resolve({ code: "Space", key: " " }, "character")).toBeNull();
-});
-
-test("positional char keys are mode-gated", () => {
-	// Character mode: the char keys belong to the character channel, not bindings.
-	expect(resolve({ code: "KeyA", key: "a" }, "character")).toBeNull();
-	// Positional mode: matched by physical code, with exact modifiers.
-	expect(resolve({ code: "KeyA", key: "a" }, "positional")).toBe("PRESS_A");
-	expect(resolve({ code: "KeyA", key: "a", shift: true }, "positional")).toBe(
-		"PRESS_SHIFT_A",
-	);
+test("character keys are bound by physical code (Ctrl path + Positional mode)", () => {
+	// One flat set binds the character keys by code: Positional mode uses these
+	// directly, and Character mode reaches them for Ctrl combos and fallback.
+	expect(resolve({ code: "KeyA" })).toBe("PRESS_A");
+	expect(resolve({ code: "KeyA", shift: true })).toBe("PRESS_SHIFT_A");
+	expect(resolve({ code: "KeyA", ctrl: true })).toBe("PRESS_CONTROL_A");
+	expect(resolve({ code: "Space" })).toBe("PRESS_SPACE");
+	expect(resolve({ code: "Space", shift: true })).toBe("PRESS_SHIFT_SPACE");
+	expect(resolve({ code: "Space", ctrl: true })).toBe("PRESS_CONTROL_SPACE");
 });
 
 test("Ctrl combos resolve by code, not produced character", () => {
-	// The keyboard resolves Ctrl combos against the positional layer — distinct
-	// physical keys give distinct commands even when the OS reports the same key
-	// (Turkish Ctrl+\ vs Ctrl+, both report ",").
-	const pos = defaultBindings(false, "positional");
+	// Distinct physical keys give distinct commands even when the OS reports the
+	// same key (Turkish Ctrl+\ vs Ctrl+, both report ",").
+	const set = defaultBindingSet(false);
 	const cmd = (code: string) =>
-		resolveBinding(pos, ev({ code, ctrl: true }))?.command;
+		resolveBinding(set, ev({ code, ctrl: true }))?.command;
 	expect(cmd("Backslash")).toBe("PRESS_CONTROL_ASTERISK");
 	expect(cmd("Comma")).toBe("PRESS_CONTROL_COMMA");
 	expect(cmd("Semicolon")).toBe("PRESS_CONTROL_SEMICOLON");
@@ -169,33 +127,25 @@ test("Ctrl combos resolve by code, not produced character", () => {
 
 test("Windows aliases browser-grabbed Ctrl combos onto Alt", () => {
 	// Alt stands in for Ctrl on the grabbed keys only (non-mac).
-	expect(resolve({ code: "Digit1", alt: true }, "character", false)).toBe(
-		"PRESS_CONTROL_1",
+	expect(resolve({ code: "Digit1", alt: true })).toBe("PRESS_CONTROL_1");
+	expect(resolve({ code: "Digit1", alt: true, shift: true })).toBe(
+		"PRESS_CONTROL_SHIFT_1",
 	);
-	expect(
-		resolve({ code: "Digit1", alt: true, shift: true }, "character", false),
-	).toBe("PRESS_CONTROL_SHIFT_1");
-	expect(resolve({ code: "KeyN", alt: true }, "character", false)).toBe(
-		"PRESS_CONTROL_N",
-	);
+	expect(resolve({ code: "KeyN", alt: true })).toBe("PRESS_CONTROL_N");
 	// Not on Mac (Option is for chars / F-keys there)…
-	expect(resolve({ code: "Digit1", alt: true }, "character", true)).toBeNull();
+	expect(resolve({ code: "Digit1", alt: true }, true)).toBeNull();
 	// …and only the grabbed keys — other Alt+letter stays free for commands.
-	expect(resolve({ code: "KeyA", alt: true }, "character", false)).toBeNull();
+	expect(resolve({ code: "KeyA", alt: true })).toBeNull();
 });
 
 test("macOS overlay: Cmd+Arrow cursor, Option+Arrow F1–F4", () => {
-	expect(
-		resolve({ key: "ArrowUp", meta: true }, "character", false),
-	).toBeNull();
-	expect(resolve({ key: "ArrowUp", meta: true }, "character", true)).toBe(
+	expect(resolve({ key: "ArrowUp", meta: true })).toBeNull();
+	expect(resolve({ key: "ArrowUp", meta: true }, true)).toBe(
 		"PRESS_CONTROL_MINUS",
 	);
 	// Option+Arrow → F1–F4 is mac-only (Alt is unusable for it on Windows).
-	expect(resolve({ key: "ArrowUp", alt: true }, "character", false)).toBeNull();
-	expect(resolve({ key: "ArrowUp", alt: true }, "character", true)).toBe(
-		"PRESS_F1",
-	);
+	expect(resolve({ key: "ArrowUp", alt: true })).toBeNull();
+	expect(resolve({ key: "ArrowUp", alt: true }, true)).toBe("PRESS_F1");
 });
 
 test("relocated F-key homes (Help/Tab/Esc/Inverse)", () => {

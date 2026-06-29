@@ -6,11 +6,12 @@ import type { Command } from "./commands.ts";
 // channel in char-keys.ts.
 //
 // Structured as a platform-agnostic `base` plus per-platform overlays merged in
-// to form the effective defaults (see `defaultBindings`). Every binding is one
+// to form the effective defaults (see `defaultBindingSet`). Every binding is one
 // (key + modifiers) → one fixed command; no folding. Modifiers are exact (must be
 // up unless stated) except device inputs, which are Shift-agnostic (see `Mod`).
-// The raw `code`→Atari layer is tagged Positional-only (the positional layer);
-// in Character mode those keys belong to the character channel instead.
+// One flat set serves both keyboard modes: in Character mode the character
+// channel resolves first and shadows the bare/Shift character keys (so typing is
+// layout-aware), then falls through to these bindings — see keyboard.ts.
 
 /** Host key identity: physical position (`code`) or logical/named key (`key`). */
 type KeyId = { code: string } | { key: string };
@@ -40,10 +41,6 @@ export interface Binding {
 	// Pressed on key-down; released on key-up when the command has a release half
 	// (a sustained control), else instant — so a held binding is one entry.
 	command: Command;
-	// Which keyboard mode this binding is active in; absent = both. The raw
-	// character-key layer is positional-only (in Character mode those keys belong
-	// to the character channel).
-	mode?: KeyboardMode;
 	// Display label override — a frozen fallback for user bindings. Default
 	// bindings resolve their label from the layout map / QWERTY (see `labelFor`).
 	label?: string;
@@ -341,12 +338,12 @@ const winBindings: Binding[] = [
 	...editKeys({ alt: true }),
 ];
 
-// --- Positional layer (Positional mode only) -----------------------------
+// --- Positional layer ----------------------------------------------------
 // The raw keyboard: each character-producing host key, by physical `code`, mapped
-// to the Atari matrix key at that position. Tagged `mode: "positional"`, so it's
-// dropped in Character mode (where these keys belong to the character channel —
-// produced char → Atari key). Modifiers are exact here — Ctrl/Shift are part of
-// the keycode.
+// to the Atari matrix key at that position. In Character mode the character
+// channel resolves first and shadows the bare/Shift keys (typing is layout-aware,
+// by produced char); these still serve Ctrl combos, non-ATASCII keys, and all of
+// Positional mode. Modifiers are exact here — Ctrl/Shift are part of the keycode.
 
 // Host `code` → the Atari matrix base at that physical position.
 // Backquote/IntlBackslash double the ESC key (the key left of `1`, as on the
@@ -403,14 +400,12 @@ const positionalKeys: Record<string, MatrixBase> = {
 	Space: "SPACE",
 };
 
-// Each position → its four exact-modifier bindings (see modVariants), tagged
-// positional-only. Exported so the keyboard can resolve Ctrl (and Windows Alt)
-// combos against the character-key layer alone.
+// Each position → its four exact-modifier bindings (see modVariants). In
+// Character mode the character channel resolves first and shadows the bare/Shift
+// character keys (so typing is layout-aware); these still apply for Ctrl combos,
+// non-ATASCII keys, and the whole of Positional mode.
 export const positional: Binding[] = Object.entries(positionalKeys).flatMap(
-	([code, base]) =>
-		modVariants({ code }, base).map(
-			(b): Binding => ({ ...b, mode: "positional" }),
-		),
+	([code, base]) => modVariants({ code }, base),
 );
 
 /** A binding's trigger identity (key + modifier states) — overlays replace by
@@ -433,26 +428,12 @@ function overlay(acc: Binding[], ext: Binding[]): Binding[] {
  * The full default binding set for a platform: the platform-agnostic bindings
  * plus the positional layer, with the platform overlay merged in — macOS
  * (Cmd/Option+Arrow) on Mac, the Windows/Linux Alt-for-Ctrl aliases elsewhere.
- * One flat set tagged by `mode`; {@link bindingsForMode} narrows it for a mode.
- * This is what the binding store persists (and the customization UI edits).
+ * One flat set, the same in both keyboard modes; the mode only decides whether
+ * the character channel resolves first (see the keyboard). This is what the
+ * binding store persists (and the customization UI edits).
  */
 export function defaultBindingSet(mac: boolean): Binding[] {
 	return overlay([...base, ...positional], mac ? macBindings : winBindings);
-}
-
-/** The bindings in `flat` active in `mode`: those whose `mode` matches, or is
- *  absent (= both). The positional character layer drops out in Character mode. */
-export function bindingsForMode(
-	flat: Binding[],
-	mode: KeyboardMode,
-): Binding[] {
-	return flat.filter((b) => b.mode === undefined || b.mode === mode);
-}
-
-/** The effective default bindings for a mode + platform — the per-mode view of
- *  {@link defaultBindingSet}. */
-export function defaultBindings(mac: boolean, mode: KeyboardMode): Binding[] {
-	return bindingsForMode(defaultBindingSet(mac), mode);
 }
 
 // --- Resolution ----------------------------------------------------------

@@ -2,11 +2,31 @@ import { charCommand } from "./char-keys.ts";
 import { type Command, MATRIX_COMMANDS } from "./commands.ts";
 import {
 	type Binding,
-	bindingsForMode,
 	type KeyboardMode,
 	type KeyEventLike,
 	resolveBinding,
 } from "./key-bindings.ts";
+
+/**
+ * The command a Character-mode key event produces. The character channel wins
+ * first: a key that types a printable ATASCII character (no Ctrl/Alt/Cmd) types
+ * it — layout-aware, shadowing the bare/Shift character-key bindings. Everything
+ * else falls through to `bindings`: modified combos (Ctrl resolves positionally),
+ * named keys, and keys with no ATASCII character (ş, €) — which a binding can
+ * still claim. Dead keys yield nothing; composition delivers the glyph instead.
+ */
+export function characterModeCommand(
+	bindings: Binding[],
+	e: KeyEventLike,
+): Command | undefined {
+	if (e.ctrl || e.alt || e.meta) return resolveBinding(bindings, e)?.command;
+	if (e.key === "Dead") return undefined;
+	if (e.key.length === 1) {
+		const command = charCommand(e.key, e.shift);
+		if (command) return command;
+	}
+	return resolveBinding(bindings, e)?.command;
+}
 
 /**
  * How the keyboard actuates commands. A physical key is sustained: `press` on
@@ -22,10 +42,11 @@ export interface KeyboardActions {
 }
 
 /**
- * Translates host keyboard events into Atari key actions by resolving them
- * against the binding table ({@link defaultBindings}) for the active mode, with
- * the character channel ({@link charKeys}) as the Character-mode fallback for
- * printable characters. The mode is read live per keystroke.
+ * Translates host keyboard events into Atari key actions. One flat binding set
+ * (loaded/persisted by the host) serves both modes: Positional resolves it
+ * directly; Character runs the character channel first ({@link
+ * characterModeCommand}), with the same bindings as the fall-through. The mode is
+ * read live per keystroke.
  *
  * Keystrokes are observed on an (offscreen) input element rather than the window
  * so that dead-key composition works — the composed glyph arrives via
@@ -35,12 +56,8 @@ export class Keyboard {
 	#actions: KeyboardActions;
 	#getMode: () => KeyboardMode;
 
-	// The active bindings, split per mode for resolution (re-derived by
-	// setBindings from the flat set the host loads/persists).
-	#bindings: Record<KeyboardMode, Binding[]> = {
-		character: [],
-		positional: [],
-	};
+	// The active bindings (one flat set), as loaded/persisted by the host.
+	#bindings: Binding[] = [];
 
 	// Physical keys (event.code) currently holding a POKEY matrix key (one shared
 	// register, released only when the set empties).
@@ -59,14 +76,10 @@ export class Keyboard {
 		this.setBindings(bindings);
 	}
 
-	/** Replace the active bindings (one flat set), re-deriving the per-mode views.
-	 *  Live — it affects subsequent key-downs; anything already held still releases
-	 *  via its own key-up. */
+	/** Replace the active bindings (one flat set). Live — it affects subsequent
+	 *  key-downs; anything already held still releases via its own key-up. */
 	setBindings(bindings: Binding[]): void {
-		this.#bindings = {
-			character: bindingsForMode(bindings, "character"),
-			positional: bindingsForMode(bindings, "positional"),
-		};
+		this.#bindings = bindings;
 	}
 
 	attach(input: HTMLInputElement): void {
@@ -126,35 +139,16 @@ export class Keyboard {
 		}
 
 		const e = this.#normalize(event);
-		const mode = this.#getMode();
+		// Character mode runs the character channel first (layout-aware typing),
+		// then falls through to the bindings; Positional resolves them directly.
 		const command =
-			resolveBinding(this.#bindings[mode], e)?.command ??
-			(mode === "character" ? this.#typeCommand(event, e) : undefined);
+			this.#getMode() === "character"
+				? characterModeCommand(this.#bindings, e)
+				: resolveBinding(this.#bindings, e)?.command;
 		if (command) {
 			event.preventDefault();
 			this.#press(event.code, command);
 		}
-	}
-
-	// The Atari command for a Character-mode keystroke that isn't a discrete
-	// binding. Plain/Shift typing goes through the character channel (layout-aware,
-	// by produced character); Ctrl combos — and any key whose character has no
-	// ATASCII equivalent (e.g. Turkish ş) — resolve positionally by physical code.
-	// Undefined for dead keys (composition handles them) and non-typing combos.
-	#typeCommand(event: KeyboardEvent, e: KeyEventLike): Command | undefined {
-		// Meta is the browser's; Alt is the (deferred) Mod layer — neither types.
-		if (e.meta || e.alt) return undefined;
-		// Ctrl resolves by code: the produced character is unreliable under Ctrl
-		// (on some layouts different physical keys report the same one — Turkish
-		// Ctrl+\ and Ctrl+, both report ","), whereas the code is stable.
-		if (e.ctrl) return resolveBinding(this.#bindings.positional, e)?.command;
-		if (event.key === "Dead") return undefined; // composition delivers the glyph
-		if (event.key.length === 1) {
-			const command = charCommand(event.key, e.shift);
-			if (command) return command; // layout-aware ATASCII character
-		}
-		// No ATASCII equivalent (ş, ı, …) → the positional key at this location.
-		return resolveBinding(this.#bindings.positional, e)?.command;
 	}
 
 	#keyUp(event: KeyboardEvent): void {

@@ -184,11 +184,21 @@ export const messages = {
 		removeFilter: "Remove filter",
 		// Per-type fact rows in the item detail view.
 		fields: {
+			name: "Name",
 			cartType: "Cartridge type",
 			osType: "OS type",
 			sectors: "Sectors",
 			sectorSize: "Sector size",
 		},
+		// The slot flags an 8K cart can be tagged with (the BASIC / built-in-game
+		// ROM slots). "BASIC" is a hardware token; the rest is translatable.
+		slots: {
+			title: "Firmware slots",
+			basic: "BASIC",
+			game: "Built-in game",
+		},
+		save: "Save",
+		renamed: (name: string): string => `Renamed to ${name}`,
 		// Heading for the item view's recognized-image section (firmware today;
 		// DOSes and other known software later).
 		knownTitle: "Well-known image",

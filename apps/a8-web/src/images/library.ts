@@ -20,6 +20,7 @@ import {
 	loadEntries,
 	loadOverrides,
 	putEntry,
+	putOverride,
 } from "./store.ts";
 
 /**
@@ -135,6 +136,36 @@ export const builtinSoftware = computed<ImageEntry[]>(() =>
 		.filter((e) => BUILTIN_SOFTWARE_IDS.has(e.id))
 		.sort((a, b) => a.user.displayName.localeCompare(b.user.displayName)),
 );
+
+/**
+ * Edit an image's user metadata (display name, slot flags). A user upload's
+ * patch is merged into its stored entry; a built-in's is persisted as an
+ * override layered over the firmware defaults. Reactive through the signals.
+ */
+export async function updateUserMeta(
+	id: string,
+	patch: Partial<UserMeta>,
+): Promise<void> {
+	await readyLibrary();
+	const entry = userEntries.value.find((e) => e.id === id);
+	if (entry) {
+		const updated: StoredEntry = {
+			...entry,
+			user: { ...entry.user, ...patch },
+		};
+		await putEntry(updated);
+		userEntries.value = userEntries.value.map((e) =>
+			e.id === id ? updated : e,
+		);
+		return;
+	}
+	if (!getImage(id)) return; // unknown id — nothing to override
+	const next = { ...(builtinOverrides.value.get(id) ?? {}), ...patch };
+	await putOverride({ id, user: next });
+	const overrides = new Map(builtinOverrides.value);
+	overrides.set(id, next);
+	builtinOverrides.value = overrides;
+}
 
 /** Promote a transient (auto-added) image into the curated library. */
 export async function keepImage(id: string): Promise<void> {

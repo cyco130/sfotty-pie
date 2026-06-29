@@ -161,8 +161,91 @@ function RecentsSection({ host }: { host: EmulatorHost }) {
 }
 
 /**
- * The menu panel: machine configuration (staged, applied with a reboot), the
- * boot-image action, the software library, and a short key-mappings reference.
+ * The machine-configuration form (its own panel): model, RAM, optional separate
+ * ANTIC RAM, TV standard, and BASIC. Edits are staged and applied with a reboot.
+ */
+export function ConfigView({ host }: { host: EmulatorHost }) {
+	const staged = host.staged.value;
+	const dirty = host.dirty.value;
+
+	return (
+		<div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+			<LabeledSelect
+				label={messages.sidebar.model}
+				value={staged.model}
+				options={MODELS.map((model) => ({
+					value: model,
+					label: MODEL_LABELS[model],
+				}))}
+				onSelect={(value) => host.stageModel(value as AtariModel)}
+			/>
+			<LabeledSelect
+				label={messages.sidebar.ram}
+				value={String(ramTotal(staged))}
+				options={RAM_SIZES[staged.model].map((kb) => ({
+					value: String(kb),
+					label: `${kb}K`,
+				}))}
+				onSelect={(value) => host.stageRam(Number(value))}
+			/>
+			{staged.portbExtendedRam && (
+				<label class="flex items-center justify-between gap-3">
+					<span class="text-sm text-neutral-600">
+						{messages.sidebar.separateAntic}
+					</span>
+					<input
+						type="checkbox"
+						checked={staged.portbExtendedRam.antic}
+						disabled={anticPolicy(staged.portbExtendedRam.size) !== "optional"}
+						onChange={(event) => host.stageAntic(event.currentTarget.checked)}
+					/>
+				</label>
+			)}
+			<Segmented
+				label={messages.sidebar.tv}
+				value={staged.tv}
+				options={[
+					{
+						value: "ntsc",
+						label: "NTSC",
+						onSelect: () => host.stageTv("ntsc"),
+					},
+					{ value: "pal", label: "PAL", onSelect: () => host.stageTv("pal") },
+				]}
+			/>
+			<Segmented
+				label={messages.sidebar.basic}
+				value={staged.basicDisabled ? "off" : "on"}
+				options={[
+					{
+						value: "on",
+						label: messages.sidebar.on,
+						onSelect: () => host.stageBasicDisabled(false),
+					},
+					{
+						value: "off",
+						label: messages.sidebar.off,
+						onSelect: () => host.stageBasicDisabled(true),
+					},
+				]}
+			/>
+			{dirty && (
+				<button
+					type="button"
+					class="mt-3 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-white hover:bg-neutral-700"
+					onClick={() => host.applyConfig()}
+				>
+					{messages.sidebar.rebootToApply}
+				</button>
+			)}
+		</div>
+	);
+}
+
+/**
+ * The menu panel: a launcher of navigation links (machine config, boot, library,
+ * ROM preferences, the palette), the recents list, and a short key-mappings
+ * reference. The machine-config form lives on its own panel ({@link ConfigView}).
  */
 export function MenuView({
 	host,
@@ -171,96 +254,37 @@ export function MenuView({
 	host: EmulatorHost;
 	onOpenPalette: () => void;
 }) {
-	const staged = host.staged.value;
-	const dirty = host.dirty.value;
-
 	return (
 		<div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
-			<section>
-				<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-					{messages.sidebar.machine}
-				</h2>
-				<div class="flex flex-col gap-2">
-					<LabeledSelect
-						label={messages.sidebar.model}
-						value={staged.model}
-						options={MODELS.map((model) => ({
-							value: model,
-							label: MODEL_LABELS[model],
-						}))}
-						onSelect={(value) => host.stageModel(value as AtariModel)}
-					/>
-					<LabeledSelect
-						label={messages.sidebar.ram}
-						value={String(ramTotal(staged))}
-						options={RAM_SIZES[staged.model].map((kb) => ({
-							value: String(kb),
-							label: `${kb}K`,
-						}))}
-						onSelect={(value) => host.stageRam(Number(value))}
-					/>
-					{staged.portbExtendedRam && (
-						<label class="flex items-center justify-between gap-3">
-							<span class="text-sm text-neutral-600">
-								{messages.sidebar.separateAntic}
-							</span>
-							<input
-								type="checkbox"
-								checked={staged.portbExtendedRam.antic}
-								disabled={
-									anticPolicy(staged.portbExtendedRam.size) !== "optional"
-								}
-								onChange={(event) =>
-									host.stageAntic(event.currentTarget.checked)
-								}
-							/>
-						</label>
-					)}
-					<Segmented
-						label={messages.sidebar.tv}
-						value={staged.tv}
-						options={[
-							{
-								value: "ntsc",
-								label: "NTSC",
-								onSelect: () => host.stageTv("ntsc"),
-							},
-							{
-								value: "pal",
-								label: "PAL",
-								onSelect: () => host.stageTv("pal"),
-							},
-						]}
-					/>
-					<Segmented
-						label={messages.sidebar.basic}
-						value={staged.basicDisabled ? "off" : "on"}
-						options={[
-							{
-								value: "on",
-								label: messages.sidebar.on,
-								onSelect: () => host.stageBasicDisabled(false),
-							},
-							{
-								value: "off",
-								label: messages.sidebar.off,
-								onSelect: () => host.stageBasicDisabled(true),
-							},
-						]}
-					/>
-				</div>
-				{dirty && (
-					<button
-						type="button"
-						class="mt-3 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-white hover:bg-neutral-700"
-						onClick={() => host.applyConfig()}
-					>
-						{messages.sidebar.rebootToApply}
-					</button>
-				)}
-			</section>
-
 			<section class="flex flex-col gap-1">
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.showPanel("config")}
+				>
+					{messages.sidebar.machineConfig}
+				</button>
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.dispatch("BOOT_IMAGE")}
+				>
+					{messages.sidebar.bootImage}
+				</button>
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.showPanel("library")}
+				>
+					{messages.library.title}…
+				</button>
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.showPanel("roms")}
+				>
+					{messages.roms.title}…
+				</button>
 				<div class="flex items-center justify-between gap-3">
 					<button
 						type="button"
@@ -273,27 +297,6 @@ export function MenuView({
 						{onMac() ? "⌘K" : "Alt+K"}
 					</span>
 				</div>
-				<button
-					type="button"
-					class="text-left text-sm hover:underline"
-					onClick={() => host.dispatch("BOOT_IMAGE")}
-				>
-					{messages.sidebar.bootImage}
-				</button>
-				<button
-					type="button"
-					class="text-left text-sm hover:underline"
-					onClick={() => host.showPanel("roms")}
-				>
-					{messages.roms.title}…
-				</button>
-				<button
-					type="button"
-					class="text-left text-sm hover:underline"
-					onClick={() => host.showPanel("library")}
-				>
-					{messages.library.title}…
-				</button>
 			</section>
 
 			<RecentsSection host={host} />

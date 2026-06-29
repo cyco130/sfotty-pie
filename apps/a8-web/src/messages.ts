@@ -89,7 +89,6 @@ export const messages = {
 
 	sidebar: {
 		close: "Close",
-		machine: "Machine",
 		model: "Model",
 		ram: "RAM",
 		separateAntic: "Separate ANTIC access",
@@ -98,6 +97,7 @@ export const messages = {
 		on: "On",
 		off: "Off",
 		rebootToApply: "Reboot to apply",
+		machineConfig: "Machine configuration…",
 		commandPalette: "Command palette…",
 		bootImage: "Boot image…",
 		keys: "Keys",
@@ -109,6 +109,7 @@ export const messages = {
 		thirdPartyLicenses: "Third-party licenses",
 		build: "Build",
 		titleMenu: "Sfotty Pie A8 Web",
+		titleConfig: "Machine",
 		titlePalette: "Commands",
 	},
 

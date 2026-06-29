@@ -83,7 +83,7 @@ export interface Toast {
  * The sidebar's content when open. Stable string ids so the state stays
  * serializable (a future deep-link layer can map these straight to the URL).
  */
-export type SidebarPanel = "menu" | "palette" | "roms" | "library";
+export type SidebarPanel = "menu" | "config" | "palette" | "roms" | "library";
 
 export type { MachineSettings } from "./machine-config.ts";
 
@@ -904,7 +904,8 @@ export class EmulatorHost {
 
 	/** Show a sidebar panel (switching directly if another is already open). */
 	showPanel(panel: SidebarPanel): void {
-		if (panel === "menu") this.staged.value = this.config.peek(); // from running config
+		// Open the config form on the running machine's settings.
+		if (panel === "config") this.staged.value = this.config.peek();
 		navigate(`/a8/emu/${panel}`, { replace: true });
 	}
 

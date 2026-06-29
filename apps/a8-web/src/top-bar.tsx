@@ -50,7 +50,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 			<button
 				type="button"
 				class="text-neutral-300 hover:text-white"
-				onClick={() => host.showPanel("menu")}
+				onClick={() => host.showPanel("config")}
 			>
 				{MODEL_LABELS[config.model]} · {ramTotal(config)}K ·{" "}
 				{config.tv.toUpperCase()}

@@ -428,16 +428,29 @@ function overlay(acc: Binding[], ext: Binding[]): Binding[] {
 }
 
 /**
- * The effective default bindings for a mode + platform: every binding active in
- * `mode` (its `mode` matches, or is absent = both), then the platform overlay —
- * macOS (Cmd/Option+Arrow) on Mac, the Windows/Linux Alt-for-Ctrl aliases
- * elsewhere. The positional layer drops out in Character mode via its `mode` tag.
+ * The full default binding set for a platform: the platform-agnostic bindings
+ * plus the positional layer, with the platform overlay merged in — macOS
+ * (Cmd/Option+Arrow) on Mac, the Windows/Linux Alt-for-Ctrl aliases elsewhere.
+ * One flat set tagged by `mode`; {@link bindingsForMode} narrows it for a mode.
+ * This is what the binding store persists (and the customization UI edits).
  */
+export function defaultBindingSet(mac: boolean): Binding[] {
+	return overlay([...base, ...positional], mac ? macBindings : winBindings);
+}
+
+/** The bindings in `flat` active in `mode`: those whose `mode` matches, or is
+ *  absent (= both). The positional character layer drops out in Character mode. */
+export function bindingsForMode(
+	flat: Binding[],
+	mode: KeyboardMode,
+): Binding[] {
+	return flat.filter((b) => b.mode === undefined || b.mode === mode);
+}
+
+/** The effective default bindings for a mode + platform — the per-mode view of
+ *  {@link defaultBindingSet}. */
 export function defaultBindings(mac: boolean, mode: KeyboardMode): Binding[] {
-	const active = [...base, ...positional].filter(
-		(b) => b.mode === undefined || b.mode === mode,
-	);
-	return overlay(active, mac ? macBindings : winBindings);
+	return bindingsForMode(defaultBindingSet(mac), mode);
 }
 
 // --- Resolution ----------------------------------------------------------
@@ -551,13 +564,15 @@ export async function loadLayoutLabels(): Promise<Map<string, string>> {
 }
 
 /**
- * A binding's display label: the live layout map (for `code` keys), else its
- * frozen `label`, else the QWERTY legend / key name. Modifier prefixes
- * (Ctrl+/Shift+) are the caller's to add.
+ * A binding's display label: its committed `label` if set (the persisted,
+ * user-editable legend), else — for `code` keys — the live layout map, else the
+ * QWERTY legend / key name. Modifier prefixes (Ctrl+/Shift+) are the caller's to
+ * add. Used both to bake labels into the defaults (no `label` yet → resolves
+ * from the layout) and to read them back for display.
  */
 export function labelFor(b: Binding, layout: Map<string, string>): string {
 	if ("code" in b.on) {
-		return layout.get(b.on.code) ?? b.label ?? qwertyLabel(b.on.code);
+		return b.label ?? layout.get(b.on.code) ?? qwertyLabel(b.on.code);
 	}
 	return b.label ?? qwertyLabel(b.on.key);
 }

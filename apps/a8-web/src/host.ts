@@ -34,6 +34,7 @@ import {
 	updateImage,
 } from "./images/library.ts";
 import type { ImageEntry } from "./images/metadata.ts";
+import { freshBindings, loadStoredBindings } from "./key-bindings-store.ts";
 import { Keyboard } from "./keyboard.ts";
 import {
 	clampRam,
@@ -270,6 +271,10 @@ export class EmulatorHost {
 	readonly #audio: AudioOutput | null;
 	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
+	readonly #isMac = navigator.userAgent.includes("Mac");
+	// Whether key bindings were loaded from storage; if not, create() generates
+	// and persists the platform defaults (async — it resolves layout labels).
+	readonly #bindingsStored: boolean;
 	// The model a brand-new install starts from (and resets fall back to).
 	readonly #defaultModel: AtariModel;
 
@@ -309,6 +314,12 @@ export class EmulatorHost {
 		const host = new EmulatorHost(config);
 		await host.#ensureFirmware();
 		await host.#restoreMedia();
+		// First run (or a cleared store): generate + persist the default bindings,
+		// with labels resolved from the live layout. The keyboard isn't attached
+		// until the UI mounts, so the brief empty-binding window is never live.
+		if (!host.#bindingsStored) {
+			host.#keyboard.setBindings(await freshBindings(host.#isMac));
+		}
 		host.#emulator = host.#makeEmulator();
 		host.#wireLeds();
 		return host;
@@ -342,6 +353,10 @@ export class EmulatorHost {
 		this.keyboardMode.value =
 			loadPersisted(KBMODE_KEY) === "positional" ? "positional" : "character";
 
+		// Key bindings: this tab's stored flat set, or empty until create()
+		// generates and persists the platform defaults (first run / cleared store).
+		const storedBindings = loadStoredBindings();
+		this.#bindingsStored = storedBindings !== undefined;
 		// #emulator is built by create() once the initial firmware is fetched.
 		this.#keyboard = new Keyboard(
 			{
@@ -351,6 +366,7 @@ export class EmulatorHost {
 				releaseMatrix: () => this.releaseMatrix(),
 			},
 			() => this.keyboardMode.value,
+			storedBindings ?? [],
 		);
 
 		// The audio context resumes/suspends asynchronously; track it.
@@ -821,6 +837,13 @@ export class EmulatorHost {
 		this.setKeyboardMode(
 			this.keyboardMode.value === "character" ? "positional" : "character",
 		);
+	}
+
+	/** Regenerate the platform default key bindings (labels from the live layout),
+	 *  persist them, and apply them live — discarding any customization. */
+	async resetKeyBindings(): Promise<void> {
+		this.#keyboard.setBindings(await freshBindings(this.#isMac));
+		this.toast(messages.toasts.keyBindingsReset);
 	}
 
 	setMuted(muted: boolean): void {

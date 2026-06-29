@@ -309,6 +309,7 @@ export const messages = {
 		powerCycling: "Power cycling",
 		keyboardMode: (mode: "character" | "positional"): string =>
 			`Keyboard: ${mode === "positional" ? "Positional" : "Character"} mode`,
+		keyBindingsReset: "Key bindings reset to defaults",
 		saving: (name: string) => `Saving (${name})`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
 		copy: "Copy",
@@ -333,6 +334,7 @@ export const labels = {
 	KEYBOARD_MODE_CHARACTER: "Keyboard: Character mode (layout-aware typing)",
 	KEYBOARD_MODE_POSITIONAL: "Keyboard: Positional mode (raw, by physical key)",
 	KEYBOARD_MODE_TOGGLE: "Keyboard: toggle Character / Positional mode",
+	KEY_BINDINGS_RESET: "Keyboard: reset key bindings to defaults",
 	AUDIO_MUTE: "Mute audio",
 	AUDIO_UNMUTE: "Unmute audio",
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",

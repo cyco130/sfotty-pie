@@ -93,6 +93,10 @@ export const commands = {
 		label: "KEYBOARD_MODE_TOGGLE",
 		run: ({ host }) => host.toggleKeyboardMode(),
 	},
+	KEY_BINDINGS_RESET: {
+		label: "KEY_BINDINGS_RESET",
+		run: ({ host }) => void host.resetKeyBindings(),
+	},
 
 	// Audio.
 	AUDIO_MUTE: { label: "AUDIO_MUTE", run: ({ host }) => host.setMuted(true) },

@@ -1,6 +1,9 @@
 import { expect, test } from "vitest";
 import {
+	bindingsForMode,
 	defaultBindings,
+	defaultBindingSet,
+	labelFor,
 	type KeyboardMode,
 	type KeyEventLike,
 	resolveBinding,
@@ -97,6 +100,36 @@ test("Cmd (mac) / Alt (win) on -/= reach the Shift+Clear / insert-line forms", (
 	expect(resolve({ code: "Minus", ctrl: true }, "positional")).toBe(
 		"PRESS_CONTROL_LESS_THAN",
 	);
+});
+
+test("the flat default set narrows to the per-mode views", () => {
+	const set = defaultBindingSet(false);
+	const hasKeyA = (bs: { on: object }[]) =>
+		bs.some((b) => "code" in b.on && b.on.code === "KeyA");
+	// The positional layer (character keys by code) lives in the flat set and the
+	// positional view, but not the character view.
+	expect(hasKeyA(set)).toBe(true);
+	expect(hasKeyA(bindingsForMode(set, "positional"))).toBe(true);
+	expect(hasKeyA(bindingsForMode(set, "character"))).toBe(false);
+	// The per-mode view matches the dedicated helper (defaultBindings).
+	expect(bindingsForMode(set, "character")).toEqual(
+		defaultBindings(false, "character"),
+	);
+	expect(bindingsForMode(set, "positional")).toEqual(
+		defaultBindings(false, "positional"),
+	);
+});
+
+test("a committed label wins over the live layout (editable legends)", () => {
+	const layout = new Map([["KeyA", "Q"]]); // e.g. AZERTY legend
+	// No committed label → resolve from the layout (this is the bake path).
+	expect(labelFor({ on: { code: "KeyA" }, command: "PRESS_A" }, layout)).toBe(
+		"Q",
+	);
+	// A committed label is authoritative (so user edits survive).
+	expect(
+		labelFor({ on: { code: "KeyA" }, command: "PRESS_A", label: "★" }, layout),
+	).toBe("★");
 });
 
 test("positional char keys are mode-gated", () => {

@@ -2,7 +2,7 @@ import { charCommand } from "./char-keys.ts";
 import { type Command, MATRIX_COMMANDS } from "./commands.ts";
 import {
 	type Binding,
-	defaultBindings,
+	bindingsForMode,
 	type KeyboardMode,
 	type KeyEventLike,
 	resolveBinding,
@@ -34,10 +34,13 @@ export interface KeyboardActions {
 export class Keyboard {
 	#actions: KeyboardActions;
 	#getMode: () => KeyboardMode;
-	#isMac = navigator.userAgent.includes("Mac");
 
-	// The binding set per mode, precomputed (platform is fixed for the session).
-	#bindings: Record<KeyboardMode, Binding[]>;
+	// The active bindings, split per mode for resolution (re-derived by
+	// setBindings from the flat set the host loads/persists).
+	#bindings: Record<KeyboardMode, Binding[]> = {
+		character: [],
+		positional: [],
+	};
 
 	// Physical keys (event.code) currently holding a POKEY matrix key (one shared
 	// register, released only when the set empties).
@@ -46,12 +49,23 @@ export class Keyboard {
 	// it): console buttons, Reset, joystick, the Shift keys.
 	#held = new Map<string, Command>();
 
-	constructor(actions: KeyboardActions, getMode: () => KeyboardMode) {
+	constructor(
+		actions: KeyboardActions,
+		getMode: () => KeyboardMode,
+		bindings: Binding[],
+	) {
 		this.#actions = actions;
 		this.#getMode = getMode;
+		this.setBindings(bindings);
+	}
+
+	/** Replace the active bindings (one flat set), re-deriving the per-mode views.
+	 *  Live — it affects subsequent key-downs; anything already held still releases
+	 *  via its own key-up. */
+	setBindings(bindings: Binding[]): void {
 		this.#bindings = {
-			character: defaultBindings(this.#isMac, "character"),
-			positional: defaultBindings(this.#isMac, "positional"),
+			character: bindingsForMode(bindings, "character"),
+			positional: bindingsForMode(bindings, "positional"),
 		};
 	}
 

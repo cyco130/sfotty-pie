@@ -9,16 +9,34 @@ export interface CommandContext {
 	host: EmulatorHost;
 }
 
-/** A command: a static label key (into {@link labels}) plus its action. */
+/**
+ * A command: a static label key (into {@link labels}) plus its action. `run` is
+ * the action — or, for a control, its press half. `release` is the matching key
+ * up; when present, a momentary trigger (palette, click) auto-releases after a
+ * short pulse so it doesn't leave the control stuck, while a sustained trigger
+ * (held key, touch) ties release to its own up event. Absent `release` ⇒
+ * press-only: app verbs (POWER_CYCLE, SET_*) and Break alike.
+ *
+ * The palette lists every command — it's the catch-all fallback for any action
+ * whose key binding is unavailable; a held control surfaced there just pulses
+ * (one keystroke / one joystick step). `palette: false` removes one from that
+ * list (still bindable) — wired but unused for now, for a future bindable-only
+ * verb like "turbo while held".
+ */
 interface CommandSpec {
 	label: LabelKey;
 	run: (ctx: CommandContext) => void;
+	release?: (ctx: CommandContext) => void;
+	palette?: boolean;
 }
 
-/** Factory for the POKEY matrix key presses, which differ only by key code. */
+/** Factory for the POKEY matrix key presses, which differ only by key code. The
+ *  matrix is one shared register, so every key releases the same way. Palette
+ *  picks pulse a single keystroke. */
 const press = (code: number, label: LabelKey): CommandSpec => ({
 	label,
 	run: ({ emulator }) => emulator.machine.pokeyKeyDown(code),
+	release: ({ emulator }) => emulator.machine.pokeyKeyUp(),
 });
 
 export const commands = {
@@ -60,10 +78,14 @@ export const commands = {
 		run: ({ host }) => host.toggleAudio(),
 	},
 
-	// The menu sidebar.
-	MENU_TOGGLE: {
-		label: "MENU_TOGGLE",
-		run: ({ host }) => host.togglePanel("menu"),
+	// Sidebar panels — each opens its panel; CLOSE_PANEL dismisses whichever is
+	// showing. (Showing one when it's already open is a no-op.)
+	OPEN_MENU: { label: "OPEN_MENU", run: ({ host }) => host.showPanel("menu") },
+	// The command palette (this surface) — also the fallback for any action whose
+	// key binding is unavailable.
+	OPEN_PALETTE: {
+		label: "OPEN_PALETTE",
+		run: ({ host }) => host.showPanel("palette"),
 	},
 
 	// Full-screen the whole app (chrome included), so the on-screen controls
@@ -81,6 +103,8 @@ export const commands = {
 		label: "OPEN_LIBRARY",
 		run: ({ host }) => host.showPanel("library"),
 	},
+	// Dismiss whichever sidebar panel is open, returning focus to the machine.
+	CLOSE_PANEL: { label: "CLOSE_PANEL", run: ({ host }) => host.closePanel() },
 	CLEAR_LIBRARY: {
 		label: "CLEAR_LIBRARY",
 		run: ({ host }) => host.clearLibrary(),
@@ -435,101 +459,67 @@ export const commands = {
 	PRESS_CONTROL_SHIFT_S: press(0xfe, "PRESS_CONTROL_SHIFT_S"),
 	PRESS_CONTROL_SHIFT_A: press(0xff, "PRESS_CONTROL_SHIFT_A"),
 
-	RELEASE_POKEY_KEY: {
-		label: "RELEASE_POKEY_KEY",
-		run: ({ emulator }) => emulator.machine.pokeyKeyUp(),
-	},
-
 	PRESS_SHIFT: {
 		label: "PRESS_SHIFT",
 		run: ({ emulator }) => emulator.machine.shiftKeyDown(),
-	},
-	RELEASE_SHIFT: {
-		label: "RELEASE_SHIFT",
-		run: ({ emulator }) => emulator.machine.shiftKeyUp(),
+		release: ({ emulator }) => emulator.machine.shiftKeyUp(),
 	},
 
 	PRESS_RESET: {
 		label: "PRESS_RESET",
 		run: ({ emulator }) => emulator.machine.resetButtonDown(),
-	},
-	RELEASE_RESET: {
-		label: "RELEASE_RESET",
-		run: ({ emulator }) => emulator.machine.resetButtonUp(),
+		release: ({ emulator }) => emulator.machine.resetButtonUp(),
 	},
 
 	// Console buttons
 	PRESS_OPTION: {
 		label: "PRESS_OPTION",
 		run: ({ emulator }) => emulator.machine.consoleKeyDown(4),
-	},
-	RELEASE_OPTION: {
-		label: "RELEASE_OPTION",
-		run: ({ emulator }) => emulator.machine.consoleKeyUp(4),
+		release: ({ emulator }) => emulator.machine.consoleKeyUp(4),
 	},
 	PRESS_SELECT: {
 		label: "PRESS_SELECT",
 		run: ({ emulator }) => emulator.machine.consoleKeyDown(2),
-	},
-	RELEASE_SELECT: {
-		label: "RELEASE_SELECT",
-		run: ({ emulator }) => emulator.machine.consoleKeyUp(2),
+		release: ({ emulator }) => emulator.machine.consoleKeyUp(2),
 	},
 	PRESS_START: {
 		label: "PRESS_START",
 		run: ({ emulator }) => emulator.machine.consoleKeyDown(1),
-	},
-	RELEASE_START: {
-		label: "RELEASE_START",
-		run: ({ emulator }) => emulator.machine.consoleKeyUp(1),
+		release: ({ emulator }) => emulator.machine.consoleKeyUp(1),
 	},
 
-	// Break
+	// Break — a release isn't observable by software (no key-up), so press-only.
 	PRESS_BREAK: {
 		label: "PRESS_BREAK",
 		run: ({ emulator }) => emulator.machine.breakKeyDown(),
 	},
 
-	// Joystick 0 (direction masks: 1 = up, 2 = down, 4 = left, 8 = right)
+	// Joystick 0 (direction masks: 1 = up, 2 = down, 4 = left, 8 = right). Held
+	// while a trigger sustains them; a palette pick pulses a single step.
 	PRESS_JOY0_UP: {
 		label: "PRESS_JOY0_UP",
 		run: ({ emulator }) => emulator.machine.joystickDown(0, 1),
-	},
-	RELEASE_JOY0_UP: {
-		label: "RELEASE_JOY0_UP",
-		run: ({ emulator }) => emulator.machine.joystickUp(0, 1),
+		release: ({ emulator }) => emulator.machine.joystickUp(0, 1),
 	},
 	PRESS_JOY0_DOWN: {
 		label: "PRESS_JOY0_DOWN",
 		run: ({ emulator }) => emulator.machine.joystickDown(0, 2),
-	},
-	RELEASE_JOY0_DOWN: {
-		label: "RELEASE_JOY0_DOWN",
-		run: ({ emulator }) => emulator.machine.joystickUp(0, 2),
+		release: ({ emulator }) => emulator.machine.joystickUp(0, 2),
 	},
 	PRESS_JOY0_LEFT: {
 		label: "PRESS_JOY0_LEFT",
 		run: ({ emulator }) => emulator.machine.joystickDown(0, 4),
-	},
-	RELEASE_JOY0_LEFT: {
-		label: "RELEASE_JOY0_LEFT",
-		run: ({ emulator }) => emulator.machine.joystickUp(0, 4),
+		release: ({ emulator }) => emulator.machine.joystickUp(0, 4),
 	},
 	PRESS_JOY0_RIGHT: {
 		label: "PRESS_JOY0_RIGHT",
 		run: ({ emulator }) => emulator.machine.joystickDown(0, 8),
-	},
-	RELEASE_JOY0_RIGHT: {
-		label: "RELEASE_JOY0_RIGHT",
-		run: ({ emulator }) => emulator.machine.joystickUp(0, 8),
+		release: ({ emulator }) => emulator.machine.joystickUp(0, 8),
 	},
 	PRESS_JOY0_TRIGGER: {
 		label: "PRESS_JOY0_TRIGGER",
 		run: ({ emulator }) => emulator.machine.joystickTriggerDown(0),
-	},
-	RELEASE_JOY0_TRIGGER: {
-		label: "RELEASE_JOY0_TRIGGER",
-		run: ({ emulator }) => emulator.machine.joystickTriggerUp(0),
+		release: ({ emulator }) => emulator.machine.joystickTriggerUp(0),
 	},
 
 	// TODO: settings commands (TOGGLE_KEYBOARD_LAYOUT_MODE and friends) come
@@ -544,13 +534,21 @@ export function setCommandTrace(enabled: boolean): void {
 }
 
 for (const key of Object.keys(commands) as Command[]) {
-	const spec = commands[key];
+	const spec: CommandSpec = commands[key];
 	const run = spec.run;
 	spec.run = (ctx) => {
 		// eslint-disable-next-line no-console -- command tracing is a debug aid
 		if (traceCommands) console.log("COMMAND", key);
 		run(ctx);
 	};
+	const release = spec.release;
+	if (release) {
+		spec.release = (ctx) => {
+			// eslint-disable-next-line no-console -- command tracing is a debug aid
+			if (traceCommands) console.log("COMMAND", key, "(release)");
+			release(ctx);
+		};
+	}
 }
 
 /** Every bindable command name — the key-binding and palette surface. */
@@ -561,14 +559,24 @@ export function labelOf(command: Command): string {
 	return labels[commands[command].label];
 }
 
+/** A command's release half (key up), or undefined for a press-only command. */
+export function releaseOf(
+	command: Command,
+): ((ctx: CommandContext) => void) | undefined {
+	return (commands[command] as CommandSpec).release;
+}
+
 /**
- * Every command the palette lists, sorted alphabetically by label — its
- * default (empty-query) order. (Recently-used commands will float to the top
- * later.)
+ * The commands the palette lists, sorted alphabetically by label — its default
+ * (empty-query) order. Everything is listed (the palette is the fallback for any
+ * unavailable binding) unless a command opts out with `palette: false`.
+ * (Recently-used commands will float to the top later.)
  */
 export const paletteCommands: readonly Command[] = (
 	Object.keys(commands) as Command[]
-).sort((a, b) => labelOf(a).localeCompare(labelOf(b)));
+)
+	.filter((command) => (commands[command] as CommandSpec).palette !== false)
+	.sort((a, b) => labelOf(a).localeCompare(labelOf(b)));
 
 /*
 "Toggle machine type (400/800 / XL/XE)"

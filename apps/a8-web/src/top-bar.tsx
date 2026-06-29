@@ -43,14 +43,14 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 				class="text-neutral-400 hover:text-white"
 				aria-label={messages.topBar.menu}
 				title={messages.topBar.menu}
-				onClick={() => host.dispatch("MENU_TOGGLE")}
+				onClick={() => host.togglePanel("menu")}
 			>
 				<Icon name="menu" class="size-6" />
 			</button>
 			<button
 				type="button"
 				class="text-neutral-300 hover:text-white"
-				onClick={() => host.showPanel("menu")}
+				onClick={() => host.showPanel("config")}
 			>
 				{MODEL_LABELS[config.model]} · {ramTotal(config)}K ·{" "}
 				{config.tv.toUpperCase()}

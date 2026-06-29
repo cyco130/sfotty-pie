@@ -17,7 +17,7 @@ import {
 } from "@sfotty-pie/a8";
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
-import { commands, type Command } from "./commands.ts";
+import { commands, type Command, releaseOf } from "./commands.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
@@ -83,7 +83,7 @@ export interface Toast {
  * The sidebar's content when open. Stable string ids so the state stays
  * serializable (a future deep-link layer can map these straight to the URL).
  */
-export type SidebarPanel = "menu" | "palette" | "roms" | "library";
+export type SidebarPanel = "menu" | "config" | "palette" | "roms" | "library";
 
 export type { MachineSettings } from "./machine-config.ts";
 
@@ -102,6 +102,11 @@ const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
 // Persisted-state keys (namespaced by storageName) — see persist.ts.
 const CONFIG_KEY = "config";
 const ROMS_KEY = "roms";
+
+// How long a momentary trigger (palette, click) holds a control before its
+// auto-release — long enough for the OS to sense the key/button. Counted in
+// emulated frames so it's two frames whether real-time or in turbo.
+const PULSE_FRAMES = 2;
 // The mounted media is per-tab (sessionStorage only) — a fresh tab starts empty
 // rather than auto-booting the last session's image.
 const MEDIA_KEY = "media";
@@ -330,7 +335,12 @@ export class EmulatorHost {
 		this.stagedRoms.value = this.appliedRoms.peek();
 
 		// #emulator is built by create() once the initial firmware is fetched.
-		this.#keyboard = new Keyboard((command) => this.dispatch(command));
+		this.#keyboard = new Keyboard({
+			press: (command) => this.press(command),
+			release: (command) => this.release(command),
+			tap: (command) => this.dispatch(command),
+			releaseMatrix: () => this.releaseMatrix(),
+		});
 
 		// The audio context resumes/suspends asynchronously; track it.
 		if (audio) {
@@ -439,9 +449,43 @@ export class EmulatorHost {
 		this.#refreshAttachments();
 	}
 
-	/** Run a bound command (from a key binding, the UI, or the palette). */
+	#commandContext() {
+		return { emulator: this.#emulator, host: this };
+	}
+
+	/**
+	 * Activate a command from a momentary trigger (the palette, a click) — no
+	 * release event follows, so a control auto-releases after a short pulse;
+	 * app verbs (no release half) just run.
+	 */
 	dispatch(command: Command): void {
-		commands[command].run({ emulator: this.#emulator, host: this });
+		this.press(command);
+		const release = releaseOf(command);
+		if (release) {
+			// Frame-paced so the pulse is two emulated frames even under turbo.
+			this.#emulator.afterFrames(PULSE_FRAMES, () =>
+				release(this.#commandContext()),
+			);
+		}
+	}
+
+	/** Press a command (a sustained trigger's key-down). */
+	press(command: Command): void {
+		commands[command].run(this.#commandContext());
+	}
+
+	/** Release a command (a sustained trigger's key-up); a no-op if press-only. */
+	release(command: Command): void {
+		releaseOf(command)?.(this.#commandContext());
+	}
+
+	/**
+	 * Release the POKEY keyboard matrix — one shared register, so every matrix
+	 * key releases the same way. The keyboard/OSD call this when the last held
+	 * matrix key goes up.
+	 */
+	releaseMatrix(): void {
+		this.#emulator.machine.pokeyKeyUp();
 	}
 
 	/**
@@ -860,7 +904,8 @@ export class EmulatorHost {
 
 	/** Show a sidebar panel (switching directly if another is already open). */
 	showPanel(panel: SidebarPanel): void {
-		if (panel === "menu") this.staged.value = this.config.peek(); // from running config
+		// Open the config form on the running machine's settings.
+		if (panel === "config") this.staged.value = this.config.peek();
 		navigate(`/a8/emu/${panel}`, { replace: true });
 	}
 

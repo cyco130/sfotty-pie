@@ -235,9 +235,11 @@ export class EmulatorHost {
 	// Fetched ROM bytes, keyed by the resolved image's id — populated lazily
 	// before each (re)build so #makeEmulator can read them synchronously.
 	readonly #bytes = new Map<string, Uint8Array>();
-	// In-memory firmware overrides (not persisted). appliedRoms is what the
-	// running machine uses; stagedRoms is the ROMs panel's working copy. applyRoms
-	// adopts it, rebooting only when the picks change the running machine.
+	// The firmware picks per slot, persisted. appliedRoms is what the running
+	// machine uses (an explicit pick, or the rank-resolved one #ensurePins pins in
+	// so it stays put across library changes); stagedRoms is the ROMs panel's
+	// working copy. applyRoms adopts it, rebooting only when the picks change the
+	// running machine.
 	readonly appliedRoms = signal<RomOverrides>(NO_ROM_OVERRIDES);
 	readonly stagedRoms = signal<RomOverrides>(NO_ROM_OVERRIDES);
 	readonly romsDirty = computed(
@@ -456,9 +458,12 @@ export class EmulatorHost {
 
 	// The best-ranked built-in firmware present in the library for a list of
 	// keys (a built-in's image id is its firmware key).
+	// Resolve the best available firmware by rank, matching on the detected
+	// firmware identity — so an uploaded copy of a known ROM is picked just like
+	// the built-in one (a built-in's id is also its key).
 	#pick(keys: readonly FirmwareKey[]): ImageEntry | null {
 		for (const key of keys) {
-			const entry = getImage(key);
+			const entry = libraryEntries.value.find((e) => e.firmwareKey === key);
 			if (entry) return entry;
 		}
 		return null;
@@ -508,13 +513,64 @@ export class EmulatorHost {
 		return id ? (getImage(id) ?? null) : null;
 	}
 
-	// The XEGS built-in game — a bundled game-slot image.
+	// The XEGS game-slot image — any library image flagged for the game slot
+	// (the bundled one, or an upload the user has tagged).
 	#pickGame(): ImageEntry | null {
 		return (
-			libraryEntries.value.find(
-				(e) => e.source === "builtin" && e.user.slots?.includes("game"),
-			) ?? null
+			libraryEntries.value.find((e) => e.user.slots?.includes("game")) ?? null
 		);
+	}
+
+	// Pin the resolved firmware per slot into the (persisted) prefs, so a later
+	// library change can't silently re-rank a slot that's already settled. A slot
+	// is (re)picked by rank only when its pref is empty or points at an image the
+	// library no longer has — "fill an empty slot, or replace a vanished one";
+	// importing a better ROM leaves a settled slot alone (pick it by hand instead).
+	#ensurePins(): void {
+		// Every OS slot (not just the running model's) gets pinned, so a slot the
+		// user hasn't booted into is just as stable against imports.
+		const osSlots: { slot: OsSlot; model: AtariModel; tv: "ntsc" | "pal" }[] = [
+			{ slot: "800-ntsc", model: "400/800", tv: "ntsc" },
+			{ slot: "800-pal", model: "400/800", tv: "pal" },
+			{ slot: "xlxe", model: "xl/xe", tv: "ntsc" },
+			{ slot: "1200xl", model: "1200xl", tv: "ntsc" },
+			{ slot: "xegs", model: "xegs", tv: "ntsc" },
+		];
+		const prev = this.appliedRoms.value;
+		const os = { ...prev.os };
+		let basic = prev.basic;
+		let game = prev.game;
+		let changed = false;
+
+		for (const s of osSlots) {
+			if (this.#fromId(os[s.slot])) continue; // settled + still available
+			const pick = this.#pick(preferredOsKeys({ model: s.model, tv: s.tv }));
+			if (pick) {
+				os[s.slot] = pick.id;
+				changed = true;
+			}
+		}
+		if (!this.#fromId(basic)) {
+			const pick = this.#pick(preferredBasicKeys());
+			if (pick) {
+				basic = pick.id;
+				changed = true;
+			}
+		}
+		if (!this.#fromId(game)) {
+			const pick = this.#pickGame();
+			if (pick) {
+				game = pick.id;
+				changed = true;
+			}
+		}
+
+		if (!changed) return;
+		const wasDirty = this.romsDirty.value; // staged-vs-applied, before we update
+		const next: RomOverrides = { os, basic, game };
+		this.appliedRoms.value = next;
+		if (!wasDirty) this.stagedRoms.value = next; // keep the panel synced
+		savePersisted(ROMS_KEY, next);
 	}
 
 	// Fetch (and cache) the bytes the running config's OS + BASIC need, so the
@@ -524,6 +580,7 @@ export class EmulatorHost {
 	// failure just leaves built-ins).
 	async #ensureFirmware(): Promise<void> {
 		await readyLibrary();
+		this.#ensurePins();
 		const { os, basic, game } = this.#resolveFirmware();
 		await Promise.all(
 			[os, basic, game]
@@ -1124,13 +1181,15 @@ export class EmulatorHost {
 		};
 	}
 
-	// Set config + applied/staged ROM picks without persisting (resets clear the
-	// store deliberately; a later explicit change re-persists).
+	// Set config + applied/staged ROM picks, then re-pin (a reset clears the picks,
+	// so this fills + persists them afresh — without it a settled slot would read
+	// as empty until the next boot and re-rank on import).
 	#setConfigAndRoms(config: MachineSettings, roms: RomOverrides): void {
 		this.config.value = config;
 		this.staged.value = config;
 		this.appliedRoms.value = roms;
 		this.stagedRoms.value = roms;
+		this.#ensurePins();
 	}
 
 	#mediaMounted(): boolean {

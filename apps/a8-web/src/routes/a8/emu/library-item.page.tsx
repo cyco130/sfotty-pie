@@ -10,8 +10,13 @@ import {
 	getImageBytes,
 	readyLibrary,
 	removeImage,
+	updateUserMeta,
 } from "../../../images/library.ts";
-import type { ImageEntry, ImageType } from "../../../images/metadata.ts";
+import type {
+	ImageEntry,
+	ImageSlot,
+	ImageType,
+} from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
 import { useEmu } from "./emu-context.ts";
@@ -102,6 +107,53 @@ function Detail({ label, value }: { label: string; value: string }) {
 	);
 }
 
+// Editable name with an explicit Save (shown only once the text differs), plus a
+// confirming toast — so a rename never happens silently. Keyed by id by the
+// caller so the draft resets when switching images.
+function NameEditor({
+	entry,
+	toast,
+}: {
+	entry: ImageEntry;
+	toast: (message: string) => void;
+}) {
+	const [draft, setDraft] = useState(entry.user.displayName);
+	const name = draft.trim();
+	const dirty = name !== "" && name !== entry.user.displayName;
+	const save = (): void => {
+		if (!dirty) return;
+		void updateUserMeta(entry.id, { displayName: name });
+		toast(messages.library.renamed(name));
+	};
+	return (
+		<div class="flex flex-col gap-1">
+			<span class="text-xs text-neutral-500">
+				{messages.library.fields.name}
+			</span>
+			<div class="flex gap-2">
+				<input
+					type="text"
+					value={draft}
+					class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 text-sm font-medium text-neutral-900 outline-none focus:border-neutral-500"
+					onInput={(event) => setDraft(event.currentTarget.value)}
+					onKeyDown={(event) => {
+						if (event.key === "Enter") save();
+					}}
+				/>
+				{dirty && (
+					<button
+						type="button"
+						class="shrink-0 rounded bg-neutral-800 px-3 py-1 text-sm text-white hover:bg-neutral-700"
+						onClick={save}
+					>
+						{messages.library.save}
+					</button>
+				)}
+			</div>
+		</div>
+	);
+}
+
 export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	const { host } = useEmu();
 	const [ready, setReady] = useState(false);
@@ -157,6 +209,19 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	const type = entry.derived.type;
 	const canBoot = type === "cart" || type === "disk" || type === "xex";
 
+	// Slot flags apply to standard-8K carts (CART type 1) — the kind the BASIC
+	// and built-in-game ROM slots accept.
+	const isStdCart =
+		entry.derived.type === "cart" && entry.derived.cartType === 1;
+	const slots = entry.user.slots ?? [];
+
+	const toggleSlot = (slot: ImageSlot, on: boolean): void => {
+		const next = on
+			? [...slots.filter((s) => s !== slot), slot]
+			: slots.filter((s) => s !== slot);
+		void updateUserMeta(entry.id, { slots: next });
+	};
+
 	const remove = async (): Promise<void> => {
 		if (
 			!window.confirm(messages.library.confirmDelete(entry.user.displayName))
@@ -200,6 +265,12 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
 				<BackLink />
 
+				<NameEditor
+					key={entry.id}
+					entry={entry}
+					toast={(message) => host.toast(message)}
+				/>
+
 				<div class="flex flex-col gap-1.5">
 					<Detail
 						label={messages.library.columns.source}
@@ -234,6 +305,34 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 						</button>
 					</div>
 				</div>
+
+				{isStdCart && (
+					<div class="flex flex-col gap-1.5">
+						<h3 class="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+							{messages.library.slots.title}
+						</h3>
+						<label class="flex items-center gap-2 text-sm text-neutral-800">
+							<input
+								type="checkbox"
+								checked={slots.includes("basic")}
+								onChange={(event) =>
+									toggleSlot("basic", event.currentTarget.checked)
+								}
+							/>
+							{messages.library.slots.basic}
+						</label>
+						<label class="flex items-center gap-2 text-sm text-neutral-800">
+							<input
+								type="checkbox"
+								checked={slots.includes("game")}
+								onChange={(event) =>
+									toggleSlot("game", event.currentTarget.checked)
+								}
+							/>
+							{messages.library.slots.game}
+						</label>
+					</div>
+				)}
 
 				<div class="flex flex-col gap-2">
 					{canBoot && (

@@ -127,31 +127,32 @@ const CART_SLOTS: SlotDef[] = [
 	},
 ];
 
-/** A slot's qualifying images: built-ins first (by rank), then your ROMs by name. */
+/**
+ * A slot's qualifying images, best-first: by preference rank, then name. Ranking
+ * is by detected firmware identity (`firmwareKey`), so an uploaded copy of a
+ * known ROM ranks like the built-in one; unknown ROMs have no key and follow.
+ */
 function candidatesFor(slot: SlotDef): ImageEntry[] {
 	const rank = new Map<string, number>(
 		slot.ranking.map((key, index) => [key, index]),
 	);
-	// A built-in's id is its firmware key; user ROMs have no rank.
 	const rankOf = (e: ImageEntry): number =>
-		e.source === "builtin" ? (rank.get(e.id) ?? Infinity) : Infinity;
+		rank.get(e.firmwareKey ?? "") ?? Infinity;
 	return libraryEntries.value
 		.filter(slot.match)
 		.sort(
 			(a, b) =>
-				(a.source === "builtin" ? 0 : 1) - (b.source === "builtin" ? 0 : 1) ||
 				rankOf(a) - rankOf(b) ||
 				a.user.displayName.localeCompare(b.user.displayName),
 		);
 }
 
-/** One slot: label + format hint over a full-width picker grouped built-in / yours. */
+/** One slot: label + format hint over a full-width, suitability-ordered picker. */
 function Slot({ slot, host }: { slot: SlotDef; host: EmulatorHost }) {
 	const entries = candidatesFor(slot);
-	const builtins = entries.filter((e) => e.source === "builtin");
-	const yours = entries.filter((e) => e.source === "user");
-	// The automatic default is the top-ranked built-in — what the host auto-picks.
-	const best = builtins[0];
+	// The most-suitable candidate (first after the rank sort) — the value shown
+	// for a not-yet-pinned slot, and the "reset to suitable" target.
+	const best = entries[0];
 	const empty = entries.length === 0;
 	const stagedId = slot.read(host.stagedRoms.value);
 	const appliedId = slot.read(host.appliedRoms.value);
@@ -198,26 +199,11 @@ function Slot({ slot, host }: { slot: SlotDef; host: EmulatorHost }) {
 				{empty ? (
 					<option>{messages.roms.noSuitable}</option>
 				) : (
-					<>
-						{builtins.length > 0 && (
-							<optgroup label={messages.roms.builtin}>
-								{builtins.map((entry) => (
-									<option key={entry.id} value={entry.id}>
-										{entry.user.displayName}
-									</option>
-								))}
-							</optgroup>
-						)}
-						{yours.length > 0 && (
-							<optgroup label={messages.roms.yourRoms}>
-								{yours.map((entry) => (
-									<option key={entry.id} value={entry.id}>
-										{entry.user.displayName}
-									</option>
-								))}
-							</optgroup>
-						)}
-					</>
+					entries.map((entry) => (
+						<option key={entry.id} value={entry.id}>
+							{entry.user.displayName}
+						</option>
+					))
 				)}
 			</select>
 		</div>

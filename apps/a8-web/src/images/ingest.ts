@@ -13,7 +13,7 @@ import {
 } from "@sfotty-pie/a8";
 import { idbBlobStore } from "./blob-store.ts";
 import { sha256Hex } from "./hash.ts";
-import type { ImageSlot, StoredEntry } from "./metadata.ts";
+import type { ImageSlot, StoredEntry, UserMeta } from "./metadata.ts";
 import { putEntry } from "./store.ts";
 
 export const blobs = idbBlobStore();
@@ -40,7 +40,7 @@ export async function ingestFile(
 	seen: Set<string>,
 	into: StoredEntry[],
 	transient = false,
-	tags: string[] = [],
+	meta: Partial<UserMeta> = {},
 ): Promise<{ added: number; deduped: number }> {
 	const pieces = canonicalize(bytes, fileName); // throws on an unrecognized file
 	const baseName = fileName.replace(/\.[^./]+$/, "");
@@ -55,7 +55,17 @@ export async function ingestFile(
 		seen.add(hash);
 		const raw = bytes.subarray(piece.from, piece.to);
 		const fw = detectFirmware(raw);
-		const slots = primeSlots(fw?.type ?? null, piece.kind);
+		// Supplied metadata (a zip import's manifest) wins over the auto-derived
+		// name/slots; everything else stays content-derived.
+		const slots = meta.slots ?? primeSlots(fw?.type ?? null, piece.kind);
+		const user: UserMeta = {
+			displayName:
+				meta.displayName ??
+				fw?.name ??
+				(piece.role ? `${baseName} (${piece.role})` : baseName),
+		};
+		if (slots?.length) user.slots = slots;
+		if (meta.tags?.length) user.tags = meta.tags;
 		const entry: StoredEntry = {
 			id: crypto.randomUUID(),
 			hash,
@@ -65,12 +75,7 @@ export async function ingestFile(
 			...(fw && { firmwareKey: fw.key }),
 			locator: { backend: "idb", ref: hash },
 			derived: piece.kind,
-			user: {
-				displayName:
-					fw?.name ?? (piece.role ? `${baseName} (${piece.role})` : baseName),
-				...(slots && { slots }),
-				...(tags.length > 0 && { tags }),
-			},
+			user,
 		};
 		await blobs.put(hash, piece.bytes);
 		await putEntry(entry);

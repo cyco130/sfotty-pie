@@ -20,6 +20,16 @@ export type DerivedMeta = ImageKind;
 /** The coarse, canonical kind of an image — what it intrinsically is. */
 export type ImageType = ImageKind["type"];
 
+/** Canonical file extension per type — a cartridge is a `.car`, an OS a raw
+ *  `.rom`, a disk an `.atr`, an executable a `.xex`. Stored names carry none;
+ *  this is added on download / library export. */
+export const CANON_EXT: Record<ImageType, string> = {
+	os: "rom",
+	cart: "car",
+	disk: "atr",
+	xex: "xex",
+};
+
 /** A slot picker an image can be surfaced in (standard-8K carts only). */
 export type ImageSlot = "basic" | "game";
 

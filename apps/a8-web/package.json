@@ -16,6 +16,7 @@
     "@preact/signals": "^2.9.2",
     "@sfotty-pie/a8": "workspace:*",
     "@sfotty-pie/sfotty": "workspace:*",
+    "fflate": "^0.8.3",
     "preact": "^10.29.2",
     "preact-iso": "^2.12.0"
   },

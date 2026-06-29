@@ -69,14 +69,9 @@ worker.onmessage = async (event: MessageEvent<ImportRequest>) => {
 		const into: StoredEntry[] = [];
 		try {
 			const bytes = new Uint8Array(await file.arrayBuffer());
-			const result = await ingestFile(
-				bytes,
-				file.name,
-				seen,
-				into,
-				false,
+			const result = await ingestFile(bytes, file.name, seen, into, false, {
 				tags,
-			);
+			});
 			added += result.added;
 			deduped += result.deduped;
 		} catch {

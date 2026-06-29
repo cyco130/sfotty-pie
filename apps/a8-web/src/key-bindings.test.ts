@@ -78,6 +78,23 @@ test("Ctrl combos resolve by code, not produced character", () => {
 	expect(cmd("Semicolon")).toBe("PRESS_CONTROL_SEMICOLON");
 });
 
+test("Windows aliases browser-grabbed Ctrl combos onto Alt", () => {
+	// Alt stands in for Ctrl on the grabbed keys only (non-mac).
+	expect(resolve({ code: "Digit1", alt: true }, "character", false)).toBe(
+		"PRESS_CONTROL_1",
+	);
+	expect(
+		resolve({ code: "Digit1", alt: true, shift: true }, "character", false),
+	).toBe("PRESS_CONTROL_SHIFT_1");
+	expect(resolve({ code: "KeyN", alt: true }, "character", false)).toBe(
+		"PRESS_CONTROL_N",
+	);
+	// Not on Mac (Option is for chars / F-keys there)…
+	expect(resolve({ code: "Digit1", alt: true }, "character", true)).toBeNull();
+	// …and only the grabbed keys — other Alt+letter stays free for commands.
+	expect(resolve({ code: "KeyA", alt: true }, "character", false)).toBeNull();
+});
+
 test("macOS overlay: Cmd+Arrow cursor, Option+Arrow F1–F4", () => {
 	expect(
 		resolve({ key: "ArrowUp", meta: true }, "character", false),

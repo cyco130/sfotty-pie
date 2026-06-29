@@ -149,6 +149,25 @@ function navKey(on: KeyId, base: "F1" | "F2" | "F3" | "F4"): Binding[] {
 	];
 }
 
+// A Windows/Linux alternate for a browser-grabbed Ctrl combo: Alt+<code> → the
+// Atari Ctrl+<base> (and Alt+Shift → Ctrl+Shift when `shift`). Bound only for the
+// keys the browser actually eats, so every other Alt+letter stays free for app
+// commands.
+function altCtrl(code: string, base: MatrixBase, shift = true): Binding[] {
+	const out: Binding[] = [
+		{ on: { code }, alt: true, command: `PRESS_CONTROL_${base}` },
+	];
+	if (shift) {
+		out.push({
+			on: { code },
+			alt: true,
+			shift: true,
+			command: `PRESS_CONTROL_SHIFT_${base}`,
+		});
+	}
+	return out;
+}
+
 // Platform-agnostic bindings. (Every F-key is additionally claimed at
 // window+capture — the browser-shortcut guard — assumed for the F-keys here.)
 const base: Binding[] = [
@@ -250,6 +269,22 @@ const macBindings: Binding[] = [
 	...modVariants({ key: "ArrowRight" }, "F4", { alt: true }),
 ];
 
+// Windows/Linux overlay: Alt stands in for Ctrl on just the keys the browser
+// grabs — Ctrl+digit (tab select / zoom) and Ctrl+N/T/W/L/O (new window / tab /
+// close / address bar / open). Nothing else, so other Alt+letter combos stay free
+// for app commands (e.g. Alt+K opens the palette). On macOS these reach the Atari
+// via plain Ctrl, so this overlay is non-mac only.
+const winBindings: Binding[] = [
+	...(["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const).flatMap(
+		(d) => altCtrl(`Digit${d}`, d),
+	),
+	...altCtrl("KeyN", "N"),
+	...altCtrl("KeyT", "T"),
+	...altCtrl("KeyW", "W"),
+	...altCtrl("KeyL", "L", false),
+	...altCtrl("KeyO", "O", false),
+];
+
 // --- Positional layer (Positional mode only) -----------------------------
 // The raw keyboard: each character-producing host key, by physical `code`, mapped
 // to the Atari matrix key at that position. Tagged `mode: "positional"`, so it's
@@ -312,8 +347,9 @@ const positionalKeys: Record<string, MatrixBase> = {
 };
 
 // Each position → its four exact-modifier bindings (see modVariants), tagged
-// positional-only.
-const positional: Binding[] = Object.entries(positionalKeys).flatMap(
+// positional-only. Exported so the keyboard can resolve Ctrl (and Windows Alt)
+// combos against the character-key layer alone.
+export const positional: Binding[] = Object.entries(positionalKeys).flatMap(
 	([code, base]) =>
 		modVariants({ code }, base).map(
 			(b): Binding => ({ ...b, mode: "positional" }),
@@ -338,14 +374,15 @@ function overlay(acc: Binding[], ext: Binding[]): Binding[] {
 
 /**
  * The effective default bindings for a mode + platform: every binding active in
- * `mode` (its `mode` matches, or is absent = both), then the macOS overlay on
- * macOS. The positional layer drops out in Character mode via its `mode` tag.
+ * `mode` (its `mode` matches, or is absent = both), then the platform overlay —
+ * macOS (Cmd/Option+Arrow) on Mac, the Windows/Linux Alt-for-Ctrl aliases
+ * elsewhere. The positional layer drops out in Character mode via its `mode` tag.
  */
 export function defaultBindings(mac: boolean, mode: KeyboardMode): Binding[] {
 	const active = [...base, ...positional].filter(
 		(b) => b.mode === undefined || b.mode === mode,
 	);
-	return mac ? overlay(active, macBindings) : active;
+	return overlay(active, mac ? macBindings : winBindings);
 }
 
 // --- Resolution ----------------------------------------------------------

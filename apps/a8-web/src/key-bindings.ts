@@ -280,6 +280,30 @@ const base: Binding[] = [
 	...navKey({ key: "End" }, "F4"), // line end
 ];
 
+// Cmd (mac) / Alt (win) on the `-` and `=`/`+` keys → the Atari SHIFT functions of
+// the keys that sit there: Shift+Clear (the `<`/Clear key, at `-`) and insert-line
+// (Shift on the `>`/Insert key, at `=`/`+`). The Ctrl forms — Clear, insert-char —
+// already work as Ctrl+-/Ctrl+=, since Ctrl resolves positionally. But host Shift
+// on those keys produces characters (`_`, `+`), so the Shift forms have no
+// positional route; Cmd/Alt supply it. These are the browser zoom chords, but
+// preventable. Shift-agnostic so the chord lands however `+`/`-` is produced.
+function editKeys(mod: Pick<Binding, "meta" | "alt">): Binding[] {
+	return [
+		{
+			on: { code: "Minus" },
+			...mod,
+			shift: "any",
+			command: "PRESS_SHIFT_LESS_THAN",
+		},
+		{
+			on: { code: "Equal" },
+			...mod,
+			shift: "any",
+			command: "PRESS_SHIFT_GREATER_THAN",
+		},
+	];
+}
+
 // macOS overlay: Cmd+Arrow stands in for the cursor keys (the OS reserves
 // Ctrl+Arrow for Mission Control), and Option+Arrow drives the 1200XL function
 // keys F1–F4 (cursor up/down/left/right by default), with Ctrl/Shift variants.
@@ -288,6 +312,8 @@ const macBindings: Binding[] = [
 	{ on: { key: "ArrowDown" }, meta: true, command: "PRESS_CONTROL_EQUALS" },
 	{ on: { key: "ArrowLeft" }, meta: true, command: "PRESS_CONTROL_PLUS" },
 	{ on: { key: "ArrowRight" }, meta: true, command: "PRESS_CONTROL_ASTERISK" },
+	// Cmd+-/Cmd+= → Shift+Clear / insert-line (see editKeys).
+	...editKeys({ meta: true }),
 	// Option+Arrow → F1–F4 (+ Ctrl/Shift). Option (not plain Alt) avoids the
 	// Windows snags noted on `base` above — hence mac-only.
 	...modVariants({ key: "ArrowUp" }, "F1", { alt: true }),
@@ -310,6 +336,8 @@ const winBindings: Binding[] = [
 	...altCtrl("KeyW", "W"),
 	...altCtrl("KeyL", "L", false),
 	...altCtrl("KeyO", "O", false),
+	// Alt+-/Alt+= → Shift+Clear / insert-line (editKeys; Cmd's stand-in on Windows).
+	...editKeys({ alt: true }),
 ];
 
 // --- Positional layer (Positional mode only) -----------------------------

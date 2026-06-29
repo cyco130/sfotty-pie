@@ -70,6 +70,35 @@ test("unscannable Ctrl+Shift combos get no binding", () => {
 	);
 });
 
+test("Cmd (mac) / Alt (win) on -/= reach the Shift+Clear / insert-line forms", () => {
+	// The Atari </ > (Clear / Insert) sit at the -/= positions. Their Ctrl forms
+	// are positional (Ctrl+-/Ctrl+=), but host Shift+-/= type characters, so the
+	// Shift forms have no positional route — Cmd/Alt supply them.
+	expect(resolve({ code: "Minus", meta: true }, "character", true)).toBe(
+		"PRESS_SHIFT_LESS_THAN",
+	);
+	expect(resolve({ code: "Equal", meta: true }, "character", true)).toBe(
+		"PRESS_SHIFT_GREATER_THAN",
+	);
+	// Shift-agnostic, so Cmd++ (Cmd+Shift+=) lands the same as Cmd+=.
+	expect(
+		resolve({ code: "Equal", meta: true, shift: true }, "character", true),
+	).toBe("PRESS_SHIFT_GREATER_THAN");
+	// Windows uses Alt for the same; the modifier doesn't cross platforms.
+	expect(resolve({ code: "Minus", alt: true }, "character", false)).toBe(
+		"PRESS_SHIFT_LESS_THAN",
+	);
+	expect(resolve({ code: "Equal", alt: true }, "character", false)).toBe(
+		"PRESS_SHIFT_GREATER_THAN",
+	);
+	expect(resolve({ code: "Minus", alt: true }, "character", true)).toBeNull();
+	expect(resolve({ code: "Minus", meta: true }, "character", false)).toBeNull();
+	// The Ctrl forms still resolve positionally (unchanged by the Cmd/Alt route).
+	expect(resolve({ code: "Minus", ctrl: true }, "positional")).toBe(
+		"PRESS_CONTROL_LESS_THAN",
+	);
+});
+
 test("positional char keys are mode-gated", () => {
 	// Character mode: the char keys belong to the character channel, not bindings.
 	expect(resolve({ code: "KeyA", key: "a" }, "character")).toBeNull();

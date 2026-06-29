@@ -145,17 +145,13 @@ export class Keyboard {
 
 	#keyUp(event: KeyboardEvent): void {
 		// macOS browsers swallow keyups for other keys while Cmd is held, so a
-		// Cmd+Arrow matrix press may never see its arrow keyup — release held
-		// arrows when Cmd itself is released instead.
+		// Cmd+<key> matrix press (cursor arrows, the Cmd+-/= editing keys) may never
+		// see its own keyup — release any held matrix key when Cmd itself is released.
 		if (event.key === "Meta") {
-			let changed = false;
-			for (const code of this.#matrixHeld) {
-				if (code.startsWith("Arrow")) {
-					this.#matrixHeld.delete(code);
-					changed = true;
-				}
+			if (this.#matrixHeld.size > 0) {
+				this.#matrixHeld.clear();
+				this.#actions.releaseMatrix();
 			}
-			if (changed && this.#matrixHeld.size === 0) this.#actions.releaseMatrix();
 			return;
 		}
 

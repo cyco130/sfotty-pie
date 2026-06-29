@@ -18,6 +18,7 @@ import {
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
+import type { KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
@@ -102,6 +103,7 @@ const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
 // Persisted-state keys (namespaced by storageName) — see persist.ts.
 const CONFIG_KEY = "config";
 const ROMS_KEY = "roms";
+const KBMODE_KEY = "keyboard-mode";
 
 // How long a momentary trigger (palette, click) holds a control before its
 // auto-release — long enough for the OS to sense the key/button. Counted in
@@ -226,6 +228,10 @@ export class EmulatorHost {
 	/** Whether turbo mode (unthrottled, muted) is engaged. */
 	readonly turboMode = signal(false);
 
+	/** Keyboard interpretation: Character (layout-aware typing) vs Positional
+	 *  (raw, by physical key). Persisted; loaded in the constructor. */
+	readonly keyboardMode = signal<KeyboardMode>("character");
+
 	/** The 1200XL keyboard LEDs `[L1, L2]` (true = lit), or null on other models. */
 	readonly leds = signal<readonly [boolean, boolean] | null>(null);
 
@@ -333,14 +339,19 @@ export class EmulatorHost {
 		// the ranking).
 		this.appliedRoms.value = sanitizeRoms(loadPersisted(ROMS_KEY));
 		this.stagedRoms.value = this.appliedRoms.peek();
+		this.keyboardMode.value =
+			loadPersisted(KBMODE_KEY) === "positional" ? "positional" : "character";
 
 		// #emulator is built by create() once the initial firmware is fetched.
-		this.#keyboard = new Keyboard({
-			press: (command) => this.press(command),
-			release: (command) => this.release(command),
-			tap: (command) => this.dispatch(command),
-			releaseMatrix: () => this.releaseMatrix(),
-		});
+		this.#keyboard = new Keyboard(
+			{
+				press: (command) => this.press(command),
+				release: (command) => this.release(command),
+				tap: (command) => this.dispatch(command),
+				releaseMatrix: () => this.releaseMatrix(),
+			},
+			() => this.keyboardMode.value,
+		);
 
 		// The audio context resumes/suspends asynchronously; track it.
 		if (audio) {
@@ -796,6 +807,20 @@ export class EmulatorHost {
 
 	toggleTurboMode(): void {
 		this.setTurboMode(!this.turboMode.value);
+	}
+
+	/** Switch the keyboard interpretation (Character vs Positional). Persisted;
+	 *  takes effect on the next keystroke once the keyboard reads the binding set. */
+	setKeyboardMode(mode: KeyboardMode): void {
+		this.keyboardMode.value = mode;
+		savePersisted(KBMODE_KEY, mode);
+		this.toast(messages.toasts.keyboardMode(mode));
+	}
+
+	toggleKeyboardMode(): void {
+		this.setKeyboardMode(
+			this.keyboardMode.value === "character" ? "positional" : "character",
+		);
 	}
 
 	setMuted(muted: boolean): void {

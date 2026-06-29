@@ -307,6 +307,8 @@ export const messages = {
 		switchingMachine: (model: string) => `Switching to Atari ${model}`,
 		switchingTv: (tv: string) => `Switching TV to ${tv}`,
 		powerCycling: "Power cycling",
+		keyboardMode: (mode: "character" | "positional"): string =>
+			`Keyboard: ${mode === "positional" ? "Positional" : "Character"} mode`,
 		saving: (name: string) => `Saving (${name})`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
 		copy: "Copy",
@@ -328,6 +330,9 @@ export const labels = {
 	TURBO_MODE_ENABLE: "Enable turbo mode (run unthrottled, muted)",
 	TURBO_MODE_DISABLE: "Disable turbo mode (return to real-time speed)",
 	TURBO_MODE_TOGGLE: "Toggle turbo mode",
+	KEYBOARD_MODE_CHARACTER: "Keyboard: Character mode (layout-aware typing)",
+	KEYBOARD_MODE_POSITIONAL: "Keyboard: Positional mode (raw, by physical key)",
+	KEYBOARD_MODE_TOGGLE: "Keyboard: toggle Character / Positional mode",
 	AUDIO_MUTE: "Mute audio",
 	AUDIO_UNMUTE: "Unmute audio",
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",

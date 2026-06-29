@@ -28,6 +28,9 @@ interface CommandSpec {
 	run: (ctx: CommandContext) => void;
 	release?: (ctx: CommandContext) => void;
 	palette?: boolean;
+	// A POKEY keyboard-matrix key (one shared register). The keyboard releases
+	// these only when the last held matrix key is up — see {@link MATRIX_COMMANDS}.
+	matrix?: boolean;
 }
 
 /** Factory for the POKEY matrix key presses, which differ only by key code. The
@@ -37,6 +40,7 @@ const press = (code: number, label: LabelKey): CommandSpec => ({
 	label,
 	run: ({ emulator }) => emulator.machine.pokeyKeyDown(code),
 	release: ({ emulator }) => emulator.machine.pokeyKeyUp(),
+	matrix: true,
 });
 
 export const commands = {
@@ -65,6 +69,20 @@ export const commands = {
 	TURBO_MODE_TOGGLE: {
 		label: "TURBO_MODE_TOGGLE",
 		run: ({ host }) => host.toggleTurboMode(),
+	},
+
+	// Keyboard interpretation: layout-aware typing vs raw positional keys.
+	KEYBOARD_MODE_CHARACTER: {
+		label: "KEYBOARD_MODE_CHARACTER",
+		run: ({ host }) => host.setKeyboardMode("character"),
+	},
+	KEYBOARD_MODE_POSITIONAL: {
+		label: "KEYBOARD_MODE_POSITIONAL",
+		run: ({ host }) => host.setKeyboardMode("positional"),
+	},
+	KEYBOARD_MODE_TOGGLE: {
+		label: "KEYBOARD_MODE_TOGGLE",
+		run: ({ host }) => host.toggleKeyboardMode(),
 	},
 
 	// Audio.
@@ -565,6 +583,13 @@ export function releaseOf(
 ): ((ctx: CommandContext) => void) | undefined {
 	return (commands[command] as CommandSpec).release;
 }
+
+/** The POKEY keyboard-matrix commands (one shared release register). */
+export const MATRIX_COMMANDS: ReadonlySet<Command> = new Set(
+	(Object.keys(commands) as Command[]).filter(
+		(key) => (commands[key] as CommandSpec).matrix,
+	),
+);
 
 /**
  * The commands the palette lists, sorted alphabetically by label — its default

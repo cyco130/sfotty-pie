@@ -1,18 +1,16 @@
 import type { Command } from "./commands.ts";
 
-// DRAFT — an extraction of the discrete key bindings currently hardcoded in
-// keyboard.ts, as data for the future customizable binding system. NOT WIRED:
-// keyboard.ts still owns runtime behavior; this only mirrors it for review.
+// The keyboard binding table: every discrete Atari key / device action as data,
+// keyed by trigger and resolved by `resolveBinding`. keyboard.ts drives input
+// through it; layout-aware typing (Character mode) is the separate character
+// channel in char-keys.ts.
 //
 // Structured as a platform-agnostic `base` plus per-platform overlays merged in
 // to form the effective defaults (see `defaultBindings`). Every binding is one
 // (key + modifiers) → one fixed command; no folding. Modifiers are exact (must be
 // up unless stated) except device inputs, which are Shift-agnostic (see `Mod`).
-//
-// OUT OF SCOPE — the "character channel" (a separate subsystem): plain
-// layout-aware typing and Ctrl+char for Character mode; the by-`code` table for
-// Positional mode; and the Alt/Option "Mod" Ctrl-layer. Those map produced
-// characters, not device/app actions, so they aren't bindings.
+// The raw `code`→Atari layer is tagged Positional-only (the positional layer);
+// in Character mode those keys belong to the character channel instead.
 
 /** Host key identity: physical position (`code`) or logical/named key (`key`). */
 type KeyId = { code: string } | { key: string };

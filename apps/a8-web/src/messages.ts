@@ -133,6 +133,7 @@ export const messages = {
 	library: {
 		title: "Library",
 		drop: "Drop files or folders here, or",
+		importTags: "Tag imported files (comma-separated)…",
 		browse: "browse files",
 		browseFolder: "a folder",
 		empty: "No images yet.",
@@ -161,6 +162,7 @@ export const messages = {
 		search: "Filter by name…",
 		allTypes: "All types",
 		allSources: "All sources",
+		allTags: "All tags",
 		sourceBuiltin: "Built-in",
 		sourceUser: "Yours",
 		prev: "Prev",
@@ -197,6 +199,11 @@ export const messages = {
 		},
 		save: "Save",
 		renamed: (name: string): string => `Renamed to ${name}`,
+		tags: {
+			label: "Tags",
+			add: "Add a tag…",
+			remove: "Remove tag",
+		},
 		// Heading for the item view's recognized-image section (firmware today;
 		// DOSes and other known software later).
 		knownTitle: "Well-known image",

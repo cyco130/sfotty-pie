@@ -12,6 +12,8 @@ import { loadEntries } from "./store.ts";
 
 export interface ImportRequest {
 	files: File[];
+	/** Tags stamped onto every imported entry (already normalized). */
+	tags: string[];
 }
 
 export type ImportResponse =
@@ -34,7 +36,7 @@ const FLUSH_MS = 100;
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 
 worker.onmessage = async (event: MessageEvent<ImportRequest>) => {
-	const { files } = event.data;
+	const { files, tags } = event.data;
 	const total = files.length;
 
 	// Dedup against what's already stored; the worker owns writes for the import.
@@ -67,7 +69,14 @@ worker.onmessage = async (event: MessageEvent<ImportRequest>) => {
 		const into: StoredEntry[] = [];
 		try {
 			const bytes = new Uint8Array(await file.arrayBuffer());
-			const result = await ingestFile(bytes, file.name, seen, into);
+			const result = await ingestFile(
+				bytes,
+				file.name,
+				seen,
+				into,
+				false,
+				tags,
+			);
 			added += result.added;
 			deduped += result.deduped;
 		} catch {

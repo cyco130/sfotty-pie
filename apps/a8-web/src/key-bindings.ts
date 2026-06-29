@@ -109,6 +109,7 @@ type MatrixBase =
 	| "TAB"
 	| "RETURN"
 	| "BACKSPACE"
+	| "SPACE"
 	| "F1"
 	| "F2"
 	| "F3"
@@ -399,6 +400,7 @@ const positionalKeys: Record<string, MatrixBase> = {
 	Comma: "COMMA",
 	Period: "PERIOD",
 	Slash: "SLASH",
+	Space: "SPACE",
 };
 
 // Each position → its four exact-modifier bindings (see modVariants), tagged
@@ -575,4 +577,37 @@ export function labelFor(b: Binding, layout: Map<string, string>): string {
 		return b.label ?? layout.get(b.on.code) ?? qwertyLabel(b.on.code);
 	}
 	return b.label ?? qwertyLabel(b.on.key);
+}
+
+// Committed bindings carry their `label`, so chord display needs no layout map.
+const NO_LAYOUT = new Map<string, string>();
+
+/**
+ * A binding's full chord for display: the required-modifier prefixes (in a fixed
+ * order; `"any"` modifiers are device-agnostic so omitted) + the key legend.
+ * `mac` picks Cmd/Opt over Meta/Alt.
+ */
+export function chordLabel(b: Binding, mac: boolean): string {
+	const parts: string[] = [];
+	if (b.ctrl === true) parts.push("Ctrl");
+	if (b.meta === true) parts.push(mac ? "Cmd" : "Meta");
+	if (b.alt === true) parts.push(mac ? "Opt" : "Alt");
+	if (b.shift === true) parts.push("Shift");
+	parts.push(labelFor(b, NO_LAYOUT));
+	return parts.join("+");
+}
+
+/**
+ * Each command's primary (first-listed) trigger chord, for showing the shortcut
+ * next to a command. Commands with no binding are absent.
+ */
+export function primaryChords(
+	flat: Binding[],
+	mac: boolean,
+): Map<Command, string> {
+	const chords = new Map<Command, string>();
+	for (const b of flat) {
+		if (!chords.has(b.command)) chords.set(b.command, chordLabel(b, mac));
+	}
+	return chords;
 }

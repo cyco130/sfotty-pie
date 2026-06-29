@@ -5,10 +5,10 @@ import type { Command } from "./commands.ts";
 // ATASCII equivalent.
 //
 // Symbols and digits map directly — the host's layout and Shift are already
-// baked into the produced character (e.g. "!" is the Atari Shift+1). Letters are
-// the exception: their case must follow the Shift MODIFIER, not the produced
-// case, so the host's CapsLock state never adds a phantom Shift — see
-// {@link charCommand}.
+// baked into the produced character (e.g. "!" is the Atari Shift+1). Letters and
+// space are the exception: the produced character can't carry their Shift (letter
+// case is unreliable under CapsLock; a space is a space either way), so it comes
+// from the Shift MODIFIER — Shift+A → Atari Shift+A, Shift+Space → Shift+Space.
 
 type Letter =
 	| "A"
@@ -38,9 +38,9 @@ type Letter =
 	| "Y"
 	| "Z";
 
-// Non-letter printable characters → their Atari keystroke.
+// Non-letter printable characters → their Atari keystroke. Space is handled like
+// a letter (folds by the Shift modifier), so it isn't here.
 const SYMBOLS: Record<string, Command> = {
-	" ": "PRESS_SPACE",
 	"!": "PRESS_SHIFT_1",
 	'"': "PRESS_SHIFT_2",
 	"#": "PRESS_SHIFT_3",
@@ -92,5 +92,31 @@ export function charCommand(char: string, shift: boolean): Command | undefined {
 		const letter = char.toUpperCase() as Letter;
 		return shift ? `PRESS_SHIFT_${letter}` : `PRESS_${letter}`;
 	}
+	if (char === " ") return shift ? "PRESS_SHIFT_SPACE" : "PRESS_SPACE";
 	return SYMBOLS[char];
 }
+
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("") as Letter[];
+
+/**
+ * The inverse of the character channel: each Atari character command → the host
+ * character that types it in Character mode, for showing shortcuts. Symbols carry
+ * their own Shift in the glyph ("!" not "Shift+1"); letters fold by the Shift
+ * modifier, so Shift is shown explicitly (`PRESS_SHIFT_A` → "Shift+A").
+ */
+export const characterChords: ReadonlyMap<Command, string> = new Map<
+	Command,
+	string
+>([
+	...Object.entries(SYMBOLS).map(([char, command]): [Command, string] => [
+		command,
+		char,
+	]),
+	// Space folds by the Shift modifier, like letters.
+	["PRESS_SPACE", "Space"],
+	["PRESS_SHIFT_SPACE", "Shift+Space"],
+	...LETTERS.flatMap((l): [Command, string][] => [
+		[`PRESS_${l}`, l],
+		[`PRESS_SHIFT_${l}`, `Shift+${l}`],
+	]),
+]);

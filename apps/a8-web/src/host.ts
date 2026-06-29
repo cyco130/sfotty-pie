@@ -18,7 +18,7 @@ import {
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
-import type { KeyboardMode } from "./key-bindings.ts";
+import type { Binding, KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
@@ -233,6 +233,10 @@ export class EmulatorHost {
 	 *  (raw, by physical key). Persisted; loaded in the constructor. */
 	readonly keyboardMode = signal<KeyboardMode>("character");
 
+	/** The active key bindings (one flat set); mirrors what the keyboard resolves,
+	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
+	readonly keyBindings = signal<Binding[]>([]);
+
 	/** The 1200XL keyboard LEDs `[L1, L2]` (true = lit), or null on other models. */
 	readonly leds = signal<readonly [boolean, boolean] | null>(null);
 
@@ -318,7 +322,7 @@ export class EmulatorHost {
 		// with labels resolved from the live layout. The keyboard isn't attached
 		// until the UI mounts, so the brief empty-binding window is never live.
 		if (!host.#bindingsStored) {
-			host.#keyboard.setBindings(await freshBindings(host.#isMac));
+			host.#applyBindings(await freshBindings(host.#isMac));
 		}
 		host.#emulator = host.#makeEmulator();
 		host.#wireLeds();
@@ -357,6 +361,7 @@ export class EmulatorHost {
 		// generates and persists the platform defaults (first run / cleared store).
 		const storedBindings = loadStoredBindings();
 		this.#bindingsStored = storedBindings !== undefined;
+		this.keyBindings.value = storedBindings ?? [];
 		// #emulator is built by create() once the initial firmware is fetched.
 		this.#keyboard = new Keyboard(
 			{
@@ -839,11 +844,23 @@ export class EmulatorHost {
 		);
 	}
 
+	/** Whether this host runs on macOS — for platform-specific shortcut labels. */
+	get isMac(): boolean {
+		return this.#isMac;
+	}
+
 	/** Regenerate the platform default key bindings (labels from the live layout),
 	 *  persist them, and apply them live — discarding any customization. */
 	async resetKeyBindings(): Promise<void> {
-		this.#keyboard.setBindings(await freshBindings(this.#isMac));
+		this.#applyBindings(await freshBindings(this.#isMac));
 		this.toast(messages.toasts.keyBindingsReset);
+	}
+
+	// Make a flat binding set the active one — both the keyboard (resolution) and
+	// the signal (UI shortcut display).
+	#applyBindings(bindings: Binding[]): void {
+		this.keyBindings.value = bindings;
+		this.#keyboard.setBindings(bindings);
 	}
 
 	setMuted(muted: boolean): void {

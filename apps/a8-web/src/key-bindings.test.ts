@@ -132,6 +132,19 @@ test("a committed label wins over the live layout (editable legends)", () => {
 	).toBe("★");
 });
 
+test("space is bound in the positional layer (plain / Shift / Ctrl)", () => {
+	expect(resolve({ code: "Space" }, "positional")).toBe("PRESS_SPACE");
+	expect(resolve({ code: "Space", shift: true }, "positional")).toBe(
+		"PRESS_SHIFT_SPACE",
+	);
+	// Ctrl+Space resolves by code — the path the character mode uses for Ctrl too.
+	expect(resolve({ code: "Space", ctrl: true }, "positional")).toBe(
+		"PRESS_CONTROL_SPACE",
+	);
+	// In Character mode space belongs to the character channel, not a binding.
+	expect(resolve({ code: "Space", key: " " }, "character")).toBeNull();
+});
+
 test("positional char keys are mode-gated", () => {
 	// Character mode: the char keys belong to the character channel, not bindings.
 	expect(resolve({ code: "KeyA", key: "a" }, "character")).toBeNull();

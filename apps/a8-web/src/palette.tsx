@@ -1,7 +1,9 @@
 import type { ComponentChild } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { characterChords } from "./char-keys.ts";
 import { type Command, labelOf, paletteCommands } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
+import { primaryChords } from "./key-bindings.ts";
 import { messages } from "./messages.ts";
 import { currentPath } from "./navigate.ts";
 
@@ -163,6 +165,19 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 		inputRef.current?.focus();
 	}, []);
 
+	// Each command's primary binding chord, shown beside it. Recomputed only when
+	// the binding set changes (e.g. a reset), not per keystroke.
+	const bindingChords = useMemo(
+		() => primaryChords(host.keyBindings.value, host.isMac),
+		[host.keyBindings.value, host.isMac],
+	);
+	// In Character mode, the matrix keys are typed, so show the produced character
+	// (e.g. "!", "-") rather than the positional binding ("Shift+1", "[").
+	const mode = host.keyboardMode.value;
+	const chordFor = (command: Command): string | undefined =>
+		(mode === "character" ? characterChords.get(command) : undefined) ??
+		bindingChords.get(command);
+
 	const trimmed = query.trim();
 	const results: Result[] = trimmed
 		? paletteCommands
@@ -238,21 +253,29 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 				</div>
 			) : (
 				<ul class="mt-2 min-h-0 flex-1 overflow-y-auto">
-					{results.map(({ command, positions }, index) => (
-						<li
-							key={command}
-							ref={index === active ? selectedRef : null}
-							class={`cursor-pointer rounded px-2 py-1.5 text-sm ${
-								index === active
-									? "bg-neutral-200 text-neutral-900"
-									: "text-neutral-700"
-							}`}
-							onMouseMove={() => setSelected(index)}
-							onClick={() => run(command)}
-						>
-							{highlight(labelOf(command), positions)}
-						</li>
-					))}
+					{results.map(({ command, positions }, index) => {
+						const chord = chordFor(command);
+						return (
+							<li
+								key={command}
+								ref={index === active ? selectedRef : null}
+								class={`flex cursor-pointer items-center justify-between gap-3 rounded px-2 py-1.5 text-sm ${
+									index === active
+										? "bg-neutral-200 text-neutral-900"
+										: "text-neutral-700"
+								}`}
+								onMouseMove={() => setSelected(index)}
+								onClick={() => run(command)}
+							>
+								<span>{highlight(labelOf(command), positions)}</span>
+								{chord && (
+									<kbd class="shrink-0 font-mono text-xs text-neutral-400">
+										{chord}
+									</kbd>
+								)}
+							</li>
+						);
+					})}
 				</ul>
 			)}
 		</div>

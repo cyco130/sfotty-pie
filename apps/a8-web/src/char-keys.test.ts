@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { charCommand } from "./char-keys.ts";
+import { characterChords, charCommand } from "./char-keys.ts";
 
 // The four printable characters with no ATASCII equivalent.
 const EXCLUDED = new Set(["`", "{", "}", "~"]);
@@ -29,4 +29,22 @@ test("symbols ignore the Shift modifier (it's baked into the character)", () => 
 	expect(charCommand("!", false)).toBe("PRESS_SHIFT_1");
 	expect(charCommand("!", true)).toBe("PRESS_SHIFT_1");
 	expect(charCommand(";", false)).toBe("PRESS_SEMICOLON");
+});
+
+test("space folds by the Shift modifier (like letters)", () => {
+	expect(charCommand(" ", false)).toBe("PRESS_SPACE");
+	expect(charCommand(" ", true)).toBe("PRESS_SHIFT_SPACE");
+});
+
+test("characterChords inverts the channel for shortcut display", () => {
+	// Symbols show the glyph (Shift baked in); letters show Shift explicitly.
+	expect(characterChords.get("PRESS_A")).toBe("A");
+	expect(characterChords.get("PRESS_SHIFT_A")).toBe("Shift+A");
+	expect(characterChords.get("PRESS_SHIFT_1")).toBe("!");
+	expect(characterChords.get("PRESS_MINUS")).toBe("-");
+	expect(characterChords.get("PRESS_LESS_THAN")).toBe("<");
+	expect(characterChords.get("PRESS_SPACE")).toBe("Space");
+	expect(characterChords.get("PRESS_SHIFT_SPACE")).toBe("Shift+Space");
+	// Ctrl variants aren't in the character channel (they resolve positionally).
+	expect(characterChords.has("PRESS_CONTROL_A")).toBe(false);
 });

@@ -215,19 +215,20 @@ const base: Binding[] = [
 
 	// Named Atari keys — each with all four Ctrl/Shift variants. Caps/Tab/Esc/
 	// Inverse have no natural F-key home, so they take F-keys the browser leaves
-	// alone (F7/F9/F11/F12); Esc and Tab keep their own keys too, the F-key adding
+	// alone (F7/F9/F10/F11); Esc and Tab keep their own keys too, the F-key adding
 	// the reliable Ctrl/Shift combos — notably Ctrl+F9 → Atari Ctrl+Tab, which the
 	// real Ctrl+Tab can't reach.
 	...modVariants({ key: "F7" }, "CAPS"),
 	...modVariants({ key: "F9" }, "TAB"),
 	// Help's natural home is F1 — F2–F5 are the console keys (Option/Select/Start/
-	// Reset), so F1 extends that row as on the XE. Plain F1 is browser Help on
-	// Windows, so F10 is bound too as a reliable alternate; and Shift+F1 (clear
-	// everywhere) covers Shift+Help, since Windows Shift+F10 is the context menu.
+	// Reset), so F1 extends that row as on the XE. Plain F-keys are preventable, so
+	// F1 carries Help and Shift+F1 covers Shift+Help.
 	...modVariants({ key: "F1" }, "HELP"),
-	...modVariants({ key: "F10" }, "HELP"),
+	// Inverse video on F10. Windows can't intercept Shift+F10 (context menu), so
+	// Shift+Inverse is unreachable there — but it has no real function. (F12 is
+	// left free.)
+	...modVariants({ key: "F10" }, "INVERSE_VIDEO"),
 	...modVariants({ key: "F11" }, "ESC"),
-	...modVariants({ key: "F12" }, "INVERSE_VIDEO"),
 	...modVariants({ key: "Escape" }, "ESC"),
 	...modVariants({ key: "Tab" }, "TAB"),
 	...modVariants({ key: "Enter" }, "RETURN"),

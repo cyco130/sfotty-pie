@@ -149,8 +149,9 @@ test("macOS overlay: Cmd+Arrow cursor, Option+Arrow F1–F4", () => {
 });
 
 test("relocated F-key homes (Help/Tab/Esc/Inverse)", () => {
-	expect(resolve({ key: "F10", ctrl: true })).toBe("PRESS_CONTROL_HELP");
+	expect(resolve({ key: "F1", ctrl: true })).toBe("PRESS_CONTROL_HELP");
 	expect(resolve({ key: "F9", ctrl: true })).toBe("PRESS_CONTROL_TAB");
 	expect(resolve({ key: "F8" })).toBe("PRESS_BREAK");
-	expect(resolve({ key: "F12" })).toBe("PRESS_INVERSE_VIDEO");
+	expect(resolve({ key: "F10" })).toBe("PRESS_INVERSE_VIDEO");
+	expect(resolve({ key: "F12" })).toBeNull(); // F12 left free
 });

@@ -522,14 +522,34 @@ function matches(b: Binding, event: KeyEventLike): boolean {
 	);
 }
 
-/** The binding `event` triggers in `bindings`, or null (the first match — every
- *  binding is keyed by `code`, so there's no key-vs-code precedence). */
+// A binding's specificity: how many modifiers it pins concretely (`"any"` doesn't
+// count). When several bindings match one event — only possible via `"any"`
+// wildcards — the most specific wins, so a precise binding beats a catch-all.
+function specificity(b: Binding): number {
+	let pinned = 0;
+	for (const m of [b.shift, b.ctrl, b.alt, b.meta]) if (m !== "any") pinned++;
+	return pinned;
+}
+
+/** The binding `event` triggers in `bindings`, or null — the most specific match
+ *  (ties keep array order). Bindings are keyed by `code`, so there's no key-vs-
+ *  code precedence; specificity only orders overlaps that `"any"` modifiers
+ *  create, making resolution independent of the set's order. */
 export function resolveBinding(
 	bindings: Binding[],
 	event: KeyEventLike,
 ): Binding | null {
-	for (const b of bindings) if (matches(b, event)) return b;
-	return null;
+	let best: Binding | null = null;
+	let bestSpec = -1;
+	for (const b of bindings) {
+		if (!matches(b, event)) continue;
+		const spec = specificity(b);
+		if (spec > bestSpec) {
+			best = b;
+			bestSpec = spec;
+		}
+	}
+	return best;
 }
 
 // --- Display labels ------------------------------------------------------

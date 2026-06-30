@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import {
+	type Binding,
 	defaultBindingSet,
 	labelFor,
 	type KeyEventLike,
@@ -89,6 +90,24 @@ test("Cmd (mac) / Alt (win) on -/= reach the Shift+Clear / insert-line forms", (
 	expect(resolve({ code: "Minus", ctrl: true })).toBe(
 		"PRESS_CONTROL_LESS_THAN",
 	);
+});
+
+test("resolveBinding prefers the most specific match (any ranks lower)", () => {
+	// An overlap only "any" can create: a catch-all and a precise binding on KeyA.
+	const set: Binding[] = [
+		{ on: "KeyA", shift: "any", command: "PRESS_A" }, // catch-all
+		{ on: "KeyA", shift: true, command: "PRESS_SHIFT_A" }, // precise
+	];
+	// Shift+A matches both → the precise one wins, regardless of array order.
+	expect(resolveBinding(set, ev({ code: "KeyA", shift: true }))?.command).toBe(
+		"PRESS_SHIFT_A",
+	);
+	expect(
+		resolveBinding([...set].reverse(), ev({ code: "KeyA", shift: true }))
+			?.command,
+	).toBe("PRESS_SHIFT_A");
+	// Plain A matches only the catch-all.
+	expect(resolveBinding(set, ev({ code: "KeyA" }))?.command).toBe("PRESS_A");
 });
 
 test("a committed label wins over the live layout (editable legends)", () => {

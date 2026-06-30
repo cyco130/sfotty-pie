@@ -65,6 +65,9 @@ export class Keyboard {
 
 	// The active bindings (one flat set), as loaded/persisted by the host.
 	#bindings: Binding[] = [];
+	// The `scope: "global"` subset, resolved by the window handler (so a global
+	// binding is never shadowed by a more-specific machine binding on the same key).
+	#globalBindings: Binding[] = [];
 
 	// Physical keys (event.code) currently holding a POKEY matrix key (one shared
 	// register, released only when the set empties).
@@ -87,6 +90,7 @@ export class Keyboard {
 	 *  key-downs; anything already held still releases via its own key-up. */
 	setBindings(bindings: Binding[]): void {
 		this.#bindings = bindings;
+		this.#globalBindings = bindings.filter((b) => b.scope === "global");
 	}
 
 	attach(input: HTMLInputElement): void {
@@ -109,8 +113,13 @@ export class Keyboard {
 			"keydown",
 			(event) => {
 				if (capturingKeys) return; // the editor is recording this keystroke
-				const binding = resolveBinding(this.#bindings, this.#normalize(event));
-				if (binding?.scope === "global") {
+				// Resolve among the global bindings only — running first, this is what
+				// gives global commands precedence over machine keys cross-scope.
+				const binding = resolveBinding(
+					this.#globalBindings,
+					this.#normalize(event),
+				);
+				if (binding) {
 					event.preventDefault();
 					event.stopImmediatePropagation();
 					this.#actions.tap(binding.command);

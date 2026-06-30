@@ -294,15 +294,21 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 							{messages.shortcuts.key}
 						</span>
 						{capturing ? (
-							<div class="rounded border border-neutral-500 bg-neutral-50 px-2 py-1 text-sm">
-								<span class="font-mono text-neutral-900">
-									{captured
-										? comboLabel(captured, host.isMac)
-										: messages.shortcuts.capturePrompt}
-								</span>
-								<span class="ml-2 text-xs text-neutral-400">
+							<div class="rounded-md bg-blue-600 px-3 py-2 text-white">
+								<div class="flex items-center gap-2">
+									<span class="relative flex size-2.5 shrink-0">
+										<span class="absolute inline-flex size-full animate-ping rounded-full bg-white opacity-75" />
+										<span class="relative inline-flex size-2.5 rounded-full bg-white" />
+									</span>
+									<span class="font-mono text-sm font-semibold">
+										{captured
+											? comboLabel(captured, host.isMac)
+											: messages.shortcuts.capturePrompt}
+									</span>
+								</div>
+								<div class="mt-0.5 text-xs text-blue-100">
 									{messages.shortcuts.captureHint}
-								</span>
+								</div>
 							</div>
 						) : (
 							<button

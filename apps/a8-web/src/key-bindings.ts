@@ -408,9 +408,68 @@ export const positional: Binding[] = Object.entries(positionalKeys).flatMap(
 	([code, base]) => modVariants(code, base),
 );
 
+/** The host `code`s that produce a character in Character mode (the positional
+ *  layer's keys). The editor warns when a bare one of these is bound, since
+ *  typing shadows it there. */
+export const CHARACTER_CODES: ReadonlySet<string> = new Set(
+	Object.keys(positionalKeys),
+);
+
+/** Host `code`s offered in the binding editor's key picker (the keys you might
+ *  reasonably bind), grouped roughly by kind. */
+export const KEY_CODES: readonly string[] = [
+	..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((c) => `Key${c}`),
+	..."0123456789".split("").map((d) => `Digit${d}`),
+	"Minus",
+	"Equal",
+	"BracketLeft",
+	"BracketRight",
+	"Semicolon",
+	"Quote",
+	"Backquote",
+	"Backslash",
+	"Comma",
+	"Period",
+	"Slash",
+	"IntlBackslash",
+	"Space",
+	"Enter",
+	"Tab",
+	"Backspace",
+	"Delete",
+	"Insert",
+	"ArrowUp",
+	"ArrowDown",
+	"ArrowLeft",
+	"ArrowRight",
+	"Home",
+	"End",
+	"PageUp",
+	"PageDown",
+	...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
+	"Escape",
+	"Pause",
+	"ShiftLeft",
+	"ShiftRight",
+	"ControlLeft",
+	"ControlRight",
+	"AltLeft",
+	"AltRight",
+	"MetaLeft",
+	"MetaRight",
+	...Array.from({ length: 10 }, (_, i) => `Numpad${i}`),
+	"NumpadEnter",
+	"NumpadAdd",
+	"NumpadSubtract",
+	"NumpadMultiply",
+	"NumpadDivide",
+	"NumpadDecimal",
+];
+
 /** A binding's trigger identity (key + modifier states) — overlays replace by
- *  this. Each modifier's state (up / down / any) is part of the identity. */
-function triggerKey(b: Binding): string {
+ *  this, and the editor detects conflicts with it. Each modifier's state (up /
+ *  down / any) is part of the identity. */
+export function triggerKey(b: Binding): string {
 	const state = (m: Mod | undefined): string =>
 		m === "any" ? "any" : m ? "down" : "up";
 	return `${b.on}|s:${state(b.shift)}|c:${state(b.ctrl)}|a:${state(b.alt)}|m:${state(b.meta)}`;
@@ -511,6 +570,12 @@ function qwertyLabel(id: string): string {
 	const digit = /^Digit([0-9])$/.exec(id);
 	if (digit) return digit[1]!;
 	return QWERTY_LABELS[id] ?? id;
+}
+
+/** A `code`'s display label — layout-aware when a layout map is given, else
+ *  QWERTY. For the editor's key picker. */
+export function codeLabel(code: string, layout?: Map<string, string>): string {
+	return layout?.get(code) ?? qwertyLabel(code);
 }
 
 interface KeyboardLayoutAPI {

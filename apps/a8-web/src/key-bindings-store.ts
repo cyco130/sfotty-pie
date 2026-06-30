@@ -32,6 +32,11 @@ export function loadStoredBindings(): Binding[] | undefined {
 	return undefined;
 }
 
+/** Persist the current flat binding set (the editor's save path). */
+export function saveBindings(bindings: Binding[]): void {
+	savePersisted(KEY_BINDINGS_KEY, { v: VERSION, bindings } satisfies Stored);
+}
+
 /** Generate the default flat binding set with labels resolved from the live
  *  keyboard layout, persist it, and return it — the first-run and reset path. */
 export async function freshBindings(mac: boolean): Promise<Binding[]> {
@@ -39,6 +44,6 @@ export async function freshBindings(mac: boolean): Promise<Binding[]> {
 	const bindings = defaultBindingSet(mac).map(
 		(b): Binding => ({ ...b, label: labelFor(b, layout) }),
 	);
-	savePersisted(KEY_BINDINGS_KEY, { v: VERSION, bindings } satisfies Stored);
+	saveBindings(bindings);
 	return bindings;
 }

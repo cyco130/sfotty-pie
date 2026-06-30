@@ -34,7 +34,11 @@ import {
 	updateImage,
 } from "./images/library.ts";
 import type { ImageEntry } from "./images/metadata.ts";
-import { freshBindings, loadStoredBindings } from "./key-bindings-store.ts";
+import {
+	freshBindings,
+	loadStoredBindings,
+	saveBindings,
+} from "./key-bindings-store.ts";
 import { Keyboard } from "./keyboard.ts";
 import {
 	clampRam,
@@ -867,6 +871,12 @@ export class EmulatorHost {
 	#applyBindings(bindings: Binding[]): void {
 		this.keyBindings.value = bindings;
 		this.#keyboard.setBindings(bindings);
+	}
+
+	/** Replace the binding set from an edit — persist it and apply it live. */
+	updateBindings(bindings: Binding[]): void {
+		saveBindings(bindings);
+		this.#applyBindings(bindings);
 	}
 
 	setMuted(muted: boolean): void {

@@ -118,6 +118,24 @@ export const messages = {
 	shortcuts: {
 		placeholder: "Search by action or key…",
 		noMatches: "No matches",
+		back: "Shortcuts",
+		bindings: "Bindings",
+		noBindings: "No bindings yet",
+		addBinding: "Add binding",
+		key: "Key",
+		keyNone: "Select a key…",
+		scope: "Scope",
+		scopeMachine: "Emulator",
+		scopeGlobal: "Global",
+		modOff: "Off",
+		modOn: "On",
+		modAny: "Any",
+		add: "Add",
+		removeBinding: "Remove binding",
+		unknownCommand: "Unknown command",
+		warnTyping: "Types in Character mode — only fires in Positional.",
+		warnConflict: (label: string) =>
+			`Currently "${label}" — adding will reassign it.`,
 	},
 
 	roms: {

@@ -3,6 +3,7 @@ import { type Command, labelOf, paletteCommands } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { chordLabel } from "./key-bindings.ts";
 import { messages } from "./messages.ts";
+import { navigate } from "./navigate.ts";
 
 // One displayed row: a command and one of its bound chords, or null when the
 // command has no binding (shown so it's findable to bind later).
@@ -75,18 +76,23 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 			) : (
 				<ul class="mt-2 min-h-0 flex-1 divide-y divide-neutral-100 overflow-y-auto">
 					{shown.map((row, index) => (
-						<li
-							key={`${row.command}:${row.chord ?? ""}:${index}`}
-							class="flex items-center justify-between gap-3 px-2 py-1.5 text-sm"
-						>
-							<span class={row.chord ? "text-neutral-700" : "text-neutral-400"}>
-								{labelOf(row.command)}
-							</span>
-							{row.chord && (
-								<kbd class="shrink-0 font-mono text-xs text-neutral-500">
-									{row.chord}
-								</kbd>
-							)}
+						<li key={`${row.command}:${row.chord ?? ""}:${index}`}>
+							<button
+								type="button"
+								class="flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm hover:bg-neutral-100"
+								onClick={() => navigate(`/a8/emu/keys/${row.command}`)}
+							>
+								<span
+									class={row.chord ? "text-neutral-700" : "text-neutral-400"}
+								>
+									{labelOf(row.command)}
+								</span>
+								{row.chord && (
+									<kbd class="shrink-0 font-mono text-xs text-neutral-500">
+										{row.chord}
+									</kbd>
+								)}
+							</button>
 						</li>
 					))}
 				</ul>

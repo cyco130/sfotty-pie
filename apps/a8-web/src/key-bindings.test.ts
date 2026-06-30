@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
 	type Binding,
 	defaultBindingSet,
+	keyLabel,
 	labelFor,
 	type KeyEventLike,
 	resolveBinding,
@@ -90,6 +91,17 @@ test("Cmd (mac) / Alt (win) on -/= reach the Shift+Clear / insert-line forms", (
 	expect(resolve({ code: "Minus", ctrl: true })).toBe(
 		"PRESS_CONTROL_LESS_THAN",
 	);
+});
+
+test("keyLabel names the bare modifier keys (mac-aware, with side)", () => {
+	expect(keyLabel("MetaLeft", true)).toBe("Left Cmd");
+	expect(keyLabel("MetaLeft", false)).toBe("Left Win");
+	expect(keyLabel("AltRight", true)).toBe("Right Opt");
+	expect(keyLabel("AltRight", false)).toBe("Right Alt");
+	expect(keyLabel("ShiftLeft", false)).toBe("Left Shift");
+	// Non-modifier codes are unchanged.
+	expect(keyLabel("KeyA", true)).toBe("A");
+	expect(keyLabel("F5", false)).toBe("F5");
 });
 
 test("resolveBinding prefers the most specific match (any ranks lower)", () => {

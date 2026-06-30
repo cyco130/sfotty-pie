@@ -598,6 +598,31 @@ export function codeLabel(code: string, layout?: Map<string, string>): string {
 	return layout?.get(code) ?? qwertyLabel(code);
 }
 
+// Modifier keys by `code`, named with their side and the platform name (Cmd/Opt
+// on macOS, Win/Alt elsewhere) — for a binding ON a modifier key (the ShiftLeft
+// trigger) and for capturing/picking a bare modifier, which otherwise shows the
+// raw code ("MetaLeft").
+const MOD_KEY_LABELS: Record<string, (mac: boolean) => string> = {
+	ShiftLeft: () => "Left Shift",
+	ShiftRight: () => "Right Shift",
+	ControlLeft: () => "Left Ctrl",
+	ControlRight: () => "Right Ctrl",
+	AltLeft: (mac) => (mac ? "Left Opt" : "Left Alt"),
+	AltRight: (mac) => (mac ? "Right Opt" : "Right Alt"),
+	MetaLeft: (mac) => (mac ? "Left Cmd" : "Left Win"),
+	MetaRight: (mac) => (mac ? "Right Cmd" : "Right Win"),
+};
+
+/** A `code`'s display label with the modifier keys named (mac-aware) — for the
+ *  key picker and capture; everything else falls back to {@link codeLabel}. */
+export function keyLabel(
+	code: string,
+	mac: boolean,
+	layout?: Map<string, string>,
+): string {
+	return MOD_KEY_LABELS[code]?.(mac) ?? codeLabel(code, layout);
+}
+
 interface KeyboardLayoutAPI {
 	getLayoutMap?(): Promise<Map<string, string>>;
 }
@@ -647,7 +672,8 @@ export function chordLabel(b: Binding, mac: boolean): string {
 	if (b.meta === true) parts.push(mac ? "Cmd" : "Meta");
 	if (b.alt === true) parts.push(mac ? "Opt" : "Alt");
 	if (b.shift === true) parts.push("Shift");
-	parts.push(labelFor(b, NO_LAYOUT));
+	// A binding ON a modifier key (the ShiftLeft trigger) gets the named label.
+	parts.push(MOD_KEY_LABELS[b.on]?.(mac) ?? labelFor(b, NO_LAYOUT));
 	return parts.join("+");
 }
 

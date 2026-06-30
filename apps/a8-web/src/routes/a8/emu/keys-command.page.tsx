@@ -5,8 +5,8 @@ import {
 	type Binding,
 	CHARACTER_CODES,
 	chordLabel,
-	codeLabel,
 	KEY_CODES,
+	keyLabel,
 	triggerKey,
 } from "../../../key-bindings.ts";
 import { setCapturingKeys } from "../../../keyboard.ts";
@@ -64,7 +64,7 @@ function comboLabel(combo: Combo, mac: boolean): string {
 	if (combo.meta) parts.push(mac ? "Cmd" : "Meta");
 	if (combo.alt) parts.push(mac ? "Opt" : "Alt");
 	if (combo.shift) parts.push("Shift");
-	parts.push(codeLabel(combo.code));
+	parts.push(keyLabel(combo.code, mac));
 	return parts.join("+");
 }
 
@@ -325,7 +325,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 							<option value="">{messages.shortcuts.keyNone}</option>
 							{KEY_CODES.map((c) => (
 								<option key={c} value={c} title={c}>
-									{codeLabel(c)}
+									{keyLabel(c, host.isMac)}
 								</option>
 							))}
 						</select>

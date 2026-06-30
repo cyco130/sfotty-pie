@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { commands, type Command, labelOf } from "../../../commands.ts";
 import { Icon } from "../../../icon.tsx";
 import {
@@ -9,6 +9,7 @@ import {
 	KEY_CODES,
 	triggerKey,
 } from "../../../key-bindings.ts";
+import { setCapturingKeys } from "../../../keyboard.ts";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
 import { useEmu } from "./emu-context.ts";
@@ -33,6 +34,39 @@ function isCommand(value: string): value is Command {
 // keys to "a8" — the editor's suggestion, overridable.
 const defaultScope = (command: Command): "global" | "a8" =>
 	command.startsWith("PRESS_") ? "a8" : "global";
+
+// A captured combo. Modifiers are booleans (capture can't express "any"); a
+// modifier key pressed alone records its `code` without setting that modifier.
+interface Combo {
+	code: string;
+	ctrl: boolean;
+	shift: boolean;
+	alt: boolean;
+	meta: boolean;
+}
+
+function captureCombo(event: KeyboardEvent): Combo {
+	const c = event.code;
+	const altGraph = event.getModifierState("AltGraph");
+	return {
+		code: c,
+		ctrl:
+			event.ctrlKey && !altGraph && c !== "ControlLeft" && c !== "ControlRight",
+		shift: event.shiftKey && c !== "ShiftLeft" && c !== "ShiftRight",
+		alt: event.altKey && !altGraph && c !== "AltLeft" && c !== "AltRight",
+		meta: event.metaKey && c !== "MetaLeft" && c !== "MetaRight",
+	};
+}
+
+function comboLabel(combo: Combo, mac: boolean): string {
+	const parts: string[] = [];
+	if (combo.ctrl) parts.push("Ctrl");
+	if (combo.meta) parts.push(mac ? "Cmd" : "Meta");
+	if (combo.alt) parts.push(mac ? "Opt" : "Alt");
+	if (combo.shift) parts.push("Shift");
+	parts.push(codeLabel(combo.code));
+	return parts.join("+");
+}
 
 function BackLink() {
 	return (
@@ -88,6 +122,49 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 	const [scope, setScope] = useState<"global" | "a8">(
 		isCommand(raw) ? defaultScope(raw) : "a8",
 	);
+	const [capturing, setCapturing] = useState(false);
+	const [captured, setCaptured] = useState<Combo | null>(null);
+	const capturedRef = useRef<Combo | null>(null);
+
+	// Key capture (VSCode-style): record each combo, Enter applies it to the form,
+	// Esc cancels. A window-capture listener so it preempts the global resolver and
+	// the emulator; the keyboard's global dispatch stands down via setCapturingKeys.
+	// Layout effect (pre-paint) so the standdown is in place before the user, who
+	// only acts once the capture UI is visible, can press a global chord like Cmd+K.
+	useLayoutEffect(() => {
+		if (!capturing) return;
+		setCapturingKeys(true);
+		const onKey = (event: KeyboardEvent) => {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			if (event.key === "Escape") {
+				setCapturing(false);
+				return;
+			}
+			if (event.key === "Enter") {
+				const combo = capturedRef.current;
+				if (combo) {
+					setCode(combo.code);
+					setMods({
+						ctrl: combo.ctrl ? "on" : "off",
+						shift: combo.shift ? "on" : "off",
+						alt: combo.alt ? "on" : "off",
+						meta: combo.meta ? "on" : "off",
+					});
+				}
+				setCapturing(false);
+				return;
+			}
+			const combo = captureCombo(event);
+			capturedRef.current = combo;
+			setCaptured(combo);
+		};
+		window.addEventListener("keydown", onKey, true);
+		return () => {
+			setCapturingKeys(false);
+			window.removeEventListener("keydown", onKey, true);
+		};
+	}, [capturing]);
 
 	if (!isCommand(raw)) {
 		return (
@@ -212,10 +289,34 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 						{messages.shortcuts.addBinding}
 					</h3>
 
-					<label class="flex flex-col gap-1">
+					<div class="flex flex-col gap-1">
 						<span class="text-xs text-neutral-500">
 							{messages.shortcuts.key}
 						</span>
+						{capturing ? (
+							<div class="rounded border border-neutral-500 bg-neutral-50 px-2 py-1 text-sm">
+								<span class="font-mono text-neutral-900">
+									{captured
+										? comboLabel(captured, host.isMac)
+										: messages.shortcuts.capturePrompt}
+								</span>
+								<span class="ml-2 text-xs text-neutral-400">
+									{messages.shortcuts.captureHint}
+								</span>
+							</div>
+						) : (
+							<button
+								type="button"
+								class="rounded border border-neutral-300 px-2 py-1 text-left text-sm text-neutral-700 hover:bg-neutral-50"
+								onClick={() => {
+									capturedRef.current = null;
+									setCaptured(null);
+									setCapturing(true);
+								}}
+							>
+								{messages.shortcuts.capture}
+							</button>
+						)}
 						<select
 							value={code}
 							class="rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 outline-none focus:border-neutral-500"
@@ -228,7 +329,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 								</option>
 							))}
 						</select>
-					</label>
+					</div>
 
 					{MODS.map((m) => (
 						<div

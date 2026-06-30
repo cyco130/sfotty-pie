@@ -7,6 +7,13 @@ import {
 	resolveBinding,
 } from "./key-bindings.ts";
 
+// While the key-binding editor is capturing a combo, the window-level global
+// resolver stands down so the chord (e.g. Cmd+K) is captured, not dispatched.
+let capturingKeys = false;
+export function setCapturingKeys(active: boolean): void {
+	capturingKeys = active;
+}
+
 /**
  * The command a Character-mode key event produces. The character channel wins
  * first: a key that types a printable ATASCII character (no Ctrl/Alt/Cmd) types
@@ -101,6 +108,7 @@ export class Keyboard {
 		window.addEventListener(
 			"keydown",
 			(event) => {
+				if (capturingKeys) return; // the editor is recording this keystroke
 				const binding = resolveBinding(this.#bindings, this.#normalize(event));
 				if (binding?.scope === "global") {
 					event.preventDefault();

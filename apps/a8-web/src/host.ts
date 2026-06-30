@@ -862,6 +862,7 @@ export class EmulatorHost {
 	/** Regenerate the platform default key bindings (labels from the live layout),
 	 *  persist them, and apply them live — discarding any customization. */
 	async resetKeyBindings(): Promise<void> {
+		if (!window.confirm(messages.shortcuts.confirmReset)) return;
 		this.#applyBindings(await freshBindings(this.#isMac));
 		this.toast(messages.toasts.keyBindingsReset);
 	}
@@ -1281,6 +1282,7 @@ export class EmulatorHost {
 
 	/** Clear all saved settings, reverting to factory config + picks (library kept). */
 	resetDefaultSettings(): void {
+		if (!window.confirm(messages.reset.confirmDefaults)) return;
 		const before = this.#resolvedFirmwareIds();
 		const prev = this.config.value;
 		const hadMedia = this.#mediaMounted();

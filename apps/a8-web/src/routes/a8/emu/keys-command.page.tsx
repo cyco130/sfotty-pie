@@ -154,6 +154,8 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 	};
 
 	const remove = (binding: Binding) => {
+		const chord = chordLabel(binding, host.isMac);
+		if (!window.confirm(messages.shortcuts.confirmRemove(chord))) return;
 		host.updateBindings(host.keyBindings.value.filter((b) => b !== binding));
 	};
 

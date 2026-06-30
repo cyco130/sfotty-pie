@@ -132,6 +132,9 @@ export const messages = {
 		modAny: "Any",
 		add: "Add",
 		removeBinding: "Remove binding",
+		confirmRemove: (chord: string) => `Remove the ${chord} binding?`,
+		confirmReset:
+			"Reset all key bindings to defaults? Your customizations will be lost.",
 		unknownCommand: "Unknown command",
 		warnTyping: "Types in Character mode — only fires in Positional.",
 		warnConflict: (label: string) =>
@@ -271,6 +274,8 @@ export const messages = {
 	reset: {
 		confirmEverything:
 			"Wipe the entire library AND all saved settings? This can't be undone.",
+		confirmDefaults:
+			"Reset all settings to defaults? Saved settings and key bindings will be lost.",
 		everything: "Reset everything — library and settings",
 		tab: "This tab reset to your saved settings",
 		defaults: "All settings reset to defaults",

@@ -10,6 +10,7 @@ const EmuIndex = lazy(() => import("./routes/a8/emu/(a8-emu).page.tsx"));
 const MenuPanel = lazy(() => import("./routes/a8/emu/menu.page.tsx"));
 const ConfigPanel = lazy(() => import("./routes/a8/emu/config.page.tsx"));
 const PalettePanel = lazy(() => import("./routes/a8/emu/palette.page.tsx"));
+const KeysPanel = lazy(() => import("./routes/a8/emu/keys.page.tsx"));
 const RomsPanel = lazy(() => import("./routes/a8/emu/roms.page.tsx"));
 const LibraryPanel = lazy(() => import("./routes/a8/emu/library.page.tsx"));
 const LibraryItemPanel = lazy(
@@ -44,6 +45,7 @@ function EmuSection() {
 				<Route path="/menu" component={MenuPanel} />
 				<Route path="/config" component={ConfigPanel} />
 				<Route path="/palette" component={PalettePanel} />
+				<Route path="/keys" component={KeysPanel} />
 				<Route path="/roms" component={RomsPanel} />
 				<Route path="/library" component={LibraryPanel} />
 				<Route path="/library/:id" component={LibraryItemPanel} />

@@ -99,6 +99,7 @@ export const messages = {
 		rebootToApply: "Reboot to apply",
 		machineConfig: "Machine configuration…",
 		commandPalette: "Command palette…",
+		keyboardShortcuts: "Keyboard shortcuts…",
 		bootImage: "Boot image…",
 		keys: "Keys",
 		about: "About",
@@ -111,6 +112,12 @@ export const messages = {
 		titleMenu: "Sfotty Pie A8 Web",
 		titleConfig: "Machine",
 		titlePalette: "Commands",
+		titleKeys: "Shortcuts",
+	},
+
+	shortcuts: {
+		placeholder: "Search by action or key…",
+		noMatches: "No matches",
 	},
 
 	roms: {
@@ -339,7 +346,9 @@ export const labels = {
 	AUDIO_UNMUTE: "Unmute audio",
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
 	OPEN_MENU: "Menu",
+	OPEN_CONFIG: "Machine configuration…",
 	OPEN_PALETTE: "Command palette",
+	OPEN_KEYS: "Keyboard shortcuts…",
 	CLOSE_PANEL: "Close panel",
 	OPEN_ROMS: "ROM preferences…",
 	OPEN_LIBRARY: "Library…",

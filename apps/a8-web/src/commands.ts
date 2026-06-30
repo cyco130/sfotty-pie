@@ -112,12 +112,17 @@ export const commands = {
 	// Sidebar panels — each opens its panel; CLOSE_PANEL dismisses whichever is
 	// showing. (Showing one when it's already open is a no-op.)
 	OPEN_MENU: { label: "OPEN_MENU", run: ({ host }) => host.showPanel("menu") },
+	OPEN_CONFIG: {
+		label: "OPEN_CONFIG",
+		run: ({ host }) => host.showPanel("config"),
+	},
 	// The command palette (this surface) — also the fallback for any action whose
 	// key binding is unavailable.
 	OPEN_PALETTE: {
 		label: "OPEN_PALETTE",
 		run: ({ host }) => host.showPanel("palette"),
 	},
+	OPEN_KEYS: { label: "OPEN_KEYS", run: ({ host }) => host.showPanel("keys") },
 
 	// Full-screen the whole app (chrome included), so the on-screen controls
 	// stay reachable. A no-op-safe toggle; also bound to a double-click on the

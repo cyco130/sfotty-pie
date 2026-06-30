@@ -297,6 +297,13 @@ export function MenuView({
 						{onMac() ? "⌘K" : "Alt+K"}
 					</span>
 				</div>
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.showPanel("keys")}
+				>
+					{messages.sidebar.keyboardShortcuts}
+				</button>
 			</section>
 
 			<RecentsSection host={host} />

@@ -13,9 +13,6 @@ import type { Command } from "./commands.ts";
 // channel resolves first and shadows the bare/Shift character keys (so typing is
 // layout-aware), then falls through to these bindings — see keyboard.ts.
 
-/** Host key identity: physical position (`code`) or logical/named key (`key`). */
-type KeyId = { code: string } | { key: string };
-
 /**
  * A modifier's required state. Default (absent) = must be UP; `true` = must be
  * DOWN; `"any"` = don't care. `"any"` is for device inputs (console buttons,
@@ -31,7 +28,9 @@ type Mod = boolean | "any";
 export type KeyboardMode = "character" | "positional";
 
 export interface Binding {
-	on: KeyId;
+	// The trigger: the physical key by `code` (layout-independent). A future
+	// gamepad trigger would be a separate Binding variant, not part of `on`.
+	on: string;
 	// Intentional modifiers (see {@link Mod}). `alt` is the Alt/Option "Mod"
 	// layer, `meta` is Cmd. Locks (Caps/Num) never matched.
 	shift?: Mod;
@@ -139,7 +138,7 @@ const DEAD_CTRL_SHIFT: ReadonlySet<MatrixBase> = new Set<MatrixBase>([
 // held base modifier onto all of them (e.g. Option for the mac F1–F4). The
 // Ctrl+Shift variant is dropped for bases that can't be scanned (see above).
 function modVariants(
-	on: KeyId,
+	on: string,
 	base: MatrixBase,
 	extra: Partial<Pick<Binding, "shift" | "ctrl" | "alt" | "meta">> = {},
 ): Binding[] {
@@ -164,7 +163,7 @@ function modVariants(
 // unmodified meaning matches the Atari Shift+Fn (PgUp = top-left = Shift+F1, Home
 // = line-start = Shift+F3, …). So host Shift is INVERTED — plain → Shift+Fn,
 // Shift → plain Fn — while Ctrl stays direct.
-function navKey(on: KeyId, base: "F1" | "F2" | "F3" | "F4"): Binding[] {
+function navKey(on: string, base: "F1" | "F2" | "F3" | "F4"): Binding[] {
 	// F1–F4's Ctrl+Shift can't be scanned on real hardware, so there's no
 	// Ctrl+Shift variant here.
 	return [
@@ -180,11 +179,11 @@ function navKey(on: KeyId, base: "F1" | "F2" | "F3" | "F4"): Binding[] {
 // commands.
 function altCtrl(code: string, base: MatrixBase, shift = true): Binding[] {
 	const out: Binding[] = [
-		{ on: { code }, alt: true, command: `PRESS_CONTROL_${base}` },
+		{ on: code, alt: true, command: `PRESS_CONTROL_${base}` },
 	];
 	if (shift && !DEAD_CTRL_SHIFT.has(base)) {
 		out.push({
-			on: { code },
+			on: code,
 			alt: true,
 			shift: true,
 			command: `PRESS_CONTROL_SHIFT_${base}`,
@@ -199,84 +198,84 @@ const base: Binding[] = [
 	// Console buttons (held). Shift- and Ctrl-agnostic: they're a separate CONSOL
 	// line, so no host modifier suppresses them (Shift+Option is a real combo —
 	// the Shift key's own binding fires alongside).
-	{ on: { key: "F2" }, shift: "any", ctrl: "any", command: "PRESS_OPTION" },
-	{ on: { key: "F3" }, shift: "any", ctrl: "any", command: "PRESS_SELECT" },
-	{ on: { key: "F4" }, shift: "any", ctrl: "any", command: "PRESS_START" },
+	{ on: "F2", shift: "any", ctrl: "any", command: "PRESS_OPTION" },
+	{ on: "F3", shift: "any", ctrl: "any", command: "PRESS_SELECT" },
+	{ on: "F4", shift: "any", ctrl: "any", command: "PRESS_START" },
 
 	// Reset (held, Shift-agnostic → Shift+Reset works); Ctrl+F5 cold-boots. Ctrl
 	// is exact, so it cleanly splits Reset from Power-cycle with no overlap.
-	{ on: { key: "F5" }, shift: "any", command: "PRESS_RESET" },
-	{ on: { key: "F5" }, ctrl: true, shift: "any", command: "POWER_CYCLE" },
+	{ on: "F5", shift: "any", command: "PRESS_RESET" },
+	{ on: "F5", ctrl: true, shift: "any", command: "POWER_CYCLE" },
 
 	// Break — no release (a key-up isn't observable), so instant. On F8: its one
 	// reachability gap is Ctrl+F8 (Mac Safari), which Break never uses.
-	{ on: { key: "F8" }, command: "PRESS_BREAK" },
-	{ on: { key: "Pause" }, command: "PRESS_BREAK" },
+	{ on: "F8", command: "PRESS_BREAK" },
+	{ on: "Pause", command: "PRESS_BREAK" },
 
 	// Named Atari keys — each with all four Ctrl/Shift variants. Caps/Tab/Esc/
 	// Inverse have no natural F-key home, so they take F-keys the browser leaves
 	// alone (F7/F9/F10/F11); Esc and Tab keep their own keys too, the F-key adding
 	// the reliable Ctrl/Shift combos — notably Ctrl+F9 → Atari Ctrl+Tab, which the
 	// real Ctrl+Tab can't reach.
-	...modVariants({ key: "F7" }, "CAPS"),
-	...modVariants({ key: "F9" }, "TAB"),
+	...modVariants("F7", "CAPS"),
+	...modVariants("F9", "TAB"),
 	// Help's natural home is F1 — F2–F5 are the console keys (Option/Select/Start/
 	// Reset), so F1 extends that row as on the XE. Plain F-keys are preventable, so
 	// F1 carries Help and Shift+F1 covers Shift+Help.
-	...modVariants({ key: "F1" }, "HELP"),
+	...modVariants("F1", "HELP"),
 	// Inverse video on F10. Windows can't intercept Shift+F10 (context menu), so
 	// Shift+Inverse is unreachable there — but it has no real function. (F12 is
 	// left free.)
-	...modVariants({ key: "F10" }, "INVERSE_VIDEO"),
-	...modVariants({ key: "F11" }, "ESC"),
-	...modVariants({ key: "Escape" }, "ESC"),
-	...modVariants({ key: "Tab" }, "TAB"),
-	...modVariants({ key: "Enter" }, "RETURN"),
-	...modVariants({ key: "Backspace" }, "BACKSPACE"),
+	...modVariants("F10", "INVERSE_VIDEO"),
+	...modVariants("F11", "ESC"),
+	...modVariants("Escape", "ESC"),
+	...modVariants("Tab", "TAB"),
+	...modVariants("Enter", "RETURN"),
+	...modVariants("Backspace", "BACKSPACE"),
 
 	// Editing keys.
 	{
-		on: { key: "Delete" },
+		on: "Delete",
 		command: "PRESS_CONTROL_BACKSPACE",
 		note: "Delete char (Ctrl+Backspace)",
 	},
-	{ on: { key: "Delete" }, shift: true, command: "PRESS_SHIFT_BACKSPACE" },
+	{ on: "Delete", shift: true, command: "PRESS_SHIFT_BACKSPACE" },
 	{
-		on: { key: "Insert" },
+		on: "Insert",
 		command: "PRESS_CONTROL_GREATER_THAN",
 		note: "Insert char (Ctrl+>)",
 	},
-	{ on: { key: "Insert" }, shift: true, command: "PRESS_SHIFT_GREATER_THAN" },
+	{ on: "Insert", shift: true, command: "PRESS_SHIFT_GREATER_THAN" },
 	// (Home was Clear; it's now a navigation key → F3 below. Clear stays reachable
 	// as Ctrl+-, since the Atari < key sits at the - position positionally — Ctrl
 	// resolves by code, so host Ctrl+< would hit the , key instead.)
 
 	// Shift keys — by `code` for left/right location. Shift-agnostic (a Shift key
 	// can't require Shift up: pressing it sets Shift).
-	{ on: { code: "ShiftLeft" }, shift: "any", command: "PRESS_JOY0_TRIGGER" },
-	{ on: { code: "ShiftRight" }, shift: "any", command: "PRESS_SHIFT" },
+	{ on: "ShiftLeft", shift: "any", command: "PRESS_JOY0_TRIGGER" },
+	{ on: "ShiftRight", shift: "any", command: "PRESS_SHIFT" },
 
 	// Arrows, plain — joystick 0 (held). Shift-agnostic: ShiftLeft is the fire
 	// button, so firing while steering must work.
-	{ on: { key: "ArrowUp" }, shift: "any", command: "PRESS_JOY0_UP" },
-	{ on: { key: "ArrowDown" }, shift: "any", command: "PRESS_JOY0_DOWN" },
-	{ on: { key: "ArrowLeft" }, shift: "any", command: "PRESS_JOY0_LEFT" },
-	{ on: { key: "ArrowRight" }, shift: "any", command: "PRESS_JOY0_RIGHT" },
+	{ on: "ArrowUp", shift: "any", command: "PRESS_JOY0_UP" },
+	{ on: "ArrowDown", shift: "any", command: "PRESS_JOY0_DOWN" },
+	{ on: "ArrowLeft", shift: "any", command: "PRESS_JOY0_LEFT" },
+	{ on: "ArrowRight", shift: "any", command: "PRESS_JOY0_RIGHT" },
 
 	// Ctrl+Arrows — Atari cursor keys (Ctrl exact, so plain/Shift arrows steer).
-	{ on: { key: "ArrowUp" }, ctrl: true, command: "PRESS_CONTROL_MINUS" },
-	{ on: { key: "ArrowDown" }, ctrl: true, command: "PRESS_CONTROL_EQUALS" },
-	{ on: { key: "ArrowLeft" }, ctrl: true, command: "PRESS_CONTROL_PLUS" },
-	{ on: { key: "ArrowRight" }, ctrl: true, command: "PRESS_CONTROL_ASTERISK" },
+	{ on: "ArrowUp", ctrl: true, command: "PRESS_CONTROL_MINUS" },
+	{ on: "ArrowDown", ctrl: true, command: "PRESS_CONTROL_EQUALS" },
+	{ on: "ArrowLeft", ctrl: true, command: "PRESS_CONTROL_PLUS" },
+	{ on: "ArrowRight", ctrl: true, command: "PRESS_CONTROL_ASTERISK" },
 
 	// Navigation keys → the 1200XL function keys F1–F4 (the universal home for
 	// them — reachable on every platform, including Windows where Option+Arrow
 	// isn't). Mapped by meaning: the unmodified key gives the Atari Shift+Fn (so
 	// host Shift is inverted — see navKey). macOS also gets Option+Arrow (overlay).
-	...navKey({ key: "PageUp" }, "F1"), // top-left
-	...navKey({ key: "PageDown" }, "F2"), // bottom-left
-	...navKey({ key: "Home" }, "F3"), // line start
-	...navKey({ key: "End" }, "F4"), // line end
+	...navKey("PageUp", "F1"), // top-left
+	...navKey("PageDown", "F2"), // bottom-left
+	...navKey("Home", "F3"), // line start
+	...navKey("End", "F4"), // line end
 ];
 
 // Cmd (mac) / Alt (win) on the `-` and `=`/`+` keys → the Atari SHIFT functions of
@@ -288,18 +287,8 @@ const base: Binding[] = [
 // preventable. Shift-agnostic so the chord lands however `+`/`-` is produced.
 function editKeys(mod: Pick<Binding, "meta" | "alt">): Binding[] {
 	return [
-		{
-			on: { code: "Minus" },
-			...mod,
-			shift: "any",
-			command: "PRESS_SHIFT_LESS_THAN",
-		},
-		{
-			on: { code: "Equal" },
-			...mod,
-			shift: "any",
-			command: "PRESS_SHIFT_GREATER_THAN",
-		},
+		{ on: "Minus", ...mod, shift: "any", command: "PRESS_SHIFT_LESS_THAN" },
+		{ on: "Equal", ...mod, shift: "any", command: "PRESS_SHIFT_GREATER_THAN" },
 	];
 }
 
@@ -307,18 +296,18 @@ function editKeys(mod: Pick<Binding, "meta" | "alt">): Binding[] {
 // Ctrl+Arrow for Mission Control), and Option+Arrow drives the 1200XL function
 // keys F1–F4 (cursor up/down/left/right by default), with Ctrl/Shift variants.
 const macBindings: Binding[] = [
-	{ on: { key: "ArrowUp" }, meta: true, command: "PRESS_CONTROL_MINUS" },
-	{ on: { key: "ArrowDown" }, meta: true, command: "PRESS_CONTROL_EQUALS" },
-	{ on: { key: "ArrowLeft" }, meta: true, command: "PRESS_CONTROL_PLUS" },
-	{ on: { key: "ArrowRight" }, meta: true, command: "PRESS_CONTROL_ASTERISK" },
+	{ on: "ArrowUp", meta: true, command: "PRESS_CONTROL_MINUS" },
+	{ on: "ArrowDown", meta: true, command: "PRESS_CONTROL_EQUALS" },
+	{ on: "ArrowLeft", meta: true, command: "PRESS_CONTROL_PLUS" },
+	{ on: "ArrowRight", meta: true, command: "PRESS_CONTROL_ASTERISK" },
 	// Cmd+-/Cmd+= → Shift+Clear / insert-line (see editKeys).
 	...editKeys({ meta: true }),
 	// Option+Arrow → F1–F4 (+ Ctrl/Shift). Option (not plain Alt) avoids the
 	// Windows snags noted on `base` above — hence mac-only.
-	...modVariants({ key: "ArrowUp" }, "F1", { alt: true }),
-	...modVariants({ key: "ArrowDown" }, "F2", { alt: true }),
-	...modVariants({ key: "ArrowLeft" }, "F3", { alt: true }),
-	...modVariants({ key: "ArrowRight" }, "F4", { alt: true }),
+	...modVariants("ArrowUp", "F1", { alt: true }),
+	...modVariants("ArrowDown", "F2", { alt: true }),
+	...modVariants("ArrowLeft", "F3", { alt: true }),
+	...modVariants("ArrowRight", "F4", { alt: true }),
 ];
 
 // Windows/Linux overlay: Alt stands in for Ctrl on just the keys the browser
@@ -406,7 +395,7 @@ const positionalKeys: Record<string, MatrixBase> = {
 // character keys (so typing is layout-aware); these still apply for Ctrl combos,
 // non-ATASCII keys, and the whole of Positional mode.
 export const positional: Binding[] = Object.entries(positionalKeys).flatMap(
-	([code, base]) => modVariants({ code }, base),
+	([code, base]) => modVariants(code, base),
 );
 
 /** A binding's trigger identity (key + modifier states) — overlays replace by
@@ -414,8 +403,7 @@ export const positional: Binding[] = Object.entries(positionalKeys).flatMap(
 function triggerKey(b: Binding): string {
 	const state = (m: Mod | undefined): string =>
 		m === "any" ? "any" : m ? "down" : "up";
-	const id = "code" in b.on ? `code:${b.on.code}` : `key:${b.on.key}`;
-	return `${id}|s:${state(b.shift)}|c:${state(b.ctrl)}|a:${state(b.alt)}|m:${state(b.meta)}`;
+	return `${b.on}|s:${state(b.shift)}|c:${state(b.ctrl)}|a:${state(b.alt)}|m:${state(b.meta)}`;
 }
 
 // Overlay `ext` onto `acc`: a binding with the same trigger replaces, else adds.
@@ -456,9 +444,8 @@ function modMatches(required: Mod | undefined, actual: boolean): boolean {
 }
 
 function matches(b: Binding, event: KeyEventLike): boolean {
-	const id = "code" in b.on ? event.code === b.on.code : event.key === b.on.key;
 	return (
-		id &&
+		event.code === b.on &&
 		modMatches(b.shift, event.shift) &&
 		modMatches(b.ctrl, event.ctrl) &&
 		modMatches(b.alt, event.alt) &&
@@ -466,30 +453,23 @@ function matches(b: Binding, event: KeyEventLike): boolean {
 	);
 }
 
-/**
- * The binding `event` triggers in `bindings`, or null. A code-based binding (the
- * more specific identity) wins over a key-based one for the same event.
- */
+/** The binding `event` triggers in `bindings`, or null (the first match — every
+ *  binding is keyed by `code`, so there's no key-vs-code precedence). */
 export function resolveBinding(
 	bindings: Binding[],
 	event: KeyEventLike,
 ): Binding | null {
-	let keyMatch: Binding | null = null;
-	for (const b of bindings) {
-		if (!matches(b, event)) continue;
-		if ("code" in b.on) return b; // code beats key
-		keyMatch ??= b;
-	}
-	return keyMatch;
+	for (const b of bindings) if (matches(b, event)) return b;
+	return null;
 }
 
 // --- Display labels ------------------------------------------------------
 // A binding's human label is layout-dependent, so it's resolved at display time
 // (not stored): the user's physical layout via getLayoutMap(), else QWERTY.
 
-// US-QWERTY legends for keys the layout map doesn't cover (symbols by `code`, the
-// Shift keys, and named keys by `key`). Letters/digits derive from the code, so
-// they need no entry here.
+// US-QWERTY legends for `code`s the layout map doesn't cover (symbols, the Shift
+// keys, the named/navigation keys). Letters/digits derive from the code, so they
+// need no entry here.
 const QWERTY_LABELS: Record<string, string> = {
 	Backquote: "`",
 	Minus: "-",
@@ -549,16 +529,13 @@ export async function loadLayoutLabels(): Promise<Map<string, string>> {
 
 /**
  * A binding's display label: its committed `label` if set (the persisted,
- * user-editable legend), else — for `code` keys — the live layout map, else the
- * QWERTY legend / key name. Modifier prefixes (Ctrl+/Shift+) are the caller's to
- * add. Used both to bake labels into the defaults (no `label` yet → resolves
- * from the layout) and to read them back for display.
+ * user-editable legend), else the live layout map for the `code`, else the QWERTY
+ * legend. Modifier prefixes (Ctrl+/Shift+) are the caller's to add. Used both to
+ * bake labels into the defaults (no `label` yet → resolves from the layout) and
+ * to read them back for display.
  */
 export function labelFor(b: Binding, layout: Map<string, string>): string {
-	if ("code" in b.on) {
-		return b.label ?? layout.get(b.on.code) ?? qwertyLabel(b.on.code);
-	}
-	return b.label ?? qwertyLabel(b.on.key);
+	return b.label ?? layout.get(b.on) ?? qwertyLabel(b.on);
 }
 
 // Committed bindings carry their `label`, so chord display needs no layout map.

@@ -13,7 +13,8 @@ import { loadPersisted, savePersisted } from "./persist.ts";
 // they survive as editable, layout-stable legends; bump VERSION to invalidate
 // stores when the shape changes.
 export const KEY_BINDINGS_KEY = "key-bindings";
-const VERSION = 1;
+// v2: bindings are keyed by `code` only (the `{ key }` trigger arm was dropped).
+const VERSION = 2;
 
 interface Stored {
 	v: number;

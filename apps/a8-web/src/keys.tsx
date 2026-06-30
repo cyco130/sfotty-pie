@@ -1,7 +1,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { type Command, labelOf, paletteCommands } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
-import { chordLabel } from "./key-bindings.ts";
+import { chordLabel, layoutLabelsAvailable } from "./key-bindings.ts";
 import { messages } from "./messages.ts";
 import { navigate } from "./navigate.ts";
 
@@ -10,6 +10,17 @@ import { navigate } from "./navigate.ts";
 interface Row {
 	command: Command;
 	chord: string | null;
+}
+
+/** A caveat shown when the browser can't tell us the keyboard layout, so the
+ *  labels fall back to QWERTY and may not match a non-US keyboard. */
+export function LayoutWarning() {
+	if (layoutLabelsAvailable()) return null;
+	return (
+		<p class="mb-2 shrink-0 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+			{messages.shortcuts.layoutWarning}
+		</p>
+	);
 }
 
 /**
@@ -58,6 +69,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 
 	return (
 		<div class="flex min-h-0 flex-1 flex-col">
+			<LayoutWarning />
 			<input
 				type="text"
 				placeholder={messages.shortcuts.placeholder}

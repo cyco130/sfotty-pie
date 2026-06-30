@@ -633,18 +633,44 @@ interface KeyboardLayoutAPI {
  * — `labelFor` then falls back to QWERTY. Covers only the writing-system keys
  * (letters/digits/symbols); function/named keys aren't in it.
  */
+/** Uppercase layout legends to keycap form, minding letters whose default casing
+ *  misreads on a real key:
+ *  - Turkish/Azeri carry both the dotted and dotless i, whose caps are İ / I, but
+ *    plain `toUpperCase` folds both to "I" — so when the pair is present we case
+ *    in the Turkish locale, keeping each dot.
+ *  - German ß uppercases to "SS"; a key just prints "ß", so we keep it. */
+export function upperLegends(
+	entries: Iterable<[string, string]>,
+): Map<string, string> {
+	const list = [...entries];
+	const labels = new Set(list.map(([, label]) => label));
+	const turkish = labels.has("i") && labels.has("ı");
+	const cap = (label: string) =>
+		label === "ß"
+			? "ß"
+			: turkish
+				? label.toLocaleUpperCase("tr")
+				: label.toUpperCase();
+	return new Map(list.map(([code, label]) => [code, cap(label)]));
+}
+
 export async function loadLayoutLabels(): Promise<Map<string, string>> {
 	const kb = (navigator as unknown as { keyboard?: KeyboardLayoutAPI })
 		.keyboard;
 	if (!kb?.getLayoutMap) return new Map();
 	try {
-		const map = await kb.getLayoutMap();
-		return new Map(
-			[...map].map(([code, label]) => [code, label.toUpperCase()]),
-		);
+		return upperLegends(await kb.getLayoutMap());
 	} catch {
 		return new Map(); // permission/availability hiccup → QWERTY fallback
 	}
+}
+
+/** Whether the browser exposes the physical keyboard layout (Chromium does;
+ *  Firefox/Safari don't). When false, character-key labels fall back to QWERTY
+ *  and may mislead on a non-US layout. */
+export function layoutLabelsAvailable(): boolean {
+	return !!(navigator as unknown as { keyboard?: KeyboardLayoutAPI }).keyboard
+		?.getLayoutMap;
 }
 
 /**

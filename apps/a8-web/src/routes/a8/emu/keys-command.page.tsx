@@ -10,6 +10,7 @@ import {
 	triggerKey,
 } from "../../../key-bindings.ts";
 import { setCapturingKeys } from "../../../keyboard.ts";
+import { LayoutWarning } from "../../../keys.tsx";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
 import { useEmu } from "./emu-context.ts";
@@ -246,6 +247,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 		<PanelFrame title={labelOf(command)}>
 			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
 				<BackLink />
+				<LayoutWarning />
 
 				<section class="flex flex-col gap-1.5">
 					<h3 class="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
@@ -377,6 +379,21 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 							{messages.shortcuts.warnConflict(labelOf(conflict.command))}
 						</p>
 					)}
+
+					<div class="flex items-baseline gap-2">
+						<span class="text-xs text-neutral-500">
+							{messages.shortcuts.combo}
+						</span>
+						{candidate ? (
+							<kbd class="font-mono text-sm font-medium text-neutral-900">
+								{chordLabel(candidate, host.isMac)}
+							</kbd>
+						) : (
+							<span class="text-sm text-neutral-400 italic">
+								{messages.shortcuts.none}
+							</span>
+						)}
+					</div>
 
 					<button
 						type="button"

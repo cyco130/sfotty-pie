@@ -124,6 +124,10 @@ export const messages = {
 		addBinding: "Add binding",
 		key: "Key",
 		keyNone: "Select a key…",
+		combo: "Combo",
+		none: "None",
+		layoutWarning:
+			"Key labels assume a US layout — this browser doesn't expose your keyboard layout, so they may not match your keys.",
 		capture: "Capture combo…",
 		capturePrompt: "Press a key combo…",
 		captureHint: "Enter to set · Esc to cancel",

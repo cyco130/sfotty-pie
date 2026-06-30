@@ -6,6 +6,7 @@ import {
 	labelFor,
 	type KeyEventLike,
 	resolveBinding,
+	upperLegends,
 } from "./key-bindings.ts";
 
 // A KeyEventLike with all modifiers up by default.
@@ -130,6 +131,25 @@ test("a committed label wins over the live layout (editable legends)", () => {
 	expect(labelFor({ on: "KeyA", command: "PRESS_A", label: "★" }, layout)).toBe(
 		"★",
 	);
+});
+
+test("Turkish layout uppercases the dotted/dotless i as İ / I", () => {
+	// Both i and ı present → case in the "tr" locale so each keeps its dot.
+	const tr = upperLegends([
+		["KeyI", "i"],
+		["Backslash", "ı"],
+		["KeyA", "a"],
+	]);
+	expect(tr.get("KeyI")).toBe("İ");
+	expect(tr.get("Backslash")).toBe("I");
+	expect(tr.get("KeyA")).toBe("A");
+	// A non-Turkish layout (no ı) uppercases i the ordinary way.
+	const us = upperLegends([["KeyI", "i"]]);
+	expect(us.get("KeyI")).toBe("I");
+});
+
+test("German ß keeps its keycap form, not the SS expansion", () => {
+	expect(upperLegends([["Minus", "ß"]]).get("Minus")).toBe("ß");
 });
 
 test("character keys are bound by physical code (Ctrl path + Positional mode)", () => {

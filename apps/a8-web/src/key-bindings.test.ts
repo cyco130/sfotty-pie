@@ -146,6 +146,19 @@ test("macOS overlay: Cmd+Arrow cursor, Option+Arrow F1–F4", () => {
 	expect(resolve({ code: "ArrowUp", alt: true }, true)).toBe("PRESS_F1");
 });
 
+test("the palette chord is a global binding (Cmd+K mac / Alt+K win)", () => {
+	const mac = defaultBindingSet(true).find((b) => b.command === "OPEN_PALETTE");
+	expect(mac).toMatchObject({ on: "KeyK", meta: true, scope: "global" });
+	const win = defaultBindingSet(false).find(
+		(b) => b.command === "OPEN_PALETTE",
+	);
+	expect(win).toMatchObject({ on: "KeyK", alt: true, scope: "global" });
+	// Machine keys carry no scope (default "a8" — resolved on the focused input).
+	expect(
+		defaultBindingSet(false).find((b) => b.command === "PRESS_A")?.scope,
+	).toBeUndefined();
+});
+
 test("relocated F-key homes (Help/Tab/Esc/Inverse)", () => {
 	expect(resolve({ code: "F1", ctrl: true })).toBe("PRESS_CONTROL_HELP");
 	expect(resolve({ code: "F9", ctrl: true })).toBe("PRESS_CONTROL_TAB");

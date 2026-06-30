@@ -40,6 +40,12 @@ export interface Binding {
 	// Pressed on key-down; released on key-up when the command has a release half
 	// (a sustained control), else instant — so a held binding is one entry.
 	command: Command;
+	// Where this binding resolves. "global" → the window-level resolver dispatches
+	// it regardless of focus (app commands like OPEN_PALETTE); absent/"a8" → only
+	// when the emulator input is focused (machine keys). A coarse first cut of a
+	// per-binding context — it'll grow into a `when` predicate once a second axis
+	// (e.g. typing/gaming) lands.
+	scope?: "global" | "a8";
 	// Display label override — a frozen fallback for user bindings. Default
 	// bindings resolve their label from the layout map / QWERTY (see `labelFor`).
 	label?: string;
@@ -300,6 +306,8 @@ const macBindings: Binding[] = [
 	{ on: "ArrowDown", meta: true, command: "PRESS_CONTROL_EQUALS" },
 	{ on: "ArrowLeft", meta: true, command: "PRESS_CONTROL_PLUS" },
 	{ on: "ArrowRight", meta: true, command: "PRESS_CONTROL_ASTERISK" },
+	// Cmd+K opens the palette — a global binding (fires regardless of focus).
+	{ on: "KeyK", meta: true, command: "OPEN_PALETTE", scope: "global" },
 	// Cmd+-/Cmd+= → Shift+Clear / insert-line (see editKeys).
 	...editKeys({ meta: true }),
 	// Option+Arrow → F1–F4 (+ Ctrl/Shift). Option (not plain Alt) avoids the
@@ -324,6 +332,8 @@ const winBindings: Binding[] = [
 	...altCtrl("KeyW", "W"),
 	...altCtrl("KeyL", "L", false),
 	...altCtrl("KeyO", "O", false),
+	// Alt+K opens the palette — a global binding (Cmd's stand-in on Windows).
+	{ on: "KeyK", alt: true, command: "OPEN_PALETTE", scope: "global" },
 	// Alt+-/Alt+= → Shift+Clear / insert-line (editKeys; Cmd's stand-in on Windows).
 	...editKeys({ alt: true }),
 ];

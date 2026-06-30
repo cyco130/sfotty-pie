@@ -93,13 +93,21 @@ export class Keyboard {
 			if (!(event as InputEvent).isComposing) input.value = "";
 		});
 
-		// The function keys the emulator maps (F1–F12) collide with browser
-		// shortcuts — most damagingly F5 (reload → a cold boot). The input's own
-		// handler preventDefaults them when focused, but a window-level guard stops
-		// the browser action even when focus has drifted onto a menu button.
+		// Global bindings (app commands — OPEN_PALETTE, etc.) resolve here at the
+		// window so they fire regardless of focus and preempt the offscreen input;
+		// machine keys (scope absent) fall through to the input handler above.
+		// Also the F-key browser-shortcut guard (F5 reload → cold boot is the worst
+		// offender), which must work even when focus has drifted off the input.
 		window.addEventListener(
 			"keydown",
 			(event) => {
+				const binding = resolveBinding(this.#bindings, this.#normalize(event));
+				if (binding?.scope === "global") {
+					event.preventDefault();
+					event.stopImmediatePropagation();
+					this.#actions.tap(binding.command);
+					return;
+				}
 				if (/^F([1-9]|1[0-2])$/.test(event.key)) event.preventDefault();
 			},
 			true,

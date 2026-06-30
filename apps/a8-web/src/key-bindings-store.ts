@@ -13,8 +13,9 @@ import { loadPersisted, savePersisted } from "./persist.ts";
 // they survive as editable, layout-stable legends; bump VERSION to invalidate
 // stores when the shape changes.
 export const KEY_BINDINGS_KEY = "key-bindings";
-// v2: bindings are keyed by `code` only (the `{ key }` trigger arm was dropped).
-const VERSION = 2;
+// v2: bindings keyed by `code` only (the `{ key }` trigger arm was dropped).
+// v3: + the global Cmd/Alt+K → OPEN_PALETTE binding and the `scope` field.
+const VERSION = 3;
 
 interface Stored {
 	v: number;

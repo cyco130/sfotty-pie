@@ -204,6 +204,40 @@ test("German ß keeps its keycap form, not the SS expansion", () => {
 	expect(upperLegends([["Minus", "ß"]]).get("Minus")).toBe("ß");
 });
 
+test("upperLegends numbers a symbol number row (AZERTY) but keeps a real one", () => {
+	// AZERTY: the number row is symbols unshifted → label each DigitN as its numeral.
+	const azerty = upperLegends([
+		["Digit1", "&"],
+		["Digit2", "é"],
+		["Digit3", '"'],
+		["Digit4", "'"],
+		["Digit5", "("],
+		["Digit6", "-"],
+		["Digit7", "è"],
+		["Digit8", "_"],
+		["Digit9", "ç"],
+		["Digit0", "à"],
+	]);
+	expect(azerty.get("Digit1")).toBe("1");
+	expect(azerty.get("Digit7")).toBe("7");
+	expect(azerty.get("Digit0")).toBe("0");
+	// A full digit row is trusted as-is, reordering included.
+	const reordered = upperLegends([
+		["Digit1", "2"],
+		["Digit2", "1"],
+		["Digit3", "3"],
+		["Digit4", "4"],
+		["Digit5", "5"],
+		["Digit6", "6"],
+		["Digit7", "7"],
+		["Digit8", "8"],
+		["Digit9", "9"],
+		["Digit0", "0"],
+	]);
+	expect(reordered.get("Digit1")).toBe("2");
+	expect(reordered.get("Digit2")).toBe("1");
+});
+
 test("character keys are bound by physical code (Ctrl path + Positional mode)", () => {
 	// One flat set binds the character keys by code: Positional mode uses these
 	// directly, and Character mode reaches them for Ctrl combos and fallback.

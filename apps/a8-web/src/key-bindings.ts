@@ -663,12 +663,16 @@ interface KeyboardLayoutAPI {
  * — `labelFor` then falls back to QWERTY. Covers only the writing-system keys
  * (letters/digits/symbols); function/named keys aren't in it.
  */
-/** Uppercase layout legends to keycap form, minding letters whose default casing
- *  misreads on a real key:
+/** Uppercase layout legends to keycap form, minding legends that mislead on a
+ *  real key:
  *  - Turkish/Azeri carry both the dotted and dotless i, whose caps are İ / I, but
  *    plain `toUpperCase` folds both to "I" — so when the pair is present we case
  *    in the Turkish locale, keeping each dot.
- *  - German ß uppercases to "SS"; a key just prints "ß", so we keep it. */
+ *  - German ß uppercases to "SS"; a key just prints "ß", so we keep it.
+ *  - The number row: a full unshifted digit set is kept as-is (honoring any
+ *    reordering — e.g. Programmer Dvorak); otherwise each DigitN is labeled with
+ *    its numeral, since AZERTY & co. carry symbols there unshifted, yet Ctrl+N is
+ *    universally shown (and resolved, digit VKs being position-fixed) as the digit. */
 export function upperLegends(
 	entries: Iterable<[string, string]>,
 ): Map<string, string> {
@@ -681,7 +685,20 @@ export function upperLegends(
 			: turkish
 				? label.toLocaleUpperCase("tr")
 				: label.toUpperCase();
-	return new Map(list.map(([code, label]) => [code, cap(label)]));
+	const map = new Map(list.map(([code, label]) => [code, cap(label)]));
+	const digits: (string | undefined)[] = [];
+	for (let n = 0; n <= 9; n++) digits.push(map.get(`Digit${n}`));
+	// A full digit row (all ten present, each an ASCII digit) is trustworthy — keep
+	// it, reordering and all. Anything else (symbols on AZERTY/Dvorak) → numerals.
+	const fullDigitRow =
+		digits.every((v) => v !== undefined && /^[0-9]$/.test(v)) &&
+		new Set(digits).size === 10;
+	if (!fullDigitRow) {
+		for (let n = 0; n <= 9; n++) {
+			if (map.has(`Digit${n}`)) map.set(`Digit${n}`, String(n));
+		}
+	}
+	return map;
 }
 
 export async function loadLayoutLabels(): Promise<Map<string, string>> {

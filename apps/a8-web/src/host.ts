@@ -18,11 +18,7 @@ import {
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
-import {
-	loadLayoutLabels,
-	type Binding,
-	type KeyboardMode,
-} from "./key-bindings.ts";
+import type { Binding, KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
@@ -39,6 +35,7 @@ import {
 } from "./images/library.ts";
 import type { ImageEntry } from "./images/metadata.ts";
 import {
+	ensureStoredLayout,
 	freshBindings,
 	loadStoredBindings,
 	saveBindings,
@@ -251,10 +248,9 @@ export class EmulatorHost {
 	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
 	readonly keyBindings = signal<Binding[]>([]);
 
-	/** The live keyboard-layout legends (Chromium's `getLayoutMap`; empty where
-	 *  unavailable), for chord display — so shortcut labels track the actual
-	 *  layout instead of the QWERTY fallback baked into the bindings. Loaded once
-	 *  in create(). */
+	/** The layout snapshot the bindings were baked from (`code` → legend), used to
+	 *  label the editor's live preview — existing chords carry their own baked
+	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
 	readonly layoutLabels = signal<Map<string, string>>(new Map());
 
 	/** The 1200XL keyboard LEDs `[L1, L2]` (true = lit), or null on other models. */
@@ -338,19 +334,20 @@ export class EmulatorHost {
 		const host = new EmulatorHost(config);
 		await host.#ensureFirmware();
 		await host.#restoreMedia();
-		// First run (or a cleared store): generate + persist the default bindings,
-		// with labels resolved from the live layout. The keyboard isn't attached
-		// until the UI mounts, so the brief empty-binding window is never live.
+		// First run (or a cleared store): generate + persist the default bindings
+		// from the layout snapshot. Otherwise load the stored snapshot (only used to
+		// label the editor's live preview now — existing chords carry baked labels).
+		// The keyboard isn't attached until the UI mounts, so the brief empty-binding
+		// window is never live.
 		if (!host.#bindingsStored) {
-			host.#applyBindings(await freshBindings(host.#isMac));
+			const { bindings, layout } = await freshBindings(host.#isMac);
+			host.#applyBindings(bindings);
+			host.layoutLabels.value = layout;
+		} else {
+			host.layoutLabels.value = await ensureStoredLayout();
 		}
 		host.#emulator = host.#makeEmulator();
 		host.#wireLeds();
-		// Live layout legends for chord display — non-blocking, so boot doesn't
-		// wait on it; the signal updates the shortcut labels once resolved.
-		void loadLayoutLabels().then((labels) => {
-			host.layoutLabels.value = labels;
-		});
 		return host;
 	}
 
@@ -874,11 +871,14 @@ export class EmulatorHost {
 		return this.#isMac;
 	}
 
-	/** Regenerate the platform default key bindings (labels from the live layout),
-	 *  persist them, and apply them live — discarding any customization. */
+	/** Regenerate the platform default key bindings from a freshly re-read layout
+	 *  (so this doubles as the layout-switch refresh), persist them, and apply them
+	 *  live — discarding any customization. */
 	async resetKeyBindings(): Promise<void> {
 		if (!window.confirm(messages.shortcuts.confirmReset)) return;
-		this.#applyBindings(await freshBindings(this.#isMac));
+		const { bindings, layout } = await freshBindings(this.#isMac);
+		this.#applyBindings(bindings);
+		this.layoutLabels.value = layout;
 		this.toast(messages.toasts.keyBindingsReset);
 	}
 

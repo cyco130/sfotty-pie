@@ -803,12 +803,10 @@ export function chordLabel(
 	if (b.alt === true) parts.push(mac ? "Opt" : "Alt");
 	if (b.shift === true) parts.push("Shift");
 	// A binding ON a modifier key (the ShiftLeft trigger) gets the named label.
-	// Otherwise a supplied live layout legend wins over the baked one — so chords
-	// track a Chromium layout switch — before falling back to the committed label
-	// / QWERTY. Absent a layout map (`NO_LAYOUT`), it's the baked label as before.
-	parts.push(
-		MOD_KEY_LABELS[b.on]?.(mac) ?? layout.get(b.on) ?? labelFor(b, NO_LAYOUT),
-	);
+	// Otherwise the baked label wins (a stable snapshot frozen at generation);
+	// `layout` only fills in bindings that carry none yet — the editor's live
+	// preview — before the QWERTY fallback.
+	parts.push(MOD_KEY_LABELS[b.on]?.(mac) ?? labelFor(b, layout));
 	return parts.join("+");
 }
 

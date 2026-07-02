@@ -1,7 +1,7 @@
 import { labelOf, type Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { Icon } from "./icon.tsx";
-import { primaryChords } from "./key-bindings.ts";
+import { primaryChords, type Binding } from "./key-bindings.ts";
 import {
 	anticPolicy,
 	MODELS,
@@ -239,6 +239,31 @@ const MENU_COMMANDS = [
 	"OPEN_KEYS",
 ] as const satisfies readonly Command[];
 
+// The four arrows that drive joystick 0 as shipped. The key-mappings help shows
+// its "Arrow keys → Joystick" line only when all four still map that way — a
+// rebind makes the shorthand a lie, so we drop the line rather than guess.
+const JOYSTICK_ARROWS = [
+	["ArrowUp", "PRESS_JOY0_UP"],
+	["ArrowDown", "PRESS_JOY0_DOWN"],
+	["ArrowLeft", "PRESS_JOY0_LEFT"],
+	["ArrowRight", "PRESS_JOY0_RIGHT"],
+] as const satisfies readonly (readonly [string, Command])[];
+
+function joystickOnArrows(bindings: Binding[]): boolean {
+	return JOYSTICK_ARROWS.every(([on, command]) =>
+		bindings.some((b) => b.on === on && b.command === command),
+	);
+}
+
+// The Atari console keys, in row order. Each line appears only if the command is
+// bound; Option/Select/Start collapse into one row of whichever are bound. The
+// key caps (Option/Select/Start/Reset/Break) are hardware tokens, kept inline.
+const CONSOLE_KEYS = [
+	["PRESS_OPTION", "Option"],
+	["PRESS_SELECT", "Select"],
+	["PRESS_START", "Start"],
+] as const satisfies readonly (readonly [Command, string])[];
+
 /**
  * The menu panel: a launcher of the main commands (machine config, boot, library,
  * ROM preferences, the palette, keys) with their shortcuts, the recents list, and
@@ -260,6 +285,27 @@ export function MenuView({
 		host.isMac,
 		host.layoutLabels.value,
 	);
+
+	// Live key-mappings help: each row appears only if its command is bound, so
+	// the reference never drifts from the actual bindings. Reset and cold reset
+	// (power cycle) get their own lines.
+	const km = messages.keyHelp;
+	const keyRows: { keys: string; action: string }[] = [];
+	if (joystickOnArrows(host.keyBindings.value))
+		keyRows.push({ keys: km.arrowKeys, action: km.joystick });
+	const trigger = chords.get("PRESS_JOY0_TRIGGER");
+	if (trigger) keyRows.push({ keys: trigger, action: km.trigger });
+	const consoleBound = CONSOLE_KEYS.filter(([command]) => chords.has(command));
+	if (consoleBound.length > 0)
+		keyRows.push({
+			keys: consoleBound.map(([command]) => chords.get(command)!).join("/"),
+			action: consoleBound.map(([, token]) => token).join("/"),
+		});
+	const reset = chords.get("PRESS_RESET");
+	if (reset) keyRows.push({ keys: reset, action: "Reset" });
+	const coldReset = chords.get("POWER_CYCLE");
+	if (coldReset) keyRows.push({ keys: coldReset, action: km.coldReset });
+
 	return (
 		<div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
 			<section class="flex flex-col gap-1">
@@ -294,33 +340,18 @@ export function MenuView({
 			    on pointer capability, not width: a phone in landscape is wide
 			    enough to trip `sm:`, but `any-pointer: fine` (a mouse/trackpad,
 			    which travels with a keyboard) stays false on touch-only. */}
-			<section class="hidden any-pointer-fine:block">
-				<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-					{messages.sidebar.keys}
-				</h2>
-				<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-					<KeyRow
-						keys={messages.keyHelp.arrowKeys}
-						action={messages.keyHelp.joystick}
-					/>
-					<KeyRow
-						keys={messages.keyHelp.leftShift}
-						action={messages.keyHelp.trigger}
-					/>
-					<KeyRow
-						keys={messages.keyHelp.consoleKeys}
-						action={messages.keyHelp.consoleActions}
-					/>
-					<KeyRow
-						keys={messages.keyHelp.resetKey}
-						action={messages.keyHelp.resetAction}
-					/>
-					<KeyRow
-						keys={messages.keyHelp.breakKey}
-						action={messages.keyHelp.breakAction}
-					/>
-				</dl>
-			</section>
+			{keyRows.length > 0 && (
+				<section class="hidden any-pointer-fine:block">
+					<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+						{messages.sidebar.keys}
+					</h2>
+					<dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+						{keyRows.map((row) => (
+							<KeyRow key={row.action} keys={row.keys} action={row.action} />
+						))}
+					</dl>
+				</section>
+			)}
 
 			<section>
 				<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">

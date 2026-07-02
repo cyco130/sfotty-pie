@@ -335,14 +335,8 @@ export const messages = {
 	keyHelp: {
 		arrowKeys: "Arrow keys",
 		joystick: "Joystick",
-		leftShift: "Left Shift",
 		trigger: "Trigger",
-		consoleKeys: "F2 / F3 / F4",
-		consoleActions: "Option / Select / Start",
-		resetKey: "F5",
-		resetAction: "Reset (Ctrl: cold reset)",
-		breakKey: "F8",
-		breakAction: "Break",
+		coldReset: "Cold reset",
 	},
 
 	palette: {

@@ -109,6 +109,33 @@ export const messages = {
 		titleConfig: "Machine",
 		titlePalette: "Commands",
 		titleKeys: "Shortcuts",
+		titleControllers: "Controllers",
+	},
+
+	// The controllers panel: a live view of connected gamepads for diagnosis and
+	// (later) binding. Button/axis names are hardware tokens and stay inline; only
+	// the surrounding copy is here.
+	controllers: {
+		noPad: "Connect a controller and press a button to see it here.",
+		standard: "Standard mapping",
+		nonStandard: "Non-standard mapping",
+		joystick: "Joystick",
+		off: "Off",
+		buttons: "Buttons",
+		axes: "Axes",
+		bindings: "Bindings",
+		joystickSection: "Joystick",
+		consoleSection: "Console",
+		addBinding: "Add binding",
+		reset: "Reset to defaults",
+		pressInput: "Press a button or push a stick…  (Esc to cancel)",
+		role: {
+			up: "Up",
+			down: "Down",
+			left: "Left",
+			right: "Right",
+			trigger: "Trigger",
+		},
 	},
 
 	// The main menu is a launcher, so its entries read as short destinations —
@@ -121,6 +148,7 @@ export const messages = {
 		roms: "ROM preferences…",
 		palette: "Command palette…",
 		keys: "Keyboard shortcuts…",
+		controllers: "Controllers…",
 	},
 
 	shortcuts: {
@@ -446,6 +474,7 @@ export const labels = {
 	TURBO_MODE_ENABLE: "Emulation: Enable turbo mode (unthrottled, muted)",
 	TURBO_MODE_DISABLE: "Emulation: Disable turbo mode",
 	TURBO_MODE_TOGGLE: "Emulation: Toggle turbo mode",
+	TURBO_HOLD: "Emulation: Turbo mode while held",
 	KEYBOARD_MODE_CHARACTER:
 		"Keyboard: Switch to character mode (layout-aware typing)",
 	KEYBOARD_MODE_POSITIONAL:
@@ -459,6 +488,7 @@ export const labels = {
 	OPEN_CONFIG: "Machine: Open configuration…",
 	OPEN_PALETTE: "View: Open command palette…",
 	OPEN_KEYS: "Keyboard: Open shortcuts…",
+	OPEN_CONTROLLERS: "Controllers: Open panel…",
 	CLOSE_PANEL: "View: Close panel",
 	OPEN_ROMS: "Machine: Open ROM preferences…",
 	OPEN_LIBRARY: "Library: Open…",
@@ -760,6 +790,21 @@ export const labels = {
 	PRESS_JOY0_LEFT: "Atari: Push joystick 0 left",
 	PRESS_JOY0_RIGHT: "Atari: Push joystick 0 right",
 	PRESS_JOY0_TRIGGER: "Atari: Press joystick 0 trigger",
+	PRESS_JOY1_UP: "Atari: Push joystick 1 up",
+	PRESS_JOY1_DOWN: "Atari: Push joystick 1 down",
+	PRESS_JOY1_LEFT: "Atari: Push joystick 1 left",
+	PRESS_JOY1_RIGHT: "Atari: Push joystick 1 right",
+	PRESS_JOY1_TRIGGER: "Atari: Press joystick 1 trigger",
+	PRESS_JOY2_UP: "Atari: Push joystick 2 up",
+	PRESS_JOY2_DOWN: "Atari: Push joystick 2 down",
+	PRESS_JOY2_LEFT: "Atari: Push joystick 2 left",
+	PRESS_JOY2_RIGHT: "Atari: Push joystick 2 right",
+	PRESS_JOY2_TRIGGER: "Atari: Press joystick 2 trigger",
+	PRESS_JOY3_UP: "Atari: Push joystick 3 up",
+	PRESS_JOY3_DOWN: "Atari: Push joystick 3 down",
+	PRESS_JOY3_LEFT: "Atari: Push joystick 3 left",
+	PRESS_JOY3_RIGHT: "Atari: Push joystick 3 right",
+	PRESS_JOY3_TRIGGER: "Atari: Press joystick 3 trigger",
 } satisfies Record<string, string>;
 
 export type LabelKey = keyof typeof labels;

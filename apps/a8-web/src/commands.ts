@@ -52,6 +52,22 @@ const press = (code: number, label: LabelKey): CommandSpec => ({
 	...(isDeadCtrlShift(code) && { palette: false }),
 });
 
+// Joystick direction/trigger presses, one factory per kind. `port` is 0-3;
+// direction `mask` bits are 1 = up, 2 = down, 4 = left, 8 = right. Held while a
+// trigger sustains them; a palette pick pulses a single step. Ports 2/3 exist on
+// the 800 only — on the XL/XE the machine ignores them (see
+// `machine.joystickDown`), so their commands are harmless there.
+const joyDir = (port: number, mask: number, label: LabelKey): CommandSpec => ({
+	label,
+	run: ({ emulator }) => emulator.machine.joystickDown(port, mask),
+	release: ({ emulator }) => emulator.machine.joystickUp(port, mask),
+});
+const joyTrigger = (port: number, label: LabelKey): CommandSpec => ({
+	label,
+	run: ({ emulator }) => emulator.machine.joystickTriggerDown(port),
+	release: ({ emulator }) => emulator.machine.joystickTriggerUp(port),
+});
+
 export const commands = {
 	POWER_CYCLE: {
 		label: "POWER_CYCLE",
@@ -78,6 +94,15 @@ export const commands = {
 	TURBO_MODE_TOGGLE: {
 		label: "TURBO_MODE_TOGGLE",
 		run: ({ host }) => host.toggleTurboMode(),
+	},
+	// Turbo while held: press runs unthrottled, release returns to real time.
+	// Bindable-only — a momentary palette pulse would enable turbo for a couple of
+	// frames, which is pointless — so it's kept out of the palette.
+	TURBO_HOLD: {
+		label: "TURBO_HOLD",
+		run: ({ host }) => host.setTurboMode(true),
+		release: ({ host }) => host.setTurboMode(false),
+		palette: false,
 	},
 
 	// Keyboard interpretation: layout-aware typing vs raw positional keys.
@@ -123,6 +148,10 @@ export const commands = {
 		run: ({ host }) => host.showPanel("palette"),
 	},
 	OPEN_KEYS: { label: "OPEN_KEYS", run: ({ host }) => host.showPanel("keys") },
+	OPEN_CONTROLLERS: {
+		label: "OPEN_CONTROLLERS",
+		run: ({ host }) => host.showPanel("controllers"),
+	},
 
 	// Full-screen the whole app (chrome included), so the on-screen controls
 	// stay reachable. A no-op-safe toggle; also bound to a double-click on the
@@ -530,33 +559,31 @@ export const commands = {
 		run: ({ emulator }) => emulator.machine.breakKeyDown(),
 	},
 
-	// Joystick 0 (direction masks: 1 = up, 2 = down, 4 = left, 8 = right). Held
-	// while a trigger sustains them; a palette pick pulses a single step.
-	PRESS_JOY0_UP: {
-		label: "PRESS_JOY0_UP",
-		run: ({ emulator }) => emulator.machine.joystickDown(0, 1),
-		release: ({ emulator }) => emulator.machine.joystickUp(0, 1),
-	},
-	PRESS_JOY0_DOWN: {
-		label: "PRESS_JOY0_DOWN",
-		run: ({ emulator }) => emulator.machine.joystickDown(0, 2),
-		release: ({ emulator }) => emulator.machine.joystickUp(0, 2),
-	},
-	PRESS_JOY0_LEFT: {
-		label: "PRESS_JOY0_LEFT",
-		run: ({ emulator }) => emulator.machine.joystickDown(0, 4),
-		release: ({ emulator }) => emulator.machine.joystickUp(0, 4),
-	},
-	PRESS_JOY0_RIGHT: {
-		label: "PRESS_JOY0_RIGHT",
-		run: ({ emulator }) => emulator.machine.joystickDown(0, 8),
-		release: ({ emulator }) => emulator.machine.joystickUp(0, 8),
-	},
-	PRESS_JOY0_TRIGGER: {
-		label: "PRESS_JOY0_TRIGGER",
-		run: ({ emulator }) => emulator.machine.joystickTriggerDown(0),
-		release: ({ emulator }) => emulator.machine.joystickTriggerUp(0),
-	},
+	// Joysticks 0-3, one set per port (directions + trigger). Ports 2/3 are the
+	// 800's extra jacks; the machine no-ops them on the XL/XE.
+	PRESS_JOY0_UP: joyDir(0, 1, "PRESS_JOY0_UP"),
+	PRESS_JOY0_DOWN: joyDir(0, 2, "PRESS_JOY0_DOWN"),
+	PRESS_JOY0_LEFT: joyDir(0, 4, "PRESS_JOY0_LEFT"),
+	PRESS_JOY0_RIGHT: joyDir(0, 8, "PRESS_JOY0_RIGHT"),
+	PRESS_JOY0_TRIGGER: joyTrigger(0, "PRESS_JOY0_TRIGGER"),
+
+	PRESS_JOY1_UP: joyDir(1, 1, "PRESS_JOY1_UP"),
+	PRESS_JOY1_DOWN: joyDir(1, 2, "PRESS_JOY1_DOWN"),
+	PRESS_JOY1_LEFT: joyDir(1, 4, "PRESS_JOY1_LEFT"),
+	PRESS_JOY1_RIGHT: joyDir(1, 8, "PRESS_JOY1_RIGHT"),
+	PRESS_JOY1_TRIGGER: joyTrigger(1, "PRESS_JOY1_TRIGGER"),
+
+	PRESS_JOY2_UP: joyDir(2, 1, "PRESS_JOY2_UP"),
+	PRESS_JOY2_DOWN: joyDir(2, 2, "PRESS_JOY2_DOWN"),
+	PRESS_JOY2_LEFT: joyDir(2, 4, "PRESS_JOY2_LEFT"),
+	PRESS_JOY2_RIGHT: joyDir(2, 8, "PRESS_JOY2_RIGHT"),
+	PRESS_JOY2_TRIGGER: joyTrigger(2, "PRESS_JOY2_TRIGGER"),
+
+	PRESS_JOY3_UP: joyDir(3, 1, "PRESS_JOY3_UP"),
+	PRESS_JOY3_DOWN: joyDir(3, 2, "PRESS_JOY3_DOWN"),
+	PRESS_JOY3_LEFT: joyDir(3, 4, "PRESS_JOY3_LEFT"),
+	PRESS_JOY3_RIGHT: joyDir(3, 8, "PRESS_JOY3_RIGHT"),
+	PRESS_JOY3_TRIGGER: joyTrigger(3, "PRESS_JOY3_TRIGGER"),
 
 	// TODO: settings commands (TOGGLE_KEYBOARD_LAYOUT_MODE and friends) come
 	// back when raw mode and an options store exist.

@@ -1,4 +1,4 @@
-import { KEYBOARD_LAYOUTS } from "../../../keyboard-layouts.ts";
+import { LAYOUT_OPTIONS } from "../../../keyboard-layouts.ts";
 import { LAYOUT_AUTO } from "../../../key-bindings-store.ts";
 import { layoutLabelsAvailable } from "../../../key-bindings.ts";
 import { messages } from "../../../messages.ts";
@@ -17,10 +17,12 @@ export default function KeyboardLayoutPanel() {
 	// Nothing to auto-detect from where getLayoutMap is absent — gray it out.
 	const autoAvailable = layoutLabelsAvailable();
 
-	const options = [
-		{ id: LAYOUT_AUTO, name: messages.shortcuts.layoutAuto },
-		...KEYBOARD_LAYOUTS.map((l) => ({ id: l.id, name: l.name })),
-	];
+	// Flat, alphabetical by display name. Several options can share a map id, so
+	// picking one stores that id; on reload the first option with it (its
+	// canonical name) shows as selected.
+	const options = [...LAYOUT_OPTIONS].sort((a, b) =>
+		a.name.localeCompare(b.name),
+	);
 
 	return (
 		<PanelFrame title={messages.shortcuts.layoutTitle}>
@@ -35,43 +37,21 @@ export default function KeyboardLayoutPanel() {
 
 				<p class="text-sm text-neutral-600">{messages.shortcuts.layoutIntro}</p>
 
-				<div class="flex flex-col gap-1">
-					{options.map((option) => {
-						const selected = option.id === current;
-						const disabled = option.id === LAYOUT_AUTO && !autoAvailable;
-						return (
-							<button
-								key={option.id}
-								type="button"
-								disabled={disabled}
-								class={`flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
-									disabled
-										? "cursor-not-allowed text-neutral-400"
-										: selected
-											? "bg-neutral-200 text-neutral-900"
-											: "text-neutral-700 hover:bg-neutral-100"
-								}`}
-								onClick={() => void host.setLayoutPreference(option.id)}
-							>
-								<span
-									class={`inline-block h-3 w-3 shrink-0 rounded-full border ${
-										disabled
-											? "border-neutral-300"
-											: selected
-												? "border-neutral-800 bg-neutral-800"
-												: "border-neutral-400"
-									}`}
-								/>
-								{option.name}
-								{disabled && (
-									<span class="text-xs text-neutral-400">
-										— {messages.shortcuts.layoutAutoUnavailable}
-									</span>
-								)}
-							</button>
-						);
-					})}
-				</div>
+				<select
+					class="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-800"
+					value={current}
+					onChange={(e) => void host.setLayoutPreference(e.currentTarget.value)}
+				>
+					<option value={LAYOUT_AUTO} disabled={!autoAvailable}>
+						{messages.shortcuts.layoutAuto}
+						{!autoAvailable && ` — ${messages.shortcuts.layoutAutoUnavailable}`}
+					</option>
+					{options.map((option) => (
+						<option key={option.name} value={option.id}>
+							{option.name}
+						</option>
+					))}
+				</select>
 
 				<p class="text-xs text-neutral-500">
 					{messages.shortcuts.layoutRegenerates}

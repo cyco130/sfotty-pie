@@ -3,19 +3,20 @@
 //
 // Real detection is the userAgent. For testing the *other* platform's shortcut
 // labels and default bindings without another machine, a `?os=win|mac` query
-// param overrides it and persists (localStorage), so it survives SPA navigation
-// and reloads; `?os=auto` clears the override. After flipping, reset key bindings
-// so the set (and its primaries) regenerates for that platform.
+// param overrides it and persists for the tab (sessionStorage), so it survives
+// SPA navigation and reloads but clears itself when the tab closes; `?os=auto`
+// clears it sooner. After flipping, reset key bindings so the set (and its
+// primaries) regenerates for that platform.
 
 const OVERRIDE_KEY = "force-os";
 
 function readOverride(): "mac" | "win" | null {
 	try {
 		const param = new URLSearchParams(location.search).get("os");
-		if (param === "auto") localStorage.removeItem(OVERRIDE_KEY);
+		if (param === "auto") sessionStorage.removeItem(OVERRIDE_KEY);
 		else if (param === "mac" || param === "win")
-			localStorage.setItem(OVERRIDE_KEY, param);
-		const stored = localStorage.getItem(OVERRIDE_KEY);
+			sessionStorage.setItem(OVERRIDE_KEY, param);
+		const stored = sessionStorage.getItem(OVERRIDE_KEY);
 		return stored === "mac" || stored === "win" ? stored : null;
 	} catch {
 		return null; // no storage / non-browser context → fall back to detection
@@ -25,8 +26,8 @@ function readOverride(): "mac" | "win" | null {
 /**
  * True on macOS — for platform-specific shortcut labels (⌘ vs Ctrl+) and the
  * platform default bindings. A `?os=win` / `?os=mac` query param overrides the
- * real userAgent (persisted; `?os=auto` clears) so the other platform's labels
- * can be seen while developing.
+ * real userAgent (per-tab; `?os=auto` or closing the tab clears it) so the other
+ * platform's labels can be seen while developing.
  */
 export function isMac(): boolean {
 	const override = readOverride();

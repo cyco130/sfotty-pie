@@ -8,11 +8,54 @@ export interface GamepadActions {
 	release(command: Command): void;
 }
 
-// Past this magnitude an axis counts as pushed. Set a bit high so a released
-// stick clears it early on the passive spring-back (snappier release), but below
-// ~0.707 — a round-gated stick caps each axis near sin(45°) at the corners, so a
-// higher bar would swallow diagonals. No hysteresis or per-device deadzone yet.
-const AXIS_THRESHOLD = 0.6;
+// Analog stick → digital 8-way. Axes are paired in order (0/1, 2/3), and a pair
+// is read radially, not per-axis: below STICK_ENGAGE (a circular deadzone) it's
+// centred; past it the angle snaps to one of 8 octants. Radial magnitude reaches
+// 1 in every direction, so diagonals are as reachable as cardinals (unlike a
+// per-axis threshold, which a round gate caps near 0.707 and leaves a dead wedge
+// on every diagonal). Hysteresis stops chatter: a lower release radius, and a
+// small angular margin before an engaged pair jumps to a neighbouring octant.
+const STICK_ENGAGE = 0.45;
+const STICK_RELEASE = 0.35;
+const SECTOR_MARGIN = 0.1; // radians (~5.7°) past the 22.5° boundary before switching
+
+const QUARTER_PI = Math.PI / 4;
+const EIGHTH_PI = Math.PI / 8;
+const TWO_PI = Math.PI * 2;
+
+// The axis-halves each octant activates, as [axisOffset (0 = x, 1 = y), dir]. The
+// diagonals set both; the cardinals one. atan2(y, x) angle space, so +y is the
+// "positive" side of the odd axis (matching how axis-half bindings read).
+const OCTANT_HALVES: readonly (readonly (readonly [number, -1 | 1])[])[] = [
+	[[0, 1]], // 0: +x
+	[
+		[0, 1],
+		[1, 1],
+	], // 1: +x +y
+	[[1, 1]], // 2: +y
+	[
+		[0, -1],
+		[1, 1],
+	], // 3: −x +y
+	[[0, -1]], // 4: −x
+	[
+		[0, -1],
+		[1, -1],
+	], // 5: −x −y
+	[[1, -1]], // 6: −y
+	[
+		[0, 1],
+		[1, -1],
+	], // 7: +x −y
+];
+
+// Per-stick hysteresis state: whether the pair is currently engaged, and its last
+// octant (−1 = none). Keyed by `${gamepad.index}:${pairBase}` so it follows the
+// device, not the Atari port.
+interface StickState {
+	engaged: boolean;
+	octant: number;
+}
 
 // The commands one joystick port actuates, indexed by Atari port (0-3). Ports
 // are filled in connection order — the first connected pad drives port 0, the
@@ -120,19 +163,27 @@ const CENTERED: PortState = {
 	trigger: false,
 };
 
-// Whether a Standard input is currently active on a pad: a pressed button, or an
-// axis pushed past AXIS_THRESHOLD on the bound side.
-function inputActive(pad: Gamepad, input: GamepadInput): boolean {
+// Whether a Standard input is active: a pressed button, or an axis-half the
+// stick's octant lit up this poll (see `activeHalves`, passed in as a set of
+// `${axis}:${dir}` keys).
+function inputActive(
+	pad: Gamepad,
+	input: GamepadInput,
+	halves: ReadonlySet<string>,
+): boolean {
 	if ("button" in input) return pad.buttons[input.button]?.pressed ?? false;
-	const v = pad.axes[input.axis] ?? 0;
-	return input.dir < 0 ? v < -AXIS_THRESHOLD : v > AXIS_THRESHOLD;
+	return halves.has(`${input.axis}:${input.dir}`);
 }
 
 // Reduce a live pad to its digital port state by OR-ing every joystick binding
 // onto its role — so the D-pad and the stick both drive a direction, either one
 // active setting it. (This replaces the old "D-pad overrides the stick" rule; a
 // deadzone, not a priority, keeps a resting stick from fighting the D-pad.)
-function readPad(pad: Gamepad, joystick: readonly JoyBinding[]): PortState {
+function readPad(
+	pad: Gamepad,
+	joystick: readonly JoyBinding[],
+	halves: ReadonlySet<string>,
+): PortState {
 	const s: PortState = {
 		up: false,
 		down: false,
@@ -141,10 +192,12 @@ function readPad(pad: Gamepad, joystick: readonly JoyBinding[]): PortState {
 		trigger: false,
 	};
 	for (const b of joystick) {
-		if (inputActive(pad, b.input)) s[b.role] = true;
+		if (inputActive(pad, b.input, halves)) s[b.role] = true;
 	}
 	return s;
 }
+
+const NO_HALVES: ReadonlySet<string> = new Set();
 
 /** A connected pad and its Atari-port assignment, for the controllers UI. */
 export interface PadInfo {
@@ -184,6 +237,8 @@ export class Gamepads {
 	// who's which player; the UI edits it via setPort. Assignment is stable — a
 	// disconnect frees a port without reshuffling the survivors.
 	#portToIndex: (number | null)[] = PORT_COMMANDS.map(() => null);
+	// Per-stick hysteresis state, keyed by `${index}:${pairBase}` (see StickState).
+	#sticks = new Map<string, StickState>();
 
 	/** Fired whenever the connected set or the assignment changes, so the host can
 	 *  mirror {@link pads} into a signal. */
@@ -212,6 +267,9 @@ export class Gamepads {
 			this.#pads.delete(index);
 			const port = this.#portToIndex.indexOf(index);
 			if (port >= 0) this.#portToIndex[port] = null;
+			for (const key of this.#sticks.keys()) {
+				if (key.startsWith(`${index}:`)) this.#sticks.delete(key);
+			}
 			this.poll(true); // release whatever the departing pad held
 			this.onChange?.();
 		};
@@ -260,13 +318,53 @@ export class Gamepads {
 	poll(force = false): void {
 		if (!force && this.#pads.size === 0) return;
 		const pads = navigator.getGamepads();
+		let p0Halves = NO_HALVES;
 		for (let port = 0; port < PORT_COMMANDS.length; port++) {
 			const index = this.#portToIndex[port];
 			const pad = index != null ? pads[index] : null;
-			this.#apply(port, pad ? readPad(pad, this.#joystick) : CENTERED);
+			const halves = pad ? this.#activeHalves(pad, index!) : NO_HALVES;
+			this.#apply(port, pad ? readPad(pad, this.#joystick, halves) : CENTERED);
+			if (port === 0) p0Halves = halves;
 		}
 		const p0 = this.#portToIndex[0];
-		this.#applyConsole(p0 != null ? (pads[p0] ?? undefined) : undefined);
+		const p0pad = p0 != null ? (pads[p0] ?? undefined) : undefined;
+		this.#applyConsole(p0pad, p0Halves);
+	}
+
+	// The axis-halves the pad's sticks light up this poll: each axis pair (0/1,
+	// 2/3, …) read radially with a deadzone + octant snapping + hysteresis (see
+	// the stick constants). Returns `${axis}:${dir}` keys for inputActive.
+	#activeHalves(pad: Gamepad, index: number): ReadonlySet<string> {
+		const halves = new Set<string>();
+		const axes = pad.axes;
+		for (let base = 0; base + 1 < axes.length; base += 2) {
+			const x = axes[base] ?? 0;
+			const y = axes[base + 1] ?? 0;
+			const key = `${index}:${base}`;
+			let st = this.#sticks.get(key);
+			if (!st) {
+				st = { engaged: false, octant: -1 };
+				this.#sticks.set(key, st);
+			}
+			const r = Math.hypot(x, y);
+			st.engaged = st.engaged ? r > STICK_RELEASE : r >= STICK_ENGAGE;
+			if (!st.engaged) {
+				st.octant = -1;
+				continue;
+			}
+			let k = ((Math.round(Math.atan2(y, x) / QUARTER_PI) % 8) + 8) % 8;
+			// Boundary hysteresis: hold the last octant until clearly into the next.
+			if (st.octant >= 0 && k !== st.octant) {
+				let d = Math.abs(Math.atan2(y, x) - st.octant * QUARTER_PI);
+				if (d > Math.PI) d = TWO_PI - d;
+				if (d < EIGHTH_PI + SECTOR_MARGIN) k = st.octant;
+			}
+			st.octant = k;
+			for (const [off, dir] of OCTANT_HALVES[k]!) {
+				halves.add(`${base + off}:${dir}`);
+			}
+		}
+		return halves;
 	}
 
 	/** Replace the joystick + console binding sets (the editor's save path). Live:
@@ -294,11 +392,11 @@ export class Gamepads {
 	}
 
 	// Diff the port-0 console/meta bindings; an absent pad releases them all.
-	#applyConsole(pad: Gamepad | undefined): void {
+	#applyConsole(pad: Gamepad | undefined, halves: ReadonlySet<string>): void {
 		const state = this.#consoleState;
 		for (let i = 0; i < this.#console.length; i++) {
 			const { input, command } = this.#console[i]!;
-			const now = pad ? inputActive(pad, input) : false;
+			const now = pad ? inputActive(pad, input, halves) : false;
 			this.#edge(state[i]!, now, command);
 			state[i] = now;
 		}

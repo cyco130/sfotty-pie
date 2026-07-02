@@ -760,6 +760,21 @@ export const labels = {
 	PRESS_JOY0_LEFT: "Atari: Push joystick 0 left",
 	PRESS_JOY0_RIGHT: "Atari: Push joystick 0 right",
 	PRESS_JOY0_TRIGGER: "Atari: Press joystick 0 trigger",
+	PRESS_JOY1_UP: "Atari: Push joystick 1 up",
+	PRESS_JOY1_DOWN: "Atari: Push joystick 1 down",
+	PRESS_JOY1_LEFT: "Atari: Push joystick 1 left",
+	PRESS_JOY1_RIGHT: "Atari: Push joystick 1 right",
+	PRESS_JOY1_TRIGGER: "Atari: Press joystick 1 trigger",
+	PRESS_JOY2_UP: "Atari: Push joystick 2 up",
+	PRESS_JOY2_DOWN: "Atari: Push joystick 2 down",
+	PRESS_JOY2_LEFT: "Atari: Push joystick 2 left",
+	PRESS_JOY2_RIGHT: "Atari: Push joystick 2 right",
+	PRESS_JOY2_TRIGGER: "Atari: Press joystick 2 trigger",
+	PRESS_JOY3_UP: "Atari: Push joystick 3 up",
+	PRESS_JOY3_DOWN: "Atari: Push joystick 3 down",
+	PRESS_JOY3_LEFT: "Atari: Push joystick 3 left",
+	PRESS_JOY3_RIGHT: "Atari: Push joystick 3 right",
+	PRESS_JOY3_TRIGGER: "Atari: Press joystick 3 trigger",
 } satisfies Record<string, string>;
 
 export type LabelKey = keyof typeof labels;

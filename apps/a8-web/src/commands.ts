@@ -595,6 +595,12 @@ export function labelOf(command: Command): string {
 	return labels[commands[command].label];
 }
 
+/** A label's searchable text: a trailing "[…]" annotation (e.g. "[reboots]") is
+ *  a reader's aside, shown but not matched by search. */
+export function searchLabel(command: Command): string {
+	return labelOf(command).replace(/\s*\[[^\]]*\]$/u, "");
+}
+
 /** A command's release half (key up), or undefined for a press-only command. */
 export function releaseOf(
 	command: Command,

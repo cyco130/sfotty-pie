@@ -5,6 +5,7 @@ import {
 	type Binding,
 	CHARACTER_CODES,
 	chordLabel,
+	formatChord,
 	KEY_CODES,
 	keyLabel,
 	triggerKey,
@@ -60,13 +61,7 @@ function captureCombo(event: KeyboardEvent): Combo {
 }
 
 function comboLabel(combo: Combo, mac: boolean): string {
-	const parts: string[] = [];
-	if (combo.ctrl) parts.push("Ctrl");
-	if (combo.meta) parts.push(mac ? "Cmd" : "Meta");
-	if (combo.alt) parts.push(mac ? "Opt" : "Alt");
-	if (combo.shift) parts.push("Shift");
-	parts.push(keyLabel(combo.code, mac));
-	return parts.join("+");
+	return formatChord(combo, keyLabel(combo.code, mac), mac);
 }
 
 function BackLink() {
@@ -189,6 +184,11 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 	};
 
 	const bindings = host.keyBindings.value.filter((b) => b.command === command);
+	// Primary binding first (matching the palette/menu/keys list); the rest keep
+	// their order (sort is stable).
+	const orderedBindings = [...bindings].sort(
+		(a, b) => Number(b.primary ?? false) - Number(a.primary ?? false),
+	);
 
 	const candidate: Binding | null = code
 		? {
@@ -237,6 +237,23 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 		host.updateBindings(host.keyBindings.value.filter((b) => b !== binding));
 	};
 
+	// Pin one binding as the command's primary (the chord shown in the palette,
+	// menu, and key-help), clearing the flag from its siblings.
+	const makePrimary = (binding: Binding) => {
+		host.updateBindings(
+			host.keyBindings.value.map((b) => {
+				if (b.command !== command) return b;
+				if (b === binding) return { ...b, primary: true };
+				if (b.primary) {
+					const cleared = { ...b };
+					delete cleared.primary;
+					return cleared;
+				}
+				return b;
+			}),
+		);
+	};
+
 	const triModOptions = [
 		{ value: "off", label: messages.shortcuts.modOff },
 		{ value: "on", label: messages.shortcuts.modOn },
@@ -259,7 +276,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 						</p>
 					) : (
 						<ul class="flex flex-col gap-1">
-							{bindings.map((binding) => (
+							{orderedBindings.map((binding) => (
 								<li
 									key={triggerKey(binding)}
 									class="flex items-center justify-between gap-2 text-sm"
@@ -272,14 +289,31 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 											</span>
 										)}
 									</kbd>
-									<button
-										type="button"
-										aria-label={messages.shortcuts.removeBinding}
-										class="text-neutral-400 hover:text-neutral-700"
-										onClick={() => remove(binding)}
-									>
-										<Icon name="close" class="size-3.5" />
-									</button>
+									<div class="flex items-center gap-2">
+										{/* Primary only matters when there's a choice. */}
+										{bindings.length > 1 &&
+											(binding.primary ? (
+												<span class="rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-neutral-600 uppercase">
+													{messages.shortcuts.primary}
+												</span>
+											) : (
+												<button
+													type="button"
+													class="text-xs text-neutral-400 hover:text-neutral-700 hover:underline"
+													onClick={() => makePrimary(binding)}
+												>
+													{messages.shortcuts.makePrimary}
+												</button>
+											))}
+										<button
+											type="button"
+											aria-label={messages.shortcuts.removeBinding}
+											class="text-neutral-400 hover:text-neutral-700"
+											onClick={() => remove(binding)}
+										>
+											<Icon name="close" class="size-3.5" />
+										</button>
+									</div>
 								</li>
 							))}
 						</ul>

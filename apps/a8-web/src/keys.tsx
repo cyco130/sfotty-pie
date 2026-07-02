@@ -1,8 +1,17 @@
 import { useMemo, useState } from "preact/hooks";
-import { type Command, labelOf, paletteCommands } from "./commands.ts";
+import {
+	type Command,
+	labelOf,
+	paletteCommands,
+	searchLabel,
+} from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { LAYOUT_AUTO } from "./key-bindings-store.ts";
-import { chordLabel, layoutLabelsAvailable } from "./key-bindings.ts";
+import {
+	type Binding,
+	chordLabel,
+	layoutLabelsAvailable,
+} from "./key-bindings.ts";
 import { messages } from "./messages.ts";
 import { navigate } from "./navigate.ts";
 
@@ -47,21 +56,29 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 	const [query, setQuery] = useState("");
 
 	const rows = useMemo<Row[]>(() => {
-		const byCommand = new Map<Command, string[]>();
+		const byCommand = new Map<Command, Binding[]>();
 		for (const b of host.keyBindings.value) {
-			const chord = chordLabel(b, host.isMac, host.layoutLabels.value);
 			const list = byCommand.get(b.command);
-			if (list) list.push(chord);
-			else byCommand.set(b.command, [chord]);
+			if (list) list.push(b);
+			else byCommand.set(b.command, [b]);
 		}
 		// Bound commands first (each binding a row), then the unbound ones — both in
 		// palette order (alphabetical by label), so a command's rows stay adjacent.
+		// Within a command, its primary binding leads (matching the palette/menu),
+		// the rest keeping their order (sort is stable).
 		const bound: Row[] = [];
 		const unbound: Row[] = [];
 		for (const command of paletteCommands) {
-			const chords = byCommand.get(command);
-			if (chords?.length) {
-				for (const chord of chords) bound.push({ command, chord });
+			const bs = byCommand.get(command);
+			if (bs?.length) {
+				const ordered = [...bs].sort(
+					(a, b) => Number(b.primary ?? false) - Number(a.primary ?? false),
+				);
+				for (const b of ordered)
+					bound.push({
+						command,
+						chord: chordLabel(b, host.isMac, host.layoutLabels.value),
+					});
 			} else {
 				unbound.push({ command, chord: null });
 			}
@@ -75,7 +92,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 	const shown = q
 		? rows.filter(
 				(r) =>
-					labelOf(r.command).toLowerCase().includes(q) ||
+					searchLabel(r.command).toLowerCase().includes(q) ||
 					(r.chord?.toLowerCase().includes(q) ?? false),
 			)
 		: rows;

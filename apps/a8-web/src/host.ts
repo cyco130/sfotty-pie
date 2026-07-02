@@ -54,6 +54,7 @@ import {
 } from "./machine-config.ts";
 import { currentPath, navigate } from "./navigate.ts";
 import { messages } from "./messages.ts";
+import { isMac } from "./platform.ts";
 import { recentIds, removeRecent, touchRecent } from "./recents.ts";
 import {
 	clearAllPersisted,
@@ -297,7 +298,7 @@ export class EmulatorHost {
 	readonly #audio: AudioOutput | null;
 	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
-	readonly #isMac = navigator.userAgent.includes("Mac");
+	readonly #isMac = isMac();
 	// Whether key bindings were loaded from storage; if not, create() generates
 	// and persists the platform defaults (async — it resolves layout labels).
 	readonly #bindingsStored: boolean;

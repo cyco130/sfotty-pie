@@ -57,17 +57,50 @@ const PORT_COMMANDS: readonly PortCommands[] = [
 	},
 ];
 
-// Buttons on the player-1 pad (Standard Gamepad layout) mapped to global machine
-// and emulator commands: the three console keys, plus pause and turbo-hold. Only
-// the first pad drives these — the others are joystick-only. Each is sustained
-// (press on down, release on up), which suits the held console keys and turbo;
-// pause is a press-only toggle, so its release half is a harmless no-op.
-const CONSOLE_BUTTONS: readonly { index: number; command: Command }[] = [
-	{ index: 9, command: "PRESS_START" }, // Start / ＋ / Menu
-	{ index: 8, command: "PRESS_SELECT" }, // Select / − / View
-	{ index: 3, command: "PRESS_OPTION" }, // north face (Y / △)
-	{ index: 4, command: "TOGGLE_PAUSE" }, // L1
-	{ index: 7, command: "TURBO_HOLD" }, // R2 — hold to fast-forward
+// A reference to a Standard Gamepad input: a button by index, or one half of an
+// axis (dir −1 = the negative side). This is the vocabulary a binding maps from.
+export type GamepadInput = { button: number } | { axis: number; dir: -1 | 1 };
+
+// The five joystick senses a per-port binding drives.
+export type JoyRole = "up" | "down" | "left" | "right" | "trigger";
+
+// Per-port binding: an input → a joystick role. Applied to every pad on its own
+// port (the role resolves to that port's PRESS_JOY{n}_* command).
+export interface JoyBinding {
+	input: GamepadInput;
+	role: JoyRole;
+}
+
+// Global binding: an input → a command. Applied to the port-0 pad only.
+export interface ConsoleBinding {
+	input: GamepadInput;
+	command: Command;
+}
+
+// Default joystick bindings (Standard Gamepad layout): the D-pad (buttons 12-15)
+// and the left stick (axes 0/1) both drive the directions; button 0 is the
+// trigger. Several inputs can share a role — they OR together (see readPad).
+export const DEFAULT_JOYSTICK: readonly JoyBinding[] = [
+	{ input: { button: 12 }, role: "up" },
+	{ input: { button: 13 }, role: "down" },
+	{ input: { button: 14 }, role: "left" },
+	{ input: { button: 15 }, role: "right" },
+	{ input: { axis: 1, dir: -1 }, role: "up" },
+	{ input: { axis: 1, dir: 1 }, role: "down" },
+	{ input: { axis: 0, dir: -1 }, role: "left" },
+	{ input: { axis: 0, dir: 1 }, role: "right" },
+	{ input: { button: 0 }, role: "trigger" },
+];
+
+// Default console/meta bindings (port-0 pad only): the three console keys plus
+// pause and turbo-hold. Each is sustained (press on down, release on up); pause
+// is a press-only toggle, so its release half is a harmless no-op.
+export const DEFAULT_CONSOLE: readonly ConsoleBinding[] = [
+	{ input: { button: 9 }, command: "PRESS_START" }, // Start / ＋ / Menu
+	{ input: { button: 8 }, command: "PRESS_SELECT" }, // Select / − / View
+	{ input: { button: 3 }, command: "PRESS_OPTION" }, // north face (Y / △)
+	{ input: { button: 4 }, command: "TOGGLE_PAUSE" }, // L1
+	{ input: { button: 7 }, command: "TURBO_HOLD" }, // R2 — hold to fast-forward
 ];
 
 // A port's digital state — the five senses we drive, as booleans.
@@ -87,31 +120,30 @@ const CENTERED: PortState = {
 	trigger: false,
 };
 
-// Reduce a live pad to its digital port state (Standard Gamepad layout): the
-// D-pad is buttons 12-15, the left stick is axes 0/1 (negative is up/left), and
-// button 0 is the trigger. The D-pad wins whenever any of its buttons is down —
-// a thumb on the D-pad overrides a resting or drifting stick — otherwise the
-// stick drives the directions past AXIS_THRESHOLD.
-function readPad(pad: Gamepad): PortState {
-	const b = pad.buttons;
-	const trigger = b[0]?.pressed ?? false;
-	const up = b[12]?.pressed ?? false;
-	const down = b[13]?.pressed ?? false;
-	const left = b[14]?.pressed ?? false;
-	const right = b[15]?.pressed ?? false;
-	if (up || down || left || right) {
-		return { up, down, left, right, trigger };
-	}
+// Whether a Standard input is currently active on a pad: a pressed button, or an
+// axis pushed past AXIS_THRESHOLD on the bound side.
+function inputActive(pad: Gamepad, input: GamepadInput): boolean {
+	if ("button" in input) return pad.buttons[input.button]?.pressed ?? false;
+	const v = pad.axes[input.axis] ?? 0;
+	return input.dir < 0 ? v < -AXIS_THRESHOLD : v > AXIS_THRESHOLD;
+}
 
-	const x = pad.axes[0] ?? 0;
-	const y = pad.axes[1] ?? 0;
-	return {
-		up: y < -AXIS_THRESHOLD,
-		down: y > AXIS_THRESHOLD,
-		left: x < -AXIS_THRESHOLD,
-		right: x > AXIS_THRESHOLD,
-		trigger,
+// Reduce a live pad to its digital port state by OR-ing every joystick binding
+// onto its role — so the D-pad and the stick both drive a direction, either one
+// active setting it. (This replaces the old "D-pad overrides the stick" rule; a
+// deadzone, not a priority, keeps a resting stick from fighting the D-pad.)
+function readPad(pad: Gamepad, joystick: readonly JoyBinding[]): PortState {
+	const s: PortState = {
+		up: false,
+		down: false,
+		left: false,
+		right: false,
+		trigger: false,
 	};
+	for (const b of joystick) {
+		if (inputActive(pad, b.input)) s[b.role] = true;
+	}
+	return s;
 }
 
 /** A connected pad and its Atari-port assignment, for the controllers UI. */
@@ -130,20 +162,22 @@ export interface PadInfo {
  * scanlines. We diff each poll against the last to synthesize the press/release
  * edges the commands want.
  *
- * The mapping is hardcoded to the Standard Gamepad layout for now: every pad
- * drives its assigned Atari port (D-pad + left stick → directions, button 0 →
- * trigger), and the port-0 pad also drives the console/meta buttons (see
- * {@link CONSOLE_BUTTONS}). Which pad drives which port is an explicit assignment
- * ({@link setPort}), defaulting to lowest-free-on-connect. A binding layer and
- * per-device calibration come later.
+ * The mapping targets the Standard Gamepad layout: every pad drives its assigned
+ * Atari port (joystick bindings → directions/trigger), and the port-0 pad also
+ * drives the console/meta commands. The bindings are data ({@link setBindings}),
+ * defaulting to {@link DEFAULT_JOYSTICK} / {@link DEFAULT_CONSOLE}; which pad
+ * drives which port is an explicit assignment ({@link setPort}). Per-device
+ * normalization (for non-standard pads) comes later, ahead of these bindings.
  */
 export class Gamepads {
 	#actions: GamepadActions;
+	// The active bindings (data-driven; edited via setBindings).
+	#joystick: readonly JoyBinding[] = DEFAULT_JOYSTICK;
+	#console: readonly ConsoleBinding[] = DEFAULT_CONSOLE;
 	// Last-polled joystick state per port, so a poll emits only the changed edges.
 	#state: PortState[] = PORT_COMMANDS.map(() => CENTERED);
-	// Last-polled state of the port-0 console/meta buttons, parallel to
-	// CONSOLE_BUTTONS.
-	#consoleState: boolean[] = CONSOLE_BUTTONS.map(() => false);
+	// Last-polled state of the port-0 console/meta buttons, parallel to #console.
+	#consoleState: boolean[] = DEFAULT_CONSOLE.map(() => false);
 	// Connected pads by gamepad.index → id/mapping, from the connect events.
 	#pads = new Map<number, { id: string; mapping: string }>();
 	// Atari port → the gamepad.index driving it (or null). The source of truth for
@@ -229,10 +263,21 @@ export class Gamepads {
 		for (let port = 0; port < PORT_COMMANDS.length; port++) {
 			const index = this.#portToIndex[port];
 			const pad = index != null ? pads[index] : null;
-			this.#apply(port, pad ? readPad(pad) : CENTERED);
+			this.#apply(port, pad ? readPad(pad, this.#joystick) : CENTERED);
 		}
 		const p0 = this.#portToIndex[0];
 		this.#applyConsole(p0 != null ? (pads[p0] ?? undefined) : undefined);
+	}
+
+	/** Replace the joystick + console binding sets (the editor's save path). Live:
+	 *  it affects the next poll; anything held releases on its own next edge. */
+	setBindings(
+		joystick: readonly JoyBinding[],
+		console: readonly ConsoleBinding[],
+	): void {
+		this.#joystick = joystick;
+		this.#console = console;
+		this.#consoleState = console.map(() => false);
 	}
 
 	// Diff a port's new joystick state against the last poll, pressing/releasing on
@@ -248,12 +293,12 @@ export class Gamepads {
 		this.#state[port] = next;
 	}
 
-	// Diff the player-1 console/meta buttons; an absent pad releases them all.
+	// Diff the port-0 console/meta bindings; an absent pad releases them all.
 	#applyConsole(pad: Gamepad | undefined): void {
 		const state = this.#consoleState;
-		for (let i = 0; i < CONSOLE_BUTTONS.length; i++) {
-			const { index, command } = CONSOLE_BUTTONS[i]!;
-			const now = pad?.buttons[index]?.pressed ?? false;
+		for (let i = 0; i < this.#console.length; i++) {
+			const { input, command } = this.#console[i]!;
+			const now = pad ? inputActive(pad, input) : false;
 			this.#edge(state[i]!, now, command);
 			state[i] = now;
 		}

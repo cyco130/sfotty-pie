@@ -21,6 +21,12 @@ import { commands, type Command, releaseOf } from "./commands.ts";
 import type { Binding, KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
 import { Gamepads, type PadInfo } from "./gamepad.ts";
+import {
+	type GamepadBindings,
+	defaultGamepadBindings,
+	loadGamepadBindings,
+	saveGamepadBindings,
+} from "./gamepad-bindings-store.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
 	addOrFindImage,
@@ -257,6 +263,10 @@ export class EmulatorHost {
 	 *  panel. Mirrored from the poller on connect/disconnect/reassign. */
 	readonly gamepads = signal<PadInfo[]>([]);
 
+	/** The gamepad binding set (joystick + console layers) the editor edits; the
+	 *  device-independent layer, persisted via the gamepad-bindings store. */
+	readonly gamepadBindings = signal<GamepadBindings>(loadGamepadBindings());
+
 	/** The layout snapshot the bindings were baked from (`code` → legend), used to
 	 *  label the editor's live preview — existing chords carry their own baked
 	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
@@ -420,6 +430,9 @@ export class EmulatorHost {
 		this.#gamepads.onChange = () => {
 			this.gamepads.value = this.#gamepads.pads();
 		};
+		// Apply the persisted (or default) bindings to the poller.
+		const gb = this.gamepadBindings.peek();
+		this.#gamepads.setBindings(gb.joystick, gb.console);
 
 		// The audio context resumes/suspends asynchronously; track it.
 		if (audio) {
@@ -583,6 +596,19 @@ export class EmulatorHost {
 	 *  or `null` for off — the controllers panel's port selector. */
 	setGamepadPort(index: number, port: number | null): void {
 		this.#gamepads.setPort(index, port);
+	}
+
+	/** Replace the gamepad bindings — apply them live, persist, and mirror onto the
+	 *  signal the editor reads. */
+	setGamepadBindings(bindings: GamepadBindings): void {
+		this.gamepadBindings.value = bindings;
+		this.#gamepads.setBindings(bindings.joystick, bindings.console);
+		saveGamepadBindings(bindings);
+	}
+
+	/** Restore the default gamepad bindings. */
+	resetGamepadBindings(): void {
+		this.setGamepadBindings(defaultGamepadBindings());
 	}
 
 	// The best-ranked built-in firmware present in the library for a list of

@@ -232,7 +232,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 	};
 
 	const remove = (binding: Binding) => {
-		const chord = chordLabel(binding, host.isMac);
+		const chord = chordLabel(binding, host.isMac, host.layoutLabels.value);
 		if (!window.confirm(messages.shortcuts.confirmRemove(chord))) return;
 		host.updateBindings(host.keyBindings.value.filter((b) => b !== binding));
 	};
@@ -265,7 +265,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 									class="flex items-center justify-between gap-2 text-sm"
 								>
 									<kbd class="font-mono text-xs text-neutral-700">
-										{chordLabel(binding, host.isMac)}
+										{chordLabel(binding, host.isMac, host.layoutLabels.value)}
 										{binding.scope === "global" && (
 											<span class="ml-1.5 text-neutral-400">
 												{messages.shortcuts.scopeGlobal}
@@ -386,7 +386,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 						</span>
 						{candidate ? (
 							<kbd class="font-mono text-sm font-medium text-neutral-900">
-								{chordLabel(candidate, host.isMac)}
+								{chordLabel(candidate, host.isMac, host.layoutLabels.value)}
 							</kbd>
 						) : (
 							<span class="text-sm text-neutral-400 italic">

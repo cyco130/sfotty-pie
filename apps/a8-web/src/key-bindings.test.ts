@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
 	type Binding,
+	bakeDefaults,
 	defaultBindingSet,
 	keyLabel,
 	labelFor,
@@ -121,6 +122,57 @@ test("resolveBinding prefers the most specific match (any ranks lower)", () => {
 	).toBe("PRESS_SHIFT_A");
 	// Plain A matches only the catch-all.
 	expect(resolveBinding(set, ev({ code: "KeyA" }))?.command).toBe("PRESS_A");
+});
+
+test("bakeDefaults anchors letter shortcuts to the layout's key", () => {
+	// A layout where the K key has moved: physical KeyK types "M", and "K" is
+	// produced by the Comma key (the shape of a Turkish-F-style rearrangement).
+	const layout = new Map([
+		["KeyK", "M"],
+		["Comma", "K"],
+	]);
+	const set: Binding[] = [
+		{
+			on: "KeyK",
+			meta: true,
+			command: "OPEN_PALETTE",
+			scope: "global",
+			anchor: "letter",
+		},
+	];
+	const [baked] = bakeDefaults(set, layout);
+	// Follows the K key (Comma here), labeled "K", with the hint stripped.
+	expect(baked).toMatchObject({ on: "Comma", label: "K" });
+	expect(baked!.anchor).toBeUndefined();
+	// No layout data → keeps the QWERTY position and the letter label.
+	const [fallback] = bakeDefaults(set, new Map());
+	expect(fallback).toMatchObject({ on: "KeyK", label: "K" });
+});
+
+test("bakeDefaults re-homes a Ctrl alias to the position's Atari key", () => {
+	// Turkish-F-style: the letter N is produced by KeyI, so Alt+N should land on
+	// KeyI and take that position's Atari Ctrl command (Ctrl+I), labeled "N".
+	const layout = new Map([
+		["KeyI", "N"],
+		["KeyN", "M"],
+	]);
+	const set: Binding[] = [
+		// The positional Ctrl layer the alias re-homes onto.
+		{ on: "KeyI", ctrl: true, command: "PRESS_CONTROL_I" },
+		{ on: "KeyN", ctrl: true, command: "PRESS_CONTROL_N" },
+		// The Alt-for-Ctrl alias, anchored.
+		{ on: "KeyN", alt: true, command: "PRESS_CONTROL_N", anchor: "ctrl" },
+	];
+	const alias = bakeDefaults(set, layout).find((b) => b.alt);
+	expect(alias).toMatchObject({
+		on: "KeyI",
+		command: "PRESS_CONTROL_I",
+		label: "N",
+	});
+	expect(alias!.anchor).toBeUndefined();
+	// No layout data → stays on the QWERTY position and its command.
+	const fallback = bakeDefaults(set, new Map()).find((b) => b.alt);
+	expect(fallback).toMatchObject({ on: "KeyN", command: "PRESS_CONTROL_N" });
 });
 
 test("a committed label wins over the live layout (editable legends)", () => {

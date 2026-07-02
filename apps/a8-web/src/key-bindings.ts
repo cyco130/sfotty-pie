@@ -49,6 +49,16 @@ export interface Binding {
 	// Display label override — a frozen fallback for user bindings. Default
 	// bindings resolve their label from the layout map / QWERTY (see `labelFor`).
 	label?: string;
+	// Generation hint (default bindings only), resolved away at bake (see
+	// `bakeDefaults`) via getLayoutMap and never persisted. Both modes re-home `on`
+	// to the physical key that *produces* the chord's letter (falling back to the
+	// QWERTY position when layout data is absent):
+	//   "letter" — an app shortcut that follows the letter; the command is kept
+	//              (Cmd+K opens the palette on the K key, wherever that is).
+	//   "ctrl"   — a positional Alt-for-Ctrl alias; the command is re-taken from
+	//              the Atari Ctrl key at the *new* physical position, so on Turkish-F
+	//              Alt+N (N sits on KeyI) yields Atari Ctrl+I, not Ctrl+N.
+	anchor?: "letter" | "ctrl";
 	note?: string;
 }
 
@@ -184,8 +194,13 @@ function navKey(on: string, base: "F1" | "F2" | "F3" | "F4"): Binding[] {
 // keys the browser actually eats, so every other Alt+letter stays free for app
 // commands.
 function altCtrl(code: string, base: MatrixBase, shift = true): Binding[] {
+	// Letter aliases anchor to the produced letter's key, then take the Atari Ctrl
+	// key at that physical position (the browser grabs host Ctrl+letter by the
+	// produced letter, so that's the position it shadows). Digit aliases stay
+	// positional — digit VKs are position-fixed, grabbed by position regardless.
+	const anchor = /^[A-Z]$/.test(base) ? ({ anchor: "ctrl" } as const) : {};
 	const out: Binding[] = [
-		{ on: code, alt: true, command: `PRESS_CONTROL_${base}` },
+		{ on: code, alt: true, command: `PRESS_CONTROL_${base}`, ...anchor },
 	];
 	if (shift && !DEAD_CTRL_SHIFT.has(base)) {
 		out.push({
@@ -193,6 +208,7 @@ function altCtrl(code: string, base: MatrixBase, shift = true): Binding[] {
 			alt: true,
 			shift: true,
 			command: `PRESS_CONTROL_SHIFT_${base}`,
+			...anchor,
 		});
 	}
 	return out;
@@ -306,8 +322,15 @@ const macBindings: Binding[] = [
 	{ on: "ArrowDown", meta: true, command: "PRESS_CONTROL_EQUALS" },
 	{ on: "ArrowLeft", meta: true, command: "PRESS_CONTROL_PLUS" },
 	{ on: "ArrowRight", meta: true, command: "PRESS_CONTROL_ASTERISK" },
-	// Cmd+K opens the palette — a global binding (fires regardless of focus).
-	{ on: "KeyK", meta: true, command: "OPEN_PALETTE", scope: "global" },
+	// Cmd+K opens the palette — a global binding (fires regardless of focus),
+	// anchored to the K key so it follows the layout (Cmd+K, not Cmd+<position>).
+	{
+		on: "KeyK",
+		meta: true,
+		command: "OPEN_PALETTE",
+		scope: "global",
+		anchor: "letter",
+	},
 	// Cmd+-/Cmd+= → Shift+Clear / insert-line (see editKeys).
 	...editKeys({ meta: true }),
 	// Option+Arrow → F1–F4 (+ Ctrl/Shift). Option (not plain Alt) avoids the
@@ -332,8 +355,15 @@ const winBindings: Binding[] = [
 	...altCtrl("KeyW", "W"),
 	...altCtrl("KeyL", "L", false),
 	...altCtrl("KeyO", "O", false),
-	// Alt+K opens the palette — a global binding (Cmd's stand-in on Windows).
-	{ on: "KeyK", alt: true, command: "OPEN_PALETTE", scope: "global" },
+	// Alt+K opens the palette — a global binding (Cmd's stand-in on Windows),
+	// anchored to the K key so it follows the layout.
+	{
+		on: "KeyK",
+		alt: true,
+		command: "OPEN_PALETTE",
+		scope: "global",
+		anchor: "letter",
+	},
 	// Alt+-/Alt+= → Shift+Clear / insert-line (editKeys; Cmd's stand-in on Windows).
 	...editKeys({ alt: true }),
 ];
@@ -684,6 +714,59 @@ export function labelFor(b: Binding, layout: Map<string, string>): string {
 	return b.label ?? layout.get(b.on) ?? qwertyLabel(b.on);
 }
 
+/**
+ * Prepare a default binding set for persistence: resolve anchored chords (see
+ * `Binding.anchor`) against the live layout and freeze every binding's display
+ * label. Absent layout data (Firefox/Safari) anchoring is a no-op — chords keep
+ * their QWERTY position and letter label, exactly as before.
+ */
+export function bakeDefaults(
+	bindings: Binding[],
+	layout: Map<string, string>,
+): Binding[] {
+	// Invert the layout (produced letter → the code that types it) so an anchored
+	// chord can hop to that key. First code wins; letters are unique in practice.
+	const codeForLetter = new Map<string, string>();
+	for (const [code, label] of layout) {
+		if (!codeForLetter.has(label)) codeForLetter.set(label, code);
+	}
+	// The Atari Ctrl command at each physical position (from the positional layer),
+	// so a re-homed "ctrl" alias takes the command of the key it lands on.
+	const ctrlAt = new Map<string, Command>();
+	const ctrlShiftAt = new Map<string, Command>();
+	for (const b of bindings) {
+		if (b.ctrl === true && b.alt !== true && b.meta !== true) {
+			(b.shift === true ? ctrlShiftAt : ctrlAt).set(b.on, b.command);
+		}
+	}
+	return bindings.flatMap((b) => {
+		if (b.anchor === "letter") {
+			// App shortcut: hop to the letter's key, keep the command.
+			const letter = qwertyLabel(b.on); // the intended letter (KeyK → "K")
+			const baked = {
+				...b,
+				on: codeForLetter.get(letter) ?? b.on,
+				label: letter,
+			};
+			delete baked.anchor; // strip the hint; it never persists
+			return [baked];
+		}
+		if (b.anchor === "ctrl") {
+			// Positional Alt-for-Ctrl alias: hop to the letter's key, then take the
+			// Atari Ctrl key that sits at that physical position. Drop it if that key
+			// has no such combo (e.g. an unscannable Ctrl+Shift landing spot).
+			const letter = qwertyLabel(b.on);
+			const on = codeForLetter.get(letter) ?? b.on;
+			const command = (b.shift === true ? ctrlShiftAt : ctrlAt).get(on);
+			if (!command) return [];
+			const baked = { ...b, on, command, label: letter };
+			delete baked.anchor;
+			return [baked];
+		}
+		return [{ ...b, label: labelFor(b, layout) }];
+	});
+}
+
 // Committed bindings carry their `label`, so chord display needs no layout map.
 const NO_LAYOUT = new Map<string, string>();
 
@@ -692,28 +775,41 @@ const NO_LAYOUT = new Map<string, string>();
  * order; `"any"` modifiers are device-agnostic so omitted) + the key legend.
  * `mac` picks Cmd/Opt over Meta/Alt.
  */
-export function chordLabel(b: Binding, mac: boolean): string {
+export function chordLabel(
+	b: Binding,
+	mac: boolean,
+	layout: Map<string, string> = NO_LAYOUT,
+): string {
 	const parts: string[] = [];
 	if (b.ctrl === true) parts.push("Ctrl");
 	if (b.meta === true) parts.push(mac ? "Cmd" : "Meta");
 	if (b.alt === true) parts.push(mac ? "Opt" : "Alt");
 	if (b.shift === true) parts.push("Shift");
 	// A binding ON a modifier key (the ShiftLeft trigger) gets the named label.
-	parts.push(MOD_KEY_LABELS[b.on]?.(mac) ?? labelFor(b, NO_LAYOUT));
+	// Otherwise a supplied live layout legend wins over the baked one — so chords
+	// track a Chromium layout switch — before falling back to the committed label
+	// / QWERTY. Absent a layout map (`NO_LAYOUT`), it's the baked label as before.
+	parts.push(
+		MOD_KEY_LABELS[b.on]?.(mac) ?? layout.get(b.on) ?? labelFor(b, NO_LAYOUT),
+	);
 	return parts.join("+");
 }
 
 /**
  * Each command's primary (first-listed) trigger chord, for showing the shortcut
- * next to a command. Commands with no binding are absent.
+ * next to a command. Commands with no binding are absent. An optional live
+ * `layout` map (see {@link chordLabel}) makes the key legends track the actual
+ * keyboard rather than the baked-in fallback.
  */
 export function primaryChords(
 	flat: Binding[],
 	mac: boolean,
+	layout: Map<string, string> = NO_LAYOUT,
 ): Map<Command, string> {
 	const chords = new Map<Command, string>();
 	for (const b of flat) {
-		if (!chords.has(b.command)) chords.set(b.command, chordLabel(b, mac));
+		if (!chords.has(b.command))
+			chords.set(b.command, chordLabel(b, mac, layout));
 	}
 	return chords;
 }

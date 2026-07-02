@@ -36,7 +36,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 	const rows = useMemo<Row[]>(() => {
 		const byCommand = new Map<Command, string[]>();
 		for (const b of host.keyBindings.value) {
-			const chord = chordLabel(b, host.isMac);
+			const chord = chordLabel(b, host.isMac, host.layoutLabels.value);
 			const list = byCommand.get(b.command);
 			if (list) list.push(chord);
 			else byCommand.set(b.command, [chord]);
@@ -54,7 +54,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 			}
 		}
 		return [...bound, ...unbound];
-	}, [host.keyBindings.value, host.isMac]);
+	}, [host.keyBindings.value, host.isMac, host.layoutLabels.value]);
 
 	// Exact substring (not fuzzy), matched against the action label and the chord
 	// — so "F1" surfaces both "Press F1" (label) and "Press Help" (its F1 chord).

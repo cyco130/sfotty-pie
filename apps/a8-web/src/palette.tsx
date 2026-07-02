@@ -4,6 +4,7 @@ import { characterChords } from "./char-keys.ts";
 import { type Command, labelOf, paletteCommands } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { primaryChords } from "./key-bindings.ts";
+import { LayoutWarning } from "./keys.tsx";
 import { messages } from "./messages.ts";
 import { currentPath } from "./navigate.ts";
 
@@ -168,8 +169,13 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 	// Each command's primary binding chord, shown beside it. Recomputed only when
 	// the binding set changes (e.g. a reset), not per keystroke.
 	const bindingChords = useMemo(
-		() => primaryChords(host.keyBindings.value, host.isMac),
-		[host.keyBindings.value, host.isMac],
+		() =>
+			primaryChords(
+				host.keyBindings.value,
+				host.isMac,
+				host.layoutLabels.value,
+			),
+		[host.keyBindings.value, host.isMac, host.layoutLabels.value],
 	);
 	// In Character mode, the matrix keys are typed, so show the produced character
 	// (e.g. "!", "-") rather than the positional binding ("Shift+1", "[").
@@ -231,6 +237,7 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 
 	return (
 		<div class="flex min-h-0 flex-1 flex-col">
+			<LayoutWarning />
 			<input
 				ref={inputRef}
 				type="text"

@@ -18,7 +18,11 @@ import {
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
-import type { Binding, KeyboardMode } from "./key-bindings.ts";
+import {
+	loadLayoutLabels,
+	type Binding,
+	type KeyboardMode,
+} from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
@@ -247,6 +251,12 @@ export class EmulatorHost {
 	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
 	readonly keyBindings = signal<Binding[]>([]);
 
+	/** The live keyboard-layout legends (Chromium's `getLayoutMap`; empty where
+	 *  unavailable), for chord display — so shortcut labels track the actual
+	 *  layout instead of the QWERTY fallback baked into the bindings. Loaded once
+	 *  in create(). */
+	readonly layoutLabels = signal<Map<string, string>>(new Map());
+
 	/** The 1200XL keyboard LEDs `[L1, L2]` (true = lit), or null on other models. */
 	readonly leds = signal<readonly [boolean, boolean] | null>(null);
 
@@ -336,6 +346,11 @@ export class EmulatorHost {
 		}
 		host.#emulator = host.#makeEmulator();
 		host.#wireLeds();
+		// Live layout legends for chord display — non-blocking, so boot doesn't
+		// wait on it; the signal updates the shortcut labels once resolved.
+		void loadLayoutLabels().then((labels) => {
+			host.layoutLabels.value = labels;
+		});
 		return host;
 	}
 

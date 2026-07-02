@@ -1,7 +1,7 @@
 import {
 	type Binding,
+	bakeDefaults,
 	defaultBindingSet,
-	labelFor,
 	loadLayoutLabels,
 } from "./key-bindings.ts";
 import { loadPersisted, savePersisted } from "./persist.ts";
@@ -15,7 +15,9 @@ import { loadPersisted, savePersisted } from "./persist.ts";
 export const KEY_BINDINGS_KEY = "key-bindings";
 // v2: bindings keyed by `code` only (the `{ key }` trigger arm was dropped).
 // v3: + the global Cmd/Alt+K → OPEN_PALETTE binding and the `scope` field.
-const VERSION = 3;
+// v4: letter app-shortcuts (palette, the Alt/Ctrl+letter aliases) anchored to
+//     the produced letter via the layout, not the QWERTY position.
+const VERSION = 4;
 
 interface Stored {
 	v: number;
@@ -41,9 +43,7 @@ export function saveBindings(bindings: Binding[]): void {
  *  keyboard layout, persist it, and return it — the first-run and reset path. */
 export async function freshBindings(mac: boolean): Promise<Binding[]> {
 	const layout = await loadLayoutLabels();
-	const bindings = defaultBindingSet(mac).map(
-		(b): Binding => ({ ...b, label: labelFor(b, layout) }),
-	);
+	const bindings = bakeDefaults(defaultBindingSet(mac), layout);
 	saveBindings(bindings);
 	return bindings;
 }

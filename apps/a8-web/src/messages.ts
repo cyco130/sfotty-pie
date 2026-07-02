@@ -446,6 +446,7 @@ export const labels = {
 	TURBO_MODE_ENABLE: "Emulation: Enable turbo mode (unthrottled, muted)",
 	TURBO_MODE_DISABLE: "Emulation: Disable turbo mode",
 	TURBO_MODE_TOGGLE: "Emulation: Toggle turbo mode",
+	TURBO_HOLD: "Emulation: Turbo mode while held",
 	KEYBOARD_MODE_CHARACTER:
 		"Keyboard: Switch to character mode (layout-aware typing)",
 	KEYBOARD_MODE_POSITIONAL:

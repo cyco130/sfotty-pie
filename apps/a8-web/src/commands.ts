@@ -95,6 +95,15 @@ export const commands = {
 		label: "TURBO_MODE_TOGGLE",
 		run: ({ host }) => host.toggleTurboMode(),
 	},
+	// Turbo while held: press runs unthrottled, release returns to real time.
+	// Bindable-only — a momentary palette pulse would enable turbo for a couple of
+	// frames, which is pointless — so it's kept out of the palette.
+	TURBO_HOLD: {
+		label: "TURBO_HOLD",
+		run: ({ host }) => host.setTurboMode(true),
+		release: ({ host }) => host.setTurboMode(false),
+		palette: false,
+	},
 
 	// Keyboard interpretation: layout-aware typing vs raw positional keys.
 	KEYBOARD_MODE_CHARACTER: {

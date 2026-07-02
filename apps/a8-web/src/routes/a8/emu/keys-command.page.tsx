@@ -5,6 +5,7 @@ import {
 	type Binding,
 	CHARACTER_CODES,
 	chordLabel,
+	formatChord,
 	KEY_CODES,
 	keyLabel,
 	triggerKey,
@@ -60,13 +61,7 @@ function captureCombo(event: KeyboardEvent): Combo {
 }
 
 function comboLabel(combo: Combo, mac: boolean): string {
-	const parts: string[] = [];
-	if (combo.ctrl) parts.push("Ctrl");
-	if (combo.meta) parts.push(mac ? "Cmd" : "Meta");
-	if (combo.alt) parts.push(mac ? "Opt" : "Alt");
-	if (combo.shift) parts.push("Shift");
-	parts.push(keyLabel(combo.code, mac));
-	return parts.join("+");
+	return formatChord(combo, keyLabel(combo.code, mac), mac);
 }
 
 function BackLink() {

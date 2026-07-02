@@ -2,9 +2,9 @@ import { expect, test } from "vitest";
 import {
 	type Binding,
 	bakeDefaults,
+	chordLabel,
 	defaultBindingSet,
 	keyLabel,
-	labelFor,
 	type KeyEventLike,
 	primaryChords,
 	resolveBinding,
@@ -96,15 +96,29 @@ test("Cmd (mac) / Alt (win) on -/= reach the Shift+Clear / insert-line forms", (
 	);
 });
 
-test("keyLabel names the bare modifier keys (mac-aware, with side)", () => {
-	expect(keyLabel("MetaLeft", true)).toBe("Left Cmd");
+test("keyLabel names the bare modifier keys (full on mac, short on win)", () => {
+	expect(keyLabel("MetaLeft", true)).toBe("Left Command");
 	expect(keyLabel("MetaLeft", false)).toBe("Left Win");
-	expect(keyLabel("AltRight", true)).toBe("Right Opt");
+	expect(keyLabel("AltRight", true)).toBe("Right Option");
 	expect(keyLabel("AltRight", false)).toBe("Right Alt");
 	expect(keyLabel("ShiftLeft", false)).toBe("Left Shift");
-	// Non-modifier codes are unchanged.
+	// Letters and F-keys are the same on both.
 	expect(keyLabel("KeyA", true)).toBe("A");
 	expect(keyLabel("F5", false)).toBe("F5");
+});
+
+test("keyLabel renders named keys per platform (glyphs on mac)", () => {
+	expect(keyLabel("Backspace", true)).toBe("⌫");
+	expect(keyLabel("Backspace", false)).toBe("BkSp");
+	// Arrows (not triangles) on both, for alignment with the ⌘⇧ glyphs.
+	expect(keyLabel("ArrowUp", true)).toBe("↑");
+	expect(keyLabel("ArrowUp", false)).toBe("↑");
+	// MacBook nav/edit keys are fn-combos; Windows uses short words.
+	expect(keyLabel("PageUp", true)).toBe("fn↑");
+	expect(keyLabel("PageUp", false)).toBe("PgUp");
+	expect(keyLabel("Delete", true)).toBe("fn⌫");
+	expect(keyLabel("Delete", false)).toBe("Del");
+	expect(keyLabel("Insert", true)).toBe("Ins"); // shown though mac lacks the key
 });
 
 test("resolveBinding prefers the most specific match (any ranks lower)", () => {
@@ -142,12 +156,13 @@ test("bakeDefaults anchors letter shortcuts to the layout's key", () => {
 		},
 	];
 	const [baked] = bakeDefaults(set, layout);
-	// Follows the K key (Comma here), labeled "K", with the hint stripped.
-	expect(baked).toMatchObject({ on: "Comma", label: "K" });
+	// Follows the K key (Comma here), with the hint stripped. The label is not
+	// frozen — it recomputes from the layout at display time.
+	expect(baked).toMatchObject({ on: "Comma" });
 	expect(baked!.anchor).toBeUndefined();
-	// No layout data → keeps the QWERTY position and the letter label.
+	// No layout data → keeps the QWERTY position.
 	const [fallback] = bakeDefaults(set, new Map());
-	expect(fallback).toMatchObject({ on: "KeyK", label: "K" });
+	expect(fallback).toMatchObject({ on: "KeyK" });
 });
 
 test("bakeDefaults re-homes a Ctrl alias to the position's Atari key", () => {
@@ -165,25 +180,21 @@ test("bakeDefaults re-homes a Ctrl alias to the position's Atari key", () => {
 		{ on: "KeyN", alt: true, command: "PRESS_CONTROL_N", anchor: "ctrl" },
 	];
 	const alias = bakeDefaults(set, layout).find((b) => b.alt);
-	expect(alias).toMatchObject({
-		on: "KeyI",
-		command: "PRESS_CONTROL_I",
-		label: "N",
-	});
+	expect(alias).toMatchObject({ on: "KeyI", command: "PRESS_CONTROL_I" });
 	expect(alias!.anchor).toBeUndefined();
 	// No layout data → stays on the QWERTY position and its command.
 	const fallback = bakeDefaults(set, new Map()).find((b) => b.alt);
 	expect(fallback).toMatchObject({ on: "KeyN", command: "PRESS_CONTROL_N" });
 });
 
-test("a committed label wins over the live layout (editable legends)", () => {
-	const layout = new Map([["KeyA", "Q"]]); // e.g. AZERTY legend
-	// No committed label → resolve from the layout (this is the bake path).
-	expect(labelFor({ on: "KeyA", command: "PRESS_A" }, layout)).toBe("Q");
-	// A committed label is authoritative (so user edits survive).
-	expect(labelFor({ on: "KeyA", command: "PRESS_A", label: "★" }, layout)).toBe(
-		"★",
+test("chordLabel recomputes the key legend from the layout", () => {
+	// AZERTY: physical KeyA types "Q" — the label follows the layout, no baking.
+	const azerty = new Map([["KeyA", "Q"]]);
+	expect(chordLabel({ on: "KeyA", command: "PRESS_A" }, false, azerty)).toBe(
+		"Q",
 	);
+	// Empty layout → QWERTY fallback.
+	expect(chordLabel({ on: "KeyA", command: "PRESS_A" }, false)).toBe("A");
 });
 
 test("Turkish layout uppercases the dotted/dotless i as İ / I", () => {
@@ -311,25 +322,25 @@ test("primary chords pick the platform-preferred binding", () => {
 	const win = primaryChords(defaultBindingSet(false), false);
 	const mac = primaryChords(defaultBindingSet(true), true);
 
-	// Esc: F11 on Windows (only catchable route for Ctrl+Esc), the Esc key on mac.
+	// Esc, Tab, Break lead with the F-key on both platforms. Mac chords glyphs
+	// concatenate with the key, no separator.
 	expect(win.get("PRESS_ESC")).toBe("F11");
-	expect(mac.get("PRESS_ESC")).toBe("Esc");
-	// Tab and Break take the F-key everywhere.
+	expect(mac.get("PRESS_ESC")).toBe("F11");
 	expect(win.get("PRESS_TAB")).toBe("F9");
 	expect(mac.get("PRESS_TAB")).toBe("F9");
 	expect(win.get("PRESS_BREAK")).toBe("F8");
-	// Cursor: Ctrl+Arrow on Windows, Cmd+Arrow on mac.
+	// Cursor: Ctrl+Arrow on Windows, Cmd+Arrow (⌘↑) on mac.
 	expect(win.get("PRESS_CONTROL_MINUS")).toBe("Ctrl+↑");
-	expect(mac.get("PRESS_CONTROL_MINUS")).toBe("Cmd+↑");
+	expect(mac.get("PRESS_CONTROL_MINUS")).toBe("⌘↑");
 	// Editing row: the dedicated key on Windows, the Ctrl/Shift form on mac.
-	expect(win.get("PRESS_CONTROL_BACKSPACE")).toBe("Delete");
-	expect(mac.get("PRESS_CONTROL_BACKSPACE")).toBe("Ctrl+Backspace");
-	expect(win.get("PRESS_CONTROL_GREATER_THAN")).toBe("Insert");
-	expect(mac.get("PRESS_CONTROL_GREATER_THAN")).toBe("Ctrl+=");
+	expect(win.get("PRESS_CONTROL_BACKSPACE")).toBe("Del");
+	expect(mac.get("PRESS_CONTROL_BACKSPACE")).toBe("⌃⌫");
+	expect(win.get("PRESS_CONTROL_GREATER_THAN")).toBe("Ins");
+	expect(mac.get("PRESS_CONTROL_GREATER_THAN")).toBe("⌃=");
 	// Windows Alt-for-Ctrl alias wins over the browser-grabbed Ctrl combo.
 	expect(win.get("PRESS_CONTROL_N")).toBe("Alt+N");
-	expect(mac.get("PRESS_CONTROL_N")).toBe("Ctrl+N");
+	expect(mac.get("PRESS_CONTROL_N")).toBe("⌃N");
 	// Never a Shift+punct when another binding exists (Clear screen).
 	expect(win.get("PRESS_SHIFT_LESS_THAN")).toBe("Alt+-");
-	expect(mac.get("PRESS_SHIFT_LESS_THAN")).toBe("Cmd+-");
+	expect(mac.get("PRESS_SHIFT_LESS_THAN")).toBe("⌘-");
 });

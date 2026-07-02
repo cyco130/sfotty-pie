@@ -341,6 +341,32 @@ export const messages = {
 		coldReset: "Cold reset",
 	},
 
+	// Keyboard key and modifier labels. macOS uses glyphs (⌘⇧…, ⌫, ↑) kept inline —
+	// they're symbols, not translatable copy — and so does "fn". Windows spells
+	// keys with the short, localizable words below; bare modifier keys spell their
+	// name in full on macOS (Control/Option/Command) but short on Windows.
+	keys: {
+		// Chord-modifier words (Windows prefixes). macOS uses ⌃⇧⌥⌘ inline.
+		mod: { ctrl: "Ctrl", shift: "Shift", alt: "Alt", win: "Win" },
+		// macOS full forms for bare modifier keys (Shift is the same short/full).
+		modFull: { control: "Control", option: "Option", command: "Command" },
+		side: { left: "Left", right: "Right" },
+		// Named keys — Windows short forms (macOS uses glyphs / fn-combos).
+		backspace: "BkSp",
+		enter: "Enter",
+		tab: "Tab",
+		capsLock: "Caps Lock",
+		esc: "Esc",
+		space: "Space",
+		home: "Home",
+		end: "End",
+		pageUp: "PgUp",
+		pageDown: "PgDn",
+		insert: "Ins",
+		delete: "Del",
+		pause: "Pause",
+	},
+
 	palette: {
 		placeholder: "Type a command…",
 		noCommands: "No commands",

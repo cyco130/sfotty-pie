@@ -1,4 +1,5 @@
 import type { Command } from "./commands.ts";
+import { messages } from "./messages.ts";
 
 // The keyboard binding table: every discrete Atari key / device action as data,
 // keyed by trigger and resolved by `resolveBinding`. keyboard.ts drives input
@@ -46,9 +47,6 @@ export interface Binding {
 	// per-binding context — it'll grow into a `when` predicate once a second axis
 	// (e.g. typing/gaming) lands.
 	scope?: "global" | "a8";
-	// Display label override — a frozen fallback for user bindings. Default
-	// bindings resolve their label from the layout map / QWERTY (see `labelFor`).
-	label?: string;
 	// Generation hint (default bindings only), resolved away at bake (see
 	// `bakeDefaults`) via getLayoutMap and never persisted. Both modes re-home `on`
 	// to the physical key that *produces* the chord's letter (falling back to the
@@ -567,12 +565,15 @@ function choosePrimary(
 	const find = (pred: (b: Binding) => boolean) => group.find(pred);
 	const onKey = (on: string) => group.find((b) => b.on === on);
 
-	// Esc: on Windows only F11 reaches Ctrl+Esc (the OS grabs the Esc key there);
-	// on macOS the Esc key reads best and is catchable.
-	if (command.endsWith("ESC")) return mac ? onKey("Escape") : find(isFKey);
-	// Tab (F9 reaches Ctrl+Tab, which the real key can't) and Break (F8; Pause is
-	// fading from keyboards) → the F-key everywhere.
-	if (command.endsWith("TAB") || command === "PRESS_BREAK") return find(isFKey);
+	// Esc, Tab, and Break → the F-key everywhere. F11 is the only catchable route
+	// for Ctrl+Esc on Windows and F9 the only one for Ctrl+Tab; the Esc glyph (⎋)
+	// is obscure, and Pause is fading from keyboards — so the F-key leads.
+	if (
+		command.endsWith("ESC") ||
+		command.endsWith("TAB") ||
+		command === "PRESS_BREAK"
+	)
+		return find(isFKey);
 	// Atari cursor keys: Cmd+Arrow on macOS (the OS reserves Ctrl+Arrow for
 	// Mission Control), Ctrl+Arrow on Windows.
 	if (CURSOR_COMMANDS.has(command))
@@ -705,10 +706,10 @@ export function resolveBinding(
 // A binding's human label is layout-dependent, so it's resolved at display time
 // (not stored): the user's physical layout via getLayoutMap(), else QWERTY.
 
-// US-QWERTY legends for `code`s the layout map doesn't cover (symbols, the Shift
-// keys, the named/navigation keys). Letters/digits derive from the code, so they
-// need no entry here.
-const QWERTY_LABELS: Record<string, string> = {
+// US-QWERTY legends for the punctuation `code`s the layout map doesn't cover.
+// Letters/digits derive from the code; named/platform keys go through the tables
+// below.
+const QWERTY_PUNCT: Record<string, string> = {
 	Backquote: "`",
 	Minus: "-",
 	Equal: "=",
@@ -721,55 +722,96 @@ const QWERTY_LABELS: Record<string, string> = {
 	Comma: ",",
 	Period: ".",
 	Slash: "/",
-	ShiftLeft: "Left Shift",
-	ShiftRight: "Right Shift",
-	Escape: "Esc",
-	ArrowUp: "↑",
-	ArrowDown: "↓",
-	ArrowLeft: "←",
-	ArrowRight: "→",
 };
 
-// The QWERTY/fallback label for a `code` or named `key`: letters and digits read
-// off the identifier, the rest from the table, else the identifier verbatim
-// (so "F5", "Tab", "Enter" … display as-is).
+// The QWERTY/fallback legend for a character `code`: letters and digits read off
+// the identifier, punctuation from the table, else the identifier verbatim (so
+// "F5", "Pause" … display as-is when nothing else claims them).
 function qwertyLabel(id: string): string {
 	const letter = /^Key([A-Z])$/.exec(id);
 	if (letter) return letter[1]!;
 	const digit = /^Digit([0-9])$/.exec(id);
 	if (digit) return digit[1]!;
-	return QWERTY_LABELS[id] ?? id;
+	return QWERTY_PUNCT[id] ?? id;
 }
 
-/** A `code`'s display label — layout-aware when a layout map is given, else
- *  QWERTY. For the editor's key picker. */
-export function codeLabel(code: string, layout?: Map<string, string>): string {
-	return layout?.get(code) ?? qwertyLabel(code);
-}
-
-// Modifier keys by `code`, named with their side and the platform name (Cmd/Opt
-// on macOS, Win/Alt elsewhere) — for a binding ON a modifier key (the ShiftLeft
-// trigger) and for capturing/picking a bare modifier, which otherwise shows the
-// raw code ("MetaLeft").
-const MOD_KEY_LABELS: Record<string, (mac: boolean) => string> = {
-	ShiftLeft: () => "Left Shift",
-	ShiftRight: () => "Right Shift",
-	ControlLeft: () => "Left Ctrl",
-	ControlRight: () => "Right Ctrl",
-	AltLeft: (mac) => (mac ? "Left Opt" : "Left Alt"),
-	AltRight: (mac) => (mac ? "Right Opt" : "Right Alt"),
-	MetaLeft: (mac) => (mac ? "Left Cmd" : "Left Win"),
-	MetaRight: (mac) => (mac ? "Right Cmd" : "Right Win"),
+// Bare modifier keys, as a trigger or in the picker: "{Side} {Name}". macOS
+// spells the name in full (Control/Option/Command); Windows uses the short words.
+// Shift is "Shift" on both.
+const MODIFIER_KEYS: Record<
+	string,
+	{ side: "left" | "right"; kind: "shift" | "ctrl" | "alt" | "meta" }
+> = {
+	ShiftLeft: { side: "left", kind: "shift" },
+	ShiftRight: { side: "right", kind: "shift" },
+	ControlLeft: { side: "left", kind: "ctrl" },
+	ControlRight: { side: "right", kind: "ctrl" },
+	AltLeft: { side: "left", kind: "alt" },
+	AltRight: { side: "right", kind: "alt" },
+	MetaLeft: { side: "left", kind: "meta" },
+	MetaRight: { side: "right", kind: "meta" },
 };
 
-/** A `code`'s display label with the modifier keys named (mac-aware) — for the
- *  key picker and capture; everything else falls back to {@link codeLabel}. */
+function modifierKeyLabel(
+	side: "left" | "right",
+	kind: "shift" | "ctrl" | "alt" | "meta",
+	mac: boolean,
+): string {
+	const k = messages.keys;
+	const name =
+		kind === "shift"
+			? k.mod.shift
+			: kind === "ctrl"
+				? mac
+					? k.modFull.control
+					: k.mod.ctrl
+				: kind === "alt"
+					? mac
+						? k.modFull.option
+						: k.mod.alt
+					: mac
+						? k.modFull.command
+						: k.mod.win;
+	return `${side === "left" ? k.side.left : k.side.right} ${name}`;
+}
+
+// Named / navigation keys, whose label differs by platform: glyphs (and fn-
+// combos) on macOS, short localizable words on Windows. Anything not here is a
+// character key, resolved from the layout map / QWERTY.
+const NAMED_KEYS: Record<string, (mac: boolean) => string> = {
+	Backspace: (mac) => (mac ? "⌫" : messages.keys.backspace),
+	Enter: (mac) => (mac ? "↩" : messages.keys.enter),
+	Tab: (mac) => (mac ? "⇥" : messages.keys.tab),
+	CapsLock: (mac) => (mac ? "⇪" : messages.keys.capsLock),
+	Escape: () => messages.keys.esc, // ⎋ is obscure — spell it on both
+	Space: (mac) => (mac ? "␣" : messages.keys.space),
+	// Arrows (not triangles) on both — they align better beside the ⌘⇧ glyphs.
+	ArrowUp: () => "↑",
+	ArrowDown: () => "↓",
+	ArrowLeft: () => "←",
+	ArrowRight: () => "→",
+	Home: (mac) => (mac ? "fn←" : messages.keys.home),
+	End: (mac) => (mac ? "fn→" : messages.keys.end),
+	PageUp: (mac) => (mac ? "fn↑" : messages.keys.pageUp),
+	PageDown: (mac) => (mac ? "fn↓" : messages.keys.pageDown),
+	Insert: () => messages.keys.insert, // "Ins" on both (macOS lacks the key)
+	Delete: (mac) => (mac ? "fn⌫" : messages.keys.delete),
+	Pause: () => messages.keys.pause,
+};
+
+/** A `code`'s display label: bare modifier keys named with their side, named /
+ *  nav keys per platform, everything else a character key resolved from the
+ *  layout map (else QWERTY). */
 export function keyLabel(
 	code: string,
 	mac: boolean,
 	layout?: Map<string, string>,
 ): string {
-	return MOD_KEY_LABELS[code]?.(mac) ?? codeLabel(code, layout);
+	const mod = MODIFIER_KEYS[code];
+	if (mod) return modifierKeyLabel(mod.side, mod.kind, mac);
+	const named = NAMED_KEYS[code];
+	if (named) return named(mac);
+	return layout?.get(code) ?? qwertyLabel(code);
 }
 
 interface KeyboardLayoutAPI {
@@ -779,7 +821,7 @@ interface KeyboardLayoutAPI {
 /**
  * The user's physical layout labels (`code` → UPPERCASED key legend) from
  * `navigator.keyboard.getLayoutMap()`. Empty where unsupported (Firefox, Safari)
- * — `labelFor` then falls back to QWERTY. Covers only the writing-system keys
+ * — `keyLabel` then falls back to QWERTY. Covers only the writing-system keys
  * (letters/digits/symbols); function/named keys aren't in it.
  */
 /** Uppercase layout legends to keycap form, minding legends that mislead on a
@@ -840,21 +882,12 @@ export function layoutLabelsAvailable(): boolean {
 }
 
 /**
- * A binding's display label: its committed `label` if set (the persisted,
- * user-editable legend), else the live layout map for the `code`, else the QWERTY
- * legend. Modifier prefixes (Ctrl+/Shift+) are the caller's to add. Used both to
- * bake labels into the defaults (no `label` yet → resolves from the layout) and
- * to read them back for display.
- */
-export function labelFor(b: Binding, layout: Map<string, string>): string {
-	return b.label ?? layout.get(b.on) ?? qwertyLabel(b.on);
-}
-
-/**
  * Prepare a default binding set for persistence: resolve anchored chords (see
- * `Binding.anchor`) against the live layout and freeze every binding's display
- * label. Absent layout data (Firefox/Safari) anchoring is a no-op — chords keep
- * their QWERTY position and letter label, exactly as before.
+ * `Binding.anchor`) against the layout — re-homing each to the physical key that
+ * produces its letter (and, for a "ctrl" alias, re-taking the Atari command at
+ * that position). Absent layout data (Firefox/Safari) this is a no-op: chords
+ * keep their QWERTY position. Labels are never frozen — display recomputes them
+ * from the persisted layout (see {@link chordLabel}).
  */
 export function bakeDefaults(
 	bindings: Binding[],
@@ -879,11 +912,7 @@ export function bakeDefaults(
 		if (b.anchor === "letter") {
 			// App shortcut: hop to the letter's key, keep the command.
 			const letter = qwertyLabel(b.on); // the intended letter (KeyK → "K")
-			const baked = {
-				...b,
-				on: codeForLetter.get(letter) ?? b.on,
-				label: letter,
-			};
+			const baked = { ...b, on: codeForLetter.get(letter) ?? b.on };
 			delete baked.anchor; // strip the hint; it never persists
 			return [baked];
 		}
@@ -895,38 +924,74 @@ export function bakeDefaults(
 			const on = codeForLetter.get(letter) ?? b.on;
 			const command = (b.shift === true ? ctrlShiftAt : ctrlAt).get(on);
 			if (!command) return [];
-			const baked = { ...b, on, command, label: letter };
+			const baked = { ...b, on, command };
 			delete baked.anchor;
 			return [baked];
 		}
-		return [{ ...b, label: labelFor(b, layout) }];
+		return [b];
 	});
 }
 
-// Committed bindings carry their `label`, so chord display needs no layout map.
+// Chords are labelled from the persisted layout map; empty ⇒ QWERTY fallback.
 const NO_LAYOUT = new Map<string, string>();
 
+/** The required modifiers of a chord (each simply down or not). */
+export interface ChordMods {
+	ctrl?: boolean;
+	shift?: boolean;
+	alt?: boolean;
+	meta?: boolean;
+}
+
 /**
- * A binding's full chord for display: the required-modifier prefixes (in a fixed
- * order; `"any"` modifiers are device-agnostic so omitted) + the key legend.
- * `mac` picks Cmd/Opt over Meta/Alt.
+ * A chord from its modifiers + already-resolved key label, in canonical order
+ * (Ctrl, Shift, Alt, Cmd/Win). macOS concatenates glyphs with the key (⌘K);
+ * Windows joins localizable words with "+" (Ctrl+Shift+K). Shared by
+ * {@link chordLabel} and the editor's live capture preview.
+ */
+export function formatChord(
+	mods: ChordMods,
+	key: string,
+	mac: boolean,
+): string {
+	if (mac) {
+		let prefix = "";
+		if (mods.ctrl) prefix += "⌃";
+		if (mods.shift) prefix += "⇧";
+		if (mods.alt) prefix += "⌥";
+		if (mods.meta) prefix += "⌘";
+		return prefix + key;
+	}
+	const m = messages.keys.mod;
+	const parts: string[] = [];
+	if (mods.ctrl) parts.push(m.ctrl);
+	if (mods.shift) parts.push(m.shift);
+	if (mods.alt) parts.push(m.alt);
+	if (mods.meta) parts.push(m.win);
+	parts.push(key);
+	return parts.join("+");
+}
+
+/**
+ * A binding's full chord for display, recomputed from `layout` + platform (no
+ * frozen labels). Required modifiers only — `"any"` is device-agnostic, so
+ * omitted.
  */
 export function chordLabel(
 	b: Binding,
 	mac: boolean,
 	layout: Map<string, string> = NO_LAYOUT,
 ): string {
-	const parts: string[] = [];
-	if (b.ctrl === true) parts.push("Ctrl");
-	if (b.meta === true) parts.push(mac ? "Cmd" : "Meta");
-	if (b.alt === true) parts.push(mac ? "Opt" : "Alt");
-	if (b.shift === true) parts.push("Shift");
-	// A binding ON a modifier key (the ShiftLeft trigger) gets the named label.
-	// Otherwise the baked label wins (a stable snapshot frozen at generation);
-	// `layout` only fills in bindings that carry none yet — the editor's live
-	// preview — before the QWERTY fallback.
-	parts.push(MOD_KEY_LABELS[b.on]?.(mac) ?? labelFor(b, layout));
-	return parts.join("+");
+	return formatChord(
+		{
+			ctrl: b.ctrl === true,
+			shift: b.shift === true,
+			alt: b.alt === true,
+			meta: b.meta === true,
+		},
+		keyLabel(b.on, mac, layout),
+		mac,
+	);
 }
 
 /**

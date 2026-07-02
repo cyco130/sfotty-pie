@@ -37,8 +37,10 @@ import type { ImageEntry } from "./images/metadata.ts";
 import {
 	ensureStoredLayout,
 	freshBindings,
+	loadLayoutPref,
 	loadStoredBindings,
 	saveBindings,
+	saveLayoutPref,
 } from "./key-bindings-store.ts";
 import { Keyboard } from "./keyboard.ts";
 import {
@@ -252,6 +254,10 @@ export class EmulatorHost {
 	 *  label the editor's live preview — existing chords carry their own baked
 	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
 	readonly layoutLabels = signal<Map<string, string>>(new Map());
+
+	/** The keyboard-layout preference: "auto" (getLayoutMap) or a KEYBOARD_LAYOUTS
+	 *  id (the manual picker). Drives the setup page's selection. */
+	readonly layoutPref = signal<string>(loadLayoutPref());
 
 	/** The 1200XL keyboard LEDs `[L1, L2]` (true = lit), or null on other models. */
 	readonly leds = signal<readonly [boolean, boolean] | null>(null);
@@ -876,6 +882,20 @@ export class EmulatorHost {
 	 *  live — discarding any customization. */
 	async resetKeyBindings(): Promise<void> {
 		if (!window.confirm(messages.shortcuts.confirmReset)) return;
+		const { bindings, layout } = await freshBindings(this.#isMac);
+		this.#applyBindings(bindings);
+		this.layoutLabels.value = layout;
+		this.toast(messages.toasts.keyBindingsReset);
+	}
+
+	/** Set the keyboard-layout preference ("auto" or a `KEYBOARD_LAYOUTS` id) and
+	 *  regenerate the default bindings from it — discarding customization (a no-op
+	 *  if it's already the current pick). */
+	async setLayoutPreference(pref: string): Promise<void> {
+		if (pref === this.layoutPref.value) return;
+		if (!window.confirm(messages.shortcuts.confirmLayout)) return;
+		saveLayoutPref(pref);
+		this.layoutPref.value = pref;
 		const { bindings, layout } = await freshBindings(this.#isMac);
 		this.#applyBindings(bindings);
 		this.layoutLabels.value = layout;

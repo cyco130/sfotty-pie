@@ -9,6 +9,7 @@ import {
 	resolveBinding,
 	upperLegends,
 } from "./key-bindings.ts";
+import { KEYBOARD_LAYOUTS } from "./keyboard-layouts.ts";
 
 // A KeyEventLike with all modifiers up by default.
 function ev(partial: Partial<KeyEventLike>): KeyEventLike {
@@ -147,6 +148,26 @@ test("bakeDefaults anchors letter shortcuts to the layout's key", () => {
 	// No layout data → keeps the QWERTY position and the letter label.
 	const [fallback] = bakeDefaults(set, new Map());
 	expect(fallback).toMatchObject({ on: "KeyK", label: "K" });
+});
+
+test("built-in layouts resolve through upperLegends as expected", () => {
+	const legends = (id: string) => {
+		const layout = KEYBOARD_LAYOUTS.find((l) => l.id === id)!;
+		return upperLegends(Object.entries(layout.map));
+	};
+	const fr = legends("fr");
+	expect(fr.get("KeyA")).toBe("Q"); // AZERTY swaps A/Q…
+	expect(fr.get("KeyQ")).toBe("A");
+	expect(fr.get("KeyW")).toBe("Z"); // …and Z/W
+	expect(fr.get("Digit1")).toBe("1"); // symbol number row → numerals
+	const trq = legends("tr-q");
+	expect(trq.get("KeyI")).toBe("I"); // dotless ı → Turkish uppercase → I
+	expect(trq.get("Quote")).toBe("İ"); // dotted i → İ
+	expect(trq.get("KeyK")).toBe("K");
+	const trf = legends("tr-f");
+	expect(trf.get("KeyI")).toBe("N"); // N lives on KeyI in Turkish-F
+	expect(trf.get("KeyK")).toBe("M");
+	expect(trf.get("KeyF")).toBe("A");
 });
 
 test("bakeDefaults re-homes a Ctrl alias to the position's Atari key", () => {

@@ -128,6 +128,16 @@ export const messages = {
 		none: "None",
 		layoutWarning:
 			"Key labels assume a US layout — this browser doesn't expose your keyboard layout, so they may not match your keys.",
+		setupLayout: "Set up your keyboard",
+		layoutTitle: "Keyboard layout",
+		layoutIntro:
+			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout when available.",
+		layoutAuto: "Auto-detect (from browser)",
+		layoutAutoUnavailable: "unavailable",
+		layoutRegenerates:
+			"Changing this regenerates the default shortcuts, discarding customizations.",
+		confirmLayout:
+			"Change keyboard layout? This regenerates the default shortcuts, discarding your customizations.",
 		capture: "Capture combo…",
 		capturePrompt: "Press a key combo…",
 		captureHint: "Enter to set · Esc to cancel",

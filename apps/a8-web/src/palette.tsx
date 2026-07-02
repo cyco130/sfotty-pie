@@ -237,7 +237,7 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 
 	return (
 		<div class="flex min-h-0 flex-1 flex-col">
-			<LayoutWarning />
+			<LayoutWarning host={host} />
 			<input
 				ref={inputRef}
 				type="text"

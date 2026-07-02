@@ -11,6 +11,9 @@ const MenuPanel = lazy(() => import("./routes/a8/emu/menu.page.tsx"));
 const ConfigPanel = lazy(() => import("./routes/a8/emu/config.page.tsx"));
 const PalettePanel = lazy(() => import("./routes/a8/emu/palette.page.tsx"));
 const KeysPanel = lazy(() => import("./routes/a8/emu/keys.page.tsx"));
+const KeyboardLayoutPanel = lazy(
+	() => import("./routes/a8/emu/keys-layout.page.tsx"),
+);
 const KeyCommandPanel = lazy(
 	() => import("./routes/a8/emu/keys-command.page.tsx"),
 );
@@ -49,6 +52,8 @@ function EmuSection() {
 				<Route path="/config" component={ConfigPanel} />
 				<Route path="/palette" component={PalettePanel} />
 				<Route path="/keys" component={KeysPanel} />
+				{/* Static /keys/layout must precede the /keys/:command param route. */}
+				<Route path="/keys/layout" component={KeyboardLayoutPanel} />
 				<Route path="/keys/:command" component={KeyCommandPanel} />
 				<Route path="/roms" component={RomsPanel} />
 				<Route path="/library" component={LibraryPanel} />

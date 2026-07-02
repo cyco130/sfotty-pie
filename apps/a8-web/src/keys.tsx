@@ -1,9 +1,12 @@
 import { useMemo, useState } from "preact/hooks";
 import { type Command, labelOf, paletteCommands } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
+import { LAYOUT_AUTO } from "./key-bindings-store.ts";
 import { chordLabel, layoutLabelsAvailable } from "./key-bindings.ts";
 import { messages } from "./messages.ts";
 import { navigate } from "./navigate.ts";
+
+const LAYOUT_PATH = "/a8/emu/keys/layout";
 
 // One displayed row: a command and one of its bound chords, or null when the
 // command has no binding (shown so it's findable to bind later).
@@ -12,13 +15,23 @@ interface Row {
 	chord: string | null;
 }
 
-/** A caveat shown when the browser can't tell us the keyboard layout, so the
- *  labels fall back to QWERTY and may not match a non-US keyboard. */
-export function LayoutWarning() {
-	if (layoutLabelsAvailable()) return null;
+/** A caveat shown when we're guessing the layout — the browser doesn't expose it
+ *  and the user hasn't picked one — so labels fall back to QWERTY. Links to the
+ *  setup page; hidden once getLayoutMap works or a layout is chosen. */
+export function LayoutWarning({ host }: { host: EmulatorHost }) {
+	if (layoutLabelsAvailable() || host.layoutPref.value !== LAYOUT_AUTO) {
+		return null;
+	}
 	return (
 		<p class="mb-2 shrink-0 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-			{messages.shortcuts.layoutWarning}
+			{messages.shortcuts.layoutWarning}{" "}
+			<button
+				type="button"
+				class="font-medium underline"
+				onClick={() => navigate(LAYOUT_PATH)}
+			>
+				{messages.shortcuts.setupLayout}
+			</button>
 		</p>
 	);
 }
@@ -69,7 +82,14 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 
 	return (
 		<div class="flex min-h-0 flex-1 flex-col">
-			<LayoutWarning />
+			<LayoutWarning host={host} />
+			<button
+				type="button"
+				class="mb-2 shrink-0 self-start text-xs text-neutral-500 underline hover:text-neutral-800"
+				onClick={() => navigate(LAYOUT_PATH)}
+			>
+				{messages.shortcuts.layoutTitle}
+			</button>
 			<input
 				type="text"
 				placeholder={messages.shortcuts.placeholder}

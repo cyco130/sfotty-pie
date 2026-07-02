@@ -247,7 +247,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 		<PanelFrame title={labelOf(command)}>
 			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
 				<BackLink />
-				<LayoutWarning />
+				<LayoutWarning host={host} />
 
 				<section class="flex flex-col gap-1.5">
 					<h3 class="text-xs font-semibold tracking-wide text-neutral-500 uppercase">

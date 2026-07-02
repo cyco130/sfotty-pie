@@ -3,7 +3,9 @@ import {
 	bakeDefaults,
 	defaultBindingSet,
 	loadLayoutLabels,
+	upperLegends,
 } from "./key-bindings.ts";
+import { KEYBOARD_LAYOUTS } from "./keyboard-layouts.ts";
 import { loadPersisted, savePersisted } from "./persist.ts";
 
 // The user's binding set, persisted as one flat list. Generated from the
@@ -25,6 +27,21 @@ const VERSION = 4;
 // re-read from the live keyboard (or, absent getLayoutMap, the user's saved
 // layout). Serialized as a plain object.
 export const KEY_LAYOUT_KEY = "key-layout";
+
+// The user's layout choice for the manual picker: "auto" (use getLayoutMap when
+// available) or a `KEYBOARD_LAYOUTS` id. A manual pick wins over getLayoutMap, so
+// it's testable everywhere and honors "declare once"; default is "auto".
+export const KEY_LAYOUT_PREF = "key-layout-pref";
+export const LAYOUT_AUTO = "auto";
+
+export function saveLayoutPref(pref: string): void {
+	savePersisted(KEY_LAYOUT_PREF, pref);
+}
+
+export function loadLayoutPref(): string {
+	const stored = loadPersisted(KEY_LAYOUT_PREF);
+	return typeof stored === "string" ? stored : LAYOUT_AUTO;
+}
 
 interface Stored {
 	v: number;
@@ -64,13 +81,18 @@ export function loadStoredLayout(): Map<string, string> | undefined {
 	return map;
 }
 
-// The layout map to bake from: the live keyboard layout when the browser exposes
-// it (re-read, so a reset picks up an OS-level switch), else the user's saved
-// layout (the setup page), else empty — which bakes plain QWERTY.
+// The layout map to bake from: a manual pick wins (the setup page); else the live
+// keyboard layout when the browser exposes it (re-read, so a reset in auto mode
+// picks up an OS-level switch); else empty — which bakes plain QWERTY.
 async function resolveLayout(): Promise<Map<string, string>> {
+	const pref = loadLayoutPref();
+	if (pref !== LAYOUT_AUTO) {
+		const layout = KEYBOARD_LAYOUTS.find((l) => l.id === pref);
+		if (layout) return upperLegends(Object.entries(layout.map));
+	}
 	const live = await loadLayoutLabels();
 	if (live.size > 0) return live;
-	return loadStoredLayout() ?? new Map();
+	return new Map();
 }
 
 /** Generate the default binding set from the resolved layout, persisting both the

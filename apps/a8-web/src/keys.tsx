@@ -1,5 +1,10 @@
 import { useMemo, useState } from "preact/hooks";
-import { type Command, labelOf, paletteCommands } from "./commands.ts";
+import {
+	type Command,
+	labelOf,
+	paletteCommands,
+	searchLabel,
+} from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { LAYOUT_AUTO } from "./key-bindings-store.ts";
 import {
@@ -87,7 +92,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 	const shown = q
 		? rows.filter(
 				(r) =>
-					labelOf(r.command).toLowerCase().includes(q) ||
+					searchLabel(r.command).toLowerCase().includes(q) ||
 					(r.chord?.toLowerCase().includes(q) ?? false),
 			)
 		: rows;

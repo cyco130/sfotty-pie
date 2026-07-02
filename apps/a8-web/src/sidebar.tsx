@@ -1,4 +1,4 @@
-import { labelOf, type Command } from "./commands.ts";
+import type { Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { Icon } from "./icon.tsx";
 import { primaryChords, type Binding } from "./key-bindings.ts";
@@ -226,18 +226,19 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 	);
 }
 
-// The main menu is a set of commands: each row shows the command's label and its
-// primary shortcut, and clicking dispatches it — so the labels and chords never
-// drift from the palette and keys pages. Order is launcher-first (config, boot,
-// software) then the two meta panels (palette, keys).
+// The main menu is a set of commands: each row shows a launcher-context label
+// (messages.menu, not the palette's "Category: verb") and the command's primary
+// shortcut, and clicking dispatches it — so the chords never drift from the
+// palette and keys pages. Order is launcher-first (config, boot, software) then
+// the two meta panels (palette, keys).
 const MENU_COMMANDS = [
-	"OPEN_CONFIG",
-	"BOOT_IMAGE",
-	"OPEN_LIBRARY",
-	"OPEN_ROMS",
-	"OPEN_PALETTE",
-	"OPEN_KEYS",
-] as const satisfies readonly Command[];
+	{ command: "OPEN_CONFIG", label: messages.menu.config },
+	{ command: "BOOT_IMAGE", label: messages.menu.boot },
+	{ command: "OPEN_LIBRARY", label: messages.menu.library },
+	{ command: "OPEN_ROMS", label: messages.menu.roms },
+	{ command: "OPEN_PALETTE", label: messages.menu.palette },
+	{ command: "OPEN_KEYS", label: messages.menu.keys },
+] as const satisfies readonly { command: Command; label: string }[];
 
 // The four arrows that drive joystick 0 as shipped. The key-mappings help shows
 // its "Arrow keys → Joystick" line only when all four still map that way — a
@@ -309,7 +310,7 @@ export function MenuView({
 	return (
 		<div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
 			<section class="flex flex-col gap-1">
-				{MENU_COMMANDS.map((command) => {
+				{MENU_COMMANDS.map(({ command, label }) => {
 					const chord = chords.get(command);
 					return (
 						<div key={command} class="flex items-center justify-between gap-3">
@@ -322,7 +323,7 @@ export function MenuView({
 										: host.dispatch(command)
 								}
 							>
-								{labelOf(command)}
+								{label}
 							</button>
 							{chord && (
 								<span class="any-pointer-fine:block hidden text-xs text-neutral-400">

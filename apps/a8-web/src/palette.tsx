@@ -1,7 +1,12 @@
 import type { ComponentChild } from "preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { characterChords } from "./char-keys.ts";
-import { type Command, labelOf, paletteCommands } from "./commands.ts";
+import {
+	type Command,
+	labelOf,
+	paletteCommands,
+	searchLabel,
+} from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { primaryChords } from "./key-bindings.ts";
 import { LayoutWarning } from "./keys.tsx";
@@ -189,7 +194,7 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 		? paletteCommands
 				.map((command) => ({
 					command,
-					match: matchCommand(trimmed, labelOf(command)),
+					match: matchCommand(trimmed, searchLabel(command)),
 				}))
 				.filter(
 					(entry): entry is { command: Command; match: FuzzyMatch } =>

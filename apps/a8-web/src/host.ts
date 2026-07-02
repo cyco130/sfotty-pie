@@ -20,6 +20,7 @@ import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
 import type { Binding, KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
+import { Gamepads } from "./gamepad.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
 	addOrFindImage,
@@ -298,6 +299,7 @@ export class EmulatorHost {
 	readonly #audio: AudioOutput | null;
 	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
+	readonly #gamepads: Gamepads;
 	readonly #isMac = isMac();
 	// Whether key bindings were loaded from storage; if not, create() generates
 	// and persists the platform defaults (async — it resolves layout labels).
@@ -402,6 +404,13 @@ export class EmulatorHost {
 			() => this.keyboardMode.value,
 			storedBindings ?? [],
 		);
+
+		// The gamepad poller drives the joystick commands the same way; the
+		// emulator loop calls its poll() once per frame (wired in #makeEmulator).
+		this.#gamepads = new Gamepads({
+			press: (command) => this.press(command),
+			release: (command) => this.release(command),
+		});
 
 		// The audio context resumes/suspends asynchronously; track it.
 		if (audio) {
@@ -752,6 +761,9 @@ export class EmulatorHost {
 		});
 		emulator.setTrace(this.#cpuTrace);
 		emulator.setTurboMode(this.#turboMode);
+		// Sample the gamepad on every emulation-loop yield (see Emulator.afterYield)
+		// — the freshest read, right before the next scanlines poll the pins.
+		emulator.afterYield = () => this.#gamepads.poll();
 		return emulator;
 	}
 
@@ -1711,11 +1723,20 @@ export class EmulatorHost {
 				this.config.value.tv === "pal" ? buildPalPalette() : buildNtscPalette();
 		});
 
+		// Listen for pad connect/disconnect so polling can gate on presence.
+		const detachGamepads = this.#gamepads.attach();
+
 		let raf = 0;
 		let presented = -1;
 		let framesAtSecondStart = this.#emulator.frameCount;
 		let secondStart = performance.now();
 		const present = () => {
+			// Keepalive poll on the display cadence: the emulation loop's afterYield
+			// poll stops when paused, so this keeps the meta buttons (notably
+			// Pause→Resume) live. Harmless while running — edge detection dedupes it
+			// against the fresher afterYield samples, and it no-ops with no pad.
+			this.#gamepads.poll();
+
 			if (this.#emulator.frameCount !== presented) {
 				presented = this.#emulator.frameCount;
 				const frame = this.#emulator.frame;
@@ -1752,6 +1773,7 @@ export class EmulatorHost {
 			cancelAnimationFrame(raf);
 			resize.disconnect();
 			unsubscribe();
+			detachGamepads();
 		};
 	}
 

@@ -78,6 +78,12 @@ export class Emulator {
 	/** Increments on every completed frame. */
 	frameCount = 0;
 
+	/** Called after each yield to the event loop (see {@link #loop}). The host
+	 *  samples the gamepad here — the freshest point, since the browser refreshes
+	 *  input state between tasks, and it lands just before the next scanlines read
+	 *  the joystick pins. */
+	afterYield: (() => void) | undefined;
+
 	/** True once the CPU has jammed on a CIM (KIL/JAM) instruction. */
 	get crashed(): boolean {
 		return this.machine.cpu.crashed;
@@ -259,7 +265,19 @@ export class Emulator {
 	}
 
 	async #loop(): Promise<void> {
-		const yieldMacrotask = makeMacrotaskYield();
+		const rawYield = makeMacrotaskYield();
+		// Poll input right after every yield to the event loop: the browser refreshes
+		// gamepad state between tasks, so a resume is the freshest point to read it,
+		// fed in just before the next scanlines poll the joystick pins. Both yield
+		// primitives are wrapped so every await site below samples on resume.
+		const yieldMacrotask = async (): Promise<void> => {
+			await rawYield();
+			this.afterYield?.();
+		};
+		const sleep = async (ms: number): Promise<void> => {
+			await delay(ms);
+			this.afterYield?.();
+		};
 		this.#epoch = performance.now() - this.#scanlines * this.#msPerScanline;
 
 		while (this.#running) {
@@ -404,7 +422,7 @@ export class Emulator {
 	}
 }
 
-function sleep(ms: number): Promise<void> {
+function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 

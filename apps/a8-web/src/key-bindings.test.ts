@@ -6,6 +6,7 @@ import {
 	keyLabel,
 	labelFor,
 	type KeyEventLike,
+	primaryChords,
 	resolveBinding,
 	upperLegends,
 } from "./key-bindings.ts";
@@ -302,4 +303,33 @@ test("relocated F-key homes (Help/Tab/Esc/Inverse)", () => {
 	expect(resolve({ code: "F8" })).toBe("PRESS_BREAK");
 	expect(resolve({ code: "F10" })).toBe("PRESS_INVERSE_VIDEO");
 	expect(resolve({ code: "F12" })).toBeNull(); // F12 left free
+});
+
+// The primary binding shown for a command differs by platform (see the family
+// table in key-bindings.ts). These lock the display-relevant choices.
+test("primary chords pick the platform-preferred binding", () => {
+	const win = primaryChords(defaultBindingSet(false), false);
+	const mac = primaryChords(defaultBindingSet(true), true);
+
+	// Esc: F11 on Windows (only catchable route for Ctrl+Esc), the Esc key on mac.
+	expect(win.get("PRESS_ESC")).toBe("F11");
+	expect(mac.get("PRESS_ESC")).toBe("Esc");
+	// Tab and Break take the F-key everywhere.
+	expect(win.get("PRESS_TAB")).toBe("F9");
+	expect(mac.get("PRESS_TAB")).toBe("F9");
+	expect(win.get("PRESS_BREAK")).toBe("F8");
+	// Cursor: Ctrl+Arrow on Windows, Cmd+Arrow on mac.
+	expect(win.get("PRESS_CONTROL_MINUS")).toBe("Ctrl+↑");
+	expect(mac.get("PRESS_CONTROL_MINUS")).toBe("Cmd+↑");
+	// Editing row: the dedicated key on Windows, the Ctrl/Shift form on mac.
+	expect(win.get("PRESS_CONTROL_BACKSPACE")).toBe("Delete");
+	expect(mac.get("PRESS_CONTROL_BACKSPACE")).toBe("Ctrl+Backspace");
+	expect(win.get("PRESS_CONTROL_GREATER_THAN")).toBe("Insert");
+	expect(mac.get("PRESS_CONTROL_GREATER_THAN")).toBe("Ctrl+=");
+	// Windows Alt-for-Ctrl alias wins over the browser-grabbed Ctrl combo.
+	expect(win.get("PRESS_CONTROL_N")).toBe("Alt+N");
+	expect(mac.get("PRESS_CONTROL_N")).toBe("Ctrl+N");
+	// Never a Shift+punct when another binding exists (Clear screen).
+	expect(win.get("PRESS_SHIFT_LESS_THAN")).toBe("Alt+-");
+	expect(mac.get("PRESS_SHIFT_LESS_THAN")).toBe("Cmd+-");
 });

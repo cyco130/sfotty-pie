@@ -59,6 +59,11 @@ export interface Binding {
 	//              the Atari Ctrl key at the *new* physical position, so on Turkish-F
 	//              Alt+N (N sits on KeyI) yields Atari Ctrl+I, not Ctrl+N.
 	anchor?: "letter" | "ctrl";
+	// When a command has several bindings, the one to represent it (the chord
+	// shown in the palette, menu, and key-help). Set on the platform-preferred
+	// default by {@link markPrimaries}, or by the user ("Make primary"). At most
+	// one per command; absent ⇒ the resolver falls back to first-listed.
+	primary?: boolean;
 	note?: string;
 }
 
@@ -512,16 +517,130 @@ function overlay(acc: Binding[], ext: Binding[]): Binding[] {
 	return [...byTrigger.values()];
 }
 
+// --- Primary bindings ----------------------------------------------------
+// Which of a command's several bindings represents it (the chord shown in the
+// palette, menu, and key-help). The choice is platform-aware and can't be a
+// static list order, because the shared `base` bindings want opposite primaries
+// per platform (e.g. Esc's primary is F11 on Windows — the only catchable route
+// for Ctrl+Esc — but the Esc key itself on macOS).
+
+// Punctuation `code`s. A Shift+punct binding's label is layout-fragile (the
+// legend can misread under Shift), so it's never made primary when the command
+// has any other binding.
+const PUNCT_CODES: ReadonlySet<string> = new Set([
+	"Backquote",
+	"Minus",
+	"Equal",
+	"BracketLeft",
+	"BracketRight",
+	"Semicolon",
+	"Quote",
+	"Backslash",
+	"IntlBackslash",
+	"Comma",
+	"Period",
+	"Slash",
+]);
+
+const isFKey = (b: Binding): boolean => /^F\d+$/.test(b.on);
+const isArrow = (b: Binding): boolean => b.on.startsWith("Arrow");
+const isLetterOrDigit = (b: Binding): boolean =>
+	/^(Key[A-Z]|Digit[0-9])$/.test(b.on);
+const isShiftPunct = (b: Binding): boolean =>
+	b.shift === true && PUNCT_CODES.has(b.on);
+
+const CURSOR_COMMANDS: ReadonlySet<Command> = new Set<Command>([
+	"PRESS_CONTROL_MINUS", // cursor up
+	"PRESS_CONTROL_EQUALS", // cursor down
+	"PRESS_CONTROL_PLUS", // cursor left
+	"PRESS_CONTROL_ASTERISK", // cursor right
+]);
+
+// The platform-preferred primary among a command's `group` of bindings, or
+// undefined to fall back to first-listed (minus Shift+punct). Encodes the agreed
+// family table; the reasons live with each rule.
+function choosePrimary(
+	command: Command,
+	group: Binding[],
+	mac: boolean,
+): Binding | undefined {
+	const find = (pred: (b: Binding) => boolean) => group.find(pred);
+	const onKey = (on: string) => group.find((b) => b.on === on);
+
+	// Esc: on Windows only F11 reaches Ctrl+Esc (the OS grabs the Esc key there);
+	// on macOS the Esc key reads best and is catchable.
+	if (command.endsWith("ESC")) return mac ? onKey("Escape") : find(isFKey);
+	// Tab (F9 reaches Ctrl+Tab, which the real key can't) and Break (F8; Pause is
+	// fading from keyboards) → the F-key everywhere.
+	if (command.endsWith("TAB") || command === "PRESS_BREAK") return find(isFKey);
+	// Atari cursor keys: Cmd+Arrow on macOS (the OS reserves Ctrl+Arrow for
+	// Mission Control), Ctrl+Arrow on Windows.
+	if (CURSOR_COMMANDS.has(command))
+		return find((b) => isArrow(b) && (mac ? b.meta === true : b.ctrl === true));
+	// Delete/Insert editing row: the dedicated key on Windows; the Ctrl/Shift form
+	// on macOS, whose laptops lack Delete/Insert.
+	if (command.endsWith("BACKSPACE"))
+		return mac ? onKey("Backspace") : onKey("Delete");
+	if (command === "PRESS_CONTROL_GREATER_THAN")
+		return mac
+			? find((b) => b.on === "Equal" && b.ctrl === true)
+			: onKey("Insert");
+	if (command === "PRESS_SHIFT_GREATER_THAN")
+		return mac
+			? find((b) => b.on === "Equal" && b.meta === true)
+			: onKey("Insert");
+	// Windows Alt-for-Ctrl aliases: Ctrl+digit / Ctrl+letter are browser-grabbed,
+	// so the working Alt combo is primary. (macOS reaches these via plain Ctrl —
+	// a single binding, handled below.)
+	if (!mac) {
+		const alias = find((b) => b.alt === true && isLetterOrDigit(b));
+		if (alias) return alias;
+	}
+	// 1200XL function keys F1–F4: Option+Arrow on macOS; on Windows there's only
+	// the PgUp/PgDn/Home/End nav binding (Option+Arrow is mac-only), so no choice.
+	if (/F[1-4]$/.test(command))
+		return mac ? find((b) => isArrow(b) && b.alt === true) : undefined;
+
+	return undefined;
+}
+
+// Flag each multi-binding command's representative binding. Returns a new array
+// (the chosen bindings cloned with `primary`), leaving the shared `base`/overlay
+// binding objects untouched.
+function markPrimaries(bindings: Binding[], mac: boolean): Binding[] {
+	const groups = new Map<Command, Binding[]>();
+	for (const b of bindings) {
+		const g = groups.get(b.command);
+		if (g) g.push(b);
+		else groups.set(b.command, [b]);
+	}
+	const primary = new Set<Binding>();
+	for (const group of groups.values()) {
+		if (group.length < 2) continue;
+		const command = group[0]!.command;
+		const chosen =
+			choosePrimary(command, group, mac) ??
+			group.find((b) => !isShiftPunct(b)) ??
+			group[0];
+		if (chosen) primary.add(chosen);
+	}
+	return bindings.map((b) => (primary.has(b) ? { ...b, primary: true } : b));
+}
+
 /**
  * The full default binding set for a platform: the platform-agnostic bindings
  * plus the positional layer, with the platform overlay merged in — macOS
  * (Cmd/Option+Arrow) on Mac, the Windows/Linux Alt-for-Ctrl aliases elsewhere.
  * One flat set, the same in both keyboard modes; the mode only decides whether
  * the character channel resolves first (see the keyboard). This is what the
- * binding store persists (and the customization UI edits).
+ * binding store persists (and the customization UI edits). Each multi-binding
+ * command carries a `primary` flag on its platform-preferred representative.
  */
 export function defaultBindingSet(mac: boolean): Binding[] {
-	return overlay([...base, ...positional], mac ? macBindings : winBindings);
+	return markPrimaries(
+		overlay([...base, ...positional], mac ? macBindings : winBindings),
+		mac,
+	);
 }
 
 // --- Resolution ----------------------------------------------------------
@@ -821,10 +940,15 @@ export function primaryChords(
 	mac: boolean,
 	layout: Map<string, string> = NO_LAYOUT,
 ): Map<Command, string> {
-	const chords = new Map<Command, string>();
+	// The command's `primary` binding wins; else the first listed. (A user or the
+	// defaults mark at most one primary per command — see {@link markPrimaries}.)
+	const chosen = new Map<Command, Binding>();
 	for (const b of flat) {
-		if (!chords.has(b.command))
-			chords.set(b.command, chordLabel(b, mac, layout));
+		const cur = chosen.get(b.command);
+		if (!cur || (b.primary && !cur.primary)) chosen.set(b.command, b);
 	}
+	const chords = new Map<Command, string>();
+	for (const [command, b] of chosen)
+		chords.set(command, chordLabel(b, mac, layout));
 	return chords;
 }

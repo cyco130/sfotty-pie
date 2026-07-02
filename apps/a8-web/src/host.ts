@@ -18,6 +18,7 @@ import {
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
+import type { Binding, KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
@@ -33,6 +34,14 @@ import {
 	updateImage,
 } from "./images/library.ts";
 import type { ImageEntry } from "./images/metadata.ts";
+import {
+	ensureStoredLayout,
+	freshBindings,
+	loadLayoutPref,
+	loadStoredBindings,
+	saveBindings,
+	saveLayoutPref,
+} from "./key-bindings-store.ts";
 import { Keyboard } from "./keyboard.ts";
 import {
 	clampRam,
@@ -83,7 +92,13 @@ export interface Toast {
  * The sidebar's content when open. Stable string ids so the state stays
  * serializable (a future deep-link layer can map these straight to the URL).
  */
-export type SidebarPanel = "menu" | "config" | "palette" | "roms" | "library";
+export type SidebarPanel =
+	| "menu"
+	| "config"
+	| "palette"
+	| "keys"
+	| "roms"
+	| "library";
 
 export type { MachineSettings } from "./machine-config.ts";
 
@@ -102,6 +117,7 @@ const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
 // Persisted-state keys (namespaced by storageName) — see persist.ts.
 const CONFIG_KEY = "config";
 const ROMS_KEY = "roms";
+const KBMODE_KEY = "keyboard-mode";
 
 // How long a momentary trigger (palette, click) holds a control before its
 // auto-release — long enough for the OS to sense the key/button. Counted in
@@ -226,6 +242,23 @@ export class EmulatorHost {
 	/** Whether turbo mode (unthrottled, muted) is engaged. */
 	readonly turboMode = signal(false);
 
+	/** Keyboard interpretation: Character (layout-aware typing) vs Positional
+	 *  (raw, by physical key). Persisted; loaded in the constructor. */
+	readonly keyboardMode = signal<KeyboardMode>("character");
+
+	/** The active key bindings (one flat set); mirrors what the keyboard resolves,
+	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
+	readonly keyBindings = signal<Binding[]>([]);
+
+	/** The layout snapshot the bindings were baked from (`code` → legend), used to
+	 *  label the editor's live preview — existing chords carry their own baked
+	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
+	readonly layoutLabels = signal<Map<string, string>>(new Map());
+
+	/** The keyboard-layout preference: "auto" (getLayoutMap) or a KEYBOARD_LAYOUTS
+	 *  id (the manual picker). Drives the setup page's selection. */
+	readonly layoutPref = signal<string>(loadLayoutPref());
+
 	/** The 1200XL keyboard LEDs `[L1, L2]` (true = lit), or null on other models. */
 	readonly leds = signal<readonly [boolean, boolean] | null>(null);
 
@@ -264,6 +297,10 @@ export class EmulatorHost {
 	readonly #audio: AudioOutput | null;
 	readonly #audioError: string | null;
 	readonly #keyboard: Keyboard;
+	readonly #isMac = navigator.userAgent.includes("Mac");
+	// Whether key bindings were loaded from storage; if not, create() generates
+	// and persists the platform defaults (async — it resolves layout labels).
+	readonly #bindingsStored: boolean;
 	// The model a brand-new install starts from (and resets fall back to).
 	readonly #defaultModel: AtariModel;
 
@@ -303,6 +340,18 @@ export class EmulatorHost {
 		const host = new EmulatorHost(config);
 		await host.#ensureFirmware();
 		await host.#restoreMedia();
+		// First run (or a cleared store): generate + persist the default bindings
+		// from the layout snapshot. Otherwise load the stored snapshot (only used to
+		// label the editor's live preview now — existing chords carry baked labels).
+		// The keyboard isn't attached until the UI mounts, so the brief empty-binding
+		// window is never live.
+		if (!host.#bindingsStored) {
+			const { bindings, layout } = await freshBindings(host.#isMac);
+			host.#applyBindings(bindings);
+			host.layoutLabels.value = layout;
+		} else {
+			host.layoutLabels.value = await ensureStoredLayout();
+		}
 		host.#emulator = host.#makeEmulator();
 		host.#wireLeds();
 		return host;
@@ -333,14 +382,25 @@ export class EmulatorHost {
 		// the ranking).
 		this.appliedRoms.value = sanitizeRoms(loadPersisted(ROMS_KEY));
 		this.stagedRoms.value = this.appliedRoms.peek();
+		this.keyboardMode.value =
+			loadPersisted(KBMODE_KEY) === "positional" ? "positional" : "character";
 
+		// Key bindings: this tab's stored flat set, or empty until create()
+		// generates and persists the platform defaults (first run / cleared store).
+		const storedBindings = loadStoredBindings();
+		this.#bindingsStored = storedBindings !== undefined;
+		this.keyBindings.value = storedBindings ?? [];
 		// #emulator is built by create() once the initial firmware is fetched.
-		this.#keyboard = new Keyboard({
-			press: (command) => this.press(command),
-			release: (command) => this.release(command),
-			tap: (command) => this.dispatch(command),
-			releaseMatrix: () => this.releaseMatrix(),
-		});
+		this.#keyboard = new Keyboard(
+			{
+				press: (command) => this.press(command),
+				release: (command) => this.release(command),
+				tap: (command) => this.dispatch(command),
+				releaseMatrix: () => this.releaseMatrix(),
+			},
+			() => this.keyboardMode.value,
+			storedBindings ?? [],
+		);
 
 		// The audio context resumes/suspends asynchronously; track it.
 		if (audio) {
@@ -798,6 +858,63 @@ export class EmulatorHost {
 		this.setTurboMode(!this.turboMode.value);
 	}
 
+	/** Switch the keyboard interpretation (Character vs Positional). Persisted;
+	 *  takes effect on the next keystroke once the keyboard reads the binding set. */
+	setKeyboardMode(mode: KeyboardMode): void {
+		this.keyboardMode.value = mode;
+		savePersisted(KBMODE_KEY, mode);
+		this.toast(messages.toasts.keyboardMode(mode));
+	}
+
+	toggleKeyboardMode(): void {
+		this.setKeyboardMode(
+			this.keyboardMode.value === "character" ? "positional" : "character",
+		);
+	}
+
+	/** Whether this host runs on macOS — for platform-specific shortcut labels. */
+	get isMac(): boolean {
+		return this.#isMac;
+	}
+
+	/** Regenerate the platform default key bindings from a freshly re-read layout
+	 *  (so this doubles as the layout-switch refresh), persist them, and apply them
+	 *  live — discarding any customization. */
+	async resetKeyBindings(): Promise<void> {
+		if (!window.confirm(messages.shortcuts.confirmReset)) return;
+		const { bindings, layout } = await freshBindings(this.#isMac);
+		this.#applyBindings(bindings);
+		this.layoutLabels.value = layout;
+		this.toast(messages.toasts.keyBindingsReset);
+	}
+
+	/** Set the keyboard-layout preference ("auto" or a `KEYBOARD_LAYOUTS` id) and
+	 *  regenerate the default bindings from it — discarding customization (a no-op
+	 *  if it's already the current pick). */
+	async setLayoutPreference(pref: string): Promise<void> {
+		if (pref === this.layoutPref.value) return;
+		if (!window.confirm(messages.shortcuts.confirmLayout)) return;
+		saveLayoutPref(pref);
+		this.layoutPref.value = pref;
+		const { bindings, layout } = await freshBindings(this.#isMac);
+		this.#applyBindings(bindings);
+		this.layoutLabels.value = layout;
+		this.toast(messages.toasts.keyBindingsReset);
+	}
+
+	// Make a flat binding set the active one — both the keyboard (resolution) and
+	// the signal (UI shortcut display).
+	#applyBindings(bindings: Binding[]): void {
+		this.keyBindings.value = bindings;
+		this.#keyboard.setBindings(bindings);
+	}
+
+	/** Replace the binding set from an edit — persist it and apply it live. */
+	updateBindings(bindings: Binding[]): void {
+		saveBindings(bindings);
+		this.#applyBindings(bindings);
+	}
+
 	setMuted(muted: boolean): void {
 		if (!this.#audio) return;
 		this.#audio.muted = muted;
@@ -1200,6 +1317,7 @@ export class EmulatorHost {
 
 	/** Clear all saved settings, reverting to factory config + picks (library kept). */
 	resetDefaultSettings(): void {
+		if (!window.confirm(messages.reset.confirmDefaults)) return;
 		const before = this.#resolvedFirmwareIds();
 		const prev = this.config.value;
 		const hadMedia = this.#mediaMounted();

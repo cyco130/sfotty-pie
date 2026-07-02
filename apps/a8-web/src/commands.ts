@@ -28,7 +28,18 @@ interface CommandSpec {
 	run: (ctx: CommandContext) => void;
 	release?: (ctx: CommandContext) => void;
 	palette?: boolean;
+	// A POKEY keyboard-matrix key (one shared register). The keyboard releases
+	// these only when the last held matrix key is up — see {@link MATRIX_COMMANDS}.
+	matrix?: boolean;
 }
+
+// On real hardware the keyboard matrix can't scan a key whose base scan code is
+// $00–$07 or $10–$17 while both Ctrl and Shift are held, so the press does
+// nothing. Those Ctrl+Shift commands ($C0–$C7, $D0–$D7 — bits $08 and $20 both
+// clear) stay bound (harmlessly) but are hidden from the palette, where a no-op
+// is just clutter.
+const isDeadCtrlShift = (code: number): boolean =>
+	code >= 0xc0 && (code & 0x28) === 0;
 
 /** Factory for the POKEY matrix key presses, which differ only by key code. The
  *  matrix is one shared register, so every key releases the same way. Palette
@@ -37,6 +48,8 @@ const press = (code: number, label: LabelKey): CommandSpec => ({
 	label,
 	run: ({ emulator }) => emulator.machine.pokeyKeyDown(code),
 	release: ({ emulator }) => emulator.machine.pokeyKeyUp(),
+	matrix: true,
+	...(isDeadCtrlShift(code) && { palette: false }),
 });
 
 export const commands = {
@@ -67,6 +80,24 @@ export const commands = {
 		run: ({ host }) => host.toggleTurboMode(),
 	},
 
+	// Keyboard interpretation: layout-aware typing vs raw positional keys.
+	KEYBOARD_MODE_CHARACTER: {
+		label: "KEYBOARD_MODE_CHARACTER",
+		run: ({ host }) => host.setKeyboardMode("character"),
+	},
+	KEYBOARD_MODE_POSITIONAL: {
+		label: "KEYBOARD_MODE_POSITIONAL",
+		run: ({ host }) => host.setKeyboardMode("positional"),
+	},
+	KEYBOARD_MODE_TOGGLE: {
+		label: "KEYBOARD_MODE_TOGGLE",
+		run: ({ host }) => host.toggleKeyboardMode(),
+	},
+	KEY_BINDINGS_RESET: {
+		label: "KEY_BINDINGS_RESET",
+		run: ({ host }) => void host.resetKeyBindings(),
+	},
+
 	// Audio.
 	AUDIO_MUTE: { label: "AUDIO_MUTE", run: ({ host }) => host.setMuted(true) },
 	AUDIO_UNMUTE: {
@@ -81,12 +112,17 @@ export const commands = {
 	// Sidebar panels — each opens its panel; CLOSE_PANEL dismisses whichever is
 	// showing. (Showing one when it's already open is a no-op.)
 	OPEN_MENU: { label: "OPEN_MENU", run: ({ host }) => host.showPanel("menu") },
+	OPEN_CONFIG: {
+		label: "OPEN_CONFIG",
+		run: ({ host }) => host.showPanel("config"),
+	},
 	// The command palette (this surface) — also the fallback for any action whose
 	// key binding is unavailable.
 	OPEN_PALETTE: {
 		label: "OPEN_PALETTE",
 		run: ({ host }) => host.showPanel("palette"),
 	},
+	OPEN_KEYS: { label: "OPEN_KEYS", run: ({ host }) => host.showPanel("keys") },
 
 	// Full-screen the whole app (chrome included), so the on-screen controls
 	// stay reachable. A no-op-safe toggle; also bound to a double-click on the
@@ -565,6 +601,13 @@ export function releaseOf(
 ): ((ctx: CommandContext) => void) | undefined {
 	return (commands[command] as CommandSpec).release;
 }
+
+/** The POKEY keyboard-matrix commands (one shared release register). */
+export const MATRIX_COMMANDS: ReadonlySet<Command> = new Set(
+	(Object.keys(commands) as Command[]).filter(
+		(key) => (commands[key] as CommandSpec).matrix,
+	),
+);
 
 /**
  * The commands the palette lists, sorted alphabetically by label — its default

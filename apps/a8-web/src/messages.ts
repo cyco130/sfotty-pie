@@ -99,6 +99,7 @@ export const messages = {
 		rebootToApply: "Reboot to apply",
 		machineConfig: "Machine configuration…",
 		commandPalette: "Command palette…",
+		keyboardShortcuts: "Keyboard shortcuts…",
 		bootImage: "Boot image…",
 		keys: "Keys",
 		about: "About",
@@ -111,6 +112,50 @@ export const messages = {
 		titleMenu: "Sfotty Pie A8 Web",
 		titleConfig: "Machine",
 		titlePalette: "Commands",
+		titleKeys: "Shortcuts",
+	},
+
+	shortcuts: {
+		placeholder: "Search by action or key…",
+		noMatches: "No matches",
+		back: "Shortcuts",
+		bindings: "Bindings",
+		noBindings: "No bindings yet",
+		addBinding: "Add binding",
+		key: "Key",
+		keyNone: "Select a key…",
+		combo: "Combo",
+		none: "None",
+		layoutWarning:
+			"Key labels assume a US layout — this browser doesn't expose your keyboard layout, so they may not match your keys.",
+		setupLayout: "Set up your keyboard",
+		layoutTitle: "Keyboard layout",
+		layoutIntro:
+			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout when available.",
+		layoutAuto: "Auto-detect (from browser)",
+		layoutAutoUnavailable: "unavailable",
+		layoutRegenerates:
+			"Changing this regenerates the default shortcuts, discarding customizations.",
+		confirmLayout:
+			"Change keyboard layout? This regenerates the default shortcuts, discarding your customizations.",
+		capture: "Capture combo…",
+		capturePrompt: "Press a key combo…",
+		captureHint: "Enter to set · Esc to cancel",
+		scope: "Scope",
+		scopeMachine: "Emulator",
+		scopeGlobal: "Global",
+		modOff: "Off",
+		modOn: "On",
+		modAny: "Any",
+		add: "Add",
+		removeBinding: "Remove binding",
+		confirmRemove: (chord: string) => `Remove the ${chord} binding?`,
+		confirmReset:
+			"Reset all key bindings to defaults? Your customizations will be lost.",
+		unknownCommand: "Unknown command",
+		warnTyping: "Types in Character mode — only fires in Positional.",
+		warnConflict: (label: string) =>
+			`Currently "${label}" — adding will reassign it.`,
 	},
 
 	roms: {
@@ -246,6 +291,8 @@ export const messages = {
 	reset: {
 		confirmEverything:
 			"Wipe the entire library AND all saved settings? This can't be undone.",
+		confirmDefaults:
+			"Reset all settings to defaults? Saved settings and key bindings will be lost.",
 		everything: "Reset everything — library and settings",
 		tab: "This tab reset to your saved settings",
 		defaults: "All settings reset to defaults",
@@ -307,6 +354,9 @@ export const messages = {
 		switchingMachine: (model: string) => `Switching to Atari ${model}`,
 		switchingTv: (tv: string) => `Switching TV to ${tv}`,
 		powerCycling: "Power cycling",
+		keyboardMode: (mode: "character" | "positional"): string =>
+			`Keyboard: ${mode === "positional" ? "Positional" : "Character"} mode`,
+		keyBindingsReset: "Key bindings reset to defaults",
 		saving: (name: string) => `Saving (${name})`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
 		copy: "Copy",
@@ -328,11 +378,17 @@ export const labels = {
 	TURBO_MODE_ENABLE: "Enable turbo mode (run unthrottled, muted)",
 	TURBO_MODE_DISABLE: "Disable turbo mode (return to real-time speed)",
 	TURBO_MODE_TOGGLE: "Toggle turbo mode",
+	KEYBOARD_MODE_CHARACTER: "Keyboard: Character mode (layout-aware typing)",
+	KEYBOARD_MODE_POSITIONAL: "Keyboard: Positional mode (raw, by physical key)",
+	KEYBOARD_MODE_TOGGLE: "Keyboard: toggle Character / Positional mode",
+	KEY_BINDINGS_RESET: "Keyboard: reset key bindings to defaults",
 	AUDIO_MUTE: "Mute audio",
 	AUDIO_UNMUTE: "Unmute audio",
 	AUDIO_TOGGLE: "Toggle audio (enable, then mute/unmute)",
 	OPEN_MENU: "Menu",
+	OPEN_CONFIG: "Machine configuration…",
 	OPEN_PALETTE: "Command palette",
+	OPEN_KEYS: "Keyboard shortcuts…",
 	CLOSE_PANEL: "Close panel",
 	OPEN_ROMS: "ROM preferences…",
 	OPEN_LIBRARY: "Library…",

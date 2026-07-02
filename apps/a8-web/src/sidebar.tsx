@@ -12,22 +12,10 @@ import { messages } from "./messages.ts";
 import { recentsView } from "./recents.ts";
 import { TypePill } from "./type-pill.tsx";
 
-/**
- * The chord that opens the command palette: Cmd+K on macOS, Alt+K elsewhere.
- * Keyed by physical position (`KeyK`) so it's layout-independent, and rejecting
- * AltGraph (which reports as Ctrl+Alt on Windows) so it stays character input.
- * Alt+K is otherwise the emulator's Mod-layer `K`, a no-op stub today.
- */
+/** True on macOS — for platform-specific labels (the palette chord hint shows
+ *  ⌘K vs Alt+K). The chord itself is a `scope: "global"` binding now. */
 export function onMac(): boolean {
 	return navigator.userAgent.includes("Mac");
-}
-
-export function isToggleChord(event: KeyboardEvent): boolean {
-	if (event.code !== "KeyK") return false;
-	if (event.getModifierState("AltGraph")) return false;
-	return onMac()
-		? event.metaKey && !event.ctrlKey && !event.altKey
-		: event.altKey && !event.ctrlKey && !event.metaKey;
 }
 
 /** A labelled segmented control; each option stages its value via `onSelect`. */
@@ -297,6 +285,13 @@ export function MenuView({
 						{onMac() ? "⌘K" : "Alt+K"}
 					</span>
 				</div>
+				<button
+					type="button"
+					class="text-left text-sm hover:underline"
+					onClick={() => host.showPanel("keys")}
+				>
+					{messages.sidebar.keyboardShortcuts}
+				</button>
 			</section>
 
 			<RecentsSection host={host} />

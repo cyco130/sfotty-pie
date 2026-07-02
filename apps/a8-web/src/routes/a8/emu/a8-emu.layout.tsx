@@ -7,7 +7,6 @@ import { installDevConsole } from "../../../dev-console.ts";
 import { useHead } from "../../../head.ts";
 import { EmulatorHost, type SidebarPanel } from "../../../host.ts";
 import { messages } from "../../../messages.ts";
-import { isToggleChord } from "../../../sidebar.tsx";
 import { EmuContext } from "./emu-context.ts";
 
 // The audio sink is a page-level singleton — created once and reused across
@@ -126,18 +125,9 @@ function EmuShell({
 		host.setSidebar(panelFromPath(path));
 	}, [host, path]);
 
-	// The global palette chord (Cmd/Alt+K). Capture phase + stopImmediate so it
-	// preempts both the browser and the emulator's offscreen-input handler.
-	useEffect(() => {
-		const onKey = (event: KeyboardEvent) => {
-			if (!isToggleChord(event)) return;
-			event.preventDefault();
-			event.stopImmediatePropagation();
-			host.togglePanel("palette");
-		};
-		window.addEventListener("keydown", onKey, true);
-		return () => window.removeEventListener("keydown", onKey, true);
-	}, [host]);
+	// The global palette chord (Cmd+K / Alt+K) is now a `scope: "global"` binding
+	// (OPEN_PALETTE), resolved by the keyboard's window-level handler — no longer
+	// special-cased here.
 
 	// Esc closes whatever panel is open. Capture-phase + stopPropagation so the
 	// keystroke doesn't also reach the emulator's offscreen input.

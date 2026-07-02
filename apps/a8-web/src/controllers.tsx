@@ -1,31 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
+import { BindingsEditor } from "./gamepad-bindings.tsx";
+import { STANDARD_AXES, STANDARD_BUTTONS } from "./gamepad-labels.ts";
 import type { EmulatorHost } from "./host.ts";
 import { messages } from "./messages.ts";
-
-// Standard Gamepad layout names by index — hardware tokens, so inline (not
-// translated). Shown only for pads that report mapping === "standard"; a
-// non-standard pad shows raw indices instead, which is exactly what you need to
-// see where its controls actually live.
-const STANDARD_BUTTONS = [
-	"A / ✕",
-	"B / ○",
-	"X / □",
-	"Y / △",
-	"L1",
-	"R1",
-	"L2",
-	"R2",
-	"Select",
-	"Start",
-	"L3",
-	"R3",
-	"↑",
-	"↓",
-	"←",
-	"→",
-	"Guide",
-];
-const STANDARD_AXES = ["LX", "LY", "RX", "RY"];
 
 // A poll's-worth of one pad's state, copied out of the live Gamepad object (which
 // is a snapshot that goes stale) so it survives into render.
@@ -188,19 +165,28 @@ export function ControllersView({ host }: { host: EmulatorHost }) {
 	const pads = useLivePads();
 	// Port assignments, by gamepad.index, from the poller.
 	const ports = new Map(host.gamepads.value.map((p) => [p.index, p.port]));
-	if (pads.length === 0) {
-		return <p class="text-sm text-neutral-500">{messages.controllers.noPad}</p>;
-	}
 	return (
-		<div class="flex flex-col gap-3 overflow-y-auto">
-			{pads.map((pad) => (
-				<PadCard
-					key={pad.index}
-					pad={pad}
-					port={ports.get(pad.index) ?? null}
-					onPort={(port) => host.setGamepadPort(pad.index, port)}
-				/>
-			))}
+		<div class="flex flex-col gap-4 overflow-y-auto">
+			{pads.length === 0 ? (
+				<p class="text-sm text-neutral-500">{messages.controllers.noPad}</p>
+			) : (
+				<div class="flex flex-col gap-3">
+					{pads.map((pad) => (
+						<PadCard
+							key={pad.index}
+							pad={pad}
+							port={ports.get(pad.index) ?? null}
+							onPort={(port) => host.setGamepadPort(pad.index, port)}
+						/>
+					))}
+				</div>
+			)}
+			<div>
+				<p class="mb-2 text-sm font-semibold text-neutral-700">
+					{messages.controllers.bindings}
+				</p>
+				<BindingsEditor host={host} />
+			</div>
 		</div>
 	);
 }

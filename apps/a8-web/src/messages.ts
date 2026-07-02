@@ -123,6 +123,19 @@ export const messages = {
 		off: "Off",
 		buttons: "Buttons",
 		axes: "Axes",
+		bindings: "Bindings",
+		joystickSection: "Joystick",
+		consoleSection: "Console",
+		addBinding: "Add binding",
+		reset: "Reset to defaults",
+		pressInput: "Press a button or push a stick…  (Esc to cancel)",
+		role: {
+			up: "Up",
+			down: "Down",
+			left: "Left",
+			right: "Right",
+			trigger: "Trigger",
+		},
 	},
 
 	// The main menu is a launcher, so its entries read as short destinations —

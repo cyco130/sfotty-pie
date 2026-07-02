@@ -14,6 +14,17 @@ export function setCapturingKeys(active: boolean): void {
 	capturingKeys = active;
 }
 
+// A key event's target is a real text field (or other keyboard-driven control)
+// whose own key handling — typing, cursor keys, option navigation — we must not
+// preempt. The offscreen emulator input is included: while it's focused the input
+// handler already owns the key, so the window-level guard stands down.
+function isEditable(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) return false;
+	if (target.isContentEditable) return true;
+	const tag = target.tagName;
+	return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
 /**
  * The command a Character-mode key event produces. The character channel wins
  * first: a key that types a printable ATASCII character (no Ctrl/Alt/Cmd) types
@@ -105,10 +116,9 @@ export class Keyboard {
 		});
 
 		// Global bindings (app commands — OPEN_PALETTE, etc.) resolve here at the
-		// window so they fire regardless of focus and preempt the offscreen input;
-		// machine keys (scope absent) fall through to the input handler above.
-		// Also the F-key browser-shortcut guard (F5 reload → cold boot is the worst
-		// offender), which must work even when focus has drifted off the input.
+		// window, in the CAPTURE phase so they fire regardless of focus and preempt
+		// the offscreen input; machine keys (scope absent) fall through to the input
+		// handler above.
 		window.addEventListener(
 			"keydown",
 			(event) => {
@@ -123,12 +133,23 @@ export class Keyboard {
 					event.preventDefault();
 					event.stopImmediatePropagation();
 					this.#actions.tap(binding.command);
-					return;
 				}
-				if (/^F([1-9]|1[0-2])$/.test(event.key)) event.preventDefault();
 			},
 			true,
 		);
+
+		// Browser-shortcut guard (F5 reload → cold boot is the worst offender): when
+		// focus has drifted off the input onto the canvas/body, a bound key would
+		// still trigger its browser default. Suppress it here — in the BUBBLE phase,
+		// so any focused control had first claim, and skipping editable targets so we
+		// never touch typing (or cursor keys) in the palette, dialogs, or the
+		// offscreen input itself. Unbound keys (F12 → DevTools) fall through.
+		window.addEventListener("keydown", (event) => {
+			if (capturingKeys || isEditable(event.target)) return;
+			if (resolveBinding(this.#bindings, this.#normalize(event))) {
+				event.preventDefault();
+			}
+		});
 	}
 
 	/** Release everything held — call when the window loses focus. */

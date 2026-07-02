@@ -122,6 +122,8 @@ export const messages = {
 		keyNone: "Select a key…",
 		combo: "Combo",
 		none: "None",
+		primary: "Primary",
+		makePrimary: "Make primary",
 		layoutWarning:
 			"Key labels assume a US layout — this browser doesn't expose your keyboard layout, so they may not match your keys.",
 		setupLayout: "Set up your keyboard",

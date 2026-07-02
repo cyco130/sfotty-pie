@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import type { EmulatorHost } from "./host.ts";
 import { messages } from "./messages.ts";
 
 // Standard Gamepad layout names by index — hardware tokens, so inline (not
@@ -90,7 +91,42 @@ function AxisBar({ label, value }: { label: string; value: number }) {
 	);
 }
 
-function PadCard({ pad, port }: { pad: PadSnapshot; port: number }) {
+// The port picker for one pad: Off / Player 1-4. Reassigning is live.
+function PortSelect({
+	port,
+	onSelect,
+}: {
+	port: number | null;
+	onSelect: (port: number | null) => void;
+}) {
+	return (
+		<select
+			class="shrink-0 rounded border border-neutral-200 bg-white px-1 py-0.5 text-xs text-neutral-700"
+			value={port === null ? "off" : String(port)}
+			onChange={(e) => {
+				const v = (e.target as HTMLSelectElement).value;
+				onSelect(v === "off" ? null : Number(v));
+			}}
+		>
+			<option value="off">{messages.controllers.off}</option>
+			{[0, 1, 2, 3].map((p) => (
+				<option key={p} value={String(p)}>
+					{messages.controllers.joystick} {p}
+				</option>
+			))}
+		</select>
+	);
+}
+
+function PadCard({
+	pad,
+	port,
+	onPort,
+}: {
+	pad: PadSnapshot;
+	port: number | null;
+	onPort: (port: number | null) => void;
+}) {
 	const standard = pad.mapping === "standard";
 	return (
 		<div class="rounded border border-neutral-200 p-3">
@@ -104,9 +140,9 @@ function PadCard({ pad, port }: { pad: PadSnapshot; port: number }) {
 						: messages.controllers.nonStandard}
 				</span>
 			</div>
-			<p class="mb-3 text-xs text-neutral-500">
-				{messages.controllers.player} {port + 1}
-			</p>
+			<div class="mb-3">
+				<PortSelect port={port} onSelect={onPort} />
+			</div>
 
 			<p class="mb-1 text-xs font-medium text-neutral-500">
 				{messages.controllers.buttons}
@@ -148,15 +184,22 @@ function PadCard({ pad, port }: { pad: PadSnapshot; port: number }) {
  * grid (lit when pressed) and axis bars — for diagnosing what a pad reports.
  * Read-only for now; port assignment, binding, and calibration build on top.
  */
-export function ControllersView() {
+export function ControllersView({ host }: { host: EmulatorHost }) {
 	const pads = useLivePads();
+	// Port assignments, by gamepad.index, from the poller.
+	const ports = new Map(host.gamepads.value.map((p) => [p.index, p.port]));
 	if (pads.length === 0) {
 		return <p class="text-sm text-neutral-500">{messages.controllers.noPad}</p>;
 	}
 	return (
 		<div class="flex flex-col gap-3 overflow-y-auto">
-			{pads.map((pad, port) => (
-				<PadCard key={pad.index} pad={pad} port={port} />
+			{pads.map((pad) => (
+				<PadCard
+					key={pad.index}
+					pad={pad}
+					port={ports.get(pad.index) ?? null}
+					onPort={(port) => host.setGamepadPort(pad.index, port)}
+				/>
 			))}
 		</div>
 	);

@@ -114,6 +114,14 @@ function readPad(pad: Gamepad): PortState {
 	};
 }
 
+/** A connected pad and its Atari-port assignment, for the controllers UI. */
+export interface PadInfo {
+	index: number; // the browser's gamepad.index (its getGamepads() slot)
+	id: string;
+	mapping: string;
+	port: number | null; // assigned Atari port (0-3), or null when off
+}
+
 /**
  * Polls the Gamepad API and drives the joystick commands. The Gamepad API has no
  * button/axis events — state is read by polling — so the emulation loop calls
@@ -123,20 +131,29 @@ function readPad(pad: Gamepad): PortState {
  * edges the commands want.
  *
  * The mapping is hardcoded to the Standard Gamepad layout for now: every pad
- * drives its Atari port (D-pad + left stick → directions, button 0 → trigger),
- * and the player-1 pad also drives the console/meta buttons (see
- * {@link CONSOLE_BUTTONS}). A binding layer and per-device calibration come later.
+ * drives its assigned Atari port (D-pad + left stick → directions, button 0 →
+ * trigger), and the port-0 pad also drives the console/meta buttons (see
+ * {@link CONSOLE_BUTTONS}). Which pad drives which port is an explicit assignment
+ * ({@link setPort}), defaulting to lowest-free-on-connect. A binding layer and
+ * per-device calibration come later.
  */
 export class Gamepads {
 	#actions: GamepadActions;
 	// Last-polled joystick state per port, so a poll emits only the changed edges.
 	#state: PortState[] = PORT_COMMANDS.map(() => CENTERED);
-	// Last-polled state of the player-1 console/meta buttons, parallel to
+	// Last-polled state of the port-0 console/meta buttons, parallel to
 	// CONSOLE_BUTTONS.
 	#consoleState: boolean[] = CONSOLE_BUTTONS.map(() => false);
-	// Connected-pad count. Polling no-ops at zero, so a keyboard-only session
-	// costs nothing; the connect/disconnect events keep it current (see attach).
-	#connected = 0;
+	// Connected pads by gamepad.index → id/mapping, from the connect events.
+	#pads = new Map<number, { id: string; mapping: string }>();
+	// Atari port → the gamepad.index driving it (or null). The source of truth for
+	// who's which player; the UI edits it via setPort. Assignment is stable — a
+	// disconnect frees a port without reshuffling the survivors.
+	#portToIndex: (number | null)[] = PORT_COMMANDS.map(() => null);
+
+	/** Fired whenever the connected set or the assignment changes, so the host can
+	 *  mirror {@link pads} into a signal. */
+	onChange: (() => void) | undefined;
 
 	constructor(actions: GamepadActions) {
 		this.#actions = actions;
@@ -146,12 +163,23 @@ export class Gamepads {
 	 *  {@link poll} is a cheap no-op, so neither poll site touches the Gamepad API
 	 *  in a keyboard-only session. */
 	attach(): () => void {
-		const onConnect = (): void => {
-			this.#connected++;
+		const onConnect = (e: GamepadEvent): void => {
+			const { index, id, mapping } = e.gamepad;
+			this.#pads.set(index, { id, mapping });
+			// Lowest free port; existing pads keep theirs.
+			if (!this.#portToIndex.includes(index)) {
+				const free = this.#portToIndex.indexOf(null);
+				if (free >= 0) this.#portToIndex[free] = index;
+			}
+			this.onChange?.();
 		};
-		const onDisconnect = (): void => {
-			this.#connected = Math.max(0, this.#connected - 1);
-			this.poll(true); // force one poll to release whatever the departing pad held
+		const onDisconnect = (e: GamepadEvent): void => {
+			const { index } = e.gamepad;
+			this.#pads.delete(index);
+			const port = this.#portToIndex.indexOf(index);
+			if (port >= 0) this.#portToIndex[port] = null;
+			this.poll(true); // release whatever the departing pad held
+			this.onChange?.();
 		};
 		window.addEventListener("gamepadconnected", onConnect);
 		window.addEventListener("gamepaddisconnected", onDisconnect);
@@ -161,20 +189,50 @@ export class Gamepads {
 		};
 	}
 
-	/** Sample every connected pad and emit the joystick + console-button edges.
-	 *  Present pads fill ports in connection order; the first pad also drives the
-	 *  console/meta buttons. Absent ports/buttons read as released, so a disconnect
-	 *  frees whatever was held. A no-op when nothing is connected, unless `force`
-	 *  (the disconnect path needs to run once at zero to release). */
+	/** The connected pads with their port assignments — assigned pads first (by
+	 *  port), then the unassigned (by index). */
+	pads(): PadInfo[] {
+		const list: PadInfo[] = [];
+		for (const [index, meta] of this.#pads) {
+			const port = this.#portToIndex.indexOf(index);
+			list.push({ ...meta, index, port: port >= 0 ? port : null });
+		}
+		return list.sort(
+			(a, b) => (a.port ?? 99) - (b.port ?? 99) || a.index - b.index,
+		);
+	}
+
+	/** Assign pad `index` to `port` (0-3) or `null` (off). Swaps with whatever pad
+	 *  held the target port so no two pads share it. */
+	setPort(index: number, port: number | null): void {
+		const oldPort = this.#portToIndex.indexOf(index);
+		if (oldPort >= 0) this.#portToIndex[oldPort] = null;
+		if (port !== null) {
+			const occupant = this.#portToIndex[port];
+			this.#portToIndex[port] = index;
+			// Move the displaced pad to the vacated port (a swap); else it goes off.
+			if (occupant != null && occupant !== index && oldPort >= 0) {
+				this.#portToIndex[oldPort] = occupant;
+			}
+		}
+		this.poll(true); // re-home held inputs to the new ports
+		this.onChange?.();
+	}
+
+	/** Sample the pad on each port and emit the joystick + console-button edges.
+	 *  Unassigned/absent ports read as released, so a disconnect frees whatever was
+	 *  held. A no-op when nothing is connected, unless `force` (the disconnect and
+	 *  reassign paths run once to release/re-home). */
 	poll(force = false): void {
-		if (!force && this.#connected === 0) return;
-		const present: Gamepad[] = [];
-		for (const pad of navigator.getGamepads()) if (pad) present.push(pad);
+		if (!force && this.#pads.size === 0) return;
+		const pads = navigator.getGamepads();
 		for (let port = 0; port < PORT_COMMANDS.length; port++) {
-			const pad = present[port];
+			const index = this.#portToIndex[port];
+			const pad = index != null ? pads[index] : null;
 			this.#apply(port, pad ? readPad(pad) : CENTERED);
 		}
-		this.#applyConsole(present[0]);
+		const p0 = this.#portToIndex[0];
+		this.#applyConsole(p0 != null ? (pads[p0] ?? undefined) : undefined);
 	}
 
 	// Diff a port's new joystick state against the last poll, pressing/releasing on

@@ -1,13 +1,15 @@
 import { ControllersView } from "../../../controllers.tsx";
 import { messages } from "../../../messages.ts";
+import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
-// /a8/emu/controllers — a live monitor of connected gamepads. Reached from the
-// menu. Read-only for now (diagnosis); binding and calibration build on it.
+// /a8/emu/controllers — a live monitor of connected gamepads with per-pad port
+// assignment. Reached from the menu. Binding and calibration build on it.
 export default function ControllersPage() {
+	const { host } = useEmu();
 	return (
 		<PanelFrame title={messages.sidebar.titleControllers}>
-			<ControllersView />
+			<ControllersView host={host} />
 		</PanelFrame>
 	);
 }

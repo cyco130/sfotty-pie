@@ -20,7 +20,7 @@ import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
 import type { Binding, KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
-import { Gamepads } from "./gamepad.ts";
+import { Gamepads, type PadInfo } from "./gamepad.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
 	addOrFindImage,
@@ -253,6 +253,10 @@ export class EmulatorHost {
 	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
 	readonly keyBindings = signal<Binding[]>([]);
 
+	/** Connected gamepads and their Atari-port assignments, for the controllers
+	 *  panel. Mirrored from the poller on connect/disconnect/reassign. */
+	readonly gamepads = signal<PadInfo[]>([]);
+
 	/** The layout snapshot the bindings were baked from (`code` → legend), used to
 	 *  label the editor's live preview — existing chords carry their own baked
 	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
@@ -412,6 +416,10 @@ export class EmulatorHost {
 			press: (command) => this.press(command),
 			release: (command) => this.release(command),
 		});
+		// Mirror the pad set / port assignment into a signal for the panel.
+		this.#gamepads.onChange = () => {
+			this.gamepads.value = this.#gamepads.pads();
+		};
 
 		// The audio context resumes/suspends asynchronously; track it.
 		if (audio) {
@@ -569,6 +577,12 @@ export class EmulatorHost {
 		const machine = this.#emulator.machine;
 		machine.joystickUp(0, 0x0f & ~mask);
 		machine.joystickDown(0, mask);
+	}
+
+	/** Assign a connected gamepad (by its `gamepad.index`) to an Atari port (0-3)
+	 *  or `null` for off — the controllers panel's port selector. */
+	setGamepadPort(index: number, port: number | null): void {
+		this.#gamepads.setPort(index, port);
 	}
 
 	// The best-ranked built-in firmware present in the library for a list of

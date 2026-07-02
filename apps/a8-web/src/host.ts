@@ -99,6 +99,7 @@ export type SidebarPanel =
 	| "config"
 	| "palette"
 	| "keys"
+	| "controllers"
 	| "roms"
 	| "library";
 

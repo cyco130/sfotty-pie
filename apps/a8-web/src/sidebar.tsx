@@ -238,6 +238,7 @@ const MENU_COMMANDS = [
 	{ command: "OPEN_ROMS", label: messages.menu.roms },
 	{ command: "OPEN_PALETTE", label: messages.menu.palette },
 	{ command: "OPEN_KEYS", label: messages.menu.keys },
+	{ command: "OPEN_CONTROLLERS", label: messages.menu.controllers },
 ] as const satisfies readonly { command: Command; label: string }[];
 
 // The four arrows that drive joystick 0 as shipped. The key-mappings help shows

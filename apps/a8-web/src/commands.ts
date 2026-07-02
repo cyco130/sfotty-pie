@@ -148,6 +148,10 @@ export const commands = {
 		run: ({ host }) => host.showPanel("palette"),
 	},
 	OPEN_KEYS: { label: "OPEN_KEYS", run: ({ host }) => host.showPanel("keys") },
+	OPEN_CONTROLLERS: {
+		label: "OPEN_CONTROLLERS",
+		run: ({ host }) => host.showPanel("controllers"),
+	},
 
 	// Full-screen the whole app (chrome included), so the on-screen controls
 	// stay reachable. A no-op-safe toggle; also bound to a double-click on the

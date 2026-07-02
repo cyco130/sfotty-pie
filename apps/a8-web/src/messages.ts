@@ -109,6 +109,19 @@ export const messages = {
 		titleConfig: "Machine",
 		titlePalette: "Commands",
 		titleKeys: "Shortcuts",
+		titleControllers: "Controllers",
+	},
+
+	// The controllers panel: a live view of connected gamepads for diagnosis and
+	// (later) binding. Button/axis names are hardware tokens and stay inline; only
+	// the surrounding copy is here.
+	controllers: {
+		noPad: "Connect a controller and press a button to see it here.",
+		standard: "Standard mapping",
+		nonStandard: "Non-standard mapping",
+		player: "Player",
+		buttons: "Buttons",
+		axes: "Axes",
 	},
 
 	// The main menu is a launcher, so its entries read as short destinations —
@@ -121,6 +134,7 @@ export const messages = {
 		roms: "ROM preferences…",
 		palette: "Command palette…",
 		keys: "Keyboard shortcuts…",
+		controllers: "Controllers…",
 	},
 
 	shortcuts: {
@@ -460,6 +474,7 @@ export const labels = {
 	OPEN_CONFIG: "Machine: Open configuration…",
 	OPEN_PALETTE: "View: Open command palette…",
 	OPEN_KEYS: "Keyboard: Open shortcuts…",
+	OPEN_CONTROLLERS: "Controllers: Open panel…",
 	CLOSE_PANEL: "View: Close panel",
 	OPEN_ROMS: "Machine: Open ROM preferences…",
 	OPEN_LIBRARY: "Library: Open…",

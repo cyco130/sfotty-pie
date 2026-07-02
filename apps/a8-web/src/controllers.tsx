@@ -1,0 +1,163 @@
+import { useEffect, useState } from "preact/hooks";
+import { messages } from "./messages.ts";
+
+// Standard Gamepad layout names by index — hardware tokens, so inline (not
+// translated). Shown only for pads that report mapping === "standard"; a
+// non-standard pad shows raw indices instead, which is exactly what you need to
+// see where its controls actually live.
+const STANDARD_BUTTONS = [
+	"A / ✕",
+	"B / ○",
+	"X / □",
+	"Y / △",
+	"L1",
+	"R1",
+	"L2",
+	"R2",
+	"Select",
+	"Start",
+	"L3",
+	"R3",
+	"↑",
+	"↓",
+	"←",
+	"→",
+	"Guide",
+];
+const STANDARD_AXES = ["LX", "LY", "RX", "RY"];
+
+// A poll's-worth of one pad's state, copied out of the live Gamepad object (which
+// is a snapshot that goes stale) so it survives into render.
+interface PadSnapshot {
+	index: number;
+	id: string;
+	mapping: string;
+	buttons: { pressed: boolean; value: number }[];
+	axes: number[];
+}
+
+function snapshot(): PadSnapshot[] {
+	const out: PadSnapshot[] = [];
+	for (const p of navigator.getGamepads()) {
+		if (!p) continue;
+		out.push({
+			index: p.index,
+			id: p.id,
+			mapping: p.mapping,
+			buttons: p.buttons.map((b) => ({ pressed: b.pressed, value: b.value })),
+			axes: [...p.axes],
+		});
+	}
+	// Lowest index first, matching the poller's connection-order ports.
+	return out.sort((a, b) => a.index - b.index);
+}
+
+// Mirror the live pad state on animation frames while mounted. Independent of the
+// emulator's own poll — this view just reflects raw input for diagnosis (and,
+// later, binding capture).
+function useLivePads(): PadSnapshot[] {
+	const [pads, setPads] = useState<PadSnapshot[]>(snapshot);
+	useEffect(() => {
+		let raf = requestAnimationFrame(function tick() {
+			setPads(snapshot());
+			raf = requestAnimationFrame(tick);
+		});
+		return () => cancelAnimationFrame(raf);
+	}, []);
+	return pads;
+}
+
+// One axis as a centre-anchored bar (−1 left, +1 right) plus its value.
+function AxisBar({ label, value }: { label: string; value: number }) {
+	const pct = (value / 2) * 100; // −50…50, measured from the centre
+	return (
+		<div class="flex items-center gap-2 text-xs">
+			<span class="w-8 shrink-0 text-neutral-500">{label}</span>
+			<div class="relative h-2 flex-1 rounded bg-neutral-100">
+				<div class="absolute left-1/2 top-0 h-full w-px bg-neutral-300" />
+				<div
+					class="absolute top-0 h-full rounded bg-sky-500"
+					style={{
+						left: `${pct < 0 ? 50 + pct : 50}%`,
+						width: `${Math.abs(pct)}%`,
+					}}
+				/>
+			</div>
+			<span class="w-10 shrink-0 text-right tabular-nums text-neutral-500">
+				{value.toFixed(2)}
+			</span>
+		</div>
+	);
+}
+
+function PadCard({ pad, port }: { pad: PadSnapshot; port: number }) {
+	const standard = pad.mapping === "standard";
+	return (
+		<div class="rounded border border-neutral-200 p-3">
+			<div class="mb-1 flex items-center justify-between gap-2">
+				<span class="truncate text-sm font-medium" title={pad.id}>
+					{pad.id}
+				</span>
+				<span class="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">
+					{standard
+						? messages.controllers.standard
+						: messages.controllers.nonStandard}
+				</span>
+			</div>
+			<p class="mb-3 text-xs text-neutral-500">
+				{messages.controllers.player} {port + 1}
+			</p>
+
+			<p class="mb-1 text-xs font-medium text-neutral-500">
+				{messages.controllers.buttons}
+			</p>
+			<div class="mb-3 grid grid-cols-4 gap-1">
+				{pad.buttons.map((b, i) => (
+					<div
+						key={i}
+						class={`rounded px-1 py-1 text-center text-xs tabular-nums ${
+							b.pressed
+								? "bg-emerald-500 text-white"
+								: "bg-neutral-100 text-neutral-500"
+						}`}
+						title={standard ? STANDARD_BUTTONS[i] : String(i)}
+					>
+						{standard ? (STANDARD_BUTTONS[i] ?? i) : i}
+					</div>
+				))}
+			</div>
+
+			<p class="mb-1 text-xs font-medium text-neutral-500">
+				{messages.controllers.axes}
+			</p>
+			<div class="flex flex-col gap-1">
+				{pad.axes.map((v, i) => (
+					<AxisBar
+						key={i}
+						label={standard ? (STANDARD_AXES[i] ?? String(i)) : String(i)}
+						value={v}
+					/>
+				))}
+			</div>
+		</div>
+	);
+}
+
+/**
+ * The controllers panel body: a live monitor of every connected gamepad — button
+ * grid (lit when pressed) and axis bars — for diagnosing what a pad reports.
+ * Read-only for now; port assignment, binding, and calibration build on top.
+ */
+export function ControllersView() {
+	const pads = useLivePads();
+	if (pads.length === 0) {
+		return <p class="text-sm text-neutral-500">{messages.controllers.noPad}</p>;
+	}
+	return (
+		<div class="flex flex-col gap-3 overflow-y-auto">
+			{pads.map((pad, port) => (
+				<PadCard key={pad.index} pad={pad} port={port} />
+			))}
+		</div>
+	);
+}

@@ -9,7 +9,12 @@ export default function AtariIndexPage() {
 	return (
 		<PlaceholderIndex heading={t.heading}>
 			<NavLink href="/a8/emu">{t.emu}</NavLink>
-			<NavLink href="/a8/reference">{t.reference}</NavLink>
+			<NavLink href="/a8/docs" description={t.docsDesc}>
+				{t.docs}
+			</NavLink>
+			<NavLink href="/a8/reference" description={t.referenceDesc}>
+				{t.reference}
+			</NavLink>
 		</PlaceholderIndex>
 	);
 }

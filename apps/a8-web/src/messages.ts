@@ -27,6 +27,10 @@ export const messages = {
 	pages: {
 		home: {
 			title: "Sfotty Pie",
+			// Kept short for the meta description / social-card unfurl (the lead
+			// is too long); see head.ts.
+			description:
+				"A cycle-exact 6502 toolkit: run the Atari 8-bit in your browser, plus a 6502 core and assembler.",
 			heading: "Sfotty Pie",
 			lead: "Sfotty Pie is a set of tools for the 6502 (Sixty-Five-Oh-Two), the 8-bit CPU behind the Atari 8-bit, Apple II, Commodore 64, NES, and many others. It spans a cycle-exact 6502 core, an Atari 8-bit machine, and a 6502 assembler.",
 			launch: "Atari 8-bit emulator",
@@ -42,7 +46,10 @@ export const messages = {
 			title: "Atari 8-bit — Sfotty Pie",
 			heading: "Atari 8-bit",
 			emu: "Emulator",
+			docs: "Docs",
+			docsDesc: "Getting started and how-to guides.",
 			reference: "Reference",
+			referenceDesc: "Keyboard, ATASCII, and character tables.",
 		},
 		reference: {
 			title: "Reference — Sfotty Pie",
@@ -140,8 +147,10 @@ export const messages = {
 
 	// The main menu is a launcher, so its entries read as short destinations —
 	// not the palette's "Category: verb" phrasing (though they run the same
-	// commands). Order matches MENU_COMMANDS in sidebar.tsx.
+	// commands). Order (after `docs`) matches MENU_COMMANDS in sidebar.tsx;
+	// `docs` is a standalone link to the docs subapp, not a command.
 	menu: {
+		docs: "Help & docs",
 		config: "Machine configuration…",
 		boot: "Boot image…",
 		library: "Library…",

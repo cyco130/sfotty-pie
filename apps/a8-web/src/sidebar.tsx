@@ -311,6 +311,20 @@ export function MenuView({
 	return (
 		<div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
 			<section class="flex flex-col gap-1">
+				{/* Docs link, as the first menu entry. Opens in a new tab: this
+				    layout owns the live machine, so navigating away in-place
+				    would tear the running program down. */}
+				<a
+					href="/a8/docs"
+					target="_blank"
+					rel="noreferrer"
+					class="flex items-center gap-1.5 text-left text-sm hover:underline"
+				>
+					{messages.menu.docs}
+					<span aria-hidden="true" class="text-neutral-400">
+						↗
+					</span>
+				</a>
 				{MENU_COMMANDS.map(({ command, label }) => {
 					const chord = chords.get(command);
 					return (

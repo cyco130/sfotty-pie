@@ -11,13 +11,14 @@ import { Root } from "./root.tsx";
 // We emit static markup only for the docs subapp. Every other route — including
 // `/`, which the plugin always seeds and writes into index.html — returns an
 // empty shell, so index.html keeps its empty #app and remains a neutral SPA
-// fallback for all client-only routes. Discovered links are filtered to /docs
-// so the crawler never wanders into the emulator, which can't render in Node.
+// fallback for all client-only routes. Discovered links are filtered to
+// /a8/docs so the crawler never wanders into the emulator, which can't render
+// in Node.
 export async function prerender(data: { url: string }) {
-	if (!data.url.startsWith("/docs")) return { html: "" };
+	if (!data.url.startsWith("/a8/docs")) return { html: "" };
 	const { html, links } = await renderToStaticHtml(<Root />);
 	const docsLinks = new Set(
-		[...(links ?? [])].filter((href) => href.startsWith("/docs")),
+		[...(links ?? [])].filter((href) => href.startsWith("/a8/docs")),
 	);
 	return { html, links: docsLinks };
 }

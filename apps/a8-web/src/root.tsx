@@ -35,9 +35,9 @@ const AtasciiKeyboard = lazy(
 const LabsIndex = lazy(() => import("./routes/labs/(labs).page.tsx"));
 const KeyboardLab = lazy(() => import("./routes/labs/keyboard.page.tsx"));
 const DocsLayout = lazy(() =>
-	import("./routes/docs/docs.layout.tsx").then((m) => m.DocsLayout),
+	import("./routes/a8/docs/docs.layout.tsx").then((m) => m.DocsLayout),
 );
-const DocsIndex = lazy(() => import("./routes/docs/(docs).page.mdx"));
+const DocsIndex = lazy(() => import("./routes/a8/docs/(docs).page.mdx"));
 
 // Capture preact-iso's `route` into the module-level navigate() so non-component
 // code (the host) can navigate. Lives inside LocationProvider.
@@ -72,10 +72,10 @@ function EmuSection() {
 	);
 }
 
-// /docs/* — the docs shell wrapping a nested router of MDX pages, mirroring
-// EmuSection. Same two-route (`/docs` + `/docs/*`) trick so the bare /docs hits
-// the nested "/" page without remounting the layout when navigating between
-// docs.
+// /a8/docs/* — the docs shell wrapping a nested router of MDX pages, mirroring
+// EmuSection. Same two-route (`/a8/docs` + `/a8/docs/*`) trick so the bare
+// /a8/docs hits the nested "/" page without remounting the layout when
+// navigating between docs.
 function DocsSection() {
 	return (
 		<DocsLayout>
@@ -112,8 +112,8 @@ export function Root() {
 				/>
 				<Route path="/labs" component={LabsIndex} />
 				<Route path="/labs/keyboard" component={KeyboardLab} />
-				<Route path="/docs" component={DocsSection} />
-				<Route path="/docs/*" component={DocsSection} />
+				<Route path="/a8/docs" component={DocsSection} />
+				<Route path="/a8/docs/*" component={DocsSection} />
 				<Route default component={NotFoundPage} />
 			</Router>
 		</LocationProvider>

@@ -12,9 +12,10 @@ import { firmwareLibrary } from "./firmware-library-plugin.ts";
 // Rename each prerendered `<route>/index.html` on disk to a flat `<route>.html`
 // (leaving the root `index.html` alone), removing the now-empty directory.
 // Cloudflare Pages derives its trailing-slash behaviour from the file layout: a
-// directory-style `docs/index.html` makes `/docs/` canonical and redirects
-// `/docs` → `/docs/`, whereas a flat `docs.html` makes `/docs` canonical and
-// redirects the other way — which is what we want. Done in `writeBundle` (files
+// directory-style `a8/docs/index.html` makes `/a8/docs/` canonical and
+// redirects `/a8/docs` → `/a8/docs/`, whereas a flat `a8/docs.html` makes
+// `/a8/docs` canonical and redirects the other way — which is what we want.
+// Done in `writeBundle` (files
 // already on disk) rather than by re-keying the bundle, which desyncs Rollup's
 // emitted-asset bookkeeping and drops the file.
 function flattenPrerenderedHtml(): Plugin {
@@ -71,7 +72,7 @@ export default defineConfig({
 		{ ...mdx({ jsxImportSource: "preact" }), enforce: "pre" },
 		// Build-time prerender of the docs subapp only. The build-time entry
 		// (src/prerender.tsx, referenced explicitly so it never ships to the
-		// browser) emits real markup for /docs* and an empty shell for
+		// browser) emits real markup for /a8/docs* and an empty shell for
 		// everything else, including `/` which the plugin always writes into
 		// index.html — keeping index.html a neutral SPA fallback. `renderTarget`
 		// matches where main.tsx mounts (<main id="app">).
@@ -82,7 +83,7 @@ export default defineConfig({
 					new URL("./src/prerender.tsx", import.meta.url),
 				),
 				renderTarget: "#app",
-				additionalPrerenderRoutes: ["/docs"],
+				additionalPrerenderRoutes: ["/a8/docs"],
 				previewMiddlewareEnabled: true,
 			},
 		}),

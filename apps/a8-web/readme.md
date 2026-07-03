@@ -33,7 +33,7 @@ The headless emulator lives in `@sfotty-pie/a8`; this app is the I/O and chrome 
 
 ### Reference and dev pages
 
-- **`/docs/`** — the documentation subapp. Prose authored in MDX (compiled to Preact components by `@mdx-js/rollup`, styled with the Tailwind Typography `prose` defaults) under a nested layout shell. Unlike the rest of the app it's **prerendered to static HTML at build time** (see [`src/prerender.tsx`](src/prerender.tsx)) so its pages are real files — crawlable and first-paint-ready — while everything else stays client-rendered. Source in [`src/routes/docs/`](src/routes/docs/).
+- **`/a8/docs`** — the documentation subapp. Prose authored in MDX (compiled to Preact components by `@mdx-js/rollup`, styled with the Tailwind Typography `prose` defaults) under a nested layout shell. Unlike the rest of the app it's **prerendered to static HTML at build time** (see [`src/prerender.tsx`](src/prerender.tsx)) so its pages are real files — crawlable and first-paint-ready — while everything else stays client-rendered. Source in [`src/routes/a8/docs/`](src/routes/a8/docs/).
 - **`/a8/reference/atascii-and-keyboard`** — a generated reference for the keyboard and the ATASCII/ANTIC character set: a keyboard map (hover, or click a key to pin its scan codes and functions), the full character table, the POKEY scan-code table, and the 8×8 key matrix. Source in [`src/docs/`](src/docs/), data in [`src/keyboard-docs.ts`](src/keyboard-docs.ts).
 - **[`keyboard-lab.html`](keyboard-lab.html)** — a scratch page (served at `/keyboard-lab.html`) that logs raw `keydown` / `keyup` / `input` / `composition` events, handy for untangling browser keyboard quirks. Built and deployed with the app so its capturability probes can be run on borrowed or remote machines across OSes and browsers.
 
@@ -68,7 +68,7 @@ pnpm --filter @sfotty-pie/a8-web build
 Output is `apps/a8-web/dist/` — plain static files. Notes for hosting:
 
 - **Serve over HTTPS.** Audio (and more later) needs a secure context.
-- The docs subapp is prerendered to real files (`/docs/` → `docs/index.html`); the rest is a client-rendered SPA served from `index.html`. Together with `/keyboard-lab.html`, hashed assets, and real files under `/legal/`, the output is all static — **no SPA-style catch-all redirect** is needed.
+- The docs subapp is prerendered to real files (`/a8/docs` → `a8/docs.html`); the rest is a client-rendered SPA served from `index.html`. Together with `/keyboard-lab.html`, hashed assets, and real files under `/legal/`, the output is all static — **no SPA-style catch-all redirect** is needed.
 - The committed build is **firmware-only** — `library.local/` is gitignored, so a clean CI/host build won't include your ROMs or games. Bake those in by populating `library.local/` in your build environment.
 
 Any static host works (e.g. `rsync` the `dist/` to a web root).

@@ -12,8 +12,14 @@ export function DocsLayout({ children }: { children: ComponentChildren }) {
 					Docs
 				</a>
 			</aside>
-			<main class="mx-auto max-w-2xl flex-1 overflow-y-auto p-8">
-				{children}
+			<main class="flex-1 overflow-y-auto p-8">
+				{/* `prose` supplies the Typography plugin's reading defaults;
+				    `prose-invert` flips them for the dark background. The MDX
+				    page renders bare h1/p/ul/… elements here, so this is what
+				    styles them until (if) we add an MDXProvider component map. */}
+				<article class="prose prose-invert prose-neutral mx-auto">
+					{children}
+				</article>
 			</main>
 		</div>
 	);

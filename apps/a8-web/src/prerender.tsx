@@ -14,14 +14,15 @@ import { Root } from "./root.tsx";
 // module is never referenced by index.html, so it stays out of the client
 // bundle entirely.
 //
-// We emit static markup only for the docs subapp. Every other route — including
-// `/`, which the plugin always seeds and writes into index.html — returns an
-// empty shell, so index.html keeps its empty #app and remains a neutral SPA
-// fallback for all client-only routes. Discovered links are filtered to
-// /a8/docs so the crawler never wanders into the emulator, which can't render
-// in Node.
+// We prerender the landing page (`/`, which the plugin writes into index.html)
+// and the docs subapp; everything else returns an empty shell so its fallback
+// stays a neutral SPA host. The emulator routes can't render in Node (they need
+// browser APIs), so we neither seed them nor follow links into them: discovered
+// links are filtered to /a8/docs, dropping the home page's link out to
+// /a8/emu.
 export async function prerender(data: { url: string }) {
-	if (!data.url.startsWith("/a8/docs")) return { html: "" };
+	const prerenderable = data.url === "/" || data.url.startsWith("/a8/docs");
+	if (!prerenderable) return { html: "" };
 	// A request-scoped sink the page's <Head>/useHead hands its data to during
 	// render. renderToStaticHtml awaits the lazy route tree, so it's populated
 	// by the time this resolves.

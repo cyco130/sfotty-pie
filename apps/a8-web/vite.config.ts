@@ -1,11 +1,45 @@
 import { execSync } from "node:child_process";
+import { readdir, rename, rmdir } from "node:fs/promises";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import mdx from "@mdx-js/rollup";
 import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { firmwareLibrary } from "./firmware-library-plugin.ts";
+
+// Rename each prerendered `<route>/index.html` on disk to a flat `<route>.html`
+// (leaving the root `index.html` alone), removing the now-empty directory.
+// Cloudflare Pages derives its trailing-slash behaviour from the file layout: a
+// directory-style `docs/index.html` makes `/docs/` canonical and redirects
+// `/docs` → `/docs/`, whereas a flat `docs.html` makes `/docs` canonical and
+// redirects the other way — which is what we want. Done in `writeBundle` (files
+// already on disk) rather than by re-keying the bundle, which desyncs Rollup's
+// emitted-asset bookkeeping and drops the file.
+function flattenPrerenderedHtml(): Plugin {
+	return {
+		name: "flatten-prerendered-html",
+		apply: "build",
+		enforce: "post",
+		async writeBundle(options, bundle) {
+			const outDir = options.dir ?? "dist";
+			for (const fileName of Object.keys(bundle)) {
+				if (fileName === "index.html") continue;
+				if (!fileName.endsWith("/index.html")) continue;
+				const dir = fileName.slice(0, -"/index.html".length);
+				await rename(
+					path.join(outDir, fileName),
+					path.join(outDir, `${dir}.html`),
+				);
+				// Drop the directory if flattening emptied it (nested doc pages
+				// may leave sibling files behind, so only remove when empty).
+				const abs = path.join(outDir, dir);
+				if ((await readdir(abs)).length === 0) await rmdir(abs);
+			}
+		},
+	};
+}
 
 // The commit the build was made from, surfaced in the UI to identify manual
 // deployments. Marked `-dirty` when the tree has uncommitted changes, and
@@ -52,6 +86,7 @@ export default defineConfig({
 				previewMiddlewareEnabled: true,
 			},
 		}),
+		flattenPrerenderedHtml(),
 		tailwindcss(),
 		basicSsl(),
 		firmwareLibrary(),

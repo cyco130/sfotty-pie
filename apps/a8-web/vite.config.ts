@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import mdx from "@mdx-js/rollup";
 import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
@@ -34,7 +35,23 @@ export default defineConfig({
 	// automatic JSX runtime to match the rest of the app.
 	plugins: [
 		{ ...mdx({ jsxImportSource: "preact" }), enforce: "pre" },
-		preact(),
+		// Build-time prerender of the docs subapp only. The build-time entry
+		// (src/prerender.tsx, referenced explicitly so it never ships to the
+		// browser) emits real markup for /docs* and an empty shell for
+		// everything else, including `/` which the plugin always writes into
+		// index.html — keeping index.html a neutral SPA fallback. `renderTarget`
+		// matches where main.tsx mounts (<main id="app">).
+		preact({
+			prerender: {
+				enabled: true,
+				prerenderScript: fileURLToPath(
+					new URL("./src/prerender.tsx", import.meta.url),
+				),
+				renderTarget: "#app",
+				additionalPrerenderRoutes: ["/docs"],
+				previewMiddlewareEnabled: true,
+			},
+		}),
 		tailwindcss(),
 		basicSsl(),
 		firmwareLibrary(),

@@ -1,0 +1,31 @@
+<!--
+  Source for the social-card image served at /og.png (1200x630). The pie logo
+  is composited in from public/sfotty-pie.svg rather than embedded, so this file
+  stays just the background + wordmark. Regenerate with:
+
+    rsvg-convert media/og.svg -w 1200 -h 630 -o /tmp/og-bg.png
+    rsvg-convert public/sfotty-pie.svg -w 300 -h 300 -o /tmp/og-logo.png
+    magick /tmp/og-bg.png /tmp/og-logo.png -geometry +110+175 -composite public/og.png
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#100d09"/>
+      <stop offset="1" stop-color="#000000"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="260" cy="325" r="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#edc07a" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#edc07a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <!-- pie logo is composited in at +110+175 (300x300) -->
+
+  <text x="470" y="290" font-family="Helvetica, Arial, sans-serif" font-size="104" font-weight="800" fill="#f6f1e7" letter-spacing="-2">Sfotty Pie</text>
+  <rect x="474" y="322" width="132" height="7" rx="3" fill="#edc07a"/>
+  <text x="474" y="396" font-family="Helvetica, Arial, sans-serif" font-size="40" font-weight="500" fill="#c3bcae">Atari 8-bit emulator, in your browser</text>
+  <text x="474" y="448" font-family="Helvetica, Arial, sans-serif" font-size="30" font-weight="400" fill="#847d70">Cycle-exact 6502 core · 6502 assembler</text>
+</svg>

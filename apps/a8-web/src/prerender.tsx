@@ -1,4 +1,10 @@
 import { prerender as renderToStaticHtml } from "preact-iso";
+import {
+	HeadCollector,
+	type HeadProps,
+	type HeadSink,
+	toPrerenderHead,
+} from "./head.ts";
 import { Root } from "./root.tsx";
 
 // Build-time only. vite-prerender-plugin (wired via prerenderScript in
@@ -16,9 +22,23 @@ import { Root } from "./root.tsx";
 // in Node.
 export async function prerender(data: { url: string }) {
 	if (!data.url.startsWith("/a8/docs")) return { html: "" };
-	const { html, links } = await renderToStaticHtml(<Root />);
+	// A request-scoped sink the page's <Head>/useHead hands its data to during
+	// render. renderToStaticHtml awaits the lazy route tree, so it's populated
+	// by the time this resolves.
+	let collected: HeadProps | null = null;
+	const sink: HeadSink = {
+		collect: (head) => {
+			collected = head;
+		},
+	};
+	const { html, links } = await renderToStaticHtml(
+		<HeadCollector.Provider value={sink}>
+			<Root />
+		</HeadCollector.Provider>,
+	);
 	const docsLinks = new Set(
 		[...(links ?? [])].filter((href) => href.startsWith("/a8/docs")),
 	);
-	return { html, links: docsLinks };
+	const head = collected ? toPrerenderHead(collected) : undefined;
+	return { html, head, links: docsLinks };
 }

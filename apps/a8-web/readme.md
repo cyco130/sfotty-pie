@@ -33,7 +33,8 @@ The headless emulator lives in `@sfotty-pie/a8`; this app is the I/O and chrome 
 
 ### Reference and dev pages
 
-- **`/docs/`** — a generated reference for the keyboard and the ATASCII/ANTIC character set: a keyboard map (hover, or click a key to pin its scan codes and functions), the full character table, the POKEY scan-code table, and the 8×8 key matrix. Built and deployed with the app; source in [`src/docs/`](src/docs/), data in [`src/keyboard-docs.ts`](src/keyboard-docs.ts).
+- **`/a8/docs`** — the documentation subapp. Prose authored in MDX (compiled to Preact components by `@mdx-js/rollup`, styled with the Tailwind Typography `prose` defaults) under a nested layout shell. Unlike the rest of the app it's **prerendered to static HTML at build time** (see [`src/prerender.tsx`](src/prerender.tsx)) so its pages are real files — crawlable and first-paint-ready — while everything else stays client-rendered. Source in [`src/routes/a8/docs/`](src/routes/a8/docs/).
+- **`/a8/reference/atascii-and-keyboard`** — a generated reference for the keyboard and the ATASCII/ANTIC character set: a keyboard map (hover, or click a key to pin its scan codes and functions), the full character table, the POKEY scan-code table, and the 8×8 key matrix. Source in [`src/docs/`](src/docs/), data in [`src/keyboard-docs.ts`](src/keyboard-docs.ts).
 - **[`keyboard-lab.html`](keyboard-lab.html)** — a scratch page (served at `/keyboard-lab.html`) that logs raw `keydown` / `keyup` / `input` / `composition` events, handy for untangling browser keyboard quirks. Built and deployed with the app so its capturability probes can be run on borrowed or remote machines across OSes and browsers.
 
 ## The image library
@@ -47,17 +48,27 @@ Each has `firmware/` and `other/` subfolders. Firmware is identified (by CRC/ban
 
 So to run your own build with the real Atari ROMs and a games library, drop them into `library.local/firmware/` and `library.local/other/` — no code changes. (Users can also load images at runtime via **Boot image…**.)
 
-## Building and deploying your own
+## Building and deploying
+
+The official target is **Cloudflare Pages**, deployed from the CLI:
 
 ```sh
-pnpm build # the packages
+pnpm --filter @sfotty-pie/a8-web deploy
+```
+
+That runs the app build and `wrangler pages deploy dist` (the `deploy` script); Wrangler needs to be authenticated against the target account.
+
+Custom hosts are supported too — build the static output and serve it anywhere:
+
+```sh
+pnpm build # the workspace packages a8-web depends on
 pnpm --filter @sfotty-pie/a8-web build
 ```
 
 Output is `apps/a8-web/dist/` — plain static files. Notes for hosting:
 
 - **Serve over HTTPS.** Audio (and more later) needs a secure context.
-- It's static pages (`index.html`, `/docs/`, and `/keyboard-lab.html`) with hashed assets and real files under `/legal/`, so **no SPA-style catch-all redirect** is needed.
+- The docs subapp is prerendered to real files (`/a8/docs` → `a8/docs.html`); the rest is a client-rendered SPA served from `index.html`. Together with `/keyboard-lab.html`, hashed assets, and real files under `/legal/`, the output is all static — **no SPA-style catch-all redirect** is needed.
 - The committed build is **firmware-only** — `library.local/` is gitignored, so a clean CI/host build won't include your ROMs or games. Bake those in by populating `library.local/` in your build environment.
 
 Any static host works (e.g. `rsync` the `dist/` to a web root).

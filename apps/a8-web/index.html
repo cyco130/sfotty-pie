@@ -8,6 +8,22 @@
 		/>
 		<title>Sfotty Pie A8 Web</title>
 		<link rel="icon" type="image/svg+xml" href="/sfotty-pie.svg" />
+		<!-- Constant social-card tags. The per-page og:title/og:description are
+		     injected by the prerender pass (see head.ts); these never vary, so
+		     they live here and are inherited by every prerendered page. The
+		     1200×630 card (media/og.svg → public/og.png) is referenced
+		     root-relative; give og:image an absolute URL once SITE_ORIGIN lands,
+		     since a few scrapers require it. -->
+		<meta property="og:site_name" content="Sfotty Pie" />
+		<meta property="og:type" content="website" />
+		<meta property="og:image" content="/og.png" />
+		<meta property="og:image:width" content="1200" />
+		<meta property="og:image:height" content="630" />
+		<meta
+			property="og:image:alt"
+			content="Sfotty Pie — Atari 8-bit emulator, in your browser"
+		/>
+		<meta name="twitter:card" content="summary_large_image" />
 		<style>
 			html,
 			body,

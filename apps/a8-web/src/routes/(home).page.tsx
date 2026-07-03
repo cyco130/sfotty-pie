@@ -5,7 +5,7 @@ const GITHUB_URL = "https://github.com/cyco130/sfotty-pie";
 
 export default function HomePage() {
 	const t = messages.pages.home;
-	useHead({ title: t.title });
+	useHead({ title: t.title, description: t.description });
 	return (
 		<main class="flex h-full flex-col overflow-y-auto bg-black text-neutral-300">
 			<div class="flex flex-1 flex-col items-center justify-center gap-6 p-8 text-center">

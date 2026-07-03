@@ -20,13 +20,25 @@ export function PlaceholderIndex({
 export function NavLink({
 	href,
 	children,
+	description,
 }: {
 	href: string;
 	children: ComponentChildren;
+	description?: string;
 }) {
+	if (description === undefined) {
+		return (
+			<a href={href} class="text-neutral-200 underline hover:text-white">
+				{children}
+			</a>
+		);
+	}
 	return (
-		<a href={href} class="text-neutral-200 underline hover:text-white">
-			{children}
+		<a href={href} class="group block">
+			<span class="text-neutral-200 underline group-hover:text-white">
+				{children}
+			</span>
+			<span class="mt-0.5 block text-sm text-neutral-500">{description}</span>
 		</a>
 	);
 }

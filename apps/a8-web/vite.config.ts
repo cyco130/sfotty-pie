@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import mdx from "@mdx-js/rollup";
 import preact from "@preact/preset-vite";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import tailwindcss from "@tailwindcss/vite";
@@ -19,6 +20,7 @@ function gitHash(): string {
 }
 
 export default defineConfig({
+	appType: "spa",
 	// Build-time constant: replaces `import.meta.env.GIT_HASH` in the source.
 	define: { "import.meta.env.GIT_HASH": JSON.stringify(gitHash()) },
 	// basicSsl serves dev over HTTPS so the page is a secure context on a LAN
@@ -26,7 +28,17 @@ export default defineConfig({
 	// testing on a real device. Expect a one-time "untrusted certificate"
 	// prompt in the browser. `host: true` exposes the server on the LAN so the
 	// device can reach it in the first place.
-	plugins: [preact(), tailwindcss(), basicSsl(), firmwareLibrary()],
+	// `enforce: "pre"` runs the MDX compiler before @preact/preset-vite's babel,
+	// so .md(x) files arrive at preset-vite as ordinary Preact JSX (a
+	// default-exported component). `jsxImportSource: "preact"` targets Preact's
+	// automatic JSX runtime to match the rest of the app.
+	plugins: [
+		{ ...mdx({ jsxImportSource: "preact" }), enforce: "pre" },
+		preact(),
+		tailwindcss(),
+		basicSsl(),
+		firmwareLibrary(),
+	],
 	// Treat ROM/image files as binary assets so the library's globbed imports
 	// emit them as hashed assets instead of trying to parse them as source.
 	assetsInclude: ["**/*.rom", "**/*.xex", "**/*.atr", "**/*.car"],

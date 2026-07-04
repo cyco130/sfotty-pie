@@ -17,7 +17,8 @@ pnpm install --frozen-lockfile
 ## Layout
 
 - `packages/*` — published libraries.
-- `examples/*` — degit-cloneable consumer demos.
+- `apps/*` — deployable applications (the [a8-web](apps/a8-web) emulator front-end); not published.
+- `examples/*` — degit-cloneable consumer demos (only the `_template` scaffold so far).
 - `packages/_template/` and `examples/_template/` — scaffolds; copy from these when adding new packages.
 
 Some packages carry a `design.md` next to their `readme.md` that explains how they work internally — start there when working on a package's guts.
@@ -25,10 +26,11 @@ Some packages carry a `design.md` next to their `readme.md` that explains how th
 ## Common commands
 
 ```sh
-pnpm dev      # watch-build all packages
-pnpm build    # one-off build
-pnpm test     # full suite: per-package tests + Prettier check
-pnpm format   # write Prettier across the repo
+pnpm dev          # watch-build all packages
+pnpm build        # one-off build
+pnpm test         # fast suite: per-package tests + Prettier check
+pnpm conformance  # slow suite: CPU single-step tests + Acid800
+pnpm format       # write Prettier across the repo
 ```
 
 Inside a package, `pnpm test` runs `test:unit` (vitest), `test:typecheck` (tsc), `test:lint` (eslint), and `test:package` (publint).
@@ -50,7 +52,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 - AI use is fine as long and is subject to the same review standards as human-written code.
 - Small, focused, and well-described PRs are welcome.
 - For large or complex changes, open an issue first to discuss the approach before investing time in implementation.
-- CI (`.github/workflows/ci.yml`) must pass — both the `quality` job (lint, typecheck, unit) and the `conformance` job (CPU single-step tests, Acid800).
+- CI (`.github/workflows/ci.yml`) must pass — both the `quality` job (lint, typecheck, unit) and the `conformance` job (CPU single-step tests, Acid800). PRs also get a Cloudflare Pages preview deployment of the web app, and merges to `main` deploy production.
 
 ## Releases
 

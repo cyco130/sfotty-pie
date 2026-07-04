@@ -8,17 +8,17 @@ Markdown in this repo is not manually wrapped. Write one paragraph per line and 
 
 - `packages/*` — publishable libraries. Built with tsdown, published to npm.
 - `apps/*` — deployable applications (e.g. [apps/a8-web](apps/a8-web), the web emulator). Not published, and **not** degit starters — so unlike examples they depend on workspace packages with `workspace:*` directly (the `./version` rewrite is examples-only). Each is `private: true` and owns its own toolchain (a8-web builds with Vite, not tsdown). No `_template` scaffold — apps are bespoke; Renovate still keeps a private app's deps current without one.
-- `examples/*` — consumers of the packages. Not published. Designed to be cloned standalone (e.g. via `degit`), so **dependencies on workspace packages must use real version pins, never `workspace:*`**. The `./version` script keeps those pins in sync with the latest package versions; pnpm still links them locally during dev because of `linkWorkspacePackages: true` in [pnpm-workspace.yaml](pnpm-workspace.yaml).
-- `packages/_template/` and `examples/_template/` — scaffolds. They're real workspace members named `@<projname>/template-package` and `@<projname>/template-example` (both `private: true`) so Renovate keeps their deps current. Both `src/` files are stubs (a single `console.log`) — they don't import or export anything, on purpose: a real working consumer would break the moment the package's API changes. The example template still **declares** a dep on the main published package (`@<projname>/<projname>`) — `init` rewrites this dep when bootstrapping — so degit-cloned starters arrive with the dep wired up. Common scripts (`dev`/`build`/`test`/`ci`) filter the templates out via `!@<projname>/template-*` so they don't fan into normal work.
+- `examples/*` — consumers of the packages. Not published. Designed to be cloned standalone (e.g. via `degit`), so **dependencies on workspace packages must use real version pins, never `workspace:*`**. The `./version` script keeps those pins in sync with the latest package versions; pnpm still links them locally during dev because of `linkWorkspacePackages: true` in [pnpm-workspace.yaml](pnpm-workspace.yaml). (Today only `_template` lives here — no real examples yet.)
+- `packages/_template/` and `examples/_template/` — scaffolds. They're real workspace members named `@sfotty-pie/template-package` and `@sfotty-pie/template-example` (both `private: true`) so Renovate keeps their deps current. Both `src/` files are stubs (a single `console.log`) — they don't import or export anything, on purpose: a real working consumer would break the moment the package's API changes. The example template still **declares** a dep on `@sfotty-pie/sfotty` (version-pinned like any example) so degit-cloned starters arrive with the dep wired up. Common scripts (`dev`/`build`/`test`/`conformance`) filter the templates out via `!@sfotty-pie/template-*` so they don't fan into normal work.
 
 The root `readme.md` is its own file — an index of the package readmes plus the license/credits section — not a symlink. Keep its package list in sync when adding or removing a package.
 
-A package may carry a `design.md` next to its `readme.md` documenting its inner workings — the approach and moving parts, for people working _on_ the package rather than _with_ it. Keep `readme.md` user-facing, `CONTRIBUTING.md` repo-scoped, and `design.md` package-internals-scoped. See [packages/sfotty/design.md](packages/sfotty/design.md) for the worked example.
+A package may carry a `design.md` next to its `readme.md` documenting its inner workings — the approach and moving parts, for people working _on_ the package rather than _with_ it. Keep `readme.md` user-facing, `CONTRIBUTING.md` repo-scoped, and `design.md` package-internals-scoped. See [packages/sfotty/design.md](packages/sfotty/design.md) for the worked example; sfotty, spasm, a8, and the a8-web app all have one. Package readmes are quick-start only — no full API reference; defer details to the JSDoc on the exported types.
 
 ## Adding a new package
 
 1. Copy `packages/_template` to `packages/<name>`.
-2. In its `package.json`: rename `@<projname>/template-package` to `@<projname>/<name>`, drop `"private": true`, and update `description`/`keywords`/`repository`.
+2. In its `package.json`: rename `@sfotty-pie/template-package` to `@sfotty-pie/<name>`, drop `"private": true`, and update `description`/`keywords`/`repository`.
 3. Resolve the `TODO:` placeholders in `readme.md` (heading and description paragraph).
 4. `pnpm install` from the root.
 
@@ -26,7 +26,7 @@ A package may carry a `design.md` next to its `readme.md` documenting its inner 
 
 Do not start a new package by copying an existing one — `_template` is the canonical scaffold and stays current.
 
-**Naming convention:** every package is scoped under `@<projname>/`, including the main one (`@<projname>/<projname>`). Bare unscoped names are avoided because they're rarely available on npm. Don't introduce a bare-named package without a good reason.
+**Naming convention:** every package is scoped under `@sfotty-pie/`. Bare unscoped names are avoided because they're rarely available on npm. Don't introduce a bare-named package without a good reason.
 
 ## Stack invariants
 
@@ -37,7 +37,7 @@ These are deliberate. Don't change them without a reason.
 - **Relative imports use `.ts` extensions**, not `.js`. Lint enforces this; tsconfigs allow it via `allowImportingTsExtensions`. The point is that source runs natively under Node's TS support and Deno, no transpile step required.
 - **No TS constructs that emit runtime code**, because that "runs natively, no transpile" model uses Node's strip-only type support, which rejects them: no `enum` (use a `const` object + a `type` alias), no constructor parameter properties (declare the field and assign in the body), no `namespace`. These pass `tsc` but throw `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` at runtime.
 - **Tabs, 80 cols.** Markdown and `package.json` use 2-space indent (see [.prettierrc](.prettierrc)). Don't reformat with spaces.
-- **Node**: published source in `packages/*/src/` targets the lowest `engines.node` major (every LTS plus every Current Node release that's still maintained upstream). Dev tooling, build configs, and scripts (e.g. `init`, `tsdown.config.ts`) can assume the latest minor of the most recent LTS — features that landed in recent LTS minors are fair game there; Current-only features aren't. Off-limits inside `packages/*/src/`.
+- **Node**: published source in `packages/*/src/` targets the lowest `engines.node` major (every LTS plus every Current Node release that's still maintained upstream). Dev tooling, build configs, and scripts (e.g. `./version`, `tsdown.config.ts`) can assume the latest minor of the most recent LTS — features that landed in recent LTS minors are fair game there; Current-only features aren't. Off-limits inside `packages/*/src/`.
 - **ESLint config** comes from `@cyco130/eslint-config/node`. Lint rules live there, not in-repo.
 
 ## Commands
@@ -46,8 +46,8 @@ Run from the repo root unless noted.
 
 - `pnpm dev` — watch-build all packages in parallel.
 - `pnpm build` — build all packages.
-- `pnpm test` — fast, single-platform checks: lint, typecheck, unit. Runs every script matching `test:*` (pnpm's `/^test:/` pattern syntax), so a new `test:foo` auto-joins the suite — no registry to update. This is the tier lint-staged runs on commit.
-- `pnpm conformance` — the slow, platform-independent conformance suites kept out of the fast `test` loop (and off lint-staged): CPU single-step tests (sfotty) and Acid800 (a8). Fans out to each package's `conformance` script; runs in CI and on demand. A future `e2e` tier (multi-OS/browser, the only genuinely platform-sensitive tests) will be the third bucket. Note: bare `pnpm ci` is pnpm's clean-install command — unrelated.
+- `pnpm test` — fast, single-platform checks: lint, typecheck, unit. Runs every script matching `test:*` (pnpm's `/^test:/` pattern syntax), so a new `test:foo` auto-joins the suite — no registry to update. This is the tier CI's `quality` job runs; pre-commit approximates it for staged `packages/*` TS files (typecheck + eslint + related vitest) and just formats everything else.
+- `pnpm conformance` — the slow, platform-independent conformance suites kept out of the fast `test` loop: CPU single-step tests (sfotty) and Acid800 (a8). Fans out to each package's `conformance` script; runs in CI and on demand. A future `e2e` tier (multi-OS/browser, the only genuinely platform-sensitive tests) will be the third bucket. Note: bare `pnpm ci` is pnpm's clean-install command — unrelated.
 - `pnpm format` — Prettier write across the repo.
 
 Inside a package, `pnpm test` similarly fans out to `test:unit` (vitest), `test:typecheck` (`tsc --noEmit`), `test:lint` (eslint), and `test:package` (publint).
@@ -60,6 +60,8 @@ Inside a package, `pnpm test` similarly fans out to `test:unit` (vitest), `test:
 
 ## Tooling around the edges
 
-- **husky + lint-staged** run on pre-commit. If a commit is being blocked, fix the underlying lint/format issue rather than bypassing the hook.
+- **husky + lint-staged** run on pre-commit, layered: the root config Prettier-formats everything staged, and each `packages/*` has its own `lint-staged.config.mjs` that additionally runs typecheck + eslint + `vitest related` on staged TS files (the app has no per-package config, so its files only get Prettier). If a commit is being blocked, fix the underlying issue rather than bypassing the hook.
+- **GitHub workflows** (`.github/workflows/`): `ci.yml` (quality + conformance jobs, plus a gated production deploy of a8-web to Cloudflare Pages on `main`), `preview.yml` (per-PR Cloudflare preview deploys, cleaned up on close), `deploy.yml` (manual deploy escape hatch), `cleanup.yml` (weekly prune of old production deployments), `publish.yml` (npm release).
 - **Renovate** config lives at [.github/renovate.json](.github/renovate.json).
 - **VSCode** recommended extensions and settings live in `.vscode/`.
+- **AGENTS.md** is a symlink to this file — edit `CLAUDE.md` only.

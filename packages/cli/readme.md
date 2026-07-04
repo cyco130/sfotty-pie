@@ -1,6 +1,21 @@
 # Sfotty Pie CLI
 
-**Sfotty Pie CLI** is an emulator for a hypothetical 6502-based computer. The current implementation allows you two write CLI programs with access to stdin, stdout, and stderr.
+**Sfotty Pie CLI** is an emulator for a hypothetical 6502-based computer. The current implementation allows you to write CLI programs with access to stdin, stdout, and stderr.
+
+## Usage
+
+```sh
+npx sfotty [options] [--] <program.65> [program args...]
+```
+
+Options (must come before the program filename; `--` ends option parsing):
+
+| Option           | Description                                                      |
+| ---------------- | ---------------------------------------------------------------- |
+| `--trace`        | Write a disassembled trace line to stderr for every instruction. |
+| `--max-cycles=N` | Stop after emulating at most `N` CPU cycles.                     |
+
+The process exit code is the one the guest program writes to `EXIT` (see below). The emulator itself exits with `1` for a missing filename or an invalid executable, `2` for a guest crash (CIM instruction or undefined I/O access), and `3` for an unrecognized option or an internal error.
 
 ## Executable file format
 
@@ -28,7 +43,7 @@ The program contents are loaded starting from the address `$0400`.
 | `$0240` | `RAND`   | `R`          | Read a random byte.                                          |
 | `$0241` | `FSTIN`  | `R`          | Status of stdin: EOF if bit 7 set.                           |
 
-**Page 3** (addresses from `$0300` to `$03FF`) will contain the command line arguments as a null-terminated list of null-terminated strings.
+**Page 3** (addresses from `$0300` to `$03FF`) will contain the command line arguments as a null-terminated list of null-terminated strings, truncated to fit the page (254 bytes plus the final two terminators).
 
 Everything other than the I/O area is RAM, including the command line argument area, the program contents, and the interrupt vectors. Free areas will contain all zeroes.
 
@@ -40,7 +55,7 @@ Executables for the sample programs are in the `samples` directory, assembled fr
 
 | Name    | Description                       |
 | ------- | --------------------------------- |
-| `hello` | Prints "Hello, world!" to stdout. |
+| `hello` | Prints "Hello world!" to stdout.  |
 | `cat`   | Reads stdin and writes to stdout. |
 | `echo`  | Prints the arguments to stdout.   |
 | `guess` | Guess the number game.            |

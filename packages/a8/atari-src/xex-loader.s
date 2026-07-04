@@ -149,6 +149,27 @@ error:
 ; The actual loader
 
 init:
+	; Present a completed disk boot, the state DOS-loaded executables see:
+	; BOOTQ = disk-booted, COLDST clear. We load everything from inside the
+	; boot init, so the OS hasn't set these yet — and a game that restarts
+	; itself by hijacking DOSVEC and jumping through the OS warmstart (e.g.
+	; Bruce Lee) would have that warmstart turned into a cold reboot of
+	; this very disk by the mid-boot state.
+	lda #1
+	sta BOOTQ
+	lda #0
+	sta COLDST
+
+	; Default DOSINI to the OS cold start, so a Reset with no game hook
+	; re-boots this disk and reloads the executable — this loader consumes
+	; its own state (file_size, sector) and can't be re-entered. The OS
+	; points DOSINI at us before this call, so the write sticks; games
+	; that hook Reset (like Bruce Lee) overwrite it again.
+	lda #<COLDSV
+	sta DOSINI
+	lda #>COLDSV
+	sta DOSINI + 1
+
 	; Reset the RUNAD vector
 	lda #<rtsadr
 	sta RUNAD

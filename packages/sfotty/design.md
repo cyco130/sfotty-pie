@@ -13,7 +13,7 @@ The core does **not** own memory, interrupts, or a clock. The host drives it one
 A real 6502 executes each instruction as a sequence of cycles, and each cycle does exactly one bus access (a read or a write) plus some internal register shuffling. Sfotty mirrors that literally:
 
 1. Every instruction is described as **data** — a list of cycles, each cycle a list of tokens — in [src/nmos-instructions.generated.ts](src/nmos-instructions.generated.ts). The first token of a cycle is its single bus operation; the rest are internal register transfers. This is the "microcode DSL".
-2. A build step, [src/generate-steps.ts](src/generate-steps.ts), **compiles** that data into [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts): one function per `(opcode, cycle)` plus a flat dispatch table, `MICROCODE`.
+2. A build step, [src/generate-steps.ts](src/generate-steps.ts), **compiles** that data into [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts): one function per `(opcode, cycle)`, a flat dispatch table, `MICROCODE`, and two per-microstate side tables, `DUMMY` and `SPECULATIVE` (see [Dummy cycles](#dummy-cycles)).
 3. Each token maps to a method on the internal `SfottyCore` class (the `opXxx` methods in [src/sfotty-core.ts](src/sfotty-core.ts)). Those methods are the CPU's actual behavior; the generated functions just call them in order and pick the next cycle.
 
 So the data in `nmos-instructions.generated.ts` is the source of truth, the methods in `sfotty-core.ts` are the verbs, and `nmos-steps.generated.ts` is the generated glue that wires them together into a dispatch table. Two of these files are generated and committed (`nmos-instructions.generated.ts`, `nmos-steps.generated.ts`); see [The code-generation pipeline](#the-code-generation-pipeline).
@@ -22,14 +22,14 @@ So the data in `nmos-instructions.generated.ts` is the source of truth, the meth
 
 Everything exported lives in [src/index.ts](src/index.ts):
 
-- `Sfotty` — the CPU. Construct with a `Memory` bus and optional `SfottyOptions`.
+- `Sfotty` — the CPU. Construct with a `Memory` bus and optional `SfottyOptions` (also exported).
 - `Memory`, `ReadOptions` — the bus contract (see [Memory, reads, and traps](#memory-reads-and-traps)).
 - `DECODE` — the sentinel microstate for the opcode-fetch cycle.
 - `disassemble`, `traceLine`, `Disassembly`, `PeekReader` — the disassembler in [src/disasm.ts](src/disasm.ts), used for tracing and debugging.
 
 `Sfotty` is a thin facade ([src/sfotty.ts](src/sfotty.ts)) over the internal `SfottyCore` ([src/sfotty-core.ts](src/sfotty-core.ts)), which it holds in an ES-private field. The split exists for runtime encapsulation: the `opXxx` micro-op methods must be public on the core so the generated steps (a separate module) can call them, but the facade keeps them genuinely unreachable — inspecting a `Sfotty` in a debugger or browser console shows only real 6502 state. Hosts never see the core; everything below about registers, lines, and `run()` is exposed 1:1 on the facade as delegating accessors.
 
-Programmer-visible registers (`A`, `X`, `Y`, `S`, `PC`) and the discrete status flags (`cFlag`, `zFlag`, etc.) are public fields; `getP()`/`setP()` pack and unpack them into a status byte. The host can seed these directly, or call `reset(cold)` to run the reset sequence (see [The reset sequence](#the-reset-sequence)). The input lines `RDY`, `IRQ`, and `NMI` are public booleans the host drives between `run()` calls (see [The RDY line](#the-rdy-line) and [Interrupts](#interrupts)).
+Programmer-visible registers (`A`, `X`, `Y`, `S`, `PC`) and the discrete status flags (`cFlag`, `zFlag`, etc.) are public fields; `getP()`/`setP()` pack and unpack them into a status byte. The host can seed these directly, or call `reset(cold)` to run the reset sequence (see [The reset sequence](#the-reset-sequence)). The input lines `RDY`, `IRQ`, and `NMI` are public booleans the host drives between `run()` calls (see [The RDY line](#the-rdy-line) and [Interrupts](#interrupts)). The facade also exposes `onFetch` — an optional host callback fired on each _committed_ opcode fetch (`SYNC` asserted, `DUMMY` not), which is what tracing builds on — plus `crashed` (a CIM jam happened), the raw `state` microstate, and `describeState()` to render it for debugging.
 
 ## The execution model: one cycle per `run()`
 
@@ -50,9 +50,9 @@ A microstate is encoded as `(opcode << 3) | cycle`:
 - `opcode` (8 bits) selects the instruction.
 - `cycle` (3 bits) is the 0-based index into that instruction's `code[]` array, i.e. the cycle _after_ the opcode fetch. 3 bits is enough because no 6502 instruction has more than 7 post-fetch cycles.
 
-One special state sits above all of these: `DECODE` (`0x800`), the shared opcode-fetch cycle. Every instruction ends by returning to `DECODE` (a new CPU starts in the reset sequence and lands there after seven cycles). `decode()` reads the byte at `PC` (asserting `OPCODE_FETCH`), bumps `PC`, and sets `state = opcode << 3` — landing on cycle 0 of that opcode's microcode.
+One special state sits above all of these: `DECODE` (`0x800`), the shared opcode-fetch cycle. Every instruction ends by returning to `DECODE` (a new CPU starts in the reset sequence and lands there after seven cycles). `decode()` reads the byte at `PC` (asserting `SYNC`; `DUMMY` is OR'd in when the fetch will be discarded — an interrupt recognition), bumps `PC`, and sets `state = opcode << 3` — landing on cycle 0 of that opcode's microcode.
 
-`MICROCODE` (in [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts)) is a single flat array indexed by microstate. It is generated as a positional literal: each opcode owns a block of 8 slots, with cycles past the instruction's length filled by `badState` (which throws — reaching one is a bug), and `decode` in the final slot at index `0x800`. Because every slot is filled, V8 keeps it a fast packed array.
+`MICROCODE` (in [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts)) is a single flat array indexed by microstate. It is generated as a positional literal: each opcode owns a block of 8 slots, with cycles past the instruction's length filled by `badState` (which throws — reaching one is a bug), `decode` at index `0x800`, and the seven reset steps above it at `0x801`–`0x807`. Because every slot is filled, V8 keeps it a fast packed array.
 
 ### Cycle numbering
 
@@ -76,14 +76,14 @@ The first token of each cycle is the bus op; the rest are internal ops. The gene
 
 ```ts
 function ora_inx_2(cpu: SfottyCore): void {
-  cpu.opReadAddr(); // r-ar  (the single bus access)
+  if (!cpu.opReadAddr()) return; // r-ar  (the single bus access; bails on a RDY stall)
   cpu.opAddX(); // ar+=x
   cpu.opDrFromAl(); // dr=al
   cpu.state++; // advance to cycle 3
 }
 ```
 
-The last cycle ends with `cpu.state = DECODE` instead of `state++`, returning to the fetch. Note the **bus access is always the first statement**, and the `state` write is always last — this is what makes traps safe (below).
+The last cycle ends with `cpu.state = DECODE` instead of `state++`, returning to the fetch. Note the **bus access is always the first statement** (guarded, for reads, by the `RDY` short-circuit — see [The RDY line](#the-rdy-line)), and the `state` write is always last — this is what makes traps safe (below).
 
 ## Micro-ops: the CPU's internal verbs
 
@@ -100,12 +100,20 @@ The host implements `Memory` ([src/bus.ts](src/bus.ts)):
 
 ```ts
 read(address: number, options: ReadOptions): number;
-write(address: number, value: number): void;
+write(address: number, value: number, options: ReadOptions): void;
 ```
 
-`ReadOptions` is a bit-flag set (a `const` object, not an `enum` — enums emit runtime code this repo's no-transpile model rejects): `PEEK` for side-effect-free inspection (disassembler/debugger), `OPCODE_FETCH` for the SYNC-line fetch cycle, `DMA` for accesses driven by another chip.
+`ReadOptions` is a bit-flag set (a `const` object, not an `enum` — enums emit runtime code this repo's no-transpile model rejects): `NONE`, `PEEK` for side-effect-free inspection (disassembler/debugger), `SYNC` for the opcode-fetch cycle, `DUMMY` for non-committing accesses (see [Dummy cycles](#dummy-cycles)), `DMA` for accesses driven by another chip. `write` receives the same flags (only `DUMMY` is meaningful there — the RMW double write-back); an implementor that doesn't care may declare a narrower signature, which still satisfies the interface.
 
 The package has no built-in trap type. A host interrupts the CPU — for memory-mapped I/O, execute traps, or breakpoints — by **throwing its own sentinel** from `read`/`write`. It works because of the ordering invariant in every step function: the bus access happens _first_, before any register is mutated, and the `state` write happens _last_. So a throw mid-cycle unwinds with the CPU still in its exact pre-cycle state; the host catches it around `run()`, reacts, and simply re-`run()`s to retry the same cycle. The sentinel needs no payload — the host sources the address and access kind from its own bus (or from CPU state, e.g. `PC` at an execute trap).
+
+## Dummy cycles
+
+Many 6502 cycles perform a bus access whose value is discarded or repeated — the dummy read while adding the index register in indexed modes, the RMW double write-back, the fake stack reads of reset, the discarded fetch when an interrupt is recognized. A host with read- or write-sensitive I/O registers needs to tell these apart from real accesses, so the bus flags them with `ReadOptions.DUMMY`.
+
+Which cycles are dummies is static per microstate, so it's authored in the microcode: a `dummy` token on a cycle. The generator strips the token from the emitted step body and instead records the state in a `DUMMY` byte table (a third export of [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts), alongside `MICROCODE`); the `#read`/`#write` choke points in [src/sfotty-core.ts](src/sfotty-core.ts) look the current state up and OR `DUMMY` into the flags passed to the bus. One case is dynamic: an indexed read that may cross a page issues a speculative read that is a dummy _only if_ the page actually crossed. Those states live in the separate `SPECULATIVE` table and consult `#crossed` at runtime. `decode` handles its own case, OR-ing `DUMMY` when the fetched opcode will be discarded for an interrupt.
+
+`onFetch` (the public tracing hook) fires only on _committed_ fetches — `SYNC` asserted and `DUMMY` not — so tracers see one event per genuinely executed instruction. The dummy classifications are covered by [src/dummy-cycles.test.ts](src/dummy-cycles.test.ts).
 
 ## The RDY line
 

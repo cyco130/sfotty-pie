@@ -70,15 +70,15 @@ export interface MachineConfig {
 }
 
 /**
- * An Atari 8-bit machine (NTSC) built on the {@link AtariBus}, the combined
- * {@link AnticGtia} video chip pair, and stubs for the rest (POKEY/PIA/PBI).
+ * An Atari 8-bit machine (NTSC or PAL) built on the {@link AtariBus}, the
+ * combined {@link AnticGtia} video chip pair, POKEY, and the PIA. Classic
+ * machines as {@link MachineConfig} recipes:
  *
- * - `"800"` — OS-B, 48K, no PORTB banking; BASIC is a standard $A000 8K cart.
- * - `"800XL"` — XL OS, 64K, PORTB banking; BASIC is built in and banked via
- *   PORTB (the OS enables it unless OPTION is held).
- * - `"130XE"` — the XL plus 64K of extended RAM (four 16K banks at
- *   $4000-$7FFF via PORTB bits 2-3) with separate CPU/ANTIC access
- *   (bits 4/5).
+ * - an 800 — OS-B, 48K, no PORTB banking; BASIC is a standard $A000 8K cart.
+ * - an 800XL — `xl`, XL OS, 64K, PORTB banking; BASIC is built in and banked
+ *   via PORTB (the OS enables it unless OPTION is held).
+ * - a 130XE — the XL plus `xeBankCount: 4` (four 16K banks at $4000-$7FFF via
+ *   PORTB bits 2-3) and `separateAnticAccess` (bits 4/5).
  *
  * The host drives the machine one cycle at a time via {@link cycle}, which runs
  * ANTIC scheduling, the bus phase (ANTIC DMA or the CPU), and the render, and

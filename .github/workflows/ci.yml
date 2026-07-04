@@ -12,8 +12,8 @@ defaults:
     working-directory: .
 
 jobs:
-  # Fast, single-platform checks: lint, typecheck, unit. Same suite lint-staged
-  # runs on commit.
+  # Fast, single-platform checks: lint, typecheck, unit — the `pnpm test` tier
+  # (lint-staged approximates it per-package for staged files on commit).
   quality:
     runs-on: ubuntu-latest
     name: Quality (lint, typecheck, unit)

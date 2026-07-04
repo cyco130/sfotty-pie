@@ -54,7 +54,7 @@ The symbol table ([src/symbols.ts](src/symbols.ts)) is built for this: values **
 
 `Value = bigint | string` ([src/value.ts](src/value.ts)); `undefined` threads through as "unresolved." Numbers are unbounded `bigint` (range is checked at emit, not during arithmetic). Strings are first-class values, decoded with minimal C escapes; a **character literal is a single _byte_** in the target encoding (UTF-8 for now), so `'A'` is `65` but `'ü'` (two UTF-8 bytes) is an error — char and string literals share one encoder.
 
-[src/evaluate.ts](src/evaluate.ts) is a straightforward recursive evaluator over an `EvalEnv` (`resolve`, optional `resolveGlobal`, the `*` location counter, `report`, `strict`). `undefined` propagates through arithmetic so forward references defer cleanly. With `strict` on (the assemble pass turns it on), an unresolved _identifier_ is reported as undefined — but only on the converged pass survives, since earlier passes' diagnostics are discarded. Equality is `=` (ca65-style, no `==`); precedence low→high is `|| < && < (= != < >) < (+ -) < (* / %)`, with prefix `+ - < > !` binding tightest and `::` (scope resolution) tighter still.
+[src/evaluate.ts](src/evaluate.ts) is a straightforward recursive evaluator over an `EvalEnv` (`resolve`, optional `resolveGlobal`, the `*` location counter, `report`, `strict`). `*` is also source-level syntax — an expression can reference the current location counter directly (`jmp *`). `undefined` propagates through arithmetic so forward references defer cleanly. With `strict` on (the assemble pass turns it on), an unresolved _identifier_ is reported as undefined — but only on the converged pass survives, since earlier passes' diagnostics are discarded. Equality is `=` (ca65-style, no `==`); precedence low→high is `|| < && < (= != < >) < (+ -) < (* / %)`, with prefix `+ - < > !` binding tightest and `::` (scope resolution) tighter still.
 
 ## Instruction encoding
 
@@ -64,7 +64,7 @@ The symbol table ([src/symbols.ts](src/symbols.ts)) is built for this: values **
 
 This is what makes "assembler = linker." It lives in [src/layout.ts](src/layout.ts) and the `collect`/`render` split in [src/assemble.ts](src/assemble.ts).
 
-**Segments are byte-collectors.** A `Segment` is an ordered list of _items_: literal `bytes`, an `.org`, a `label` (resolved later), or an `emit`/`emplace` of another segment. The "current" segment (default `OUTPUT`, switched by `.segment`) receives content as collection walks the statements. `OUTPUT` is not special-cased — it's just the segment written to the file at the end.
+**Segments are byte-collectors.** A `Segment` is an ordered list of _items_: literal `bytes` (from instructions, `.byte`/`.word`, or `.res N` — N zero bytes), an `.org`, a `label` (resolved later), or an `emit`/`emplace` of another segment. The "current" segment (default `OUTPUT`, switched by `.segment "X"` or the shorthands `.code`/`.rodata`/`.data`/`.bss`/`.zeropage`, which upper-case into the segment name) receives content as collection walks the statements. `OUTPUT` is not special-cased — it's just the segment written to the file at the end.
 
 **Collect → render, per pass:**
 
@@ -138,4 +138,5 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (rou
 | [src/layout.ts](src/layout.ts)                     | `Segment` and `render` — the segment/OUTPUT layout engine.                                  |
 | [src/assemble.ts](src/assemble.ts)                 | The orchestrator: `assemble()`, `collect`, and the multipass loop.                          |
 | [src/cli.ts](src/cli.ts)                           | The `spasm` CLI (`bin`): `spasm INPUT -o OUTPUT` over an async fs host.                     |
+| [src/utils.ts](src/utils.ts)                       | Tiny helpers (`impossible` exhaustiveness check, `assume`).                                 |
 | [src/index.ts](src/index.ts)                       | Public API.                                                                                 |

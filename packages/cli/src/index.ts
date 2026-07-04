@@ -86,7 +86,7 @@ async function main() {
 						}
 
 					case 0x0240:
-						return (Math.random() * 255) | 0;
+						return (Math.random() * 256) | 0;
 
 					case 0x0241:
 						return stdinClosed && stdinOffset >= stdinBuffer.length

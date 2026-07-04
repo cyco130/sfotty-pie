@@ -6,7 +6,7 @@ import { KeyboardView } from "./keyboard-view.tsx";
 export function Docs() {
 	return (
 		<div class="min-h-screen bg-neutral-950 text-neutral-200">
-			<header class="border-b border-neutral-800 px-4 py-4">
+			<header class="border-b border-neutral-800 p-4">
 				<h1 class="text-xl font-semibold text-neutral-100">
 					Atari 8-bit reference
 				</h1>

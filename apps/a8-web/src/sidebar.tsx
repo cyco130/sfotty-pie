@@ -27,7 +27,7 @@ function Segmented({
 	return (
 		<div class="flex items-center justify-between gap-3">
 			<span class="text-sm text-neutral-600">{label}</span>
-			<div class="flex overflow-hidden rounded border border-neutral-300">
+			<div class="flex overflow-hidden rounded-sm border border-neutral-300">
 				{options.map((option) => (
 					<button
 						key={option.value}
@@ -63,7 +63,7 @@ function LabeledSelect({
 		<div class="flex items-center justify-between gap-3">
 			<span class="text-sm text-neutral-600">{label}</span>
 			<select
-				class="rounded border border-neutral-300 bg-white px-2 py-0.5 text-sm text-neutral-700"
+				class="rounded-sm border border-neutral-300 bg-white px-2 py-0.5 text-sm text-neutral-700"
 				value={value}
 				onChange={(event) => onSelect(event.currentTarget.value)}
 			>
@@ -104,7 +104,7 @@ function RecentsSection({ host }: { host: EmulatorHost }) {
 				{items.map(({ entry, recent }) => (
 					<li
 						key={entry.id}
-						class="flex items-center gap-2 rounded px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
+						class="flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
 					>
 						<TypePill type={entry.derived.type} />
 						<button
@@ -216,7 +216,7 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 			{dirty && (
 				<button
 					type="button"
-					class="mt-3 w-full rounded bg-neutral-800 px-2 py-1 text-sm text-white hover:bg-neutral-700"
+					class="mt-3 w-full rounded-sm bg-neutral-800 px-2 py-1 text-sm text-white hover:bg-neutral-700"
 					onClick={() => host.applyConfig()}
 				>
 					{messages.sidebar.rebootToApply}
@@ -341,7 +341,7 @@ export function MenuView({
 								{label}
 							</button>
 							{chord && (
-								<span class="any-pointer-fine:block hidden text-xs text-neutral-400">
+								<span class="hidden text-xs text-neutral-400 any-pointer-fine:block">
 									{chord}
 								</span>
 							)}

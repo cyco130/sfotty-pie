@@ -38,7 +38,7 @@ function HoldButton({
 	return (
 		<button
 			type="button"
-			class="flex-1 touch-none rounded bg-neutral-700/70 px-1 py-2 text-xs text-white select-none active:bg-neutral-500"
+			class="flex-1 touch-none rounded-sm bg-neutral-700/70 px-1 py-2 text-xs text-white select-none active:bg-neutral-500"
 			onTouchStart={(e) => {
 				e.preventDefault();
 				host.press(command);
@@ -141,7 +141,7 @@ function JoystickStick({ host }: { host: EmulatorHost }) {
 	return (
 		<div class="relative aspect-square w-[40vw]">
 			<div
-				class="pointer-events-none absolute top-[10vw] left-[10vw] h-[20vw] w-[20vw] rounded-full bg-slate-200/50"
+				class="pointer-events-none absolute top-[10vw] left-[10vw] size-[20vw] rounded-full bg-slate-200/50"
 				style={{
 					transform: `translate(${knob.x * 10}vw, ${knob.y * 10}vw)`,
 				}}
@@ -165,7 +165,7 @@ function PowerButton({ host }: { host: EmulatorHost }) {
 	return (
 		<button
 			type="button"
-			class="touch-none rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-400 select-none active:bg-neutral-600"
+			class="touch-none rounded-sm bg-neutral-800 px-3 py-1 text-xs text-neutral-400 select-none active:bg-neutral-600"
 			onTouchStart={(e) => {
 				e.preventDefault();
 				host.dispatch("POWER_CYCLE");
@@ -181,7 +181,7 @@ function ResetButton({ host }: { host: EmulatorHost }) {
 	return (
 		<button
 			type="button"
-			class="touch-none rounded bg-neutral-700/70 px-3 py-1 text-xs text-white select-none active:bg-neutral-500"
+			class="touch-none rounded-sm bg-neutral-700/70 px-3 py-1 text-xs text-white select-none active:bg-neutral-500"
 			onTouchStart={(e) => {
 				e.preventDefault();
 				host.press("PRESS_RESET");
@@ -211,7 +211,7 @@ function ViewToggle({
 			aria-label={aria}
 			title={aria}
 			aria-pressed={view === v}
-			class={`rounded px-3 py-1 text-lg select-none ${
+			class={`rounded-sm px-3 py-1 text-lg select-none ${
 				view === v ? "bg-neutral-500 text-white" : "text-neutral-400"
 			}`}
 			onClick={() => onChange(v)}
@@ -220,7 +220,7 @@ function ViewToggle({
 		</button>
 	);
 	return (
-		<div class="flex gap-1 rounded bg-neutral-800 p-0.5">
+		<div class="flex gap-1 rounded-sm bg-neutral-800 p-0.5">
 			{tab("stick", "joystick", messages.osd.joystickControls)}
 			{tab("keyboard", "keyboard", messages.osd.keyboard)}
 			{tab("off", "chevron-down", messages.osd.hideControls)}
@@ -278,7 +278,7 @@ export function Osd({ host }: { host: EmulatorHost }) {
 							type="button"
 							aria-label={messages.osd.swapSides}
 							title={messages.osd.swapSides}
-							class="rounded bg-neutral-700/70 px-3 py-2 text-lg text-white active:bg-neutral-500"
+							class="rounded-sm bg-neutral-700/70 px-3 py-2 text-lg text-white active:bg-neutral-500"
 							onClick={() => {
 								const next = !lefty;
 								localStorage.setItem(LEFTY_KEY, next ? "1" : "0");

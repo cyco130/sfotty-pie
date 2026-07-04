@@ -88,7 +88,7 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 				autocapitalize="off"
 				autocomplete="off"
 				spellcheck={false}
-				class="shrink-0 rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+				class="shrink-0 rounded-sm border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
 				onInput={(event) => {
 					setQuery(event.currentTarget.value);
 					setSelected(0);
@@ -108,7 +108,7 @@ export function PaletteView({ host }: { host: EmulatorHost }) {
 							<li
 								key={command}
 								ref={index === active ? selectedRef : null}
-								class={`flex cursor-pointer items-center justify-between gap-3 rounded px-2 py-1.5 text-sm ${
+								class={`flex cursor-pointer items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-sm ${
 									index === active
 										? "bg-neutral-200 text-neutral-900"
 										: "text-neutral-700"

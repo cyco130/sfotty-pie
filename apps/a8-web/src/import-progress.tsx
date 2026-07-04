@@ -43,9 +43,9 @@ export function ImportProgress() {
 					</span>
 				)}
 			</div>
-			<div class="mt-1 h-1 w-full overflow-hidden rounded bg-neutral-700">
+			<div class="mt-1 h-1 w-full overflow-hidden rounded-sm bg-neutral-700">
 				<div
-					class={`h-full rounded bg-emerald-500 ${counted ? "" : "animate-pulse"}`}
+					class={`h-full rounded-sm bg-emerald-500 ${counted ? "" : "animate-pulse"}`}
 					style={{ width: `${pct}%` }}
 				/>
 			</div>

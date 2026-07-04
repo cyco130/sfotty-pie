@@ -51,17 +51,17 @@ function AxisBar({ label, value }: { label: string; value: number }) {
 	return (
 		<div class="flex items-center gap-2 text-xs">
 			<span class="w-8 shrink-0 text-neutral-500">{label}</span>
-			<div class="relative h-2 flex-1 rounded bg-neutral-100">
-				<div class="absolute left-1/2 top-0 h-full w-px bg-neutral-300" />
+			<div class="relative h-2 flex-1 rounded-sm bg-neutral-100">
+				<div class="absolute top-0 left-1/2 h-full w-px bg-neutral-300" />
 				<div
-					class="absolute top-0 h-full rounded bg-sky-500"
+					class="absolute top-0 h-full rounded-sm bg-sky-500"
 					style={{
 						left: `${pct < 0 ? 50 + pct : 50}%`,
 						width: `${Math.abs(pct)}%`,
 					}}
 				/>
 			</div>
-			<span class="w-10 shrink-0 text-right tabular-nums text-neutral-500">
+			<span class="w-10 shrink-0 text-right text-neutral-500 tabular-nums">
 				{value.toFixed(2)}
 			</span>
 		</div>
@@ -78,7 +78,7 @@ function PortSelect({
 }) {
 	return (
 		<select
-			class="shrink-0 rounded border border-neutral-200 bg-white px-1 py-0.5 text-xs text-neutral-700"
+			class="shrink-0 rounded-sm border border-neutral-200 bg-white px-1 py-0.5 text-xs text-neutral-700"
 			value={port === null ? "off" : String(port)}
 			onChange={(e) => {
 				const v = (e.target as HTMLSelectElement).value;
@@ -106,12 +106,12 @@ function PadCard({
 }) {
 	const standard = pad.mapping === "standard";
 	return (
-		<div class="rounded border border-neutral-200 p-3">
+		<div class="rounded-sm border border-neutral-200 p-3">
 			<div class="mb-1 flex items-center justify-between gap-2">
 				<span class="truncate text-sm font-medium" title={pad.id}>
 					{pad.id}
 				</span>
-				<span class="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">
+				<span class="shrink-0 rounded-sm bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">
 					{standard
 						? messages.controllers.standard
 						: messages.controllers.nonStandard}
@@ -128,7 +128,7 @@ function PadCard({
 				{pad.buttons.map((b, i) => (
 					<div
 						key={i}
-						class={`rounded px-1 py-1 text-center text-xs tabular-nums ${
+						class={`rounded-sm p-1 text-center text-xs tabular-nums ${
 							b.pressed
 								? "bg-emerald-500 text-white"
 								: "bg-neutral-100 text-neutral-500"

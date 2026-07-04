@@ -178,7 +178,7 @@ export default function KeyboardLabPage() {
 	}, []);
 
 	return (
-		<div class="flex h-full flex-col bg-neutral-950 font-mono text-sm text-neutral-200 [color-scheme:dark]">
+		<div class="flex h-full flex-col bg-neutral-950 font-mono text-sm text-neutral-200 scheme-dark">
 			<header class="shrink-0 border-b border-neutral-800 px-4 py-3">
 				<h1 class="text-base font-semibold text-neutral-100">
 					Keyboard event lab
@@ -225,7 +225,7 @@ export default function KeyboardLabPage() {
 			/>
 			<div
 				ref={logRef}
-				class="flex-1 overflow-y-auto px-4 pt-2 pb-8 break-words whitespace-pre-wrap"
+				class="flex-1 overflow-y-auto px-4 pt-2 pb-8 wrap-break-word whitespace-pre-wrap"
 			/>
 		</div>
 	);

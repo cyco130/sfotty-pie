@@ -16,7 +16,7 @@ export function PanelFrame({
 	children: ComponentChildren;
 }) {
 	return (
-		<aside class="flex max-h-[70vh] w-full shrink-0 flex-col overflow-hidden bg-white p-4 text-neutral-800 sm:h-full sm:max-h-none sm:w-1/4 sm:min-w-96 sm:max-w-xl">
+		<aside class="flex max-h-[70vh] w-full shrink-0 flex-col overflow-hidden bg-white p-4 text-neutral-800 sm:h-full sm:max-h-none sm:w-1/4 sm:max-w-xl sm:min-w-96">
 			<div class="mb-4 flex shrink-0 items-center justify-between">
 				<span class="text-lg font-semibold">{title}</span>
 				<button

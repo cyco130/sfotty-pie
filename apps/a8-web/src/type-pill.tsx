@@ -16,7 +16,7 @@ export function TypePill({ type }: { type: ImageType }) {
 	const { code, tint } = TYPE_PILL[type];
 	return (
 		<span
-			class={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] leading-none ${tint}`}
+			class={`shrink-0 rounded-sm px-1.5 py-0.5 font-mono text-[10px] leading-none ${tint}`}
 			title={messages.library.typeName[type]}
 		>
 			{code}

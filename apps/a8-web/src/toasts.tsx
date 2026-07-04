@@ -24,7 +24,7 @@ function Notice({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
 	const color = toast.kind === "warning" ? "bg-amber-600" : "bg-neutral-800";
 	return (
 		<div
-			class={`pointer-events-auto cursor-pointer rounded ${color} px-3 py-1.5 text-sm text-white shadow-lg`}
+			class={`pointer-events-auto cursor-pointer rounded-sm ${color} px-3 py-1.5 text-sm text-white shadow-lg`}
 			onClick={onDismiss}
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
@@ -55,12 +55,12 @@ function ErrorToast({
 	return (
 		<div
 			role="alert"
-			class="pointer-events-auto flex max-w-md items-start gap-2 rounded bg-red-600 px-3 py-1.5 text-sm text-white shadow-lg"
+			class="pointer-events-auto flex max-w-md items-start gap-2 rounded-sm bg-red-600 px-3 py-1.5 text-sm text-white shadow-lg"
 		>
 			<span class="grow select-text">{toast.text}</span>
 			<button
 				type="button"
-				class="shrink-0 rounded bg-red-700/70 px-1.5 hover:bg-red-700"
+				class="shrink-0 rounded-sm bg-red-700/70 px-1.5 hover:bg-red-700"
 				onClick={copy}
 			>
 				{copied ? messages.toasts.copied : messages.toasts.copy}

@@ -14,14 +14,14 @@ export default function HomePage() {
 					alt=""
 					width="176"
 					height="176"
-					class="h-36 w-36 sm:h-44 sm:w-44"
+					class="size-36 sm:size-44"
 				/>
 				<h1 class="text-3xl font-semibold text-white">{t.heading}</h1>
 				<p class="max-w-prose text-neutral-400">{t.lead}</p>
 				<div class="flex flex-wrap items-center justify-center gap-3">
 					<a
 						href="/a8/emu"
-						class="rounded bg-neutral-200 px-5 py-2 font-medium text-neutral-900 hover:bg-white"
+						class="rounded-sm bg-neutral-200 px-5 py-2 font-medium text-neutral-900 hover:bg-white"
 					>
 						{t.launch}
 					</a>
@@ -29,7 +29,7 @@ export default function HomePage() {
 						href={GITHUB_URL}
 						target="_blank"
 						rel="noreferrer"
-						class="rounded border border-neutral-700 px-5 py-2 font-medium text-neutral-200 hover:bg-neutral-900"
+						class="rounded-sm border border-neutral-700 px-5 py-2 font-medium text-neutral-200 hover:bg-neutral-900"
 					>
 						{t.github}
 					</a>

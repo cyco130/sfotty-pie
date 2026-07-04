@@ -102,7 +102,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 				>
 					<Icon name="zap" class="size-6" />
 				</button>
-				<span class="w-16 text-right tabular-nums text-neutral-500">
+				<span class="w-16 text-right text-neutral-500 tabular-nums">
 					{fps ? `${fps} fps` : "—"}
 				</span>
 			</div>

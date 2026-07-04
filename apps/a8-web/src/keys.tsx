@@ -32,7 +32,7 @@ export function LayoutWarning({ host }: { host: EmulatorHost }) {
 		return null;
 	}
 	return (
-		<p class="mb-2 shrink-0 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+		<p class="mb-2 shrink-0 rounded-sm border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
 			{messages.shortcuts.layoutWarning}{" "}
 			<button
 				type="button"
@@ -114,7 +114,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 				autocapitalize="off"
 				autocomplete="off"
 				spellcheck={false}
-				class="shrink-0 rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+				class="shrink-0 rounded-sm border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
 				onInput={(event) => setQuery(event.currentTarget.value)}
 			/>
 
@@ -128,7 +128,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 						<li key={`${row.command}:${row.chord ?? ""}:${index}`}>
 							<button
 								type="button"
-								class="flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-sm hover:bg-neutral-100"
+								class="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-neutral-100"
 								onClick={() => navigate(`/a8/emu/keys/${row.command}`)}
 							>
 								<span

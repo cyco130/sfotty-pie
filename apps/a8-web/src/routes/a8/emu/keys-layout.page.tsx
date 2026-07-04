@@ -38,7 +38,7 @@ export default function KeyboardLayoutPanel() {
 				<p class="text-sm text-neutral-600">{messages.shortcuts.layoutIntro}</p>
 
 				<select
-					class="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-800"
+					class="w-full rounded-sm border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-800"
 					value={current}
 					onChange={(e) => void host.setLayoutPreference(e.currentTarget.value)}
 				>

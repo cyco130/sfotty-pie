@@ -1,10 +1,25 @@
 import config from "@cyco130/eslint-config/react";
+import betterTailwindcss from "eslint-plugin-better-tailwindcss";
 
 /** @type {typeof config} */
 export default [
 	...config,
 	{
 		ignores: ["dist/", "node_modules/"],
+	},
+	{
+		files: ["src/**/*.tsx"],
+		plugins: { "better-tailwindcss": betterTailwindcss },
+		settings: {
+			"better-tailwindcss": { entryPoint: "src/index.css" },
+		},
+		rules: {
+			...betterTailwindcss.configs.recommended.rules,
+			// prettier-plugin-tailwindcss owns class order and line width, so
+			// the two stylistic rules that would fight it stay off.
+			"better-tailwindcss/enforce-consistent-class-order": "off",
+			"better-tailwindcss/enforce-consistent-line-wrapping": "off",
+		},
 	},
 	{
 		languageOptions: {

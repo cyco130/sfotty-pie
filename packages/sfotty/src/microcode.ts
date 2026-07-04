@@ -28,8 +28,6 @@ export const RESET = 0x801;
 export type Step = (cpu: SfottyCore) => void;
 
 export type BusOp =
-	| "r-t1" // IR = fetch(PC++); // First cycle of every instruction
-	| "r-t1i" // IR = (fetch(PC), 0); // First cycle of interrupt handling
 	| "r-pc++" // DR = read(PC++); // Second cycle of multi-byte instructions
 	| "r-pc" // DR = read(PC); // Second cycle of single-byte instructions
 	| "r-brk" // DR = read(PC); advance PC only on a software BRK, not a hardware interrupt

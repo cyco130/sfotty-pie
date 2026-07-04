@@ -74,6 +74,10 @@ export class AnticGtia implements Memory {
 	// CHBASE
 	chbase = 0;
 
+	// CHACTL: bit 0 blanks inverse-video chars, bit 1 inverts them, bit 2
+	// reflects character rows vertically.
+	chactl = 0;
+
 	// PMBASE
 	pmbase = 0;
 
@@ -238,6 +242,7 @@ export class AnticGtia implements Memory {
 		this.#lastLineArmed = false;
 		this.#pfFineDelay = 0;
 		this.chbase = 0;
+		this.chactl = 0;
 		this.pmbase = 0;
 		this.msc = 0;
 
@@ -606,6 +611,11 @@ export class AnticGtia implements Memory {
 					this.verticalPmResolution = value & 0x10 ? 1 : 2;
 					this.missileDmaEnabled = !!(value & 0xc);
 					this.playerDmaEnabled = !!(value & 0x8);
+					break;
+
+				case 0x01:
+					// CHACTL
+					this.chactl = value & 0x07;
 					break;
 
 				case 0x02:
@@ -1249,9 +1259,11 @@ export class AnticGtia implements Memory {
 			// BK
 			f = 0;
 		} else if (pf & 0x4) {
-			// Hires. PF1 if any bit is set
+			// Hires. A lit pixel is a PF2 pixel (with PF1 luma — but the
+			// luma line doesn't drive collisions); an unlit one is
+			// background, no collision.
 			if (pf & 0x3) {
-				f = 0b0010;
+				f = 0b0100;
 			} else {
 				f = 0;
 			}
@@ -1613,9 +1625,7 @@ export class AnticGtia implements Memory {
 				case 2:
 					{
 						// 8 hires pixels (4 color clocks)
-						// TODO: Blink, upside down, inverse
-						const data = this.#dmaRead(base + this.modeLineNo);
-						const bits = charNo < 0x80 ? data : data ^ 0xff;
+						const bits = this.#charData(base, this.modeLineNo, charNo);
 
 						this.pfPixels[0] = hires(bits);
 						this.pfPixels[1] = hires(bits >> 2);
@@ -1626,14 +1636,35 @@ export class AnticGtia implements Memory {
 					break;
 
 				case 3:
-					// TODO: ANTIC mode 3
+					{
+						// Like mode 2 but 10 scanlines tall: the glyph row is
+						// the 3-bit row counter (rows 8-9 fetch glyph rows
+						// 0-1), and one quadrant of the char set — $60-$7F,
+						// the "descenders" — blanks rows 0-1 and shows the
+						// wrapped fetch at rows 8-9, while the rest blank
+						// rows 8-9 (Acid800 antic_charcontrol).
+						const line = this.modeLineNo;
+						const descender = (charNo & 0x60) === 0x60;
+						const bits = this.#charData(
+							base,
+							line & 7,
+							charNo,
+							descender ? line < 2 : line >= 8,
+						);
+
+						this.pfPixels[0] = hires(bits);
+						this.pfPixels[1] = hires(bits >> 2);
+						this.pfPixels[2] = hires(bits >> 4);
+						this.pfPixels[3] = hires(bits >> 6);
+						this.pfCounter = 4;
+					}
 					break;
 
 				case 4:
 					{
 						// 4 lores pixels with 5 colors
-						const data = this.#dmaRead(base + this.modeLineNo);
-						const useColPf3 = charNo > 0x80;
+						const data = this.#dmaRead(base + this.#charRow(this.modeLineNo));
+						const useColPf3 = !!(charNo & 0x80);
 
 						this.pfPixels[0] = lores2(data, useColPf3);
 						this.pfPixels[1] = lores2(data >> 2, useColPf3);
@@ -1646,8 +1677,10 @@ export class AnticGtia implements Memory {
 				case 5:
 					{
 						// 4 lores pixels with 5 colors
-						const data = this.#dmaRead(base + (this.modeLineNo >> 1));
-						const useColPf3 = charNo > 0x80;
+						const data = this.#dmaRead(
+							base + this.#charRow(this.modeLineNo >> 1),
+						);
+						const useColPf3 = !!(charNo & 0x80);
 
 						this.pfPixels[0] = lores2(data, useColPf3);
 						this.pfPixels[1] = lores2(data >> 2, useColPf3);
@@ -1660,7 +1693,7 @@ export class AnticGtia implements Memory {
 				case 6:
 					{
 						// 8 lores pixels, all same color
-						let data = this.#dmaRead(base + this.modeLineNo);
+						let data = this.#dmaRead(base + this.#charRow(this.modeLineNo));
 						const color = lores(charNo >> 6);
 
 						this.pfPixels.fill(0);
@@ -1678,7 +1711,9 @@ export class AnticGtia implements Memory {
 				case 7:
 					{
 						// 8 lores pixels, all same color
-						let data = this.#dmaRead(base + (this.modeLineNo >> 1));
+						let data = this.#dmaRead(
+							base + this.#charRow(this.modeLineNo >> 1),
+						);
 						const color = lores(charNo >> 6);
 
 						this.pfPixels.fill(0);
@@ -1804,6 +1839,29 @@ export class AnticGtia implements Memory {
 		}
 
 		return true;
+	}
+
+	// CHACTL bit 2 (vertical reflect) flips the glyph row within the 8-row
+	// character cell. The row fed to the address adder is 3 bits wide either
+	// way — a counter past 7 (VSCROL abuse, mode 3's rows 8-9) wraps rather
+	// than reading into the next glyph.
+	#charRow(row: number): number {
+		return (this.chactl & 0x04 ? row ^ 7 : row) & 7;
+	}
+
+	// Glyph data for the hires char modes (2 and 3) with CHACTL applied.
+	// `blankRow` is mode 3's out-of-quadrant blanking; it lands before the
+	// inverse-video handling, so an inverted blank row renders solid — and
+	// the DMA fetch still happens either way. For inverse-video chars, blank
+	// (bit 0) wins over invert (bit 1): both set renders solid.
+	#charData(base: number, row: number, charNo: number, blankRow = false) {
+		let data = this.#dmaRead(base + this.#charRow(row));
+		if (blankRow) data = 0;
+		if (charNo & 0x80) {
+			if (this.chactl & 0x01) data = 0;
+			if (this.chactl & 0x02) data ^= 0xff;
+		}
+		return data;
 	}
 
 	#incrementDisplayListAddress() {

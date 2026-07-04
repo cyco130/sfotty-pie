@@ -60,6 +60,11 @@ test("booting the disk loads and runs the executable", () => {
 		}
 	}
 
+	// Mid-boot OS state: COLDST set, BOOT? not yet recorded. The loader must
+	// flip these before running game code.
+	machine.write(0x0244, 0xff, ReadOptions.NONE);
+	machine.write(0x09, 0, ReadOptions.NONE);
+
 	cpu.RDY = true;
 	cpu.reset(true);
 	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.run();
@@ -87,4 +92,13 @@ test("booting the disk loads and runs the executable", () => {
 	// ...INITAD ran exactly once, and RUNAD ran.
 	expect(machine.read(0x3100, ReadOptions.NONE)).toBe(1);
 	expect(machine.read(0x3101, ReadOptions.NONE)).toBe(1);
+	// The loader presented a completed disk boot before running game code
+	// (BOOT? = disk, COLDST clear), so a game that restarts itself through
+	// the OS warmstart isn't cold-rebooted into the loader (Bruce Lee).
+	expect(machine.read(0x09, ReadOptions.NONE)).toBe(1);
+	expect(machine.read(0x0244, ReadOptions.NONE)).toBe(0);
+	// ...and defaulted DOSINI to the OS cold start, so a Reset with no game
+	// hook re-boots the disk instead of re-entering the spent loader.
+	expect(machine.read(0x0c, ReadOptions.NONE)).toBe(0x77);
+	expect(machine.read(0x0d, ReadOptions.NONE)).toBe(0xe4);
 });

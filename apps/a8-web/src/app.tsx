@@ -82,7 +82,7 @@ export function App({
 						ref={canvasRef}
 						width={FRAME_BUFFER_WIDTH}
 						height={FRAME_BUFFER_HEIGHT}
-						class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 [image-rendering:pixelated]"
+						class="absolute top-1/2 left-1/2 -translate-1/2 [image-rendering:pixelated]"
 					/>
 				</div>
 
@@ -118,7 +118,7 @@ export function App({
 				autocapitalize="off"
 				autocomplete="off"
 				spellcheck={false}
-				class="fixed top-0 left-0 h-px w-px border-none p-0 opacity-0"
+				class="fixed top-0 left-0 size-px border-none p-0 opacity-0"
 			/>
 		</div>
 	);

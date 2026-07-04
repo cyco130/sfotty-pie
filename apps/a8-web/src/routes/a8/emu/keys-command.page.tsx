@@ -87,7 +87,7 @@ function Segments({
 	onChange: (value: string) => void;
 }) {
 	return (
-		<div class="inline-flex overflow-hidden rounded border border-neutral-300">
+		<div class="inline-flex overflow-hidden rounded-sm border border-neutral-300">
 			{options.map((option, index) => (
 				<button
 					key={option.value}
@@ -293,7 +293,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 										{/* Primary only matters when there's a choice. */}
 										{bindings.length > 1 &&
 											(binding.primary ? (
-												<span class="rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-neutral-600 uppercase">
+												<span class="rounded-sm bg-neutral-200 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-neutral-600 uppercase">
 													{messages.shortcuts.primary}
 												</span>
 											) : (
@@ -349,7 +349,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 						) : (
 							<button
 								type="button"
-								class="rounded border border-neutral-300 px-2 py-1 text-left text-sm text-neutral-700 hover:bg-neutral-50"
+								class="rounded-sm border border-neutral-300 px-2 py-1 text-left text-sm text-neutral-700 hover:bg-neutral-50"
 								onClick={() => {
 									capturedRef.current = null;
 									setCaptured(null);
@@ -361,7 +361,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 						)}
 						<select
 							value={code}
-							class="rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 outline-none focus:border-neutral-500"
+							class="rounded-sm border border-neutral-300 px-2 py-1 text-sm text-neutral-900 outline-none focus:border-neutral-500"
 							onChange={(event) => setCode(event.currentTarget.value)}
 						>
 							<option value="">{messages.shortcuts.keyNone}</option>
@@ -432,7 +432,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 					<button
 						type="button"
 						disabled={!code}
-						class="mt-1 w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
+						class="mt-1 w-full rounded-sm bg-neutral-800 px-2 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300"
 						onClick={add}
 					>
 						{messages.shortcuts.add}

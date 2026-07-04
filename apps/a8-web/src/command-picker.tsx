@@ -229,7 +229,7 @@ export function CommandPicker({
 				autocapitalize="off"
 				autocomplete="off"
 				spellcheck={false}
-				class="shrink-0 rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+				class="shrink-0 rounded-sm border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
 				onInput={(event) => {
 					setQuery(event.currentTarget.value);
 					setSelected(0);
@@ -241,7 +241,7 @@ export function CommandPicker({
 					<li
 						key={command}
 						ref={index === active ? selectedRef : null}
-						class={`cursor-pointer rounded px-2 py-1 text-sm ${
+						class={`cursor-pointer rounded-sm px-2 py-1 text-sm ${
 							index === active
 								? "bg-neutral-200 text-neutral-900"
 								: "text-neutral-700"

@@ -23,7 +23,7 @@ function Cell({ code }: { code: number }) {
 	const key = keyByCode.get(code);
 	const coscan = COSCAN[code];
 	return (
-		<div class="flex flex-col items-center gap-1 rounded border border-neutral-800 bg-neutral-900/40 p-1.5">
+		<div class="flex flex-col items-center gap-1 rounded-sm border border-neutral-800 bg-neutral-900/40 p-1.5">
 			<div class="font-mono text-[0.65rem] text-neutral-500">{hex(code)}</div>
 			{key ? (
 				<Key labels={key.labels} />
@@ -31,7 +31,7 @@ function Cell({ code }: { code: number }) {
 				<span class="py-1 text-xs text-neutral-700 italic">None</span>
 			)}
 			{coscan && (
-				<div class="rounded bg-neutral-700 px-1.5 py-0.5 text-[0.65rem] font-semibold text-neutral-100">
+				<div class="rounded-sm bg-neutral-700 px-1.5 py-0.5 text-[0.65rem] font-semibold text-neutral-100">
 					+{coscan}
 				</div>
 			)}

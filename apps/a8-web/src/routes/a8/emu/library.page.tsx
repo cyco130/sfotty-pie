@@ -393,7 +393,7 @@ export default function LibraryPage() {
 		<PanelFrame title={messages.library.title}>
 			<div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
 				<div
-					class={`rounded border-2 border-dashed p-3 text-center text-sm ${
+					class={`rounded-sm border-2 border-dashed p-3 text-center text-sm ${
 						dragging
 							? "border-emerald-400 bg-emerald-50 text-emerald-700"
 							: "border-neutral-300 text-neutral-500"
@@ -463,7 +463,7 @@ export default function LibraryPage() {
 					autocapitalize="off"
 					autocomplete="off"
 					spellcheck={false}
-					class="w-full rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+					class="w-full rounded-sm border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
 					onInput={(event) => setImportTags(event.currentTarget.value)}
 				/>
 
@@ -475,7 +475,7 @@ export default function LibraryPage() {
 						autocapitalize="off"
 						autocomplete="off"
 						spellcheck={false}
-						class="w-full rounded border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+						class="w-full rounded-sm border border-neutral-300 px-2 py-1 text-sm text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
 						onInput={(event) =>
 							setParams({ q: event.currentTarget.value || null, page: null })
 						}
@@ -484,7 +484,7 @@ export default function LibraryPage() {
 						<select
 							aria-label={messages.library.columns.type}
 							value={typeFilter}
-							class="min-w-32 flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+							class="min-w-32 flex-1 rounded-sm border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
 							onChange={(event) =>
 								// Changing the type clears any attribute filters — they
 								// only apply within their own type.
@@ -508,7 +508,7 @@ export default function LibraryPage() {
 						<select
 							aria-label={messages.library.columns.source}
 							value={sourceFilter}
-							class="min-w-32 flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+							class="min-w-32 flex-1 rounded-sm border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
 							onChange={(event) =>
 								setParams({
 									source: event.currentTarget.value || null,
@@ -524,7 +524,7 @@ export default function LibraryPage() {
 							<select
 								aria-label={messages.library.tags.label}
 								value={tagFilter}
-								class="min-w-32 flex-1 rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+								class="min-w-32 flex-1 rounded-sm border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
 								onChange={(event) =>
 									setParams({
 										tag: event.currentTarget.value || null,
@@ -546,7 +546,7 @@ export default function LibraryPage() {
 							{attrFilters.map((f) => (
 								<span
 									key={f.param}
-									class="inline-flex items-center gap-1 rounded bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700"
+									class="inline-flex items-center gap-1 rounded-sm bg-neutral-100 px-2 py-0.5 text-xs text-neutral-700"
 								>
 									{f.label}
 									<button
@@ -571,7 +571,7 @@ export default function LibraryPage() {
 							<li key={entry.id}>
 								<button
 									type="button"
-									class="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-neutral-100"
+									class="flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left hover:bg-neutral-100"
 									onClick={() =>
 										navigate(`/a8/emu/library/${encodeURIComponent(entry.id)}`)
 									}
@@ -623,7 +623,7 @@ export default function LibraryPage() {
 									{cols.map((c) => (
 										<td
 											key={c.head}
-											class="px-2 py-1 text-right tabular-nums text-neutral-500"
+											class="px-2 py-1 text-right text-neutral-500 tabular-nums"
 										>
 											{c.render(entry.derived, setAttr)}
 										</td>
@@ -643,7 +643,7 @@ export default function LibraryPage() {
 							<button
 								type="button"
 								disabled={page <= 1}
-								class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100 disabled:opacity-40"
+								class="rounded-sm border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100 disabled:opacity-40"
 								onClick={() => goToPage(page - 1)}
 							>
 								{messages.library.prev}
@@ -651,7 +651,7 @@ export default function LibraryPage() {
 							<button
 								type="button"
 								disabled={page >= pages}
-								class="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100 disabled:opacity-40"
+								class="rounded-sm border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100 disabled:opacity-40"
 								onClick={() => goToPage(page + 1)}
 							>
 								{messages.library.next}

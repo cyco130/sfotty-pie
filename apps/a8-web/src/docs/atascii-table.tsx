@@ -121,7 +121,7 @@ function KeyCell({ code }: { code: number }) {
 	return (
 		<span class="inline-flex items-center gap-1.5">
 			{p.modifier && (
-				<span class="rounded bg-neutral-700 px-1.5 py-0.5 text-xs font-semibold text-neutral-100">
+				<span class="rounded-sm bg-neutral-700 px-1.5 py-0.5 text-xs font-semibold text-neutral-100">
 					{p.modifier}
 				</span>
 			)}

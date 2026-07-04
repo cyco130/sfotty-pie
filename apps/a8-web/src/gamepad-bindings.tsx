@@ -40,7 +40,7 @@ function Chip({ label, onClick }: { label: string; onClick?: () => void }) {
 	return (
 		<button
 			type="button"
-			class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200"
+			class="rounded-sm bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200"
 			onClick={onClick}
 		>
 			{label}
@@ -159,7 +159,7 @@ export function BindingsEditor({ host }: { host: EmulatorHost }) {
 	return (
 		<div class="flex flex-col gap-3">
 			{capture && (
-				<p class="rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">
+				<p class="rounded-sm bg-amber-50 px-2 py-1 text-xs text-amber-800">
 					{messages.controllers.pressInput}
 				</p>
 			)}
@@ -186,7 +186,7 @@ export function BindingsEditor({ host }: { host: EmulatorHost }) {
 								)}
 								<button
 									type="button"
-									class="rounded border border-dashed border-neutral-300 px-1.5 py-0.5 text-xs text-neutral-500 hover:border-neutral-400"
+									class="rounded-sm border border-dashed border-neutral-300 px-1.5 py-0.5 text-xs text-neutral-500 hover:border-neutral-400"
 									onClick={() => setCapture({ role })}
 								>
 									＋
@@ -206,7 +206,7 @@ export function BindingsEditor({ host }: { host: EmulatorHost }) {
 						<div key={i} class="flex items-center gap-2 text-xs">
 							<button
 								type="button"
-								class="flex-1 truncate rounded bg-neutral-100 px-1.5 py-0.5 text-left text-neutral-700 hover:bg-neutral-200"
+								class="flex-1 truncate rounded-sm bg-neutral-100 px-1.5 py-0.5 text-left text-neutral-700 hover:bg-neutral-200"
 								onClick={() => setPicking(i)}
 							>
 								{labelOf(b.command)}
@@ -227,7 +227,7 @@ export function BindingsEditor({ host }: { host: EmulatorHost }) {
 					))}
 					<button
 						type="button"
-						class="mt-1 self-start rounded border border-dashed border-neutral-300 px-2 py-0.5 text-xs text-neutral-500 hover:border-neutral-400"
+						class="mt-1 self-start rounded-sm border border-dashed border-neutral-300 px-2 py-0.5 text-xs text-neutral-500 hover:border-neutral-400"
 						onClick={() => setPicking("new")}
 					>
 						＋ {messages.controllers.addBinding}

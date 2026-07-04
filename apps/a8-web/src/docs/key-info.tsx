@@ -124,7 +124,7 @@ export function KeyInfo({
 					{keyData.name}
 				</span>
 				{pinned && (
-					<span class="rounded bg-amber-400/20 px-1.5 py-0.5 text-xs font-medium text-amber-300">
+					<span class="rounded-sm bg-amber-400/20 px-1.5 py-0.5 text-xs font-medium text-amber-300">
 						Pinned — click again to release
 					</span>
 				)}

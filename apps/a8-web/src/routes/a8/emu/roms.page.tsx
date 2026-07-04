@@ -174,7 +174,7 @@ function Slot({ slot, host }: { slot: SlotDef; host: EmulatorHost }) {
 					)}
 					{slot.label}
 					{active && (
-						<span class="rounded bg-emerald-100 px-1.5 text-[10px] font-medium tracking-wide text-emerald-700 uppercase">
+						<span class="rounded-sm bg-emerald-100 px-1.5 text-[10px] font-medium tracking-wide text-emerald-700 uppercase">
 							{messages.roms.inUse}
 						</span>
 					)}
@@ -187,8 +187,8 @@ function Slot({ slot, host }: { slot: SlotDef; host: EmulatorHost }) {
 				value={value}
 				class={
 					empty
-						? "w-full cursor-not-allowed rounded border border-neutral-200 bg-neutral-100 px-2 py-1 text-sm text-neutral-400"
-						: `w-full rounded border bg-white px-2 py-1 text-sm text-neutral-800 ${active ? "border-emerald-400" : "border-neutral-300"}`
+						? "w-full cursor-not-allowed rounded-sm border border-neutral-200 bg-neutral-100 px-2 py-1 text-sm text-neutral-400"
+						: `w-full rounded-sm border bg-white px-2 py-1 text-sm text-neutral-800 ${active ? "border-emerald-400" : "border-neutral-300"}`
 				}
 				onChange={(event) => {
 					// Picking the auto-pick default clears the override (no staged change).
@@ -252,7 +252,7 @@ export default function RomsPage() {
 				{dirty && (
 					<button
 						type="button"
-						class="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-white hover:bg-neutral-700"
+						class="w-full rounded-sm bg-neutral-800 px-2 py-1 text-sm text-white hover:bg-neutral-700"
 						onClick={() => host.applyRoms()}
 					>
 						{host.romsReboot.value

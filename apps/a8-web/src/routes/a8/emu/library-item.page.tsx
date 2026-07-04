@@ -122,7 +122,7 @@ function NameEditor({
 				<input
 					type="text"
 					value={draft}
-					class="min-w-0 flex-1 rounded border border-neutral-300 px-2 py-1 text-sm font-medium text-neutral-900 outline-none focus:border-neutral-500"
+					class="min-w-0 flex-1 rounded-sm border border-neutral-300 px-2 py-1 text-sm font-medium text-neutral-900 outline-none focus:border-neutral-500"
 					onInput={(event) => setDraft(event.currentTarget.value)}
 					onKeyDown={(event) => {
 						if (event.key === "Enter") save();
@@ -131,7 +131,7 @@ function NameEditor({
 				{dirty && (
 					<button
 						type="button"
-						class="shrink-0 rounded bg-neutral-800 px-3 py-1 text-sm text-white hover:bg-neutral-700"
+						class="shrink-0 rounded-sm bg-neutral-800 px-3 py-1 text-sm text-white hover:bg-neutral-700"
 						onClick={save}
 					>
 						{messages.library.save}
@@ -167,7 +167,7 @@ function TagEditor({ entry }: { entry: ImageEntry }) {
 				{tags.map((tag) => (
 					<span
 						key={tag}
-						class="inline-flex items-center gap-1 rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700"
+						class="inline-flex items-center gap-1 rounded-sm bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700"
 					>
 						{tag}
 						<button
@@ -185,7 +185,7 @@ function TagEditor({ entry }: { entry: ImageEntry }) {
 					value={draft}
 					placeholder={messages.library.tags.add}
 					autocapitalize="off"
-					class="min-w-24 flex-1 rounded border border-neutral-300 px-2 py-0.5 text-xs text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
+					class="min-w-24 flex-1 rounded-sm border border-neutral-300 px-2 py-0.5 text-xs text-neutral-900 placeholder-neutral-400 outline-none focus:border-neutral-500"
 					onInput={(event) => setDraft(event.currentTarget.value)}
 					onKeyDown={(event) => {
 						if (event.key === "Enter" || event.key === ",") {
@@ -385,7 +385,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 					{canBoot && (
 						<button
 							type="button"
-							class="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white hover:bg-neutral-700"
+							class="w-full rounded-sm bg-neutral-800 px-2 py-1.5 text-sm text-white hover:bg-neutral-700"
 							onClick={() => void host.bootImage(entry.id)}
 						>
 							{messages.library.actions.boot}
@@ -394,7 +394,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 					{type === "disk" && (
 						<button
 							type="button"
-							class="w-full rounded border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
+							class="w-full rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
 							onClick={() => void host.attachDisk(entry.id)}
 						>
 							{messages.library.actions.attachDisk}
@@ -403,7 +403,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 					{type === "cart" && (
 						<button
 							type="button"
-							class="w-full rounded border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
+							class="w-full rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
 							onClick={() => void host.attachCartridge(entry.id)}
 						>
 							{messages.library.actions.attachCart}
@@ -411,7 +411,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 					)}
 					<button
 						type="button"
-						class="w-full rounded border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
+						class="w-full rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
 						onClick={() => void download()}
 					>
 						{messages.library.actions.download}
@@ -419,7 +419,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 					{entry.source === "user" && (
 						<button
 							type="button"
-							class="w-full rounded border border-red-300 px-2 py-1.5 text-sm text-red-700 hover:bg-red-50"
+							class="w-full rounded-sm border border-red-300 px-2 py-1.5 text-sm text-red-700 hover:bg-red-50"
 							onClick={() => void remove()}
 						>
 							{messages.library.actions.delete}

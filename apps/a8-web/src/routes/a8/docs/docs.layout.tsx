@@ -17,7 +17,7 @@ export function DocsLayout({ children }: { children: ComponentChildren }) {
 				    `prose-invert` flips them for the dark background. The MDX
 				    page renders bare h1/p/ul/… elements here, so this is what
 				    styles them until (if) we add an MDXProvider component map. */}
-				<article class="prose prose-invert prose-neutral mx-auto">
+				<article class="mx-auto prose prose-neutral prose-invert">
 					{children}
 				</article>
 			</main>

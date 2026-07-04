@@ -2,7 +2,7 @@
 	"ANTIC: Address mirroring": "pass",
 	"ANTIC: Address wrapping": "pass",
 	"ANTIC: Blocked NMIs": "pass",
-	"ANTIC: Character control": "fail",
+	"ANTIC: Character control": "pass",
 	"ANTIC: DLI timing": "pass",
 	"ANTIC: DMA pattern": "fail",
 	"ANTIC: Default value": "pass",

@@ -289,7 +289,7 @@ export class SfottyCore {
 	// Bus reads ----------------------------------------------------------------
 
 	/**
-	 * `opReadDecode` — the decode cycle (the implicit `r-t1`): read the next opcode
+	 * `opReadDecode` — the decode cycle: read the next opcode
 	 * while asserting the SYNC line. Normally it advances PC and jumps to the
 	 * opcode's microcode. But if a poll latched a pending interrupt, the read is a
 	 * dummy: PC is *not* advanced and the CPU runs the BRK/interrupt sequence

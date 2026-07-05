@@ -443,6 +443,13 @@ export class EmulatorHost {
 		this.#gamepads.onChange = () => {
 			this.gamepads.value = this.#gamepads.pads();
 		};
+		// Surface connect/disconnect as notices, with the assigned port.
+		this.#gamepads.onConnect = (name, port) => {
+			this.toast(messages.toasts.controllerConnected(name, port));
+		};
+		this.#gamepads.onDisconnect = (name) => {
+			this.toast(messages.toasts.controllerDisconnected(name));
+		};
 		// Apply the persisted (or default) bindings and the persisted
 		// per-device normalization profiles to the poller.
 		const gb = this.gamepadBindings.peek();

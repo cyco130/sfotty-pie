@@ -196,6 +196,19 @@ function readPad(
 
 const NO_HALVES: ReadonlySet<string> = new Set();
 
+/**
+ * A human display name for a pad: `gamepad.id` minus the vendor/product noise
+ * (Chrome appends a parenthetical like "(STANDARD GAMEPAD Vendor: … Product:
+ * …)", Firefox prefixes hex ids like "045e-028e-"). Falls back to the raw id.
+ */
+export function padDisplayName(id: string): string {
+	const name = id
+		.replace(/\s*\([^)]*\)\s*$/, "")
+		.replace(/^(?:[0-9a-f]{1,4}-){2}/i, "")
+		.trim();
+	return name || id;
+}
+
 /** A connected pad and its Atari-port assignment, for the controllers UI. */
 export interface PadInfo {
 	index: number; // the browser's gamepad.index (its getGamepads() slot)
@@ -246,6 +259,14 @@ export class Gamepads {
 	 *  mirror {@link pads} into a signal. */
 	onChange: (() => void) | undefined;
 
+	/** Fired when a pad connects, with its display name and the Atari port it
+	 *  was assigned (null = all ports taken). */
+	onConnect: ((name: string, port: number | null) => void) | undefined;
+
+	/** Fired when a pad disconnects, with its display name and the port it
+	 *  frees (null = it wasn't assigned). */
+	onDisconnect: ((name: string, port: number | null) => void) | undefined;
+
 	constructor(actions: GamepadActions) {
 		this.#actions = actions;
 	}
@@ -256,6 +277,7 @@ export class Gamepads {
 	attach(): () => void {
 		const onConnect = (e: GamepadEvent): void => {
 			const { index, id, mapping } = e.gamepad;
+			if (this.#pads.has(index)) return; // some browsers re-fire
 			this.#pads.set(index, { id, mapping });
 			// Lowest free port; existing pads keep theirs.
 			if (!this.#portToIndex.includes(index)) {
@@ -263,9 +285,12 @@ export class Gamepads {
 				if (free >= 0) this.#portToIndex[free] = index;
 			}
 			this.onChange?.();
+			const port = this.#portToIndex.indexOf(index);
+			this.onConnect?.(padDisplayName(id), port >= 0 ? port : null);
 		};
 		const onDisconnect = (e: GamepadEvent): void => {
-			const { index } = e.gamepad;
+			const { index, id } = e.gamepad;
+			if (!this.#pads.has(index)) return;
 			this.#pads.delete(index);
 			const port = this.#portToIndex.indexOf(index);
 			if (port >= 0) this.#portToIndex[port] = null;
@@ -274,6 +299,7 @@ export class Gamepads {
 			}
 			this.poll(true); // release whatever the departing pad held
 			this.onChange?.();
+			this.onDisconnect?.(padDisplayName(id), port >= 0 ? port : null);
 		};
 		window.addEventListener("gamepadconnected", onConnect);
 		window.addEventListener("gamepaddisconnected", onDisconnect);

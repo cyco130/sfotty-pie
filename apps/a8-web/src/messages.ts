@@ -466,6 +466,12 @@ export const messages = {
 	// Announcements (info/warning toasts) for state changes that would
 	// otherwise be silent — especially palette commands. Present tense.
 	toasts: {
+		controllerConnected: (name: string, port: number | null) =>
+			port === null
+				? `Controller connected: ${name}`
+				: `Controller connected: ${name} → Joystick ${port}`,
+		controllerDisconnected: (name: string) =>
+			`Controller disconnected: ${name}`,
 		bootDisk: (name: string) => `Booting D1: (${name})`,
 		bootCartridge: (name: string) => `Booting cartridge (${name})`,
 		bootExecutable: (name: string) => `Booting executable (${name})`,

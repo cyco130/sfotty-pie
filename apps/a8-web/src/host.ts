@@ -280,6 +280,11 @@ export class EmulatorHost {
 		loadNormalizeProfiles(),
 	);
 
+	/** Whether the game picker overlay is open (see favorites-menu.tsx). */
+	readonly favoritesOpen = signal(false);
+	// Whether the machine was running when the picker opened (resume on close).
+	#favoritesWasRunning = false;
+
 	/** The layout snapshot the bindings were baked from (`code` → legend), used to
 	 *  label the editor's live preview — existing chords carry their own baked
 	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
@@ -631,6 +636,31 @@ export class EmulatorHost {
 	/** Restore the default gamepad bindings. */
 	resetGamepadBindings(): void {
 		this.setGamepadBindings(defaultGamepadBindings());
+	}
+
+	/** Open the game picker (see favorites-menu.tsx): pause the machine and
+	 *  suspend pad → command polling — the picker reads the pad itself. */
+	openFavorites(): void {
+		if (this.favoritesOpen.value) return;
+		this.#favoritesWasRunning = this.running.value;
+		if (this.running.value) this.pause();
+		this.#gamepads.suspend(true);
+		this.favoritesOpen.value = true;
+	}
+
+	/** Close the picker. With a boot target, boot it (and make sure the fresh
+	 *  machine runs); without one, resume whatever was running before. */
+	closeFavorites(bootId?: string): void {
+		if (!this.favoritesOpen.value) return;
+		this.favoritesOpen.value = false;
+		this.#gamepads.suspend(false);
+		if (bootId !== undefined) {
+			void this.bootImage(bootId).then(() => {
+				if (!this.running.value) this.resume();
+			});
+		} else if (this.#favoritesWasRunning) {
+			this.resume();
+		}
 	}
 
 	/** Set or clear (null) a device's normalization profile — apply it live,

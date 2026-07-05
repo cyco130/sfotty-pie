@@ -5,6 +5,7 @@ import {
 	type FirmwareInfo,
 } from "@sfotty-pie/a8";
 import { useEffect, useState } from "preact/hooks";
+import { favoriteIds, toggleFavorite } from "../../../favorites.ts";
 import { Icon } from "../../../icon.tsx";
 import {
 	getImage,
@@ -407,6 +408,25 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 							onClick={() => void host.attachCartridge(entry.id)}
 						>
 							{messages.library.actions.attachCart}
+						</button>
+					)}
+					{canBoot && (
+						<button
+							type="button"
+							class="flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
+							onClick={() => toggleFavorite(entry.id)}
+						>
+							<Icon
+								name="star"
+								class={`size-4 ${
+									favoriteIds.value.includes(entry.id)
+										? "text-amber-500"
+										: "text-neutral-400"
+								}`}
+							/>
+							{favoriteIds.value.includes(entry.id)
+								? messages.recents.unfavorite
+								: messages.recents.favorite}
 						</button>
 					)}
 					<button

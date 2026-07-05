@@ -141,6 +141,9 @@ export const DEFAULT_CONSOLE: readonly ConsoleBinding[] = [
 	{ input: { button: 3 }, command: "PRESS_OPTION" }, // north face (Y / △)
 	{ input: { button: 4 }, command: "TOGGLE_PAUSE" }, // L1
 	{ input: { button: 7 }, command: "TURBO_HOLD" }, // R2 — hold to fast-forward
+	// R3 — the couch game picker. Not Guide/16: macOS reserves the PS/Xbox
+	// home button (Game Controller framework), so browsers never see it there.
+	{ input: { button: 11 }, command: "OPEN_FAVORITES" },
 ];
 
 // A port's digital state — the five senses we drive, as booleans.
@@ -254,6 +257,14 @@ export class Gamepads {
 	#sticks = new Map<string, RadialStickState>();
 	// Per-device normalization profiles by gamepad id (see gamepad-normalize.ts).
 	#profiles: Readonly<Record<string, NormalizeProfile>> = {};
+	// While suspended, poll() is a no-op — a full-screen surface (the game
+	// picker) is reading the pad itself and the machine must not see it.
+	#suspended = false;
+	// The first poll after a resume only records state, emitting no edges: a
+	// button still held from before (the one that closed the picker, a fire
+	// held into a boot) must not fire its command on re-entry.
+	#skipEdges = false;
+	#muteEdges = false;
 
 	/** Fired whenever the connected set or the assignment changes, so the host can
 	 *  mirror {@link pads} into a signal. */
@@ -344,7 +355,10 @@ export class Gamepads {
 	 *  held. A no-op when nothing is connected, unless `force` (the disconnect and
 	 *  reassign paths run once to release/re-home). */
 	poll(force = false): void {
+		if (this.#suspended) return;
 		if (!force && this.#pads.size === 0) return;
+		this.#muteEdges = this.#skipEdges;
+		this.#skipEdges = false;
 		const pads = navigator.getGamepads();
 		let p0Halves = NO_HALVES;
 		let p0View: PadView | undefined;
@@ -363,6 +377,7 @@ export class Gamepads {
 			}
 		}
 		this.#applyConsole(p0View, p0Halves);
+		this.#muteEdges = false;
 	}
 
 	// The axis-halves the pad's sticks light up this poll: each axis pair (0/1,
@@ -393,6 +408,21 @@ export class Gamepads {
 	 *  Live: the next poll reads through them. */
 	setProfiles(profiles: Readonly<Record<string, NormalizeProfile>>): void {
 		this.#profiles = profiles;
+	}
+
+	/** Suspend/resume the pad → command polling (the game picker reads the pad
+	 *  itself while open). Suspending releases everything currently held. */
+	suspend(on: boolean): void {
+		if (this.#suspended === on) return;
+		this.#suspended = on;
+		if (!on) {
+			this.#skipEdges = true;
+			return;
+		}
+		for (let port = 0; port < PORT_COMMANDS.length; port++) {
+			this.#apply(port, CENTERED);
+		}
+		this.#applyConsole(undefined, NO_HALVES);
 	}
 
 	/** Replace the joystick + console binding sets (the editor's save path). Live:
@@ -432,6 +462,7 @@ export class Gamepads {
 
 	#edge(was: boolean, now: boolean, command: Command): void {
 		if (now === was) return;
+		if (this.#muteEdges) return; // state is recorded, the command isn't fired
 		if (now) this.#actions.press(command);
 		else this.#actions.release(command);
 	}

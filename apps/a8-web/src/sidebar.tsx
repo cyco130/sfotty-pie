@@ -11,6 +11,7 @@ import {
 	type AtariModel,
 } from "./machine-config.ts";
 import { messages } from "./messages.ts";
+import { favoriteIds, toggleFavorite } from "./favorites.ts";
 import { recentsView } from "./recents.ts";
 import { TypePill } from "./type-pill.tsx";
 
@@ -94,6 +95,7 @@ function KeyRow({ keys, action }: { keys: string; action: string }) {
  */
 function RecentsSection({ host }: { host: EmulatorHost }) {
 	const items = recentsView.value;
+	const favorites = favoriteIds.value;
 	if (items.length === 0) return null;
 	return (
 		<section>
@@ -114,6 +116,27 @@ function RecentsSection({ host }: { host: EmulatorHost }) {
 							onClick={() => void host.bootImage(entry.id)}
 						>
 							{entry.user.displayName}
+						</button>
+						<button
+							type="button"
+							class={`shrink-0 ${
+								favorites.includes(entry.id)
+									? "text-amber-500 hover:text-amber-600"
+									: "text-neutral-300 hover:text-neutral-500"
+							}`}
+							title={
+								favorites.includes(entry.id)
+									? messages.recents.unfavorite
+									: messages.recents.favorite
+							}
+							aria-label={
+								favorites.includes(entry.id)
+									? messages.recents.unfavorite
+									: messages.recents.favorite
+							}
+							onClick={() => toggleFavorite(entry.id)}
+						>
+							<Icon name="star" class="size-4" />
 						</button>
 						{entry.transient && (
 							<button

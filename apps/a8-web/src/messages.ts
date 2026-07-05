@@ -278,6 +278,16 @@ export const messages = {
 		keepTitle: "Add to library",
 		remove: "Remove from recents",
 		kept: (name: string): string => `Added ${name} to the library`,
+		favorite: "Add to favorites",
+		unfavorite: "Remove from favorites",
+	},
+
+	favorites: {
+		title: "Favorites",
+		recentsTitle: "Recent",
+		empty:
+			"No favorites yet — star games in the menu's Recents list or in the library.",
+		hint: "🕹 select · A / ✕ boot · B / ○ back",
 	},
 
 	library: {
@@ -526,6 +536,7 @@ export const labels = {
 	CLOSE_PANEL: "View: Close panel",
 	OPEN_ROMS: "Machine: Open ROM preferences…",
 	OPEN_LIBRARY: "Library: Open…",
+	OPEN_FAVORITES: "Library: Open game picker…",
 	CLEAR_LIBRARY: "Library: Clear…",
 	NUKE_EVERYTHING: "Settings: Reset everything (library and settings)…",
 	RESET_TAB_SETTINGS: "Settings: Reset this tab to saved settings",

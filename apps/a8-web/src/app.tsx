@@ -3,6 +3,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { Toasts } from "./toasts.tsx";
 import { BottomBar } from "./bottom-bar.tsx";
+import { FavoritesMenu } from "./favorites-menu.tsx";
 import type { EmulatorHost } from "./host.ts";
 import { ImportProgress } from "./import-progress.tsx";
 import { Osd } from "./osd.tsx";
@@ -90,6 +91,8 @@ export function App({
 
 				<BottomBar host={host} />
 			</div>
+
+			{host.favoritesOpen.value && <FavoritesMenu host={host} />}
 
 			<Toasts host={host} />
 

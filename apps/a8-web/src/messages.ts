@@ -136,6 +136,25 @@ export const messages = {
 		addBinding: "Add binding",
 		reset: "Reset to defaults",
 		pressInput: "Press a button or push a stick…  (Esc to cancel)",
+		remap: "Remap…",
+		remapped: "Remapped",
+		removeMapping: "Remove mapping",
+		nowActive: "Now active:",
+		nothingActive: "nothing",
+		mappingDefault: "Default",
+		mappingDefaultDetail: (detail: string) => `Default (${detail})`,
+		mappingNone: "None",
+		mappingHat: "Hat",
+		buttonNumber: (n: number) => `Button #${n}`,
+		axisNumber: (n: number) => `Axis #${n}`,
+		invertedAxis: "Inverted",
+		hatMapping: (axis: number) => `D-pad ← hat on axis #${axis}`,
+		capture: "Capture",
+		releaseFirst: "Release everything…",
+		pressTarget: "Press or push it…  (Esc to cancel)",
+		pushPositive: "Push its right / down side…  (Esc to cancel)",
+		saveMapping: "Save mapping",
+		cancel: "Cancel",
 		role: {
 			up: "Up",
 			down: "Down",
@@ -447,6 +466,12 @@ export const messages = {
 	// Announcements (info/warning toasts) for state changes that would
 	// otherwise be silent — especially palette commands. Present tense.
 	toasts: {
+		controllerConnected: (name: string, port: number | null) =>
+			port === null
+				? `Controller connected: ${name}`
+				: `Controller connected: ${name} → Joystick ${port}`,
+		controllerDisconnected: (name: string) =>
+			`Controller disconnected: ${name}`,
 		bootDisk: (name: string) => `Booting D1: (${name})`,
 		bootCartridge: (name: string) => `Booting cartridge (${name})`,
 		bootExecutable: (name: string) => `Booting executable (${name})`,

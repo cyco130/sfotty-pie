@@ -584,9 +584,6 @@ export const commands = {
 	PRESS_JOY3_LEFT: joyDir(3, 4, "PRESS_JOY3_LEFT"),
 	PRESS_JOY3_RIGHT: joyDir(3, 8, "PRESS_JOY3_RIGHT"),
 	PRESS_JOY3_TRIGGER: joyTrigger(3, "PRESS_JOY3_TRIGGER"),
-
-	// TODO: settings commands (TOGGLE_KEYBOARD_LAYOUT_MODE and friends) come
-	// back when raw mode and an options store exist.
 } satisfies Record<string, CommandSpec>;
 
 let traceCommands = false;

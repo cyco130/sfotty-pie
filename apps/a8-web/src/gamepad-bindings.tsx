@@ -3,6 +3,7 @@ import { CommandPicker } from "./command-picker.tsx";
 import { type Command, labelOf } from "./commands.ts";
 import type { GamepadInput, JoyRole } from "./gamepad.ts";
 import { inputLabel } from "./gamepad-labels.ts";
+import { normalize, type PadView } from "./gamepad-normalize.ts";
 import type { EmulatorHost } from "./host.ts";
 import { messages } from "./messages.ts";
 
@@ -14,8 +15,10 @@ const CAPTURE_AXIS = 0.7;
 const ROLES: readonly JoyRole[] = ["up", "down", "left", "right", "trigger"];
 
 // A pad's currently-active inputs as {key, input}: buttons pressed, axes past the
-// capture threshold (each side a distinct input).
-function activeInputs(pad: Gamepad): { key: string; input: GamepadInput }[] {
+// capture threshold (each side a distinct input). Reads the normalized view,
+// so captures land in Standard terms for a profiled pad (and double as a
+// calibration check).
+function activeInputs(pad: PadView): { key: string; input: GamepadInput }[] {
 	const out: { key: string; input: GamepadInput }[] = [];
 	pad.buttons.forEach((b, i) => {
 		if (b.pressed) out.push({ key: `b${i}`, input: { button: i } });
@@ -55,7 +58,12 @@ function Chip({ label, onClick }: { label: string; onClick?: () => void }) {
  */
 export function BindingsEditor({ host }: { host: EmulatorHost }) {
 	const bindings = host.gamepadBindings.value;
-	const standard = host.gamepads.value.some((p) => p.mapping === "standard");
+	// Standard labels apply when a pad reports the Standard mapping natively
+	// or is normalized to it by a profile.
+	const profiles = host.gamepadNormalize.value;
+	const standard = host.gamepads.value.some(
+		(p) => p.mapping === "standard" || p.id in profiles,
+	);
 	const [capture, setCapture] = useState<Capture | null>(null);
 	// The console command picker: a row index, "new", or null (closed).
 	const [picking, setPicking] = useState<number | "new" | null>(null);
@@ -65,16 +73,19 @@ export function BindingsEditor({ host }: { host: EmulatorHost }) {
 	// self-capture a button you're holding to click.
 	useEffect(() => {
 		if (!capture) return;
+		const profiles = host.gamepadNormalize.peek();
+		const view = (p: Gamepad) => normalize(p, profiles[p.id]);
 		const baseline = new Set<string>();
 		for (const p of navigator.getGamepads()) {
 			if (p)
-				for (const a of activeInputs(p)) baseline.add(`${p.index}:${a.key}`);
+				for (const a of activeInputs(view(p)))
+					baseline.add(`${p.index}:${a.key}`);
 		}
 		let raf = 0;
 		const tick = () => {
 			for (const p of navigator.getGamepads()) {
 				if (!p) continue;
-				for (const a of activeInputs(p)) {
+				for (const a of activeInputs(view(p))) {
 					if (baseline.has(`${p.index}:${a.key}`)) continue;
 					setCapture(null);
 					const cur = host.gamepadBindings.peek();

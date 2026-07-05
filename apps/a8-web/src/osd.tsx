@@ -1,10 +1,15 @@
 import type { TargetedTouchEvent } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { Icon, type IconName } from "./icon.tsx";
 import { messages } from "./messages.ts";
 import { KeyboardView } from "./osd-keyboard.tsx";
+import {
+	initialStickState,
+	readRadialStick,
+	type RadialStickConfig,
+} from "./radial-stick.ts";
 import { storageName } from "./storage.ts";
 
 const LEFTY_KEY = storageName("osd", "lefty");
@@ -74,16 +79,43 @@ function TriggerButton({ host }: { host: EmulatorHost }) {
 	);
 }
 
+// Radial-reader thresholds for the touch stick. Much slighter hysteresis than
+// the gamepad's: a finger doesn't idle at the deadzone edge (touchmove only
+// fires while it moves) and doesn't wobble like a sprung stick at a sector
+// boundary — its angular jitter is positional jitter over radius, tiny out
+// near the ring. So the thresholds stay close to the raw geometry, with just a
+// sliver of margin as anti-chatter insurance. Tuned by feel.
+const TOUCH_STICK: RadialStickConfig = {
+	engage: 0.25,
+	release: 0.2,
+	sectorMargin: 0.05, // radians (~2.9°)
+};
+
+// Per-octant joystick direction bitmask (1 = up, 2 = down, 4 = left,
+// 8 = right) and knob offset, in the radial reader's octant order: 0 = +x
+// (east), counting towards +y, which grows down the screen — so 1 = SE.
+const OCTANT_DIRECTION = [0x8, 0xa, 0x2, 0x6, 0x4, 0x5, 0x1, 0x9] as const;
+const D = Math.SQRT1_2;
+const OCTANT_KNOB = [
+	{ x: 1, y: 0 },
+	{ x: D, y: D },
+	{ x: 0, y: 1 },
+	{ x: -D, y: D },
+	{ x: -1, y: 0 },
+	{ x: -D, y: -D },
+	{ x: 0, y: -1 },
+	{ x: D, y: -D },
+] as const;
+
 /**
- * The analog touch stick: a knob inside a ring. The touch point picks one of
- * nine positions (centre + eight compass directions) by its angle from the
- * centre, with a dead zone near the middle; the knob shows the choice and the
- * host's joystick-0 direction follows. Geometry carried over from the old
- * React build.
+ * The analog touch stick: a knob inside a ring. The touch point runs through
+ * the shared radial reader (deadzone + octant snapping + hysteresis, see
+ * radial-stick.ts); the knob shows the chosen octant and the host's joystick-0
+ * direction follows.
  */
 function JoystickStick({ host }: { host: EmulatorHost }) {
 	const [knob, setKnob] = useState({ x: 0, y: 0 });
-	const d = Math.SQRT1_2;
+	const stickRef = useRef(initialStickState());
 
 	function move(e: TargetedTouchEvent<HTMLDivElement>) {
 		// targetTouches, not touches: with the fire button held by the other
@@ -97,43 +129,18 @@ function JoystickStick({ host }: { host: EmulatorHost }) {
 		const x = 2 * ((touch.clientX - rect.left) / rect.width - 0.5);
 		const y = 2 * ((touch.clientY - rect.top) / rect.height - 0.5);
 
-		if (Math.hypot(x, y) < 0.25) {
+		const octant = readRadialStick(x, y, stickRef.current, TOUCH_STICK);
+		if (octant < 0) {
 			host.setJoystickDirection(0);
 			setKnob({ x: 0, y: 0 });
-			return;
-		}
-
-		// Direction-bit masks: 1 = up, 2 = down, 4 = left, 8 = right. `y` grows
-		// downward, so a positive angle points down the screen.
-		const a = Math.atan2(y, x) / Math.PI;
-		if (a > -0.125 && a <= 0.125) {
-			host.setJoystickDirection(0x8); // E
-			setKnob({ x: 1, y: 0 });
-		} else if (a > 0.125 && a <= 0.375) {
-			host.setJoystickDirection(0xa); // SE
-			setKnob({ x: d, y: d });
-		} else if (a > 0.375 && a <= 0.625) {
-			host.setJoystickDirection(0x2); // S
-			setKnob({ x: 0, y: 1 });
-		} else if (a > 0.625 && a <= 0.875) {
-			host.setJoystickDirection(0x6); // SW
-			setKnob({ x: -d, y: d });
-		} else if (a > 0.875 || a <= -0.875) {
-			host.setJoystickDirection(0x4); // W
-			setKnob({ x: -1, y: 0 });
-		} else if (a > -0.875 && a <= -0.625) {
-			host.setJoystickDirection(0x5); // NW
-			setKnob({ x: -d, y: -d });
-		} else if (a > -0.625 && a <= -0.375) {
-			host.setJoystickDirection(0x1); // N
-			setKnob({ x: 0, y: -1 });
 		} else {
-			host.setJoystickDirection(0x9); // NE
-			setKnob({ x: d, y: -d });
+			host.setJoystickDirection(OCTANT_DIRECTION[octant]!);
+			setKnob(OCTANT_KNOB[octant]!);
 		}
 	}
 
 	function recenter() {
+		stickRef.current = initialStickState();
 		host.setJoystickDirection(0);
 		setKnob({ x: 0, y: 0 });
 	}
@@ -231,11 +238,10 @@ function ViewToggle({
 /**
  * The on-screen controls for touch devices. A persistent top bar (Power + a
  * joystick/keyboard view toggle) sits over a body that swaps between the
- * joystick view (a
- * row of console keys over a fire button and analog stick, with a left-hander
- * swap) and the on-screen keyboard. Shown only when the primary pointer is
- * coarse and the menu is closed (the menu becomes a top bar on mobile and
- * needs the room).
+ * joystick view (a row of console keys over a fire button and analog stick,
+ * with a left-hander swap) and the on-screen keyboard. Shown only when the
+ * primary pointer is coarse and the menu is closed (the menu becomes a top
+ * bar on mobile and needs the room).
  */
 export function Osd({ host }: { host: EmulatorHost }) {
 	const coarse = useCoarsePointer();

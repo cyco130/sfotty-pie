@@ -163,6 +163,11 @@ export const commands = {
 
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: { label: "BOOT_IMAGE", run: ({ host }) => host.pickBootImage() },
+	// The couch game picker (gamepad-navigable favorites/recents overlay).
+	OPEN_FAVORITES: {
+		label: "OPEN_FAVORITES",
+		run: ({ host }) => host.openFavorites(),
+	},
 	OPEN_ROMS: { label: "OPEN_ROMS", run: ({ host }) => host.showPanel("roms") },
 	OPEN_LIBRARY: {
 		label: "OPEN_LIBRARY",

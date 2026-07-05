@@ -1,5 +1,10 @@
 import type { Command } from "./commands.ts";
 import {
+	normalize,
+	type NormalizeProfile,
+	type PadView,
+} from "./gamepad-normalize.ts";
+import {
 	initialStickState,
 	readRadialStick,
 	type RadialStickConfig,
@@ -159,7 +164,7 @@ const CENTERED: PortState = {
 // stick's octant lit up this poll (see `activeHalves`, passed in as a set of
 // `${axis}:${dir}` keys).
 function inputActive(
-	pad: Gamepad,
+	pad: PadView,
 	input: GamepadInput,
 	halves: ReadonlySet<string>,
 ): boolean {
@@ -172,7 +177,7 @@ function inputActive(
 // active setting it. (This replaces the old "D-pad overrides the stick" rule; a
 // deadzone, not a priority, keeps a resting stick from fighting the D-pad.)
 function readPad(
-	pad: Gamepad,
+	pad: PadView,
 	joystick: readonly JoyBinding[],
 	halves: ReadonlySet<string>,
 ): PortState {
@@ -211,8 +216,10 @@ export interface PadInfo {
  * Atari port (joystick bindings → directions/trigger), and the port-0 pad also
  * drives the console/meta commands. The bindings are data ({@link setBindings}),
  * defaulting to {@link DEFAULT_JOYSTICK} / {@link DEFAULT_CONSOLE}; which pad
- * drives which port is an explicit assignment ({@link setPort}). Per-device
- * normalization (for non-standard pads) comes later, ahead of these bindings.
+ * drives which port is an explicit assignment ({@link setPort}). Ahead of the
+ * bindings sits per-device normalization ({@link setProfiles}): each pad is
+ * read through its profile's Standard-shaped view (the identity for
+ * unprofiled pads — see gamepad-normalize.ts).
  */
 export class Gamepads {
 	#actions: GamepadActions;
@@ -232,6 +239,8 @@ export class Gamepads {
 	// Per-stick hysteresis state, keyed by `${gamepad.index}:${pairBase}` so it
 	// follows the device, not the Atari port.
 	#sticks = new Map<string, RadialStickState>();
+	// Per-device normalization profiles by gamepad id (see gamepad-normalize.ts).
+	#profiles: Readonly<Record<string, NormalizeProfile>> = {};
 
 	/** Fired whenever the connected set or the assignment changes, so the host can
 	 *  mirror {@link pads} into a signal. */
@@ -312,22 +321,28 @@ export class Gamepads {
 		if (!force && this.#pads.size === 0) return;
 		const pads = navigator.getGamepads();
 		let p0Halves = NO_HALVES;
+		let p0View: PadView | undefined;
 		for (let port = 0; port < PORT_COMMANDS.length; port++) {
 			const index = this.#portToIndex[port];
 			const pad = index != null ? pads[index] : null;
-			const halves = pad ? this.#activeHalves(pad, index!) : NO_HALVES;
-			this.#apply(port, pad ? readPad(pad, this.#joystick, halves) : CENTERED);
-			if (port === 0) p0Halves = halves;
+			const view = pad ? normalize(pad, this.#profiles[pad.id]) : undefined;
+			const halves = view ? this.#activeHalves(view, index!) : NO_HALVES;
+			this.#apply(
+				port,
+				view ? readPad(view, this.#joystick, halves) : CENTERED,
+			);
+			if (port === 0) {
+				p0Halves = halves;
+				p0View = view;
+			}
 		}
-		const p0 = this.#portToIndex[0];
-		const p0pad = p0 != null ? (pads[p0] ?? undefined) : undefined;
-		this.#applyConsole(p0pad, p0Halves);
+		this.#applyConsole(p0View, p0Halves);
 	}
 
 	// The axis-halves the pad's sticks light up this poll: each axis pair (0/1,
 	// 2/3, …) through the radial reader. Returns `${axis}:${dir}` keys for
 	// inputActive.
-	#activeHalves(pad: Gamepad, index: number): ReadonlySet<string> {
+	#activeHalves(pad: PadView, index: number): ReadonlySet<string> {
 		const halves = new Set<string>();
 		const axes = pad.axes;
 		for (let base = 0; base + 1 < axes.length; base += 2) {
@@ -346,6 +361,12 @@ export class Gamepads {
 			}
 		}
 		return halves;
+	}
+
+	/** Replace the per-device normalization profiles (keyed by gamepad id).
+	 *  Live: the next poll reads through them. */
+	setProfiles(profiles: Readonly<Record<string, NormalizeProfile>>): void {
+		this.#profiles = profiles;
 	}
 
 	/** Replace the joystick + console binding sets (the editor's save path). Live:
@@ -373,7 +394,7 @@ export class Gamepads {
 	}
 
 	// Diff the port-0 console/meta bindings; an absent pad releases them all.
-	#applyConsole(pad: Gamepad | undefined, halves: ReadonlySet<string>): void {
+	#applyConsole(pad: PadView | undefined, halves: ReadonlySet<string>): void {
 		const state = this.#consoleState;
 		for (let i = 0; i < this.#console.length; i++) {
 			const { input, command } = this.#console[i]!;

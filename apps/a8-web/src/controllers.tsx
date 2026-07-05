@@ -1,6 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { BindingsEditor } from "./gamepad-bindings.tsx";
 import { STANDARD_AXES, STANDARD_BUTTONS } from "./gamepad-labels.ts";
+import { MapperForm } from "./gamepad-mapper.tsx";
+import { normalize, type NormalizeProfile } from "./gamepad-normalize.ts";
 import type { EmulatorHost } from "./host.ts";
 import { messages } from "./messages.ts";
 
@@ -99,33 +101,70 @@ function PadCard({
 	pad,
 	port,
 	onPort,
+	profile,
+	onProfile,
 }: {
 	pad: PadSnapshot;
 	port: number | null;
 	onPort: (port: number | null) => void;
+	profile: NormalizeProfile | undefined;
+	onProfile: (profile: NormalizeProfile | null) => void;
 }) {
-	const standard = pad.mapping === "standard";
+	const remapped = profile !== undefined;
+	const [mapping, setMapping] = useState(false);
+	// The monitor shows the pad as the emulator sees it — through the mapping
+	// when one exists — so "is my mapping applied" is visible at a glance.
+	// While the mapping editor is open it shows the raw pad instead, matching
+	// the editor's raw indices. Standard labels apply to natively-standard
+	// and remapped pads alike.
+	const view = mapping ? pad : normalize(pad, profile);
+	const standard = pad.mapping === "standard" || (remapped && !mapping);
 	return (
 		<div class="rounded-sm border border-neutral-200 p-3">
 			<div class="mb-1 flex items-center justify-between gap-2">
 				<span class="truncate text-sm font-medium" title={pad.id}>
 					{pad.id}
 				</span>
-				<span class="shrink-0 rounded-sm bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">
-					{standard
-						? messages.controllers.standard
-						: messages.controllers.nonStandard}
+				<span class="flex shrink-0 gap-1">
+					{remapped && (
+						<span class="rounded-sm bg-sky-100 px-1.5 py-0.5 text-xs text-sky-700">
+							{messages.controllers.remapped}
+						</span>
+					)}
+					<span class="rounded-sm bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">
+						{standard
+							? messages.controllers.standard
+							: messages.controllers.nonStandard}
+					</span>
 				</span>
 			</div>
-			<div class="mb-3">
+			<div class="mb-3 flex items-center gap-2">
 				<PortSelect port={port} onSelect={onPort} />
+				{!mapping && (
+					<button
+						type="button"
+						class="rounded-sm bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200"
+						onClick={() => setMapping(true)}
+					>
+						{messages.controllers.remap}
+					</button>
+				)}
+				{remapped && !mapping && (
+					<button
+						type="button"
+						class="rounded-sm bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200"
+						onClick={() => onProfile(null)}
+					>
+						{messages.controllers.removeMapping}
+					</button>
+				)}
 			</div>
 
 			<p class="mb-1 text-xs font-medium text-neutral-500">
 				{messages.controllers.buttons}
 			</p>
 			<div class="mb-3 grid grid-cols-4 gap-1">
-				{pad.buttons.map((b, i) => (
+				{view.buttons.map((b, i) => (
 					<div
 						key={i}
 						class={`rounded-sm p-1 text-center text-xs tabular-nums ${
@@ -144,7 +183,7 @@ function PadCard({
 				{messages.controllers.axes}
 			</p>
 			<div class="flex flex-col gap-1">
-				{pad.axes.map((v, i) => (
+				{view.axes.map((v, i) => (
 					<AxisBar
 						key={i}
 						label={standard ? (STANDARD_AXES[i] ?? String(i)) : String(i)}
@@ -152,6 +191,18 @@ function PadCard({
 					/>
 				))}
 			</div>
+
+			{mapping && (
+				<MapperForm
+					pad={pad}
+					profile={profile}
+					onSave={(next) => {
+						onProfile(next);
+						setMapping(false);
+					}}
+					onCancel={() => setMapping(false)}
+				/>
+			)}
 		</div>
 	);
 }
@@ -165,6 +216,7 @@ export function ControllersView({ host }: { host: EmulatorHost }) {
 	const pads = useLivePads();
 	// Port assignments, by gamepad.index, from the poller.
 	const ports = new Map(host.gamepads.value.map((p) => [p.index, p.port]));
+	const profiles = host.gamepadNormalize.value;
 	return (
 		<div class="flex flex-col gap-4 overflow-y-auto">
 			{pads.length === 0 ? (
@@ -177,6 +229,8 @@ export function ControllersView({ host }: { host: EmulatorHost }) {
 							pad={pad}
 							port={ports.get(pad.index) ?? null}
 							onPort={(port) => host.setGamepadPort(pad.index, port)}
+							profile={profiles[pad.id]}
+							onProfile={(profile) => host.setGamepadProfile(pad.id, profile)}
 						/>
 					))}
 				</div>

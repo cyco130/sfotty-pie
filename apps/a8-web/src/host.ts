@@ -27,6 +27,12 @@ import {
 	loadGamepadBindings,
 	saveGamepadBindings,
 } from "./gamepad-bindings-store.ts";
+import type { NormalizeProfile } from "./gamepad-normalize.ts";
+import {
+	loadNormalizeProfiles,
+	type NormalizeProfiles,
+	saveNormalizeProfiles,
+} from "./gamepad-normalize-store.ts";
 import { osSlotFor, type OsSlot } from "./firmware-slots.ts";
 import {
 	addOrFindImage,
@@ -267,6 +273,13 @@ export class EmulatorHost {
 	 *  device-independent layer, persisted via the gamepad-bindings store. */
 	readonly gamepadBindings = signal<GamepadBindings>(loadGamepadBindings());
 
+	/** Per-device normalization profiles by gamepad id — the device-dependent
+	 *  layer ahead of the bindings, persisted via the gamepad-normalize store.
+	 *  Capture/monitor surfaces read pads through these (see normalize()). */
+	readonly gamepadNormalize = signal<NormalizeProfiles>(
+		loadNormalizeProfiles(),
+	);
+
 	/** The layout snapshot the bindings were baked from (`code` → legend), used to
 	 *  label the editor's live preview — existing chords carry their own baked
 	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
@@ -430,9 +443,11 @@ export class EmulatorHost {
 		this.#gamepads.onChange = () => {
 			this.gamepads.value = this.#gamepads.pads();
 		};
-		// Apply the persisted (or default) bindings to the poller.
+		// Apply the persisted (or default) bindings and the persisted
+		// per-device normalization profiles to the poller.
 		const gb = this.gamepadBindings.peek();
 		this.#gamepads.setBindings(gb.joystick, gb.console);
+		this.#gamepads.setProfiles(this.gamepadNormalize.peek());
 
 		// The audio context resumes/suspends asynchronously; track it.
 		if (audio) {
@@ -609,6 +624,17 @@ export class EmulatorHost {
 	/** Restore the default gamepad bindings. */
 	resetGamepadBindings(): void {
 		this.setGamepadBindings(defaultGamepadBindings());
+	}
+
+	/** Set or clear (null) a device's normalization profile — apply it live,
+	 *  persist, and mirror onto the signal (the calibration flow's save path). */
+	setGamepadProfile(id: string, profile: NormalizeProfile | null): void {
+		const next = { ...this.gamepadNormalize.peek() };
+		if (profile) next[id] = profile;
+		else delete next[id];
+		this.gamepadNormalize.value = next;
+		this.#gamepads.setProfiles(next);
+		saveNormalizeProfiles(next);
 	}
 
 	// The best-ranked built-in firmware present in the library for a list of

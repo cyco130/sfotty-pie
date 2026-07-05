@@ -1,4 +1,10 @@
 import type { Command } from "./commands.ts";
+import {
+	initialStickState,
+	readRadialStick,
+	type RadialStickConfig,
+	type RadialStickState,
+} from "./radial-stick.ts";
 
 // How the poller actuates the machine — the same command press/release the
 // keyboard drives (see host.ts). A held direction/trigger sustains until the
@@ -8,20 +14,14 @@ export interface GamepadActions {
 	release(command: Command): void;
 }
 
-// Analog stick → digital 8-way. Axes are paired in order (0/1, 2/3), and a pair
-// is read radially, not per-axis: below STICK_ENGAGE (a circular deadzone) it's
-// centred; past it the angle snaps to one of 8 octants. Radial magnitude reaches
-// 1 in every direction, so diagonals are as reachable as cardinals (unlike a
-// per-axis threshold, which a round gate caps near 0.707 and leaves a dead wedge
-// on every diagonal). Hysteresis stops chatter: a lower release radius, and a
-// small angular margin before an engaged pair jumps to a neighbouring octant.
-const STICK_ENGAGE = 0.45;
-const STICK_RELEASE = 0.35;
-const SECTOR_MARGIN = 0.1; // radians (~5.7°) past the 22.5° boundary before switching
-
-const QUARTER_PI = Math.PI / 4;
-const EIGHTH_PI = Math.PI / 8;
-const TWO_PI = Math.PI * 2;
+// Analog stick → digital 8-way: axes are paired in order (0/1, 2/3) and each
+// pair goes through the shared radial reader (see radial-stick.ts). Thresholds
+// tuned for a spring-centred thumbstick; the OSD touch stick has its own.
+const STICK: RadialStickConfig = {
+	engage: 0.45,
+	release: 0.35,
+	sectorMargin: 0.1, // radians (~5.7°)
+};
 
 // The axis-halves each octant activates, as [axisOffset (0 = x, 1 = y), dir]. The
 // diagonals set both; the cardinals one. atan2(y, x) angle space, so +y is the
@@ -48,14 +48,6 @@ const OCTANT_HALVES: readonly (readonly (readonly [number, -1 | 1])[])[] = [
 		[1, -1],
 	], // 7: +x −y
 ];
-
-// Per-stick hysteresis state: whether the pair is currently engaged, and its last
-// octant (−1 = none). Keyed by `${gamepad.index}:${pairBase}` so it follows the
-// device, not the Atari port.
-interface StickState {
-	engaged: boolean;
-	octant: number;
-}
 
 // The commands one joystick port actuates, indexed by Atari port (0-3). Ports
 // are filled in connection order — the first connected pad drives port 0, the
@@ -237,8 +229,9 @@ export class Gamepads {
 	// who's which player; the UI edits it via setPort. Assignment is stable — a
 	// disconnect frees a port without reshuffling the survivors.
 	#portToIndex: (number | null)[] = PORT_COMMANDS.map(() => null);
-	// Per-stick hysteresis state, keyed by `${index}:${pairBase}` (see StickState).
-	#sticks = new Map<string, StickState>();
+	// Per-stick hysteresis state, keyed by `${gamepad.index}:${pairBase}` so it
+	// follows the device, not the Atari port.
+	#sticks = new Map<string, RadialStickState>();
 
 	/** Fired whenever the connected set or the assignment changes, so the host can
 	 *  mirror {@link pads} into a signal. */
@@ -332,8 +325,8 @@ export class Gamepads {
 	}
 
 	// The axis-halves the pad's sticks light up this poll: each axis pair (0/1,
-	// 2/3, …) read radially with a deadzone + octant snapping + hysteresis (see
-	// the stick constants). Returns `${axis}:${dir}` keys for inputActive.
+	// 2/3, …) through the radial reader. Returns `${axis}:${dir}` keys for
+	// inputActive.
 	#activeHalves(pad: Gamepad, index: number): ReadonlySet<string> {
 		const halves = new Set<string>();
 		const axes = pad.axes;
@@ -343,23 +336,11 @@ export class Gamepads {
 			const key = `${index}:${base}`;
 			let st = this.#sticks.get(key);
 			if (!st) {
-				st = { engaged: false, octant: -1 };
+				st = initialStickState();
 				this.#sticks.set(key, st);
 			}
-			const r = Math.hypot(x, y);
-			st.engaged = st.engaged ? r > STICK_RELEASE : r >= STICK_ENGAGE;
-			if (!st.engaged) {
-				st.octant = -1;
-				continue;
-			}
-			let k = ((Math.round(Math.atan2(y, x) / QUARTER_PI) % 8) + 8) % 8;
-			// Boundary hysteresis: hold the last octant until clearly into the next.
-			if (st.octant >= 0 && k !== st.octant) {
-				let d = Math.abs(Math.atan2(y, x) - st.octant * QUARTER_PI);
-				if (d > Math.PI) d = TWO_PI - d;
-				if (d < EIGHTH_PI + SECTOR_MARGIN) k = st.octant;
-			}
-			st.octant = k;
+			const k = readRadialStick(x, y, st, STICK);
+			if (k < 0) continue;
 			for (const [off, dir] of OCTANT_HALVES[k]!) {
 				halves.add(`${base + off}:${dir}`);
 			}

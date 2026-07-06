@@ -137,6 +137,10 @@ export const commands = {
 	// Sidebar panels — each opens its panel; CLOSE_PANEL dismisses whichever is
 	// showing. (Showing one when it's already open is a no-op.)
 	OPEN_MENU: { label: "OPEN_MENU", run: ({ host }) => host.showPanel("menu") },
+	OPEN_DISPLAY: {
+		label: "OPEN_DISPLAY",
+		run: ({ host }) => host.showPanel("display"),
+	},
 	OPEN_CONFIG: {
 		label: "OPEN_CONFIG",
 		run: ({ host }) => host.showPanel("config"),

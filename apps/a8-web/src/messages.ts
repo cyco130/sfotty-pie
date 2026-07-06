@@ -114,6 +114,7 @@ export const messages = {
 		build: "Build",
 		titleMenu: "Sfotty Pie A8 Web",
 		titleConfig: "Machine",
+		titleDisplay: "Display",
 		titlePalette: "Commands",
 		titleKeys: "Shortcuts",
 		titleControllers: "Controllers",
@@ -171,6 +172,7 @@ export const messages = {
 	menu: {
 		docs: "Help & docs",
 		config: "Machine configuration…",
+		display: "Display settings…",
 		boot: "Boot image…",
 		library: "Library…",
 		roms: "ROM preferences…",
@@ -450,6 +452,52 @@ export const messages = {
 		noCommands: "No commands",
 	},
 
+	// The display settings panel. NTSC/PAL and PF0-PF3 are hardware tokens
+	// (inline); preset names are descriptive copy, so they live here.
+	display: {
+		overscan: "Overscan",
+		width: "Width",
+		height: "Height",
+		palette: "Palette",
+		tint: "Tint (hue 1)",
+		hueStep: "Hue step (pot)",
+		saturation: "Saturation",
+		brightness: "Brightness",
+		contrast: "Contrast",
+		gamma: "Gamma",
+		primaries: "Primaries",
+		// Decode-primaries options: which phosphor set the decoded signal is
+		// interpreted against. Standard names are hardware-ish tokens but the
+		// "none" phrasing is copy, so the labels live here.
+		primariesNames: {
+			srgb: "None",
+			ntsc1953: "NTSC 1953",
+			smpteC: "SMPTE C",
+			ebu: "EBU",
+		} as Record<string, string>,
+		reset: "Reset to defaults",
+		// Wide gamut is automatic (no setting); this line just reports it.
+		wideGamutActive: "Output: Display P3 (wide gamut)",
+		wideGamutOff: "Output: sRGB",
+		notRunning:
+			"The machine is on the other standard — these settings preview in the guide below only.",
+		overscanPresets: {
+			full: "Full",
+			normal: "Normal",
+			none: "No overscan",
+		} as Record<string, string>,
+		palettePresets: {
+			vintage: "Vintage",
+			modern: "Modern",
+			calibrated: "Calibrated",
+			blueGr0: "Blue GR. 0",
+		} as Record<string, string>,
+		guideGrays: "Grays 0–15",
+		guideHues: "Hues 1–15 · luma 8",
+		guideOs: "OS defaults PF0–PF3",
+		guideWrap: "Hue 1 vs hue 15 · luma 8",
+	},
+
 	osd: {
 		joystickControls: "Joystick controls",
 		keyboard: "Keyboard",
@@ -530,6 +578,7 @@ export const labels = {
 	AUDIO_TOGGLE: "Audio: Toggle",
 	OPEN_MENU: "View: Open menu…",
 	OPEN_CONFIG: "Machine: Open configuration…",
+	OPEN_DISPLAY: "View: Open display settings…",
 	OPEN_PALETTE: "View: Open command palette…",
 	OPEN_KEYS: "Keyboard: Open shortcuts…",
 	OPEN_CONTROLLERS: "Controllers: Open panel…",

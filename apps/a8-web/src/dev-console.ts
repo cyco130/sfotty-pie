@@ -2,6 +2,7 @@
 import { canonicalize } from "@sfotty-pie/a8";
 import { disassemble, ReadOptions } from "@sfotty-pie/sfotty";
 import { setCommandTrace } from "./commands.ts";
+import { PALETTE_PRESETS, type PaletteSettings } from "./display-settings.ts";
 import {
 	type CalibrationSample,
 	type CalibrationSet,
@@ -414,6 +415,26 @@ export function installDevConsole(host: EmulatorHost): void {
 				host.setOverscan(tv, { width, height });
 			}
 			return { tv, ...host.displaySettings.peek()[tv].overscan };
+		},
+		// Adjust the running standard's palette generation parameters
+		// (persisted; partial merge), or apply a named preset:
+		//   a8.palette({ hueStep: 19 })    a8.palette("blueGr0")
+		// No args just reports the current values.
+		palette: (params?: Partial<PaletteSettings> | string) => {
+			const tv = host.config.peek().tv;
+			if (typeof params === "string") {
+				const preset = PALETTE_PRESETS[tv][params];
+				if (preset) host.setPalette(tv, preset);
+				else {
+					console.log(
+						`no "${params}" preset for ${tv}; available:`,
+						Object.keys(PALETTE_PRESETS[tv]),
+					);
+				}
+			} else if (params) {
+				host.setPalette(tv, params);
+			}
+			return { tv, ...host.displaySettings.peek()[tv].palette };
 		},
 		// Prompt-driven calibration of a real pad (defaults to the first
 		// connected one); works on standard pads too, as a layout override.

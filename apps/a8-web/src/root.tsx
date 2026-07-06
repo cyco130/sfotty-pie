@@ -9,6 +9,7 @@ const A8EmuLayout = lazy(() => import("./routes/a8/emu/a8-emu.layout.tsx"));
 const EmuIndex = lazy(() => import("./routes/a8/emu/(a8-emu).page.tsx"));
 const MenuPanel = lazy(() => import("./routes/a8/emu/menu.page.tsx"));
 const ConfigPanel = lazy(() => import("./routes/a8/emu/config.page.tsx"));
+const DisplayPanel = lazy(() => import("./routes/a8/emu/display.page.tsx"));
 const PalettePanel = lazy(() => import("./routes/a8/emu/palette.page.tsx"));
 const KeysPanel = lazy(() => import("./routes/a8/emu/keys.page.tsx"));
 const KeyboardLayoutPanel = lazy(
@@ -57,6 +58,7 @@ function EmuSection() {
 				<Route path="/" component={EmuIndex} />
 				<Route path="/menu" component={MenuPanel} />
 				<Route path="/config" component={ConfigPanel} />
+				<Route path="/display" component={DisplayPanel} />
 				<Route path="/palette" component={PalettePanel} />
 				<Route path="/keys" component={KeysPanel} />
 				{/* Static /keys/layout must precede the /keys/:command param route. */}

@@ -256,6 +256,7 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 // the two meta panels (palette, keys).
 const MENU_COMMANDS = [
 	{ command: "OPEN_CONFIG", label: messages.menu.config },
+	{ command: "OPEN_DISPLAY", label: messages.menu.display },
 	{ command: "BOOT_IMAGE", label: messages.menu.boot },
 	{ command: "OPEN_LIBRARY", label: messages.menu.library },
 	{ command: "OPEN_ROMS", label: messages.menu.roms },

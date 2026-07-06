@@ -14,6 +14,7 @@ import {
 	type AtariFileFormat,
 	type AtariModel,
 	type FirmwareKey,
+	type OutputGamut,
 } from "@sfotty-pie/a8";
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
@@ -22,7 +23,9 @@ import {
 	type DisplaySettings,
 	type OverscanSettings,
 	overscanCrop,
+	type PaletteSettings,
 	sanitizeOverscan,
+	sanitizePalette,
 } from "./display-settings.ts";
 import {
 	loadDisplaySettings,
@@ -120,6 +123,7 @@ export interface Toast {
 export type SidebarPanel =
 	| "menu"
 	| "config"
+	| "display"
 	| "palette"
 	| "keys"
 	| "controllers"
@@ -294,6 +298,11 @@ export class EmulatorHost {
 	/** Per-TV-standard display settings (overscan, later palette/persistence);
 	 *  the running config's standard selects the effective one. Persisted. */
 	readonly displaySettings = signal<DisplaySettings>(loadDisplaySettings());
+
+	/** The color space the screen canvas actually got (attachScreen detects
+	 *  wide gamut); surfaces that preview colors (the display panel's guide)
+	 *  generate in the same space so they match the machine exactly. */
+	readonly outputGamut = signal<OutputGamut>("srgb");
 
 	/** Whether the game picker overlay is open (see favorites-menu.tsx). */
 	readonly favoritesOpen = signal(false);
@@ -660,6 +669,21 @@ export class EmulatorHost {
 		const next: DisplaySettings = {
 			...current,
 			[tv]: { ...current[tv], overscan: sanitizeOverscan(overscan) },
+		};
+		this.displaySettings.value = next;
+		saveDisplaySettings(next);
+	}
+
+	/** Set one standard's palette generation parameters (sanitized; partial —
+	 *  unmentioned parameters keep their value). Applies live, persists. */
+	setPalette(tv: TvStandard, palette: Partial<PaletteSettings>): void {
+		const current = this.displaySettings.peek();
+		const next: DisplaySettings = {
+			...current,
+			[tv]: {
+				...current[tv],
+				palette: sanitizePalette({ ...current[tv].palette, ...palette }),
+			},
 		};
 		this.displaySettings.value = next;
 		saveDisplaySettings(next);
@@ -1812,7 +1836,25 @@ export class EmulatorHost {
 	 * a teardown function.
 	 */
 	attachScreen(canvas: HTMLCanvasElement): () => void {
-		const context = canvas.getContext("2d");
+		// Wide gamut when both the display and the canvas API support it —
+		// deliberately no UI: sRGB-defined palettes are converted so they look
+		// identical, while corrected wide primaries (NTSC 1953) keep saturation
+		// an sRGB canvas would clamp. Decided once here; a context's color
+		// space is fixed at creation.
+		let outputGamut: OutputGamut = "srgb";
+		let context: CanvasRenderingContext2D | null = null;
+		if (matchMedia("(color-gamut: p3)").matches) {
+			context = canvas.getContext("2d", { colorSpace: "display-p3" });
+			if (
+				context &&
+				typeof context.getContextAttributes === "function" &&
+				context.getContextAttributes().colorSpace === "display-p3"
+			) {
+				outputGamut = "display-p3";
+			}
+		}
+		context ??= canvas.getContext("2d");
+		this.outputGamut.value = outputGamut;
 		const stage = canvas.parentElement;
 		if (!context || !stage) return () => {};
 
@@ -1850,6 +1892,7 @@ export class EmulatorHost {
 		const imageData = context.createImageData(
 			FRAME_BUFFER_WIDTH,
 			FRAME_BUFFER_HEIGHT,
+			{ colorSpace: outputGamut },
 		);
 		const pixels = new Uint32Array(imageData.data.buffer);
 
@@ -1873,14 +1916,18 @@ export class EmulatorHost {
 		};
 
 		// The fit (pixel aspect), the palette, and the crop follow the TV
-		// standard; the crop also follows the display settings.
+		// standard; both crop and palette also follow the display settings
+		// (the palette is *generated* from the standard's parameters).
 		let palette = buildNtscPalette();
-		const unsubscribeConfig = this.config.subscribe(() => {
+		const apply = () => {
 			applyCrop();
+			const tv = this.config.value.tv;
+			const params = { ...this.displaySettings.value[tv].palette, outputGamut };
 			palette =
-				this.config.value.tv === "pal" ? buildPalPalette() : buildNtscPalette();
-		});
-		const unsubscribeDisplay = this.displaySettings.subscribe(applyCrop);
+				tv === "pal" ? buildPalPalette(params) : buildNtscPalette(params);
+		};
+		const unsubscribeConfig = this.config.subscribe(apply);
+		const unsubscribeDisplay = this.displaySettings.subscribe(apply);
 
 		// Listen for pad connect/disconnect so polling can gate on presence.
 		const detachGamepads = this.#gamepads.attach();

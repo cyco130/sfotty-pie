@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
 import {
 	defaultDisplaySettings,
+	PALETTE_PRESETS,
+	sanitizePalette,
 	overscanCrop,
 	sanitizeOverscan,
 } from "./display-settings.ts";
@@ -8,7 +10,7 @@ import {
 test("defaults are the Normal preset per standard", () => {
 	const d = defaultDisplaySettings();
 	expect(d.ntsc.overscan).toEqual({ width: 336, height: 224 });
-	expect(d.pal.overscan).toEqual({ width: 336, height: 240 });
+	expect(d.pal.overscan).toEqual({ width: 336, height: 224 });
 });
 
 test("the full frame crops to the whole buffer", () => {
@@ -54,4 +56,50 @@ test("sanitize clamps to the legal range and even values", () => {
 		width: 334,
 		height: 208,
 	});
+});
+
+test("palette defaults come from each standard's first preset", () => {
+	const d = defaultDisplaySettings();
+	expect(d.ntsc.palette).toEqual(PALETTE_PRESETS.ntsc["vintage"]);
+	expect(d.pal.palette).toEqual(PALETTE_PRESETS.pal["calibrated"]);
+	// The NTSC presets differ only in tint (the display's knob): Vintage's
+	// period −40° hue 1 vs Modern's calibrated −57°.
+	expect(PALETTE_PRESETS.ntsc["modern"]).toEqual({
+		...PALETTE_PRESETS.ntsc["vintage"]!,
+		hue1Angle: 303,
+	});
+	// Blue GR. 0 is the narrower field-adjusted pot with a nudged tint.
+	expect(PALETTE_PRESETS.pal["blueGr0"]).toEqual({
+		...PALETTE_PRESETS.pal["calibrated"]!,
+		hue1Angle: 145,
+		hueStep: 19,
+	});
+});
+
+test("sanitizePalette clamps to slider ranges", () => {
+	expect(
+		sanitizePalette({
+			hue1Angle: 400,
+			hueStep: -5,
+			saturation: 1,
+			brightness: -2,
+			contrast: 9,
+			gamma: 0,
+			primaries: "vga" as never, // unknown → safe default
+		}),
+	).toEqual({
+		hue1Angle: 360,
+		hueStep: 0,
+		saturation: 0.5,
+		brightness: -0.5,
+		contrast: 2,
+		gamma: 0.5,
+		primaries: "srgb",
+	});
+	// The pot goes all the way to 0, like the real trim pot.
+	expect(
+		sanitizePalette({ ...PALETTE_PRESETS.pal["calibrated"]!, hueStep: 3 }),
+	).toEqual({ ...PALETTE_PRESETS.pal["calibrated"]!, hueStep: 3 });
+	const ok = PALETTE_PRESETS.pal["blueGr0"]!;
+	expect(sanitizePalette(ok)).toEqual(ok);
 });

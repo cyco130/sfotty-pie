@@ -18,6 +18,16 @@ import {
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
+import {
+	type DisplaySettings,
+	type OverscanSettings,
+	overscanCrop,
+	sanitizeOverscan,
+} from "./display-settings.ts";
+import {
+	loadDisplaySettings,
+	saveDisplaySettings,
+} from "./display-settings-store.ts";
 import type { Binding, KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
 import { Gamepads, type PadInfo } from "./gamepad.ts";
@@ -64,6 +74,7 @@ import {
 	sanitizeSettings,
 	settingsEqual,
 	type MachineSettings,
+	type TvStandard,
 } from "./machine-config.ts";
 import { currentPath, navigate } from "./navigate.ts";
 import { messages } from "./messages.ts";
@@ -279,6 +290,10 @@ export class EmulatorHost {
 	readonly gamepadNormalize = signal<NormalizeProfiles>(
 		loadNormalizeProfiles(),
 	);
+
+	/** Per-TV-standard display settings (overscan, later palette/persistence);
+	 *  the running config's standard selects the effective one. Persisted. */
+	readonly displaySettings = signal<DisplaySettings>(loadDisplaySettings());
 
 	/** Whether the game picker overlay is open (see favorites-menu.tsx). */
 	readonly favoritesOpen = signal(false);
@@ -636,6 +651,18 @@ export class EmulatorHost {
 	/** Restore the default gamepad bindings. */
 	resetGamepadBindings(): void {
 		this.setGamepadBindings(defaultGamepadBindings());
+	}
+
+	/** Set one standard's overscan (sanitized) — applies live via the screen's
+	 *  subscription, persists (the settings page / dev console's path). */
+	setOverscan(tv: TvStandard, overscan: OverscanSettings): void {
+		const current = this.displaySettings.peek();
+		const next: DisplaySettings = {
+			...current,
+			[tv]: { ...current[tv], overscan: sanitizeOverscan(overscan) },
+		};
+		this.displaySettings.value = next;
+		saveDisplaySettings(next);
 	}
 
 	/** Open the game picker (see favorites-menu.tsx): pause the machine and
@@ -1789,15 +1816,23 @@ export class EmulatorHost {
 		const stage = canvas.parentElement;
 		if (!context || !stage) return () => {};
 
+		// The visible crop of the rendered frame — the running standard's
+		// overscan setting (see display-settings.ts). The canvas backing store
+		// is the crop, so the blit clips and the fit letterboxes exactly what's
+		// shown. Updated by the subscriptions below.
+		let crop = overscanCrop(
+			this.displaySettings.value[this.config.value.tv].overscan,
+		);
+
 		// Fit the canvas into its parent, preserving the display aspect — which
-		// depends on the TV standard's pixel aspect ratio, so re-fit when the
-		// config changes too (the stage size may not).
+		// depends on the crop and the TV standard's pixel aspect ratio, so it's
+		// re-run when either changes (the stage may not).
 		const fit = () => {
 			const par =
 				this.config.value.tv === "pal"
 					? PAL_PIXEL_ASPECT_RATIO
 					: NTSC_PIXEL_ASPECT_RATIO;
-			const displayAspect = (FRAME_BUFFER_WIDTH * par) / FRAME_BUFFER_HEIGHT;
+			const displayAspect = (crop.width * par) / crop.height;
 			const boxWidth = stage.clientWidth;
 			const boxHeight = stage.clientHeight;
 			let width = boxWidth;
@@ -1818,20 +1853,39 @@ export class EmulatorHost {
 		);
 		const pixels = new Uint32Array(imageData.data.buffer);
 
-		// Both the fit (pixel aspect) and the palette follow the TV standard,
-		// so refresh them whenever the config changes (the stage may not).
-		let palette = buildNtscPalette();
-		const unsubscribe = this.config.subscribe(() => {
+		// The frameCount of the frame currently on the canvas; −1 forces a
+		// redraw on the next present.
+		let presented = -1;
+
+		// Size the canvas backing store to the crop and force a redraw (resizing
+		// clears the canvas, and the present loop otherwise skips unchanged
+		// frames — noticeable while paused).
+		const applyCrop = () => {
+			crop = overscanCrop(
+				this.displaySettings.value[this.config.value.tv].overscan,
+			);
+			if (canvas.width !== crop.width || canvas.height !== crop.height) {
+				canvas.width = crop.width;
+				canvas.height = crop.height;
+			}
+			presented = -1;
 			fit();
+		};
+
+		// The fit (pixel aspect), the palette, and the crop follow the TV
+		// standard; the crop also follows the display settings.
+		let palette = buildNtscPalette();
+		const unsubscribeConfig = this.config.subscribe(() => {
+			applyCrop();
 			palette =
 				this.config.value.tv === "pal" ? buildPalPalette() : buildNtscPalette();
 		});
+		const unsubscribeDisplay = this.displaySettings.subscribe(applyCrop);
 
 		// Listen for pad connect/disconnect so polling can gate on presence.
 		const detachGamepads = this.#gamepads.attach();
 
 		let raf = 0;
-		let presented = -1;
 		let framesAtSecondStart = this.#emulator.frameCount;
 		let secondStart = performance.now();
 		const present = () => {
@@ -1847,7 +1901,8 @@ export class EmulatorHost {
 				for (let i = 0; i < frame.length; i++) {
 					pixels[i] = palette[frame[i]!]!;
 				}
-				context.putImageData(imageData, 0, 0);
+				// The canvas is the visible crop; putImageData clips the rest.
+				context.putImageData(imageData, -crop.left, -crop.top);
 			}
 			this.crashed.value = this.#emulator.crashed; // dedup'd by the signal
 			// Sample the emulated frame rate about once a second. Measure the
@@ -1876,7 +1931,8 @@ export class EmulatorHost {
 		return () => {
 			cancelAnimationFrame(raf);
 			resize.disconnect();
-			unsubscribe();
+			unsubscribeConfig();
+			unsubscribeDisplay();
 			detachGamepads();
 		};
 	}

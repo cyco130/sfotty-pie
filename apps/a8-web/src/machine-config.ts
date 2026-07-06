@@ -11,6 +11,9 @@ export interface ExtendedRam {
 	antic: boolean;
 }
 
+/** The TV standard a machine outputs (and display settings key on). */
+export type TvStandard = "ntsc" | "pal";
+
 /** The user-facing machine configuration the menu edits. */
 export interface MachineSettings {
 	model: AtariModel;
@@ -18,7 +21,7 @@ export interface MachineSettings {
 	memory: number;
 	/** PORTB-banked extended RAM, or null for none. */
 	portbExtendedRam: ExtendedRam | null;
-	tv: "ntsc" | "pal";
+	tv: TvStandard;
 	/** 400/800 & 1200XL: no BASIC cart. XL/XE & XEGS: hold OPTION at boot. */
 	basicDisabled: boolean;
 }

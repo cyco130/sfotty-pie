@@ -406,6 +406,15 @@ export function installDevConsole(host: EmulatorHost): void {
 				view: dump(normalize(pad, profile)),
 			};
 		},
+		// Adjust the running standard's overscan crop (persisted; sanitized to
+		// 320–376 × 192–240, even). No args just reports the current setting.
+		overscan: (width?: number, height?: number) => {
+			const tv = host.config.peek().tv;
+			if (width !== undefined && height !== undefined) {
+				host.setOverscan(tv, { width, height });
+			}
+			return { tv, ...host.displaySettings.peek()[tv].overscan };
+		},
 		// Prompt-driven calibration of a real pad (defaults to the first
 		// connected one); works on standard pads too, as a layout override.
 		calibrate: (index?: number) => void calibratePad(host, index),

@@ -113,11 +113,9 @@ export const messages = {
 		thirdPartyLicenses: "Third-party licenses",
 		build: "Build",
 		titleMenu: "Sfotty Pie A8 Web",
-		titleConfig: "Machine",
-		titleDisplay: "Display",
+		titleSettings: "Settings",
 		titlePalette: "Commands",
 		titleKeys: "Shortcuts",
-		titleControllers: "Controllers",
 	},
 
 	// The controllers panel: a live view of connected gamepads for diagnosis and
@@ -171,14 +169,19 @@ export const messages = {
 	// `docs` is a standalone link to the docs subapp, not a command.
 	menu: {
 		docs: "Help & docs",
-		config: "Machine configuration…",
-		display: "Display settings…",
+		settings: "Settings…",
 		boot: "Boot image…",
 		library: "Library…",
-		roms: "ROM preferences…",
 		palette: "Command palette…",
-		keys: "Keyboard shortcuts…",
-		controllers: "Controllers…",
+	},
+
+	// The consolidated settings view: one panel, tabbed.
+	settings: {
+		hardware: "Hardware",
+		roms: "ROMs",
+		display: "Display",
+		shortcuts: "Shortcuts",
+		controllers: "Controllers",
 	},
 
 	shortcuts: {
@@ -265,7 +268,6 @@ export const messages = {
 	},
 
 	roms: {
-		title: "ROM preferences",
 		osRoms: "OS ROMs",
 		cartRoms: "Built-in cartridge ROMs",
 		inUse: "in use",
@@ -544,7 +546,7 @@ export const messages = {
 		disablingBasic: "Disabling BASIC",
 		switchingMachine: (model: string) => `Switching to Atari ${model}`,
 		switchingTv: (tv: string) => `Switching TV to ${tv}`,
-		powerCycling: "Power cycling",
+		powerCycling: "Rebooting",
 		keyboardMode: (mode: "character" | "positional"): string =>
 			`Keyboard: ${mode === "positional" ? "Positional" : "Character"} mode`,
 		keyBindingsReset: "Key bindings reset to defaults",
@@ -580,13 +582,14 @@ export const labels = {
 	AUDIO_UNMUTE: "Audio: Unmute",
 	AUDIO_TOGGLE: "Audio: Toggle",
 	OPEN_MENU: "View: Open menu…",
-	OPEN_CONFIG: "Machine: Open configuration…",
-	OPEN_DISPLAY: "View: Open display settings…",
+	OPEN_CONFIG: "Settings: Hardware…",
+	OPEN_SETTINGS: "Settings: Open…",
+	OPEN_DISPLAY: "Settings: Display…",
 	OPEN_PALETTE: "View: Open command palette…",
-	OPEN_KEYS: "Keyboard: Open shortcuts…",
-	OPEN_CONTROLLERS: "Controllers: Open panel…",
+	OPEN_KEYS: "Settings: Keyboard shortcuts…",
+	OPEN_CONTROLLERS: "Settings: Controllers…",
 	CLOSE_PANEL: "View: Close panel",
-	OPEN_ROMS: "Machine: Open ROM preferences…",
+	OPEN_ROMS: "Settings: ROM preferences…",
 	OPEN_LIBRARY: "Library: Open…",
 	OPEN_FAVORITES: "Library: Open game picker…",
 	CLEAR_LIBRARY: "Library: Clear…",

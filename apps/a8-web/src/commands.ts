@@ -137,6 +137,14 @@ export const commands = {
 	// Sidebar panels — each opens its panel; CLOSE_PANEL dismisses whichever is
 	// showing. (Showing one when it's already open is a no-op.)
 	OPEN_MENU: { label: "OPEN_MENU", run: ({ host }) => host.showPanel("menu") },
+	// The consolidated settings view (opens on its first tab, Hardware). The
+	// menu's Settings entry; hidden from the palette, where the per-tab
+	// commands (Settings: Hardware…, Display…, …) cover it without duplication.
+	OPEN_SETTINGS: {
+		label: "OPEN_SETTINGS",
+		run: ({ host }) => host.showPanel("config"),
+		palette: false,
+	},
 	OPEN_DISPLAY: {
 		label: "OPEN_DISPLAY",
 		run: ({ host }) => host.showPanel("display"),

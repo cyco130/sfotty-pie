@@ -254,7 +254,7 @@ export function DisplayView({ host }: { host: EmulatorHost }) {
 	);
 
 	return (
-		<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+		<div class="flex shrink-0 flex-col gap-4">
 			<div class="flex gap-1">
 				{tabButton("ntsc", "NTSC")}
 				{tabButton("pal", "PAL")}

@@ -26,6 +26,7 @@ import {
 	type PaletteSettings,
 	sanitizeOverscan,
 	sanitizePalette,
+	sanitizeFrameBlending,
 } from "./display-settings.ts";
 import {
 	loadDisplaySettings,
@@ -295,7 +296,7 @@ export class EmulatorHost {
 		loadNormalizeProfiles(),
 	);
 
-	/** Per-TV-standard display settings (overscan, later palette/persistence);
+	/** Per-TV-standard display settings (overscan, palette, frame blending);
 	 *  the running config's standard selects the effective one. Persisted. */
 	readonly displaySettings = signal<DisplaySettings>(loadDisplaySettings());
 
@@ -669,6 +670,21 @@ export class EmulatorHost {
 		const next: DisplaySettings = {
 			...current,
 			[tv]: { ...current[tv], overscan: sanitizeOverscan(overscan) },
+		};
+		this.displaySettings.value = next;
+		saveDisplaySettings(next);
+	}
+
+	/** Set one standard's frame blending (sanitized). Applies live via
+	 *  the screen's subscription, persists. */
+	setFrameBlending(tv: TvStandard, frameBlending: number): void {
+		const current = this.displaySettings.peek();
+		const next: DisplaySettings = {
+			...current,
+			[tv]: {
+				...current[tv],
+				frameBlending: sanitizeFrameBlending(frameBlending),
+			},
 		};
 		this.displaySettings.value = next;
 		saveDisplaySettings(next);
@@ -1915,19 +1931,37 @@ export class EmulatorHost {
 			fit();
 		};
 
-		// The fit (pixel aspect), the palette, and the crop follow the TV
-		// standard; both crop and palette also follow the display settings
+		// The fit (pixel aspect), the palette, the crop, and the frame-blending
+		// amount follow the TV standard; all also follow the display settings
 		// (the palette is *generated* from the standard's parameters).
 		let palette = buildNtscPalette();
+		let frameBlending = 0;
 		const apply = () => {
 			applyCrop();
 			const tv = this.config.value.tv;
 			const params = { ...this.displaySettings.value[tv].palette, outputGamut };
 			palette =
 				tv === "pal" ? buildPalPalette(params) : buildNtscPalette(params);
+			frameBlending = this.displaySettings.value[tv].frameBlending;
 		};
 		const unsubscribeConfig = this.config.subscribe(apply);
 		const unsubscribeDisplay = this.displaySettings.subscribe(apply);
+
+		// Frame blending mixes in *linear light* — flicker fusion happens in
+		// light, not signal, and gamma-space blending underweights the bright
+		// phase of a flicker pair (see the analog-video appendix's averaging
+		// note). LUTs stand in for per-pixel pow: byte → linear in, linear →
+		// byte out.
+		const LINEAR = new Float32Array(256);
+		for (let i = 0; i < 256; i++) LINEAR[i] = Math.pow(i / 255, 2.2);
+		const ENCODE = new Uint8Array(4097);
+		for (let i = 0; i <= 4096; i++) {
+			ENCODE[i] = Math.round(Math.pow(i / 4096, 1 / 2.2) * 255);
+		}
+		// The retained displayed image (linear RGB triplets), and the frame it
+		// represents. Allocated on first use; dropped while blending is off.
+		let retained: Float32Array | null = null;
+		let blendedFrame = -1;
 
 		// Listen for pad connect/disconnect so polling can gate on presence.
 		const detachGamepads = this.#gamepads.attach();
@@ -1943,11 +1977,45 @@ export class EmulatorHost {
 			this.#gamepads.poll();
 
 			if (this.#emulator.frameCount !== presented) {
-				presented = this.#emulator.frameCount;
+				const frameCount = this.#emulator.frameCount;
 				const frame = this.#emulator.frame;
-				for (let i = 0; i < frame.length; i++) {
-					pixels[i] = palette[frame[i]!]!;
+				if (frameBlending > 0) {
+					// Decay per *emulated* frame: skipped frames (turbo, slow
+					// tabs) decay by k^N rather than one step. A non-advancing
+					// or reset frameCount (machine swap, forced redraws from
+					// setting changes) rebuilds the retained image fresh.
+					const fresh =
+						retained === null || blendedFrame < 0 || frameCount <= blendedFrame;
+					const k = fresh
+						? 0
+						: Math.pow(frameBlending, frameCount - blendedFrame);
+					const keep = 1 - k;
+					retained ??= new Float32Array(frame.length * 3);
+					for (let i = 0; i < frame.length; i++) {
+						const w = palette[frame[i]!]!;
+						const base = i * 3;
+						const r = LINEAR[w & 0xff]! * keep + retained[base]! * k;
+						const g =
+							LINEAR[(w >>> 8) & 0xff]! * keep + retained[base + 1]! * k;
+						const b =
+							LINEAR[(w >>> 16) & 0xff]! * keep + retained[base + 2]! * k;
+						retained[base] = r;
+						retained[base + 1] = g;
+						retained[base + 2] = b;
+						pixels[i] =
+							0xff000000 |
+							(ENCODE[(b * 4096) | 0]! << 16) |
+							(ENCODE[(g * 4096) | 0]! << 8) |
+							ENCODE[(r * 4096) | 0]!;
+					}
+				} else {
+					retained = null; // free it; re-primed when turned back on
+					for (let i = 0; i < frame.length; i++) {
+						pixels[i] = palette[frame[i]!]!;
+					}
 				}
+				blendedFrame = frameCount;
+				presented = frameCount;
 				// The canvas is the visible crop; putImageData clips the rest.
 				context.putImageData(imageData, -crop.left, -crop.top);
 			}

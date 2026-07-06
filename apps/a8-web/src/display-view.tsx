@@ -234,6 +234,7 @@ export function DisplayView({ host }: { host: EmulatorHost }) {
 		const defaults = defaultDisplaySettings()[tab];
 		host.setOverscan(tab, defaults.overscan);
 		host.setPalette(tab, defaults.palette);
+		host.setFrameBlending(tab, defaults.frameBlending);
 	};
 
 	// NTSC / PAL are hardware tokens — inline, not translated.
@@ -289,6 +290,21 @@ export function DisplayView({ host }: { host: EmulatorHost }) {
 					step={2}
 					value={settings.overscan.height}
 					onChange={(height) => setOverscan({ ...settings.overscan, height })}
+				/>
+			</section>
+
+			<section class="flex flex-col gap-2">
+				<h3 class="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+					{messages.display.frameBlendingTitle}
+				</h3>
+				<Slider
+					label={messages.display.frameBlending}
+					min={0}
+					max={0.9}
+					step={0.01}
+					digits={2}
+					value={settings.frameBlending}
+					onChange={(value) => host.setFrameBlending(tab, value)}
 				/>
 			</section>
 

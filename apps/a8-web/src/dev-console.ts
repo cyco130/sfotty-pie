@@ -436,6 +436,15 @@ export function installDevConsole(host: EmulatorHost): void {
 			}
 			return { tv, ...host.displaySettings.peek()[tv].palette };
 		},
+		// The running standard's frame blending (0–0.9, persisted).
+		frameBlending: (value?: number) => {
+			const tv = host.config.peek().tv;
+			if (value !== undefined) host.setFrameBlending(tv, value);
+			return {
+				tv,
+				frameBlending: host.displaySettings.peek()[tv].frameBlending,
+			};
+		},
 		// Prompt-driven calibration of a real pad (defaults to the first
 		// connected one); works on standard pads too, as a layout override.
 		calibrate: (index?: number) => void calibratePad(host, index),

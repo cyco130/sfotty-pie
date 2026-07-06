@@ -475,6 +475,8 @@ export const messages = {
 			smpteC: "SMPTE C",
 			ebu: "EBU",
 		} as Record<string, string>,
+		frameBlendingTitle: "Frame blending",
+		frameBlending: "Amount",
 		reset: "Reset to defaults",
 		// Wide gamut is automatic (no setting); this line just reports it.
 		wideGamutActive: "Output: Display P3 (wide gamut)",

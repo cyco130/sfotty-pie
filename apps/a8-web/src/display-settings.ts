@@ -2,7 +2,7 @@
 // 376×240 frame (games draw into overscan); overscan is a display-side crop,
 // and the correct amounts genuinely differ per standard — 80s NTSC sets
 // showed ~204–216 lines while PAL sets showed all 240 and then some. More
-// settings (palette generation parameters, frame persistence) join this
+// settings (palette generation parameters, frame frameBlending) join this
 // record over time; the eventual settings page is tabbed per standard.
 //
 // Horizontal positions are in absolute hi-res pixels (GTIA color clocks × 2):
@@ -61,6 +61,11 @@ export const PRIMARIES_OPTIONS: Record<
 export interface StandardDisplaySettings {
 	overscan: OverscanSettings;
 	palette: PaletteSettings;
+	/** Frame blending: how much of the previous displayed frame
+	 *  survives into the next (exponential decay, 0 = off). Fuses the 25/30
+	 *  Hz flicker of sprite multiplexing and flicker-color tricks the way a
+	 *  CRT + eye did, at the cost of motion smear as it grows. */
+	frameBlending: number;
 }
 
 export type DisplaySettings = Record<TvStandard, StandardDisplaySettings>;
@@ -189,10 +194,12 @@ export function defaultDisplaySettings(): DisplaySettings {
 		ntsc: {
 			overscan: { ...OVERSCAN_PRESETS.ntsc["normal"]! },
 			palette: { ...PALETTE_PRESETS.ntsc["vintage"]! },
+			frameBlending: 0,
 		},
 		pal: {
 			overscan: { ...OVERSCAN_PRESETS.pal["normal"]! },
 			palette: { ...PALETTE_PRESETS.pal["calibrated"]! },
+			frameBlending: 0,
 		},
 	};
 }
@@ -245,6 +252,12 @@ export function sanitizePalette(palette: PaletteSettings): PaletteSettings {
 			? palette.primaries
 			: "srgb",
 	};
+}
+
+/** Frame blending clamped to its slider range: 0 (off) to 0.9 — closer to 1
+ *  never fully clears and reads as pure smear. */
+export function sanitizeFrameBlending(value: number): number {
+	return clamp(value, 0, 0.9);
 }
 
 /** A crop window within the frame buffer. */

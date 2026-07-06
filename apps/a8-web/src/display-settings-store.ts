@@ -5,6 +5,7 @@ import {
 	type PaletteSettings,
 	sanitizeOverscan,
 	sanitizePalette,
+	sanitizeFrameBlending,
 	type StandardDisplaySettings,
 } from "./display-settings.ts";
 import { loadPersisted, savePersisted } from "./persist.ts";
@@ -49,6 +50,9 @@ function sanitizeStandard(
 					? p.primaries
 					: fallback.palette.primaries,
 		}),
+		frameBlending: sanitizeFrameBlending(
+			number(raw?.frameBlending, fallback.frameBlending),
+		),
 	};
 }
 

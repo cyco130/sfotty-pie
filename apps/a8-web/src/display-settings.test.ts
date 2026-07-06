@@ -1,16 +1,25 @@
 import { expect, test } from "vitest";
 import {
 	defaultDisplaySettings,
+	sanitizeFrameBlending,
 	PALETTE_PRESETS,
 	sanitizePalette,
 	overscanCrop,
 	sanitizeOverscan,
 } from "./display-settings.ts";
 
-test("defaults are the Normal preset per standard", () => {
+test("defaults are the Normal preset per standard, frameBlending off", () => {
 	const d = defaultDisplaySettings();
 	expect(d.ntsc.overscan).toEqual({ width: 336, height: 224 });
 	expect(d.pal.overscan).toEqual({ width: 336, height: 224 });
+	expect(d.ntsc.frameBlending).toBe(0);
+	expect(d.pal.frameBlending).toBe(0);
+});
+
+test("sanitizeFrameBlending clamps to 0–0.9", () => {
+	expect(sanitizeFrameBlending(-1)).toBe(0);
+	expect(sanitizeFrameBlending(0.5)).toBe(0.5);
+	expect(sanitizeFrameBlending(1)).toBe(0.9);
 });
 
 test("the full frame crops to the whole buffer", () => {

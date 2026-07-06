@@ -68,11 +68,19 @@ test("palette defaults come from each standard's first preset", () => {
 		...PALETTE_PRESETS.ntsc["vintage"]!,
 		hue1Angle: 303,
 	});
-	// Blue GR. 0 is the narrower field-adjusted pot with a nudged tint.
+	// "15 hues" is the equal-spacing camp: 360/15 = 24°/step (hue 15 stays
+	// distinct from hue 1), tinted to keep Vintage's GR.0 blue.
+	expect(PALETTE_PRESETS.ntsc["hues15"]).toEqual({
+		...PALETTE_PRESETS.ntsc["vintage"]!,
+		hue1Angle: 340,
+		hueStep: 24,
+	});
+	// Blue GR. 0 is the fitted match of the NTSC vintage look (which also
+	// yields the bluer background the name refers to).
 	expect(PALETTE_PRESETS.pal["blueGr0"]).toEqual({
 		...PALETTE_PRESETS.pal["calibrated"]!,
-		hue1Angle: 145,
-		hueStep: 19,
+		hue1Angle: 154,
+		hueStep: 23,
 	});
 });
 

@@ -489,6 +489,7 @@ export const messages = {
 		palettePresets: {
 			vintage: "Vintage",
 			modern: "Modern",
+			hues15: "15 hues",
 			calibrated: "Calibrated",
 			blueGr0: "Blue GR. 0",
 		} as Record<string, string>,

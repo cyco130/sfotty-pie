@@ -72,11 +72,10 @@ export const OVERSCAN_MIN_HEIGHT = 192;
 export const OVERSCAN_MAX_HEIGHT = FRAME_BUFFER_HEIGHT;
 
 /**
- * Named palette presets per standard — authentic parameter sets, not curated
- * RGB tables. PAL's two presets settle the community's greenish-vs-blue GR.0
- * split: both are real pot positions (the ideal 22.5°/tap gives sea green,
- * the commonly-seen field adjustment ~18.5° gives the purer blue). Display
- * labels come later with the settings page UI.
+ * Named palette presets per standard — parameter sets, not curated RGB
+ * tables (only parameters persist; presets are buttons). Each standard pairs
+ * a by-the-book calibration with the period/NTSC-vintage look, and PAL's
+ * pair also settles the community's greenish-vs-blue GR.0 split.
  */
 export const PALETTE_PRESETS: Record<
 	TvStandard,
@@ -88,12 +87,14 @@ export const PALETTE_PRESETS: Record<
 	// row replicates the procedure) and differ only in tint, the display's
 	// knob.
 	ntsc: {
-		// The default: a period display's tint. Per the AHRM, AtariAge research
-		// suggests many NTSC games were developed on sets with a more reddish
-		// hue 1 than a calibrated modern display's −57°; hand-tuned to −40°
-		// (320), between that and the Commodore 1702's documented ≈ −33°.
+		// The default: a period display's tint, per Atari's own Field Repair
+		// manual — "For Hue/Phase/Color Balance TV/monitor setting correct
+		// with Phase −33", i.e. hue 1 at −33° from I (327). The same angle the
+		// AHRM documents for the Commodore 1702, and consistent with AtariAge
+		// research that NTSC games were developed on sets with a more reddish
+		// hue 1 than a calibrated modern display's −57°.
 		vintage: {
-			hue1Angle: 320,
+			hue1Angle: 327,
 			hueStep: 360 / 14,
 			saturation: 0.25,
 			brightness: 0,
@@ -105,6 +106,20 @@ export const PALETTE_PRESETS: Record<
 		modern: {
 			hue1Angle: 303,
 			hueStep: 360 / 14,
+			saturation: 0.25,
+			brightness: 0,
+			contrast: 1,
+			gamma: 1,
+			primaries: "smpteC",
+		},
+		// The other camp in the perennial hue-1-vs-15 forum debate: the CGIA
+		// manual (among others) insists all 15 hues are distinct, implying
+		// equal spacing over the wheel — 360/15 = 24°/step, leaving hue 15 one
+		// step shy of hue 1 instead of matching it. Tint 340 keeps GR.0's
+		// blue where Vintage puts it (hue 9 ≈ 172°).
+		hues15: {
+			hue1Angle: 340,
+			hueStep: 24,
 			saturation: 0.25,
 			brightness: 0,
 			contrast: 1,
@@ -123,11 +138,17 @@ export const PALETTE_PRESETS: Record<
 			gamma: 1,
 			primaries: "ebu",
 		},
-		// The common field adjustment: a narrower pot (bluer GR.0), hand-tuned
-		// 2026-07-06 to 19°/tap with the tint nudged to 145.
+		// The NTSC "Vintage" look on a PAL machine (which also gives the blue
+		// GR.0 the name refers to): least-squares fit of the PAL generator's
+		// parameters against the NTSC vintage palette (linearized-RGB distance
+		// over all 256 entries). A reasonable match throughout — the tint
+		// lands +19° of the PAL default, echoing vintage NTSC's +24° of
+		// modern — except hue 11, which sits on the PAL wheel's structural
+		// 10/11 gap and can't be bent onto NTSC's uniform wheel by any
+		// parameter choice.
 		blueGr0: {
-			hue1Angle: 145,
-			hueStep: 19,
+			hue1Angle: 154,
+			hueStep: 23,
 			saturation: 0.25,
 			brightness: 0,
 			contrast: 1,

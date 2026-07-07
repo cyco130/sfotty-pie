@@ -322,6 +322,7 @@ export class AnticGtia implements Memory {
 
 		this.#dmaVisibleLine = false;
 		this.#lineFetchWidth = 0;
+		this.#virtualLoad = 0;
 		this.#rebuildDmaPattern();
 	}
 
@@ -1188,7 +1189,29 @@ export class AnticGtia implements Memory {
 				break;
 			case DMA_PF_SKIP:
 				// A masked load slot (playfield DMA disabled mid-line): MSC
-				// advances, the bus stays free.
+				// advances, the bus stays free, and the load takes the bus
+				// value (completed in afterCpu once the CPU has driven it).
+				this.#virtualLoad = entry;
+				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000);
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_GLYPH_VIRT:
+				// A dropped fetch past the DMA cutoff: the load still runs,
+				// from the bus (afterCpu completes it, like the phantom
+				// GRAF latch).
+				this.#virtualLoad = entry;
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_BITMAP_VIRT:
+				this.#virtualLoad = entry;
 				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000);
 				if (this.refreshPending) {
 					this.refreshPending = false;
@@ -1203,7 +1226,29 @@ export class AnticGtia implements Memory {
 	// cycle within horizontal blank, or -1 while none has occurred yet.
 	#pmFetchCycle = -1;
 
+	// A virtual/masked load slot from busCycle awaiting the bus value the
+	// CPU drives during the slot cycle (Acid800 virtdma pins the capture
+	// point via a timed LDA's operand byte).
+	#virtualLoad = 0;
+
 	afterCpu(frame: Uint8Array, busData: number) {
+		if (this.#virtualLoad) {
+			const entry = this.#virtualLoad;
+			this.#virtualLoad = 0;
+			const index = entry >> 8;
+			const action = entry & 0xff;
+			if (action === DMA_GLYPH_VIRT) {
+				this.#emitGlyph(this.#buffer[index]!, busData);
+			} else if (action === DMA_BITMAP_VIRT) {
+				this.#buffer[index] = busData;
+				this.#emitBitmapPixels(busData);
+			} else {
+				// DMA_PF_SKIP: capture the bus into the line buffer (MSC
+				// already advanced in busCycle); the display stays off.
+				this.#buffer[index] = busData;
+			}
+		}
+
 		const pixels0 = this.#generateColor(0);
 
 		const pixels1 = this.#generateColor(1);
@@ -1909,126 +1954,103 @@ export class AnticGtia implements Memory {
 	// Character glyph data fetch: read the buffered name's glyph row from
 	// CHBASE and ship it into the ANx pipe.
 	#fetchGlyph(bufferIndex: number): void {
-		const mode = this.instruction & 0x0f;
 		const charNo = this.#buffer[bufferIndex]!;
+		this.#emitGlyph(charNo, this.#dmaRead(this.#glyphAddress(charNo)));
+	}
+
+	// The glyph row address for a character name under the current mode. The
+	// two-line-resolution modes (5 and 7) halve the row; mode 3 wraps its
+	// 10-line counter into the 3-bit row (its out-of-quadrant blanking lives
+	// in #emitGlyph).
+	#glyphAddress(charNo: number): number {
+		const mode = this.instruction & 0x0f;
 		const base =
 			mode < 6
 				? // 1024-byte char set
 					(this.chbase & 0xfe) * 256 + (charNo & 0x7f) * 8
 				: // 512-byte char set
 					this.chbase * 256 + (charNo & 0x3f) * 8;
+		const line = this.modeLineNo;
+		const row =
+			mode === 3 ? line & 7 : mode === 5 || mode === 7 ? line >> 1 : line;
+		return base + this.#charRow(row);
+	}
 
-		{
-			switch (mode) {
-				case 2:
-					{
-						// 8 hires pixels (4 color clocks)
-						const bits = this.#charData(base, this.modeLineNo, charNo);
+	// Decode a glyph row into pfPixels and ship it. `data` is the raw byte —
+	// fetched, or straight off the bus for a virtual load; the CHACTL
+	// transforms and mode 3's blanking apply here, downstream of the fetch.
+	#emitGlyph(charNo: number, data: number): void {
+		const mode = this.instruction & 0x0f;
+		switch (mode) {
+			case 2:
+				{
+					// 8 hires pixels (4 color clocks)
+					const bits = this.#charTransform(data, charNo);
 
-						this.pfPixels[0] = hires(bits);
-						this.pfPixels[1] = hires(bits >> 2);
-						this.pfPixels[2] = hires(bits >> 4);
-						this.pfPixels[3] = hires(bits >> 6);
-						this.pfCounter = 4;
+					this.pfPixels[0] = hires(bits);
+					this.pfPixels[1] = hires(bits >> 2);
+					this.pfPixels[2] = hires(bits >> 4);
+					this.pfPixels[3] = hires(bits >> 6);
+					this.pfCounter = 4;
+				}
+				break;
+
+			case 3:
+				{
+					// Like mode 2 but 10 scanlines tall: one quadrant of the
+					// char set — $60-$7F, the "descenders" — blanks rows 0-1
+					// and shows the wrapped fetch at rows 8-9, while the rest
+					// blank rows 8-9 (Acid800 antic_charcontrol).
+					const line = this.modeLineNo;
+					const descender = (charNo & 0x60) === 0x60;
+					const bits = this.#charTransform(
+						data,
+						charNo,
+						descender ? line < 2 : line >= 8,
+					);
+
+					this.pfPixels[0] = hires(bits);
+					this.pfPixels[1] = hires(bits >> 2);
+					this.pfPixels[2] = hires(bits >> 4);
+					this.pfPixels[3] = hires(bits >> 6);
+					this.pfCounter = 4;
+				}
+				break;
+
+			case 4:
+			case 5:
+				{
+					// 4 lores pixels with 5 colors
+					const useColPf3 = !!(charNo & 0x80);
+
+					this.pfPixels[0] = loresPixel(data, useColPf3);
+					this.pfPixels[1] = loresPixel(data >> 2, useColPf3);
+					this.pfPixels[2] = loresPixel(data >> 4, useColPf3);
+					this.pfPixels[3] = loresPixel(data >> 6, useColPf3);
+					this.pfCounter = 4;
+				}
+				break;
+
+			case 6:
+			case 7:
+				{
+					// 8 lores pixels, all same color
+					const color = lores(charNo >> 6);
+
+					this.pfPixels.fill(0);
+					this.pfCounter = 8;
+					let i = 0;
+					while (data) {
+						const bit = data & 1;
+						data >>= 1;
+						const out = bit ? color : BG;
+						this.pfPixels[i++] = out;
 					}
-					break;
+				}
+				break;
 
-				case 3:
-					{
-						// Like mode 2 but 10 scanlines tall: the glyph row is
-						// the 3-bit row counter (rows 8-9 fetch glyph rows
-						// 0-1), and one quadrant of the char set — $60-$7F,
-						// the "descenders" — blanks rows 0-1 and shows the
-						// wrapped fetch at rows 8-9, while the rest blank
-						// rows 8-9 (Acid800 antic_charcontrol).
-						const line = this.modeLineNo;
-						const descender = (charNo & 0x60) === 0x60;
-						const bits = this.#charData(
-							base,
-							line & 7,
-							charNo,
-							descender ? line < 2 : line >= 8,
-						);
-
-						this.pfPixels[0] = hires(bits);
-						this.pfPixels[1] = hires(bits >> 2);
-						this.pfPixels[2] = hires(bits >> 4);
-						this.pfPixels[3] = hires(bits >> 6);
-						this.pfCounter = 4;
-					}
-					break;
-
-				case 4:
-					{
-						// 4 lores pixels with 5 colors
-						const data = this.#dmaRead(base + this.#charRow(this.modeLineNo));
-						const useColPf3 = !!(charNo & 0x80);
-
-						this.pfPixels[0] = loresPixel(data, useColPf3);
-						this.pfPixels[1] = loresPixel(data >> 2, useColPf3);
-						this.pfPixels[2] = loresPixel(data >> 4, useColPf3);
-						this.pfPixels[3] = loresPixel(data >> 6, useColPf3);
-						this.pfCounter = 4;
-					}
-					break;
-
-				case 5:
-					{
-						// 4 lores pixels with 5 colors
-						const data = this.#dmaRead(
-							base + this.#charRow(this.modeLineNo >> 1),
-						);
-						const useColPf3 = !!(charNo & 0x80);
-
-						this.pfPixels[0] = loresPixel(data, useColPf3);
-						this.pfPixels[1] = loresPixel(data >> 2, useColPf3);
-						this.pfPixels[2] = loresPixel(data >> 4, useColPf3);
-						this.pfPixels[3] = loresPixel(data >> 6, useColPf3);
-						this.pfCounter = 4;
-					}
-					break;
-
-				case 6:
-					{
-						// 8 lores pixels, all same color
-						let data = this.#dmaRead(base + this.#charRow(this.modeLineNo));
-						const color = lores(charNo >> 6);
-
-						this.pfPixels.fill(0);
-						this.pfCounter = 8;
-						let i = 0;
-						while (data) {
-							const bit = data & 1;
-							data >>= 1;
-							const out = bit ? color : BG;
-							this.pfPixels[i++] = out;
-						}
-					}
-					break;
-
-				case 7:
-					{
-						// 8 lores pixels, all same color
-						let data = this.#dmaRead(
-							base + this.#charRow(this.modeLineNo >> 1),
-						);
-						const color = lores(charNo >> 6);
-
-						this.pfPixels.fill(0);
-						this.pfCounter = 8;
-						let i = 0;
-						while (data) {
-							const bit = data & 1;
-							data >>= 1;
-							const out = bit ? color : BG;
-							this.pfPixels[i++] = out;
-						}
-					}
-					break;
-
-				default:
-					break;
-			}
+			default:
+				break;
 		}
 
 		this.#pushPfBatch(ANX_CHAR_DELAY);
@@ -2173,13 +2195,12 @@ export class AnticGtia implements Memory {
 		return (this.chactl & 0x04 ? row ^ 7 : row) & 7;
 	}
 
-	// Glyph data for the hires char modes (2 and 3) with CHACTL applied.
-	// `blankRow` is mode 3's out-of-quadrant blanking; it lands before the
-	// inverse-video handling, so an inverted blank row renders solid — and
-	// the DMA fetch still happens either way. For inverse-video chars, blank
-	// (bit 0) wins over invert (bit 1): both set renders solid.
-	#charData(base: number, row: number, charNo: number, blankRow = false) {
-		let data = this.#dmaRead(base + this.#charRow(row));
+	// CHACTL transforms for the hires char modes (2 and 3). `blankRow` is
+	// mode 3's out-of-quadrant blanking; it lands before the inverse-video
+	// handling, so an inverted blank row renders solid — and the fetch still
+	// happens either way. For inverse-video chars, blank (bit 0) wins over
+	// invert (bit 1): both set renders solid.
+	#charTransform(data: number, charNo: number, blankRow = false): number {
 		if (blankRow) data = 0;
 		if (charNo & 0x80) {
 			if (this.chactl & 0x01) data = 0;
@@ -2279,6 +2300,14 @@ const DMA_GLYPH = 8; // character glyph data
 const DMA_BITMAP = 9; // bitmap data into the line buffer (first scan line)
 const DMA_REPLAY = 10; // line-buffer replay: pixels flow, bus free
 const DMA_PF_SKIP = 11; // masked load slot: MSC advances, bus free
+const DMA_GLYPH_VIRT = 12; // dropped glyph fetch: loads from the bus
+const DMA_BITMAP_VIRT = 13; // dropped bitmap fetch: loads from the bus
+
+// Playfield DMA may occupy cycles only through 105; a fetch slot pushed
+// past that by HSCROL on a wide (or widened) playfield is dropped as a bus
+// request, but the load machinery still runs and takes whatever is on the
+// bus — "virtual DMA" (AHRM's dropped-cycles note; Acid800 antic_virtdma).
+const VIRTUAL_DMA_CUTOFF = 106;
 
 /**
  * Build a scanline's DMA pattern from a state key. A line's whole pattern is
@@ -2333,8 +2362,8 @@ function buildDmaPattern(key: number): Uint16Array {
 				? NAME_FETCH_START[lineWidth as 1 | 2 | 3]
 				: BITMAP_FETCH_START[lineWidth as 1 | 2 | 3]) + shift;
 		const rate = charRate || pfRate;
-		for (let c = start; c < start + span && c < 114; c += rate) {
-			pattern[c] = DMA_PF_SKIP;
+		for (let c = start, n = 0; c < start + span && c < 114; c += rate, n++) {
+			pattern[c] = DMA_PF_SKIP | (n << 8);
 		}
 		return pattern;
 	}
@@ -2347,6 +2376,8 @@ function buildDmaPattern(key: number): Uint16Array {
 	const span = FETCH_WIDTH[fetchWidth as 1 | 2 | 3];
 
 	if (charRate && newInstruction) {
+		// Name fetches can't reach the virtual-DMA cutoff (their latest
+		// possible slot is 105).
 		const start = NAME_FETCH_START[fetchWidth as 1 | 2 | 3] + shift;
 		for (
 			let c = start, n = 0;
@@ -2366,8 +2397,15 @@ function buildDmaPattern(key: number): Uint16Array {
 		: newInstruction
 			? DMA_BITMAP
 			: DMA_REPLAY;
+	// Slots pushed past the DMA cutoff still load — from the bus (replay
+	// never touches the bus and is unaffected).
+	const virtualAction = charRate
+		? DMA_GLYPH_VIRT
+		: newInstruction
+			? DMA_BITMAP_VIRT
+			: DMA_REPLAY;
 	for (let c = start, n = 0; c < start + span && c < 114; c += pfRate, n++) {
-		pattern[c] = action | (n << 8);
+		pattern[c] = (c >= VIRTUAL_DMA_CUTOFF ? virtualAction : action) | (n << 8);
 	}
 
 	return pattern;

@@ -17,7 +17,7 @@
 	"ANTIC: VCOUNT timing": "pass",
 	"ANTIC: VSCROL+NMI timing": "pass",
 	"ANTIC: Vertical scrolling": "pass",
-	"ANTIC: Virtual DMA": "fail",
+	"ANTIC: Virtual DMA": "pass",
 	"ANTIC: WSYNC timing": "pass",
 	"CPU: 65C816 tests": "skip",
 	"CPU: Basic instructions": "pass",

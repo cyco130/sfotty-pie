@@ -931,9 +931,14 @@ export class AnticGtia implements Memory {
 	#rebuildDmaPattern(): void {
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
+		// P/M data is only fetched within the visible region, scan lines
+		// 8-247 (AHRM 4.10) — not during vertical blank. This is a plain
+		// line-range gate, unlike the playfield's #dmaVisibleLine which
+		// also tracks a JVB wait.
+		const pmLine = this.vcount >= 8 && this.vcount < 248;
 		const key =
-			(this.missileDmaEnabled ? 0b1 : 0) |
-			(this.playerDmaEnabled ? 0b10 : 0) |
+			(pmLine && this.missileDmaEnabled ? 0b1 : 0) |
+			(pmLine && this.playerDmaEnabled ? 0b10 : 0) |
 			(this.#dmaVisibleLine ? 0b100 : 0) |
 			(this.#newInstruction ? 0b1000 : 0) |
 			(this.displayListDmaEnabled ? 0b10000 : 0) |

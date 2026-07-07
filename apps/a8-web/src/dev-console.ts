@@ -2,6 +2,7 @@
 import { canonicalize } from "@sfotty-pie/a8";
 import { disassemble, ReadOptions } from "@sfotty-pie/sfotty";
 import { setCommandTrace } from "./commands.ts";
+import { PALETTE_PRESETS, type PaletteSettings } from "./display-settings.ts";
 import {
 	type CalibrationSample,
 	type CalibrationSet,
@@ -404,6 +405,44 @@ export function installDevConsole(host: EmulatorHost): void {
 				profiled: !!profile,
 				raw: dump(pad),
 				view: dump(normalize(pad, profile)),
+			};
+		},
+		// Adjust the running standard's overscan crop (persisted; sanitized to
+		// 320–376 × 192–240, even). No args just reports the current setting.
+		overscan: (width?: number, height?: number) => {
+			const tv = host.config.peek().tv;
+			if (width !== undefined && height !== undefined) {
+				host.setOverscan(tv, { width, height });
+			}
+			return { tv, ...host.displaySettings.peek()[tv].overscan };
+		},
+		// Adjust the running standard's palette generation parameters
+		// (persisted; partial merge), or apply a named preset:
+		//   a8.palette({ hueStep: 19 })    a8.palette("blueGr0")
+		// No args just reports the current values.
+		palette: (params?: Partial<PaletteSettings> | string) => {
+			const tv = host.config.peek().tv;
+			if (typeof params === "string") {
+				const preset = PALETTE_PRESETS[tv][params];
+				if (preset) host.setPalette(tv, preset);
+				else {
+					console.log(
+						`no "${params}" preset for ${tv}; available:`,
+						Object.keys(PALETTE_PRESETS[tv]),
+					);
+				}
+			} else if (params) {
+				host.setPalette(tv, params);
+			}
+			return { tv, ...host.displaySettings.peek()[tv].palette };
+		},
+		// The running standard's frame blending (0–0.9, persisted).
+		frameBlending: (value?: number) => {
+			const tv = host.config.peek().tv;
+			if (value !== undefined) host.setFrameBlending(tv, value);
+			return {
+				tv,
+				frameBlending: host.displaySettings.peek()[tv].frameBlending,
 			};
 		},
 		// Prompt-driven calibration of a real pad (defaults to the first

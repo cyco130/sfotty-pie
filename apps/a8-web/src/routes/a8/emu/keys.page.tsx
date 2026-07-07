@@ -1,15 +1,15 @@
 import { KeysView } from "../../../keys.tsx";
-import { messages } from "../../../messages.ts";
 import { useEmu } from "./emu-context.ts";
-import { PanelFrame } from "./panel-frame.tsx";
+import { SettingsFrame } from "./settings-frame.tsx";
 
-// /a8/emu/keys — keyboard shortcuts: the raw binding set, searchable. Reached
-// from the menu.
+// /a8/emu/keys — the settings view's Shortcuts tab: the raw binding set,
+// searchable. Its drill-down pages (layout, per-command) keep their own
+// frames.
 export default function KeysPage() {
 	const { host } = useEmu();
 	return (
-		<PanelFrame title={messages.sidebar.titleKeys}>
+		<SettingsFrame host={host} active="shortcuts">
 			<KeysView host={host} />
-		</PanelFrame>
+		</SettingsFrame>
 	);
 }

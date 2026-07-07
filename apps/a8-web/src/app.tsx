@@ -1,4 +1,3 @@
-import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "@sfotty-pie/a8";
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 import { Toasts } from "./toasts.tsx";
@@ -79,10 +78,10 @@ export function App({
 					class="relative flex-1 overflow-hidden bg-black"
 					onDblClick={() => host.dispatch("TOGGLE_FULLSCREEN")}
 				>
+					{/* Backing-store size is owned by attachScreen (the visible
+					    overscan crop, which follows the display settings). */}
 					<canvas
 						ref={canvasRef}
-						width={FRAME_BUFFER_WIDTH}
-						height={FRAME_BUFFER_HEIGHT}
 						class="absolute top-1/2 left-1/2 -translate-1/2 [image-rendering:pixelated]"
 					/>
 				</div>

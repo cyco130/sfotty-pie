@@ -14,10 +14,24 @@ import {
 	type AtariFileFormat,
 	type AtariModel,
 	type FirmwareKey,
+	type OutputGamut,
 } from "@sfotty-pie/a8";
 import { computed, signal } from "@preact/signals";
 import type { AudioOutput } from "./audio.ts";
 import { commands, type Command, releaseOf } from "./commands.ts";
+import {
+	type DisplaySettings,
+	type OverscanSettings,
+	overscanCrop,
+	type PaletteSettings,
+	sanitizeOverscan,
+	sanitizePalette,
+	sanitizeFrameBlending,
+} from "./display-settings.ts";
+import {
+	loadDisplaySettings,
+	saveDisplaySettings,
+} from "./display-settings-store.ts";
 import type { Binding, KeyboardMode } from "./key-bindings.ts";
 import { Emulator } from "./emulator.ts";
 import { Gamepads, type PadInfo } from "./gamepad.ts";
@@ -64,6 +78,7 @@ import {
 	sanitizeSettings,
 	settingsEqual,
 	type MachineSettings,
+	type TvStandard,
 } from "./machine-config.ts";
 import { currentPath, navigate } from "./navigate.ts";
 import { messages } from "./messages.ts";
@@ -109,6 +124,7 @@ export interface Toast {
 export type SidebarPanel =
 	| "menu"
 	| "config"
+	| "display"
 	| "palette"
 	| "keys"
 	| "controllers"
@@ -279,6 +295,15 @@ export class EmulatorHost {
 	readonly gamepadNormalize = signal<NormalizeProfiles>(
 		loadNormalizeProfiles(),
 	);
+
+	/** Per-TV-standard display settings (overscan, palette, frame blending);
+	 *  the running config's standard selects the effective one. Persisted. */
+	readonly displaySettings = signal<DisplaySettings>(loadDisplaySettings());
+
+	/** The color space the screen canvas actually got (attachScreen detects
+	 *  wide gamut); surfaces that preview colors (the display panel's guide)
+	 *  generate in the same space so they match the machine exactly. */
+	readonly outputGamut = signal<OutputGamut>("srgb");
 
 	/** Whether the game picker overlay is open (see favorites-menu.tsx). */
 	readonly favoritesOpen = signal(false);
@@ -636,6 +661,48 @@ export class EmulatorHost {
 	/** Restore the default gamepad bindings. */
 	resetGamepadBindings(): void {
 		this.setGamepadBindings(defaultGamepadBindings());
+	}
+
+	/** Set one standard's overscan (sanitized) — applies live via the screen's
+	 *  subscription, persists (the settings page / dev console's path). */
+	setOverscan(tv: TvStandard, overscan: OverscanSettings): void {
+		const current = this.displaySettings.peek();
+		const next: DisplaySettings = {
+			...current,
+			[tv]: { ...current[tv], overscan: sanitizeOverscan(overscan) },
+		};
+		this.displaySettings.value = next;
+		saveDisplaySettings(next);
+	}
+
+	/** Set one standard's frame blending (sanitized). Applies live via
+	 *  the screen's subscription, persists. */
+	setFrameBlending(tv: TvStandard, frameBlending: number): void {
+		const current = this.displaySettings.peek();
+		const next: DisplaySettings = {
+			...current,
+			[tv]: {
+				...current[tv],
+				frameBlending: sanitizeFrameBlending(frameBlending),
+			},
+		};
+		this.displaySettings.value = next;
+		saveDisplaySettings(next);
+	}
+
+	/** Set one standard's palette generation parameters (sanitized; partial —
+	 *  unmentioned parameters keep their value). Applies live, persists. */
+	setPalette(tv: TvStandard, palette: Partial<PaletteSettings>): void {
+		const current = this.displaySettings.peek();
+		const next: DisplaySettings = {
+			...current,
+			[tv]: {
+				...current[tv],
+				palette: sanitizePalette({ ...current[tv].palette, ...palette }),
+			},
+		};
+		this.displaySettings.value = next;
+		saveDisplaySettings(next);
 	}
 
 	/** Open the game picker (see favorites-menu.tsx): pause the machine and
@@ -1785,19 +1852,45 @@ export class EmulatorHost {
 	 * a teardown function.
 	 */
 	attachScreen(canvas: HTMLCanvasElement): () => void {
-		const context = canvas.getContext("2d");
+		// Wide gamut when both the display and the canvas API support it —
+		// deliberately no UI: sRGB-defined palettes are converted so they look
+		// identical, while corrected wide primaries (NTSC 1953) keep saturation
+		// an sRGB canvas would clamp. Decided once here; a context's color
+		// space is fixed at creation.
+		let outputGamut: OutputGamut = "srgb";
+		let context: CanvasRenderingContext2D | null = null;
+		if (matchMedia("(color-gamut: p3)").matches) {
+			context = canvas.getContext("2d", { colorSpace: "display-p3" });
+			if (
+				context &&
+				typeof context.getContextAttributes === "function" &&
+				context.getContextAttributes().colorSpace === "display-p3"
+			) {
+				outputGamut = "display-p3";
+			}
+		}
+		context ??= canvas.getContext("2d");
+		this.outputGamut.value = outputGamut;
 		const stage = canvas.parentElement;
 		if (!context || !stage) return () => {};
 
+		// The visible crop of the rendered frame — the running standard's
+		// overscan setting (see display-settings.ts). The canvas backing store
+		// is the crop, so the blit clips and the fit letterboxes exactly what's
+		// shown. Updated by the subscriptions below.
+		let crop = overscanCrop(
+			this.displaySettings.value[this.config.value.tv].overscan,
+		);
+
 		// Fit the canvas into its parent, preserving the display aspect — which
-		// depends on the TV standard's pixel aspect ratio, so re-fit when the
-		// config changes too (the stage size may not).
+		// depends on the crop and the TV standard's pixel aspect ratio, so it's
+		// re-run when either changes (the stage may not).
 		const fit = () => {
 			const par =
 				this.config.value.tv === "pal"
 					? PAL_PIXEL_ASPECT_RATIO
 					: NTSC_PIXEL_ASPECT_RATIO;
-			const displayAspect = (FRAME_BUFFER_WIDTH * par) / FRAME_BUFFER_HEIGHT;
+			const displayAspect = (crop.width * par) / crop.height;
 			const boxWidth = stage.clientWidth;
 			const boxHeight = stage.clientHeight;
 			let width = boxWidth;
@@ -1815,23 +1908,65 @@ export class EmulatorHost {
 		const imageData = context.createImageData(
 			FRAME_BUFFER_WIDTH,
 			FRAME_BUFFER_HEIGHT,
+			{ colorSpace: outputGamut },
 		);
 		const pixels = new Uint32Array(imageData.data.buffer);
 
-		// Both the fit (pixel aspect) and the palette follow the TV standard,
-		// so refresh them whenever the config changes (the stage may not).
-		let palette = buildNtscPalette();
-		const unsubscribe = this.config.subscribe(() => {
+		// The frameCount of the frame currently on the canvas; −1 forces a
+		// redraw on the next present.
+		let presented = -1;
+
+		// Size the canvas backing store to the crop and force a redraw (resizing
+		// clears the canvas, and the present loop otherwise skips unchanged
+		// frames — noticeable while paused).
+		const applyCrop = () => {
+			crop = overscanCrop(
+				this.displaySettings.value[this.config.value.tv].overscan,
+			);
+			if (canvas.width !== crop.width || canvas.height !== crop.height) {
+				canvas.width = crop.width;
+				canvas.height = crop.height;
+			}
+			presented = -1;
 			fit();
+		};
+
+		// The fit (pixel aspect), the palette, the crop, and the frame-blending
+		// amount follow the TV standard; all also follow the display settings
+		// (the palette is *generated* from the standard's parameters).
+		let palette = buildNtscPalette();
+		let frameBlending = 0;
+		const apply = () => {
+			applyCrop();
+			const tv = this.config.value.tv;
+			const params = { ...this.displaySettings.value[tv].palette, outputGamut };
 			palette =
-				this.config.value.tv === "pal" ? buildPalPalette() : buildNtscPalette();
-		});
+				tv === "pal" ? buildPalPalette(params) : buildNtscPalette(params);
+			frameBlending = this.displaySettings.value[tv].frameBlending;
+		};
+		const unsubscribeConfig = this.config.subscribe(apply);
+		const unsubscribeDisplay = this.displaySettings.subscribe(apply);
+
+		// Frame blending mixes in *linear light* — flicker fusion happens in
+		// light, not signal, and gamma-space blending underweights the bright
+		// phase of a flicker pair (see the analog-video appendix's averaging
+		// note). LUTs stand in for per-pixel pow: byte → linear in, linear →
+		// byte out.
+		const LINEAR = new Float32Array(256);
+		for (let i = 0; i < 256; i++) LINEAR[i] = Math.pow(i / 255, 2.2);
+		const ENCODE = new Uint8Array(4097);
+		for (let i = 0; i <= 4096; i++) {
+			ENCODE[i] = Math.round(Math.pow(i / 4096, 1 / 2.2) * 255);
+		}
+		// The retained displayed image (linear RGB triplets), and the frame it
+		// represents. Allocated on first use; dropped while blending is off.
+		let retained: Float32Array | null = null;
+		let blendedFrame = -1;
 
 		// Listen for pad connect/disconnect so polling can gate on presence.
 		const detachGamepads = this.#gamepads.attach();
 
 		let raf = 0;
-		let presented = -1;
 		let framesAtSecondStart = this.#emulator.frameCount;
 		let secondStart = performance.now();
 		const present = () => {
@@ -1842,12 +1977,47 @@ export class EmulatorHost {
 			this.#gamepads.poll();
 
 			if (this.#emulator.frameCount !== presented) {
-				presented = this.#emulator.frameCount;
+				const frameCount = this.#emulator.frameCount;
 				const frame = this.#emulator.frame;
-				for (let i = 0; i < frame.length; i++) {
-					pixels[i] = palette[frame[i]!]!;
+				if (frameBlending > 0) {
+					// Decay per *emulated* frame: skipped frames (turbo, slow
+					// tabs) decay by k^N rather than one step. A non-advancing
+					// or reset frameCount (machine swap, forced redraws from
+					// setting changes) rebuilds the retained image fresh.
+					const fresh =
+						retained === null || blendedFrame < 0 || frameCount <= blendedFrame;
+					const k = fresh
+						? 0
+						: Math.pow(frameBlending, frameCount - blendedFrame);
+					const keep = 1 - k;
+					retained ??= new Float32Array(frame.length * 3);
+					for (let i = 0; i < frame.length; i++) {
+						const w = palette[frame[i]!]!;
+						const base = i * 3;
+						const r = LINEAR[w & 0xff]! * keep + retained[base]! * k;
+						const g =
+							LINEAR[(w >>> 8) & 0xff]! * keep + retained[base + 1]! * k;
+						const b =
+							LINEAR[(w >>> 16) & 0xff]! * keep + retained[base + 2]! * k;
+						retained[base] = r;
+						retained[base + 1] = g;
+						retained[base + 2] = b;
+						pixels[i] =
+							0xff000000 |
+							(ENCODE[(b * 4096) | 0]! << 16) |
+							(ENCODE[(g * 4096) | 0]! << 8) |
+							ENCODE[(r * 4096) | 0]!;
+					}
+				} else {
+					retained = null; // free it; re-primed when turned back on
+					for (let i = 0; i < frame.length; i++) {
+						pixels[i] = palette[frame[i]!]!;
+					}
 				}
-				context.putImageData(imageData, 0, 0);
+				blendedFrame = frameCount;
+				presented = frameCount;
+				// The canvas is the visible crop; putImageData clips the rest.
+				context.putImageData(imageData, -crop.left, -crop.top);
 			}
 			this.crashed.value = this.#emulator.crashed; // dedup'd by the signal
 			// Sample the emulated frame rate about once a second. Measure the
@@ -1876,7 +2046,8 @@ export class EmulatorHost {
 		return () => {
 			cancelAnimationFrame(raf);
 			resize.disconnect();
-			unsubscribe();
+			unsubscribeConfig();
+			unsubscribeDisplay();
 			detachGamepads();
 		};
 	}

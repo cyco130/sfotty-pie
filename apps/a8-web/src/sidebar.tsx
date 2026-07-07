@@ -176,7 +176,7 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 	const dirty = host.dirty.value;
 
 	return (
-		<div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+		<div class="flex shrink-0 flex-col gap-2">
 			<LabeledSelect
 				label={messages.sidebar.model}
 				value={staged.model}
@@ -252,16 +252,13 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 // The main menu is a set of commands: each row shows a launcher-context label
 // (messages.menu, not the palette's "Category: verb") and the command's primary
 // shortcut, and clicking dispatches it — so the chords never drift from the
-// palette and keys pages. Order is launcher-first (config, boot, software) then
-// the two meta panels (palette, keys).
+// palette and keys pages. Order is settings first, then the launchers, then
+// the palette; the settings entry fans out into its own tabbed view.
 const MENU_COMMANDS = [
-	{ command: "OPEN_CONFIG", label: messages.menu.config },
+	{ command: "OPEN_SETTINGS", label: messages.menu.settings },
 	{ command: "BOOT_IMAGE", label: messages.menu.boot },
 	{ command: "OPEN_LIBRARY", label: messages.menu.library },
-	{ command: "OPEN_ROMS", label: messages.menu.roms },
 	{ command: "OPEN_PALETTE", label: messages.menu.palette },
-	{ command: "OPEN_KEYS", label: messages.menu.keys },
-	{ command: "OPEN_CONTROLLERS", label: messages.menu.controllers },
 ] as const satisfies readonly { command: Command; label: string }[];
 
 // The four arrows that drive joystick 0 as shipped. The key-mappings help shows

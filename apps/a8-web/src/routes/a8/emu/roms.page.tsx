@@ -16,7 +16,7 @@ import type { ImageEntry } from "../../../images/metadata.ts";
 import { hasBuiltinBasic } from "../../../machine-config.ts";
 import { messages } from "../../../messages.ts";
 import { useEmu } from "./emu-context.ts";
-import { PanelFrame } from "./panel-frame.tsx";
+import { SettingsFrame } from "./settings-frame.tsx";
 
 // /a8/emu/roms — the firmware selector, populated from the unified image
 // library (built-ins ∪ your uploads). Each slot lists qualifying images
@@ -241,7 +241,7 @@ export default function RomsPage() {
 	useEffect(() => void readyLibrary(), []);
 	const dirty = host.romsDirty.value;
 	return (
-		<PanelFrame title={messages.roms.title}>
+		<SettingsFrame host={host} active="roms">
 			<div class="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto">
 				<Section title={messages.roms.osRoms} slots={OS_SLOTS} host={host} />
 				<Section
@@ -268,6 +268,6 @@ export default function RomsPage() {
 					{messages.roms.manageLibrary} →
 				</button>
 			</div>
-		</PanelFrame>
+		</SettingsFrame>
 	);
 }

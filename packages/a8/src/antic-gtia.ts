@@ -15,9 +15,20 @@ interface AnticGtiaConfig {
 	log: (message: string) => void;
 }
 
+/**
+ * The video output chip variant. The CTIA (in early 400/800s) predates the
+ * GTIA's special modes: PRIOR bits 6-7 are ignored and a "GTIA mode" screen
+ * displays as its base ANTIC mode — the collision difference is the
+ * documented way software detects which chip it runs on (AHRM 6.9). "fgtia"
+ * (the SECAM variant, with its trigger-sampling quirk) is a future value.
+ */
+export type TvAdapter = "ctia" | "gtia";
+
 interface AnticGtiaOptions {
 	anticTvSystem: "ntsc" | "pal";
 	gtiaTvSystem: "ntsc" | "pal";
+	/** Default "gtia". */
+	tvAdapter?: TvAdapter;
 }
 
 // What the GTIA color registers hold at power-on: a dark brown (hue $F,
@@ -215,6 +226,8 @@ export class AnticGtia implements Memory {
 
 	anticLineCount: number;
 	#gtiaPal: number;
+	// False on a CTIA: PRIOR bits 6-7 are ignored — no special modes.
+	#gtiaModes = true;
 
 	constructor(
 		{ dmaRead, log }: AnticGtiaConfig,
@@ -228,6 +241,7 @@ export class AnticGtia implements Memory {
 				? PAL_LINES_PER_FRAME
 				: NTSC_LINES_PER_FRAME;
 		this.#gtiaPal = initialOptions.gtiaTvSystem === "pal" ? 0x1 : 0xf;
+		this.#gtiaModes = initialOptions.tvAdapter !== "ctia";
 	}
 
 	setOptions(options: AnticGtiaOptions) {
@@ -236,6 +250,7 @@ export class AnticGtia implements Memory {
 				? PAL_LINES_PER_FRAME
 				: NTSC_LINES_PER_FRAME;
 		this.#gtiaPal = options.gtiaTvSystem === "pal" ? 0x1 : 0xf;
+		this.#gtiaModes = options.tvAdapter !== "ctia";
 	}
 
 	reset(cold: boolean): void {
@@ -1184,7 +1199,7 @@ export class AnticGtia implements Memory {
 		}
 
 		const pm = this.#drawPlayerMissile(pos);
-		const gtiaMode = this.prior & 0xc0;
+		const gtiaMode = this.#gtiaModes ? this.prior & 0xc0 : 0;
 
 		// Latch the line's special-mode state at color clock 33 (the
 		// boundary is pinned from both sides by psuedomodee's

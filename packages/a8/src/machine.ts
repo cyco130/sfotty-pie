@@ -1,5 +1,5 @@
 import { ReadOptions, Sfotty, type Memory } from "@sfotty-pie/sfotty";
-import { AnticGtia } from "./antic-gtia.ts";
+import { AnticGtia, type TvAdapter } from "./antic-gtia.ts";
 import type { AtrImage } from "./atr.ts";
 import {
 	AtariBus,
@@ -41,6 +41,12 @@ export interface MachineConfig {
 	xl?: boolean;
 	/** TV standard: line count, the GTIA PAL flag, and timing. Default NTSC. */
 	tvSystem?: "ntsc" | "pal";
+	/**
+	 * Video output chip. A CTIA (early 400/800s) ignores PRIOR bits 6-7, so
+	 * the GTIA special modes 9/10/11 display as their base ANTIC mode.
+	 * Default "gtia".
+	 */
+	tvAdapter?: TvAdapter;
 	/**
 	 * Conventional RAM in KB: 16/48 on the 400/800, 64 on XL/XE. Defaults from
 	 * `xl` (48 / 64).
@@ -140,7 +146,11 @@ export class Atari implements Memory {
 				dmaRead: (address) => this.bus.read(address, ReadOptions.DMA),
 				log: log ?? (() => {}),
 			},
-			{ anticTvSystem: tvSystem, gtiaTvSystem: tvSystem },
+			{
+				anticTvSystem: tvSystem,
+				gtiaTvSystem: tvSystem,
+				tvAdapter: config.tvAdapter ?? "gtia",
+			},
 		);
 
 		this.pia = new Pia();

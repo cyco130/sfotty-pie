@@ -54,6 +54,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 			>
 				{MODEL_LABELS[config.model]} · {ramTotal(config)}K ·{" "}
 				{config.tv.toUpperCase()}
+				{config.tvAdapter === "ctia" && " · CTIA"}
 			</button>
 
 			<div class="ml-auto flex items-center gap-3 text-neutral-400 sm:gap-5">

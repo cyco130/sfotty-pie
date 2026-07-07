@@ -78,6 +78,7 @@ import {
 	sanitizeSettings,
 	settingsEqual,
 	type MachineSettings,
+	type TvAdapter,
 	type TvStandard,
 } from "./machine-config.ts";
 import { currentPath, navigate } from "./navigate.ts";
@@ -250,6 +251,7 @@ export class EmulatorHost {
 		memory: 64,
 		portbExtendedRam: null,
 		tv: "ntsc",
+		tvAdapter: "gtia",
 		basicDisabled: false,
 	});
 
@@ -883,7 +885,7 @@ export class EmulatorHost {
 	// disabled and no cartridge is mounted. The XL/XE always wire BASIC in (its
 	// "disable" is the OPTION-hold at boot).
 	#makeEmulator(): Emulator {
-		const { model, tv, basicDisabled, memory, portbExtendedRam } =
+		const { model, tv, tvAdapter, basicDisabled, memory, portbExtendedRam } =
 			this.config.value;
 		const xl = model !== "400/800";
 		const builtinBasic = hasBuiltinBasic(model);
@@ -923,6 +925,7 @@ export class EmulatorHost {
 			}),
 			os: osBytes,
 			tvSystem: tv,
+			tvAdapter,
 			...(builtinBasic && basicBytes && { basic: basicBytes }),
 			...(builtinBasic && basicDisabled && { holdOption: true }),
 			...(model === "xegs" && gameBytes && { game: gameBytes }),
@@ -1182,6 +1185,11 @@ export class EmulatorHost {
 		if (next.tv !== prev.tv) {
 			this.toast(messages.toasts.switchingTv(next.tv.toUpperCase()));
 		}
+		if (next.tvAdapter !== prev.tvAdapter) {
+			this.toast(
+				messages.toasts.switchingVideoChip(next.tvAdapter.toUpperCase()),
+			);
+		}
 		if (next.basicDisabled !== prev.basicDisabled) {
 			this.toast(this.#basicToggleMessage(next.basicDisabled, next.model));
 		}
@@ -1279,6 +1287,10 @@ export class EmulatorHost {
 
 	stageTv(tv: "ntsc" | "pal"): void {
 		this.staged.value = { ...this.staged.value, tv };
+	}
+
+	stageTvAdapter(tvAdapter: TvAdapter): void {
+		this.staged.value = { ...this.staged.value, tvAdapter };
 	}
 
 	stageBasicDisabled(basicDisabled: boolean): void {
@@ -1524,6 +1536,7 @@ export class EmulatorHost {
 			memory: model === "400/800" ? 48 : 64,
 			portbExtendedRam: null,
 			tv: "ntsc",
+			tvAdapter: "gtia",
 			basicDisabled: false,
 		};
 	}

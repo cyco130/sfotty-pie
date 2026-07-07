@@ -221,6 +221,22 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 				]}
 			/>
 			<Segmented
+				label={messages.sidebar.videoChip}
+				value={staged.tvAdapter}
+				options={[
+					{
+						value: "ctia",
+						label: "CTIA",
+						onSelect: () => host.stageTvAdapter("ctia"),
+					},
+					{
+						value: "gtia",
+						label: "GTIA",
+						onSelect: () => host.stageTvAdapter("gtia"),
+					},
+				]}
+			/>
+			<Segmented
 				label={messages.sidebar.basic}
 				value={staged.basicDisabled ? "off" : "on"}
 				options={[

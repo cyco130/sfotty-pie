@@ -54,11 +54,6 @@ const GRAF_WRITE_DELAY = 5;
 const COLOR_WRITE_DELAY = 3;
 const PRIOR_WRITE_DELAY = 4;
 
-// Color clocks of collision blackout after a HITCLR (see the HITCLR case
-// in write()). 6 is parity with the old painter; hardware presumably lets
-// in-flight pixels collide again immediately — pinned later.
-const HITCLR_SUPPRESS = 6;
-
 export class AnticGtia implements Memory {
 	// NMIEN bits
 	vbiEnabled = false;
@@ -392,7 +387,6 @@ export class AnticGtia implements Memory {
 		this.#grafWrites.reset();
 		this.#colorWrites.reset();
 		this.#priorWrites.reset();
-		this.#collisionSuppress = 0;
 	}
 
 	#log: (message: string) => void;
@@ -515,11 +509,9 @@ export class AnticGtia implements Memory {
 					this.enableMissiles = !!(value & 0x01);
 					break;
 				case 0x1e:
-					// HITCLR clears the collision latches immediately, but
-					// collisions stay off for the pipeline lag: the color
-					// clocks painted next are the ones the old
-					// ahead-of-the-beam painter had already painted — and
-					// cleared — by write time.
+					// HITCLR clears the collision latches immediately; the
+					// beam-anchored painter re-latches whatever it paints
+					// next, so nothing else is needed (Acid800-pinned).
 					this.m0pf = 0;
 					this.m1pf = 0;
 					this.m2pf = 0;
@@ -536,7 +528,6 @@ export class AnticGtia implements Memory {
 					this.p1pl = 0;
 					this.p2pl = 0;
 					this.p3pl = 0;
-					this.#collisionSuppress = HITCLR_SUPPRESS;
 					break;
 				case 0x1f:
 					this.consolWritten = value & 0x07;
@@ -672,10 +663,6 @@ export class AnticGtia implements Memory {
 	#grafWrites = new DelayLine(8); // GRAFPx/GRAFM
 	#colorWrites = new DelayLine(8); // COLPMx/COLPFx/COLBK
 	#priorWrites = new DelayLine(8); // PRIOR
-
-	// Color clocks left in the post-HITCLR collision blackout (see the
-	// HITCLR case in write()).
-	#collisionSuppress = 0;
 
 	#queueGtiaWrite(address: number, value: number): void {
 		const line =
@@ -1391,12 +1378,6 @@ export class AnticGtia implements Memory {
 
 	// Get playfield and P/M outputs and detect collisions
 	#detectCollisions(pf: number, pm: number): void {
-		// Post-HITCLR blackout (see the HITCLR case in write()).
-		if (this.#collisionSuppress) {
-			this.#collisionSuppress--;
-			return;
-		}
-
 		// Convert PF output into individual bits
 		let f: number;
 		if (!pf) {

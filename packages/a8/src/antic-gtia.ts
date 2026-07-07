@@ -1391,8 +1391,8 @@ export class AnticGtia implements Memory {
 			// color clock this stream still spends in GTIA's output
 			// register.
 			const t = (this.hpos - 1) * 2 + pos;
-			const start = ([0, 63, 47, 31] as const)[this.playfieldWidth];
-			const width = ([0, 128, 160, 192] as const)[this.playfieldWidth];
+			const start = PF_WINDOW_START[this.playfieldWidth];
+			const width = PF_WINDOW_WIDTH[this.playfieldWidth];
 			if (t < start || t >= start + width) {
 				return 0;
 			}
@@ -1857,11 +1857,11 @@ export class AnticGtia implements Memory {
 			playfieldWidth = (playfieldWidth + 1) as 2 | 3;
 		}
 
-		let start = ([0, 26, 18, 10] as const)[playfieldWidth];
+		let start = NAME_FETCH_START[playfieldWidth];
 		if ((this.instruction & 0x0f) > 1 && this.instruction & 0x10) {
 			start += Math.floor(this.hscrol / 2);
 		}
-		const width = ([0, 64, 80, 96] as const)[playfieldWidth];
+		const width = FETCH_WIDTH[playfieldWidth];
 
 		if (
 			cycle < start ||
@@ -1901,15 +1901,13 @@ export class AnticGtia implements Memory {
 		// Character glyph fetches trail their name fetches by three cycles;
 		// bitmap data fetches sit at the true playfield DMA slots, one cycle
 		// earlier (antic_dmapattern's tables).
-		let start = (
-			this.charFetchRate
-				? ([0, 29, 21, 13] as const)
-				: ([0, 28, 20, 12] as const)
-		)[playfieldWidth];
+		let start = (this.charFetchRate ? GLYPH_FETCH_START : BITMAP_FETCH_START)[
+			playfieldWidth
+		];
 		if ((this.instruction & 0x0f) > 1 && this.instruction & 0x10) {
 			start += Math.floor(this.hscrol / 2);
 		}
-		const width = ([0, 64, 80, 96] as const)[playfieldWidth];
+		const width = FETCH_WIDTH[playfieldWidth];
 
 		if (
 			cycle < start ||
@@ -2249,6 +2247,23 @@ export class AnticGtia implements Memory {
 		}
 	}
 }
+
+// Per-playfield-width tables, indexed by DMACTL width bits (0 = off,
+// 1/2/3 = narrow/normal/wide).
+
+// The unwidened display window on the ANx stream, in color clocks: the
+// display starts (HPOS 64/48/32) minus the one color clock the stream still
+// spends in GTIA's output register; widths in color clocks.
+const PF_WINDOW_START = [0, 63, 47, 31] as const;
+const PF_WINDOW_WIDTH = [0, 128, 160, 192] as const;
+
+// Playfield fetch-slot start cycles (see the ANX delay comment at the top):
+// character names, character glyph data (names + 3), and bitmap data (the
+// true playfield DMA slots); the fetch window width in cycles.
+const NAME_FETCH_START = [0, 26, 18, 10] as const;
+const GLYPH_FETCH_START = [0, 29, 21, 13] as const;
+const BITMAP_FETCH_START = [0, 28, 20, 12] as const;
+const FETCH_WIDTH = [0, 64, 80, 96] as const;
 
 const LINES_PER_MODE = [
 	0,

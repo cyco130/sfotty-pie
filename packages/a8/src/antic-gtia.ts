@@ -62,12 +62,13 @@ const ANX_CHAR_DELAY = 6;
 // half color clocks). AHRM's table supplies the spacings between classes
 // (color = HPOS-4, PRIOR = HPOS-3, GRAF = HPOS-2; its absolute
 // $81/$82/$83/$85 column sits a uniform 3 color clocks earlier — a
-// write-phase origin difference, the ladder is what's reliable). Open
-// refinements: SIZE rides with HPOS per AHRM, but Atari++'s
-// -playerresizedelay says 3 color clocks (the deferred pmresize test will
-// arbitrate), and PRIOR bits 6-7 are really 3-5 color clocks with
-// per-transition artifacts (GTIA modes work).
+// write-phase origin difference, the ladder is what's reliable). SIZE is
+// faster than HPOS — Atari++'s -playerresizedelay (3 color clocks, i.e.
+// HPOS-3) where AHRM's prose lumps them; Acid800 pmresize arbitrates in
+// Atari++'s favor. Open refinement: PRIOR bits 6-7 are really 3-5 color
+// clocks with per-transition artifacts (GTIA modes work).
 const POS_WRITE_DELAY = 7;
+const SIZE_WRITE_DELAY = 4;
 const GRAF_WRITE_DELAY = 5;
 const COLOR_WRITE_DELAY = 3;
 const PRIOR_WRITE_DELAY = 4;
@@ -397,6 +398,7 @@ export class AnticGtia implements Memory {
 		this.#pmFetchCycle = -1;
 
 		this.#posWrites.reset();
+		this.#sizeWrites.reset();
 		this.#grafWrites.reset();
 		this.#colorWrites.reset();
 		this.#priorWrites.reset();
@@ -682,35 +684,42 @@ export class AnticGtia implements Memory {
 	// (the CPU issues at most one write per machine cycle = two color
 	// clocks). Slot payload: bit 16 marks presence, bits 8-15 the register,
 	// bits 0-7 the value. Ticked once per color clock in #generateColor.
-	#posWrites = new DelayLine(8); // HPOSPx/HPOSMx/SIZEPx/SIZEM
+	#posWrites = new DelayLine(8); // HPOSPx/HPOSMx
+	#sizeWrites = new DelayLine(8); // SIZEPx/SIZEM
 	#grafWrites = new DelayLine(8); // GRAFPx/GRAFM
 	#colorWrites = new DelayLine(8); // COLPMx/COLPFx/COLBK
 	#priorWrites = new DelayLine(8); // PRIOR
 
 	#queueGtiaWrite(address: number, value: number): void {
 		const line =
-			address < 0x0d
+			address < 0x08
 				? this.#posWrites
-				: address < 0x12
-					? this.#grafWrites
-					: address < 0x1b
-						? this.#colorWrites
-						: this.#priorWrites;
+				: address < 0x0d
+					? this.#sizeWrites
+					: address < 0x12
+						? this.#grafWrites
+						: address < 0x1b
+							? this.#colorWrites
+							: this.#priorWrites;
 		const delay =
-			address < 0x0d
+			address < 0x08
 				? POS_WRITE_DELAY
-				: address < 0x12
-					? GRAF_WRITE_DELAY
-					: address < 0x1b
-						? COLOR_WRITE_DELAY
-						: PRIOR_WRITE_DELAY;
+				: address < 0x0d
+					? SIZE_WRITE_DELAY
+					: address < 0x12
+						? GRAF_WRITE_DELAY
+						: address < 0x1b
+							? COLOR_WRITE_DELAY
+							: PRIOR_WRITE_DELAY;
 		line.scheduleValue(delay, 0x10000 | (address << 8) | value);
 	}
 
-	// Tick the four write lines and apply whatever is due, just before the
+	// Tick the five write lines and apply whatever is due, just before the
 	// current color clock paints.
 	#applyPendingWrites(): void {
 		let w = this.#posWrites.tick();
+		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		w = this.#sizeWrites.tick();
 		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 		w = this.#grafWrites.tick();
 		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
@@ -752,28 +761,34 @@ export class AnticGtia implements Memory {
 				this.hposm3 = value;
 				break;
 
+			// The size bits feed the shift state machine directly as its
+			// counter mask: state' = (state + 1) & size (AHRM 6.5). %00 and
+			// %10 both render normal width, but %10 is not remapped — from
+			// state %01 the counter sticks at %10 and never reaches the
+			// shift-on-%00 transition, the documented lockup anomaly
+			// (Acid800 pmresize).
 			case 0x08:
 				// SIZEP0
-				this.#sizeP0 = PM_SIZES[value & 0x3]!;
+				this.#sizeP0 = value & 0x3;
 				break;
 			case 0x09:
 				// SIZEP1
-				this.#sizeP1 = PM_SIZES[value & 0x3]!;
+				this.#sizeP1 = value & 0x3;
 				break;
 			case 0x0a:
 				// SIZEP2
-				this.#sizeP2 = PM_SIZES[value & 0x3]!;
+				this.#sizeP2 = value & 0x3;
 				break;
 			case 0x0b:
 				// SIZEP3
-				this.#sizeP3 = PM_SIZES[value & 0x3]!;
+				this.#sizeP3 = value & 0x3;
 				break;
 			case 0x0c:
 				// SIZEM
-				this.#sizeM0 = PM_SIZES[value & 0x3]!;
-				this.#sizeM1 = PM_SIZES[(value >> 2) & 0x3]!;
-				this.#sizeM2 = PM_SIZES[(value >> 4) & 0x3]!;
-				this.#sizeM3 = PM_SIZES[(value >> 6) & 0x3]!;
+				this.#sizeM0 = value & 0x3;
+				this.#sizeM1 = (value >> 2) & 0x3;
+				this.#sizeM2 = (value >> 4) & 0x3;
+				this.#sizeM3 = (value >> 6) & 0x3;
 				break;
 			case 0x0d:
 				this.grafP0 = value;
@@ -1478,36 +1493,53 @@ export class AnticGtia implements Memory {
 		// register position (HPOS write latency comes from the write pipe).
 		const start = (this.hpos - 1) * 2 + pos;
 
+		// A comparator match forces the shift state machine into %00 — a
+		// transition that itself shifts the register once — and then ORs
+		// the graphics latch in. On a bit-cell boundary the natural shift
+		// already made that transition (counter 0 here), so no extra shift
+		// happens. An empty register makes all of this invisible (the
+		// normal case); an image still in flight comes out shifted a step
+		// and merged with the new one (AHRM 6.5 "Overlapping object
+		// images"; the shift-then-OR order and the coincident-boundary case
+		// are pinned by Acid800 pmoverlap's pixel tables).
 		if (start === this.hposp0) {
-			this.#shiftP0 = this.grafP0;
+			if (this.#sizeP0Counter) this.#shiftP0 = (this.#shiftP0 << 1) & 0xff;
+			this.#shiftP0 |= this.grafP0;
 			this.#sizeP0Counter = 0;
 		}
 		if (start === this.hposp1) {
-			this.#shiftP1 = this.grafP1;
+			if (this.#sizeP1Counter) this.#shiftP1 = (this.#shiftP1 << 1) & 0xff;
+			this.#shiftP1 |= this.grafP1;
 			this.#sizeP1Counter = 0;
 		}
 		if (start === this.hposp2) {
-			this.#shiftP2 = this.grafP2;
+			if (this.#sizeP2Counter) this.#shiftP2 = (this.#shiftP2 << 1) & 0xff;
+			this.#shiftP2 |= this.grafP2;
 			this.#sizeP2Counter = 0;
 		}
 		if (start === this.hposp3) {
-			this.#shiftP3 = this.grafP3;
+			if (this.#sizeP3Counter) this.#shiftP3 = (this.#shiftP3 << 1) & 0xff;
+			this.#shiftP3 |= this.grafP3;
 			this.#sizeP3Counter = 0;
 		}
 		if (start === this.hposm0) {
-			this.#shiftM0 = (this.grafM << 6) & 0xc0;
+			if (this.#sizeM0Counter) this.#shiftM0 = (this.#shiftM0 << 1) & 0xff;
+			this.#shiftM0 |= (this.grafM << 6) & 0xc0;
 			this.#sizeM0Counter = 0;
 		}
 		if (start === this.hposm1) {
-			this.#shiftM1 = (this.grafM << 4) & 0xc0;
+			if (this.#sizeM1Counter) this.#shiftM1 = (this.#shiftM1 << 1) & 0xff;
+			this.#shiftM1 |= (this.grafM << 4) & 0xc0;
 			this.#sizeM1Counter = 0;
 		}
 		if (start === this.hposm2) {
-			this.#shiftM2 = (this.grafM << 2) & 0xc0;
+			if (this.#sizeM2Counter) this.#shiftM2 = (this.#shiftM2 << 1) & 0xff;
+			this.#shiftM2 |= (this.grafM << 2) & 0xc0;
 			this.#sizeM2Counter = 0;
 		}
 		if (start === this.hposm3) {
-			this.#shiftM3 = this.grafM & 0xc0;
+			if (this.#sizeM3Counter) this.#shiftM3 = (this.#shiftM3 << 1) & 0xff;
+			this.#shiftM3 |= this.grafM & 0xc0;
 			this.#sizeM3Counter = 0;
 		}
 
@@ -2353,13 +2385,6 @@ function loresPixel(index: number, pf3: boolean): number {
 
 	return lores(index);
 }
-
-const PM_SIZES = [
-	0b00, // Normal
-	0b01, // Double
-	0b00, // Normal
-	0b11, // Quadruple
-];
 
 // colorRegisters indices, doubling as the priority table's selector bits.
 const COLPM0 = 0;

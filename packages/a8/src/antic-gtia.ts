@@ -37,17 +37,22 @@ const POWER_ON_COLOR = 0xf0;
 const ANX_DELAY = 7;
 
 // GTIA register writes reach the paint logic a few color clocks after the
-// bus write (AHRM 6.10 table 18: color +1, PRIOR +2, GRAF +3, HPOS/SIZE +5
-// from the write cycle). A write during machine cycle w scheduled with
-// delay N applies just before color clock 2w+N-1 paints. All four classes
-// currently use the parity delay 7 — effective from color clock 2w+6,
-// which is exactly where the old ahead-of-the-beam painter put every write
-// — so this refactor changes no behavior. Tuning each class down to its
-// hardware constant is the follow-up step, pinned test by test.
+// bus write (AHRM 6.10 table 18). A write during machine cycle w scheduled
+// with delay N applies just before color clock 2w+N-1 paints. The anchor is
+// HPOS at delay 7 — effective from color clock 2w+6, pinned by Acid800
+// gtia_retrigger and equal to Atari++'s -playerpositiondelay default (12
+// half color clocks). AHRM's table supplies the spacings between classes
+// (color = HPOS-4, PRIOR = HPOS-3, GRAF = HPOS-2; its absolute
+// $81/$82/$83/$85 column sits a uniform 3 color clocks earlier — a
+// write-phase origin difference, the ladder is what's reliable). Open
+// refinements: SIZE rides with HPOS per AHRM, but Atari++'s
+// -playerresizedelay says 3 color clocks (the deferred pmresize test will
+// arbitrate), and PRIOR bits 6-7 are really 3-5 color clocks with
+// per-transition artifacts (GTIA modes work).
 const POS_WRITE_DELAY = 7;
-const GRAF_WRITE_DELAY = 7;
-const COLOR_WRITE_DELAY = 7;
-const PRIOR_WRITE_DELAY = 7;
+const GRAF_WRITE_DELAY = 5;
+const COLOR_WRITE_DELAY = 3;
+const PRIOR_WRITE_DELAY = 4;
 
 // Color clocks of collision blackout after a HITCLR (see the HITCLR case
 // in write()). 6 is parity with the old painter; hardware presumably lets

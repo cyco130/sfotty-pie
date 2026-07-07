@@ -322,6 +322,7 @@ export class AnticGtia implements Memory {
 
 		this.#dmaVisibleLine = false;
 		this.#lineFetchWidth = 0;
+		this.#lineFetchShift = 0;
 		this.#virtualLoad = 0;
 		this.#rebuildDmaPattern();
 	}
@@ -899,27 +900,21 @@ export class AnticGtia implements Memory {
 	#dmaPattern: Uint16Array = new Uint16Array(114);
 	#dmaPatternCache = new Map<number, Uint16Array>();
 
-	// The (widened) fetch width the line's playfield started with, 0 before
-	// it starts. Disabling playfield DMA after the start leaves the load
-	// slots running as bus-free MSC advances (see buildDmaPattern); a
-	// disable before the start means the playfield never starts at all.
-	#lineFetchWidth = 0;
+	// The playfield's start latch: ANTIC arms the playfield DMA clock at a
+	// per-width deadline (AHRM 4.11: cycles 24/16/8 for narrow/normal/wide,
+	// one later per 2 of HSCROL). The DMA_PF_ARM slot in the pre-start
+	// pattern fires at deadline+1, latching the geometry the line's fetches
+	// use from then on — a width/scroll state whose arm cycle is already
+	// behind the beam never starts at all, and post-start register changes
+	// can't move the fetch phase (Acid800 pfstarttiming). Disabling
+	// playfield DMA after the start leaves the load slots running as
+	// bus-free loads (see buildDmaPattern).
+	#lineFetchWidth = 0; // latched (widened) fetch width, 0 = not started
+	#lineFetchShift = 0; // latched whole-cycle HSCROL shift
 
 	#rebuildDmaPattern(): void {
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
-		if (this.playfieldWidth) {
-			let fetchWidth: number = this.playfieldWidth;
-			if (scrolled && fetchWidth < 3) fetchWidth++;
-			this.#lineFetchWidth = fetchWidth;
-		} else if (this.#lineFetchWidth) {
-			const start =
-				(this.charFetchRate
-					? NAME_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3]
-					: BITMAP_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3]) +
-				(scrolled ? this.hscrol >> 1 : 0);
-			if (this.hpos - 1 <= start) this.#lineFetchWidth = 0;
-		}
 		const key =
 			(this.missileDmaEnabled ? 0b1 : 0) |
 			(this.playerDmaEnabled ? 0b10 : 0) |
@@ -931,7 +926,8 @@ export class AnticGtia implements Memory {
 			(scrolled ? 0x400 : 0) |
 			((this.hscrol >> 1) << 11) |
 			(this.playfieldWidth << 14) |
-			(this.#lineFetchWidth << 16);
+			(this.#lineFetchWidth << 16) |
+			(this.#lineFetchShift << 18);
 		let pattern = this.#dmaPatternCache.get(key);
 		if (!pattern) {
 			pattern = buildDmaPattern(key);
@@ -1084,6 +1080,7 @@ export class AnticGtia implements Memory {
 			this.#dmaVisibleLine =
 				!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
 			this.#lineFetchWidth = 0;
+			this.#lineFetchShift = 0;
 			this.#rebuildDmaPattern();
 		}
 
@@ -1219,6 +1216,24 @@ export class AnticGtia implements Memory {
 					this.halt = false;
 				}
 				break;
+			case DMA_PF_ARM: {
+				// The playfield DMA clock starts: latch the geometry the
+				// line's fetches will use (the slot samples the registers
+				// before this cycle's CPU write can land — the deadline).
+				const scrolled =
+					(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
+				let fetchWidth: number = this.playfieldWidth;
+				if (scrolled && fetchWidth < 3) fetchWidth++;
+				this.#lineFetchWidth = fetchWidth;
+				this.#lineFetchShift = scrolled ? this.hscrol >> 1 : 0;
+				this.#rebuildDmaPattern();
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			}
 		}
 	}
 
@@ -2302,6 +2317,12 @@ const DMA_REPLAY = 10; // line-buffer replay: pixels flow, bus free
 const DMA_PF_SKIP = 11; // masked load slot: MSC advances, bus free
 const DMA_GLYPH_VIRT = 12; // dropped glyph fetch: loads from the bus
 const DMA_BITMAP_VIRT = 13; // dropped bitmap fetch: loads from the bus
+const DMA_PF_ARM = 14; // the playfield start latch (deadline + 1)
+
+// The playfield-start arm cycle per fetch width (the AHRM 4.11 deadlines —
+// cycles 24/16/8 for narrow/normal/wide — plus one; HSCROL shifts it a
+// cycle per 2, added at build time).
+const PF_ARM_CYCLE = [0, 25, 17, 9] as const;
 
 // Playfield DMA may occupy cycles only through 105; a fetch slot pushed
 // past that by HSCROL on a wide (or widened) playfield is dropped as a bus
@@ -2345,35 +2366,48 @@ function buildDmaPattern(key: number): Uint16Array {
 	const pfRate = PLAYFIELD_FETCH_RATE[mode]!;
 	if (!pfRate) return pattern;
 
+	const lineWidth = (key >> 16) & 0x3;
+	const lineShift = (key >> 18) & 0x7;
+
+	if (!lineWidth) {
+		// The playfield hasn't started: no fetch slots yet, only the arm
+		// checkpoint at the current width's start deadline + 1. A state
+		// whose arm cycle is already behind the beam never fires, so the
+		// playfield never starts on this line (AHRM 4.11's deadline rules;
+		// Acid800 pfstarttiming).
+		if (width) {
+			let fetchWidth = width;
+			if (scrolled && (fetchWidth === 1 || fetchWidth === 2)) fetchWidth++;
+			const arm =
+				PF_ARM_CYCLE[fetchWidth as 1 | 2 | 3] + (scrolled ? hscrolHalf : 0);
+			pattern[arm] = DMA_PF_ARM;
+		}
+		return pattern;
+	}
+
+	// Started: the fetch geometry is the latched one — post-start register
+	// changes can't move the phase.
+	const fetchWidth = lineWidth;
+	const shift = lineShift;
+	const span = FETCH_WIDTH[fetchWidth as 1 | 2 | 3];
+
 	if (!width) {
-		// Playfield DMA disabled after the line's playfield started: the
-		// load machinery keeps running without the bus, so MSC keeps
-		// advancing at the name/bitmap load slots (AHRM "loading the line
-		// buffer"; Acid800 linebuffering's mid-interrupted mode 8). The
-		// buffer keeps stale content where hardware loads bus noise
-		// (deliberately untested by the suite); glyph and replay slots do
-		// nothing.
-		const lineWidth = (key >> 16) & 0x3;
-		if (!lineWidth || !newInstruction) return pattern;
-		const shift = scrolled ? hscrolHalf : 0;
-		const span = FETCH_WIDTH[lineWidth as 1 | 2 | 3];
+		// Playfield DMA disabled after the start: the load machinery keeps
+		// running without the bus — MSC advances and the buffer captures
+		// the bus value at the name/bitmap load slots (AHRM "loading the
+		// line buffer"; Acid800 linebuffering's mid-interrupted mode 8);
+		// glyph and replay slots do nothing.
+		if (!newInstruction) return pattern;
 		const start =
 			(charRate
-				? NAME_FETCH_START[lineWidth as 1 | 2 | 3]
-				: BITMAP_FETCH_START[lineWidth as 1 | 2 | 3]) + shift;
+				? NAME_FETCH_START[fetchWidth as 1 | 2 | 3]
+				: BITMAP_FETCH_START[fetchWidth as 1 | 2 | 3]) + shift;
 		const rate = charRate || pfRate;
 		for (let c = start, n = 0; c < start + span && c < 114; c += rate, n++) {
 			pattern[c] = DMA_PF_SKIP | (n << 8);
 		}
 		return pattern;
 	}
-
-	// Widen if HSCROL is enabled; the fetch start also shifts by the whole
-	// cycles of the scroll value.
-	let fetchWidth = width;
-	if (scrolled && (fetchWidth === 1 || fetchWidth === 2)) fetchWidth++;
-	const shift = scrolled ? hscrolHalf : 0;
-	const span = FETCH_WIDTH[fetchWidth as 1 | 2 | 3];
 
 	if (charRate && newInstruction) {
 		// Name fetches can't reach the virtual-DMA cutoff (their latest

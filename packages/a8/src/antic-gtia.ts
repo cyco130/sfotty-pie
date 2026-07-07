@@ -28,13 +28,19 @@ const POWER_ON_COLOR = 0xf0;
 // and 2i+1 — the exact color clocks the beam covers during that cycle — so
 // "the beam" below just means the color clock being painted.
 //
-// A playfield byte reaches the screen 8 color clocks after its DMA fetch
-// (AHRM: 7 to cross the ANx bus + 1 through GTIA's output stage). Our fetch
-// slots currently sit one machine cycle after the hardware DMA slots, so
-// the in-flight lag is 6 color clocks; scheduled from busCycle time that is
-// a DelayLine delay of 7 (the schedule happens before the cycle's own two
-// ticks). When the fetch slots move to their true cycles this becomes 9.
-const ANX_DELAY = 7;
+// Playfield bytes reach the screen through the ANx bus with a fixed lag,
+// but the fetch slots differ by mode family (pinned by Acid800
+// antic_dmapattern's cycle tables): bitmap-mode data fetches sit at cycles
+// 12/20/28 (wide/normal/narrow) and take 8 color clocks to the screen
+// (AHRM: 7 to cross the ANx bus + 1 through GTIA's output stage; also the
+// cycle-65 / positions $8C-$8F mode E anchor in AHRM 6.10), while
+// character glyph fetches sit one cycle later — three cycles after their
+// name fetches at 10/18/26 — and take 6, both landing the first pixel
+// exactly at the playfield start (HPOS 32/48/64). Scheduled from busCycle
+// time (before the cycle's own two ticks) that is a DelayLine delay of
+// lag + 1.
+const ANX_BITMAP_DELAY = 9;
+const ANX_CHAR_DELAY = 7;
 
 // GTIA register writes reach the paint logic a few color clocks after the
 // bus write (AHRM 6.10 table 18). A write during machine cycle w scheduled
@@ -651,7 +657,8 @@ export class AnticGtia implements Memory {
 
 	// Playfield codes in flight from the ANTIC fetch to the GTIA paint (the
 	// ANx bus plus GTIA's output stage). Ticked once per color clock by
-	// #drawPlayfield; an empty slot paints background. See ANX_DELAY.
+	// #drawPlayfield; an empty slot paints background. See ANX_BITMAP_DELAY
+	// and ANX_CHAR_DELAY.
 	#anxLine = new DelayLine(32);
 
 	// GTIA register writes in flight to the paint logic, one DelayLine per
@@ -1720,7 +1727,14 @@ export class AnticGtia implements Memory {
 			playfieldWidth = (playfieldWidth + 1) as 2 | 3;
 		}
 
-		let start = ([0, 29, 21, 13] as const)[playfieldWidth];
+		// Character glyph fetches trail their name fetches by three cycles;
+		// bitmap data fetches sit at the true playfield DMA slots, one cycle
+		// earlier (antic_dmapattern's tables).
+		let start = (
+			this.charFetchRate
+				? ([0, 29, 21, 13] as const)
+				: ([0, 28, 20, 12] as const)
+		)[playfieldWidth];
 		if ((this.instruction & 0x0f) > 1 && this.instruction & 0x10) {
 			start += Math.floor(this.hscrol / 2);
 		}
@@ -1966,12 +1980,20 @@ export class AnticGtia implements Memory {
 
 		// Ship the byte into the ANx pipe, leftmost pixel first (pfPixels
 		// holds it right to left).
-		for (let k = this.pfCounter - 1, delay = ANX_DELAY; k >= 0; k--, delay++) {
+		for (
+			let k = this.pfCounter - 1,
+				delay = this.charFetchRate ? ANX_CHAR_DELAY : ANX_BITMAP_DELAY;
+			k >= 0;
+			k--, delay++
+		) {
 			this.#anxLine.scheduleValue(delay, this.pfPixels[k]!);
 		}
 		this.pfCounter = 0;
 
-		return true;
+		// Bitmap modes replay later scan lines from the line buffer with no
+		// bus access — those cycles don't halt the CPU (antic_dmapattern's
+		// later-line patterns show only refresh cycles blocked).
+		return this.charFetchRate !== 0 || this.modeLineNo === 0;
 	}
 
 	// CHACTL bit 2 (vertical reflect) flips the glyph row within the 8-row

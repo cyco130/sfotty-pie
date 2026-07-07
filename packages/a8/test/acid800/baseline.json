@@ -4,7 +4,7 @@
 	"ANTIC: Blocked NMIs": "pass",
 	"ANTIC: Character control": "pass",
 	"ANTIC: DLI timing": "pass",
-	"ANTIC: DMA pattern": "fail",
+	"ANTIC: DMA pattern": "pass",
 	"ANTIC: Default value": "pass",
 	"ANTIC: Display list wrapping": "pass",
 	"ANTIC: HSCROL bug": "fail",

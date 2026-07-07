@@ -349,6 +349,8 @@ export class AnticGtia implements Memory {
 		this.#sizeM3 = 1;
 		this.#sizeM3Counter = 0;
 		this.#shiftM3 = 0;
+
+		this.#pmFetchCycle = -1;
 	}
 
 	#log: (message: string) => void;
@@ -947,6 +949,10 @@ export class AnticGtia implements Memory {
 		}
 	}
 
+	// The cycle GTIA took for this line's missile fetch: the first halted
+	// cycle within horizontal blank, or -1 while none has occurred yet.
+	#pmFetchCycle = -1;
+
 	afterCpu(frame: Uint8Array, busData: number) {
 		const pixels0 = this.#generateColor(0);
 
@@ -974,14 +980,30 @@ export class AnticGtia implements Memory {
 
 			const isOddScanline = y & 1;
 
-			// The GRAF registers latch the bus during the P/M DMA slots only
+			// GTIA has no window into ANTIC's DMA schedule: it takes the
+			// first halted cycle within horizontal blank to be the missile
+			// fetch, and the four cycles starting two later to be the player
+			// fetches. With P/M DMA on that reproduces the real slots
+			// (missile 0, players 2-5); with it off, a halted display-list
+			// fetch is mistaken for the missile slot and the loads shift —
+			// and a line with no halted HBLANK cycle loads nothing (AHRM;
+			// Acid800 phantomdma).
+			if (i === 0) {
+				this.#pmFetchCycle = -1;
+			}
+			if (this.#pmFetchCycle < 0 && this.halt && i < 17) {
+				this.#pmFetchCycle = i;
+			}
+			const pmSlot = this.#pmFetchCycle < 0 ? -1 : i - this.#pmFetchCycle;
+
+			// The GRAF registers latch the bus during the P/M fetch slots only
 			// when GRACTL enables it — with GRACTL off, direct GRAF writes
 			// persist (the GTIA collision tests rely on that). The latch runs for
 			// the whole visible region (scan lines 8-247 — the enclosing y < 240):
 			// an earlier cut at y < 224 froze player graphics over the bottom 16
 			// lines, which is invisible on NTSC but corrupts the lower HUD on PAL
 			// (its taller frame puts content there) — River Raid's bug.
-			if (i === 0 && this.enableMissiles) {
+			if (pmSlot === 0 && this.enableMissiles) {
 				// VDELAY bits 0-3 delay each missile independently, but
 				// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
 				// latch each pair on its own: a delayed missile updates only
@@ -1003,19 +1025,19 @@ export class AnticGtia implements Memory {
 			}
 
 			if (this.enablePlayers) {
-				if (i === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
+				if (pmSlot === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
 					this.grafP0 = busData;
 				}
 
-				if (i === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
+				if (pmSlot === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
 					this.grafP1 = busData;
 				}
 
-				if (i === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
+				if (pmSlot === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
 					this.grafP2 = busData;
 				}
 
-				if (i === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
+				if (pmSlot === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
 					this.grafP3 = busData;
 				}
 			}

@@ -274,19 +274,41 @@ test("direct GRAF writes survive when GRACTL has latching off", () => {
 	const ag = makeAnticGtia();
 	const frame = new Uint8Array(376 * 240);
 
-	ag.write(0xd00d, 0xff); // GRAFP0, written by the CPU — no P/M DMA
+	ag.write(0xd400, 0x0c); // DMACTL: P/M DMA — the fetch slots halt
+	ag.write(0xd00d, 0xff); // GRAFP0, written by the CPU
 	for (let i = 0; i < 114 * 30; i++) {
 		ag.beforeCpu();
-		ag.afterCpu(frame, 0x20); // bus noise must not clobber it
+		ag.busCycle();
+		ag.afterCpu(frame, 0x20); // with GRACTL off, the slots must not clobber it
 	}
 	expect(ag.grafP0).toBe(0xff);
 
 	ag.write(0xd01d, 0x02); // GRACTL: latch player data
 	for (let i = 0; i < 114 * 30; i++) {
 		ag.beforeCpu();
+		ag.busCycle();
 		ag.afterCpu(frame, 0x20);
 	}
 	expect(ag.grafP0).toBe(0x20); // now the bus byte latches, like DMA
+});
+
+test("with all DMA off, GRACTL latching finds no fetch slot and loads nothing", () => {
+	// GTIA locates the P/M fetch slots by watching HALT: the first halted
+	// cycle within horizontal blank is taken as the missile fetch. With DMA
+	// entirely off there is no halted HBLANK cycle (DRAM refresh halts land
+	// later in the line), so GRACTL-enabled latching never fires.
+	const ag = makeAnticGtia();
+	const frame = new Uint8Array(376 * 240);
+
+	ag.write(0xd00d, 0xff); // GRAFP0, written by the CPU
+	ag.write(0xd01d, 0x03); // GRACTL: latch players + missiles
+	for (let i = 0; i < 114 * 30; i++) {
+		ag.beforeCpu();
+		ag.busCycle();
+		ag.afterCpu(frame, 0x20);
+	}
+	expect(ag.grafP0).toBe(0xff);
+	expect(ag.grafM).toBe(0x00);
 });
 
 test("P/M graphics latch across the whole visible region, including the bottom band", () => {
@@ -296,6 +318,7 @@ test("P/M graphics latch across the whole visible region, including the bottom b
 	// the plane. The latch must run for the full collision region (lines 8-247).
 	const ag = makeAnticGtia();
 	const frame = new Uint8Array(376 * 240);
+	ag.write(0xd400, 0x0c); // DMACTL: P/M DMA — the fetch slots halt
 	ag.write(0xd01d, 0x02); // GRACTL: enable player-graphics latching
 
 	const latchOnLine = (vcount: number, busByte: number): number => {
@@ -304,6 +327,7 @@ test("P/M graphics latch across the whole visible region, including the bottom b
 		ag.grafP0 = 0x00;
 		for (let i = 0; i < 114; i++) {
 			ag.beforeCpu();
+			ag.busCycle();
 			ag.afterCpu(frame, busByte);
 		}
 		return ag.grafP0;

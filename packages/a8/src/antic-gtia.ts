@@ -1875,7 +1875,12 @@ export class AnticGtia implements Memory {
 			// Fetch from MSC into line buffer
 			let data: number;
 
-			if (this.modeLineNo === 0) {
+			// The line buffer loads on the instruction's first scan line —
+			// not row-counter zero: a vertical-scroll entry starts the row
+			// counter at VSCROL, but the load happens regardless (Acid800
+			// psuedomodee stretches a mode F line with VSCROL=1 and expects
+			// its data fetched).
+			if (this.#newInstruction) {
 				data = this.#dmaRead(this.msc);
 				this.#buffer[bufferIndex] = data;
 				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
@@ -1993,7 +1998,7 @@ export class AnticGtia implements Memory {
 		// Bitmap modes replay later scan lines from the line buffer with no
 		// bus access — those cycles don't halt the CPU (antic_dmapattern's
 		// later-line patterns show only refresh cycles blocked).
-		return this.charFetchRate !== 0 || this.modeLineNo === 0;
+		return this.charFetchRate !== 0 || this.#newInstruction;
 	}
 
 	// CHACTL bit 2 (vertical reflect) flips the glyph row within the 8-row

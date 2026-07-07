@@ -24,6 +24,36 @@ interface AnticGtiaOptions {
 // minimum luminance). Observed behavior, not documented.
 const POWER_ON_COLOR = 0xf0;
 
+// The paint pipeline. afterCpu for machine cycle i paints color clocks 2i
+// and 2i+1 — the exact color clocks the beam covers during that cycle — so
+// "the beam" below just means the color clock being painted.
+//
+// A playfield byte reaches the screen 8 color clocks after its DMA fetch
+// (AHRM: 7 to cross the ANx bus + 1 through GTIA's output stage). Our fetch
+// slots currently sit one machine cycle after the hardware DMA slots, so
+// the in-flight lag is 6 color clocks; scheduled from busCycle time that is
+// a DelayLine delay of 7 (the schedule happens before the cycle's own two
+// ticks). When the fetch slots move to their true cycles this becomes 9.
+const ANX_DELAY = 7;
+
+// GTIA register writes reach the paint logic a few color clocks after the
+// bus write (AHRM 6.10 table 18: color +1, PRIOR +2, GRAF +3, HPOS/SIZE +5
+// from the write cycle). A write during machine cycle w scheduled with
+// delay N applies just before color clock 2w+N-1 paints. All four classes
+// currently use the parity delay 7 — effective from color clock 2w+6,
+// which is exactly where the old ahead-of-the-beam painter put every write
+// — so this refactor changes no behavior. Tuning each class down to its
+// hardware constant is the follow-up step, pinned test by test.
+const POS_WRITE_DELAY = 7;
+const GRAF_WRITE_DELAY = 7;
+const COLOR_WRITE_DELAY = 7;
+const PRIOR_WRITE_DELAY = 7;
+
+// Color clocks of collision blackout after a HITCLR (see the HITCLR case
+// in write()). 6 is parity with the old painter; hardware presumably lets
+// in-flight pixels collide again immediately — pinned later.
+const HITCLR_SUPPRESS = 6;
+
 export class AnticGtia implements Memory {
 	// NMIEN bits
 	vbiEnabled = false;
@@ -262,6 +292,7 @@ export class AnticGtia implements Memory {
 
 		this.pfPixels.fill(0);
 		this.pfCounter = 0;
+		this.#anxLine.reset();
 
 		// Output lines
 		this.nmi = false;
@@ -351,6 +382,12 @@ export class AnticGtia implements Memory {
 		this.#shiftM3 = 0;
 
 		this.#pmFetchCycle = -1;
+
+		this.#posWrites.reset();
+		this.#grafWrites.reset();
+		this.#colorWrites.reset();
+		this.#priorWrites.reset();
+		this.#collisionSuppress = 0;
 	}
 
 	#log: (message: string) => void;
@@ -461,121 +498,23 @@ export class AnticGtia implements Memory {
 			// GTIA
 			address &= 0x1f;
 			switch (address) {
-				case 0x00:
-					this.hposp0 = value;
-					break;
-				case 0x01:
-					this.hposp1 = value;
-					break;
-				case 0x02:
-					this.hposp2 = value;
-					break;
-				case 0x03:
-					this.hposp3 = value;
-					break;
-				case 0x04:
-					this.hposm0 = value;
-					break;
-				case 0x05:
-					this.hposm1 = value;
-					break;
-				case 0x06:
-					this.hposm2 = value;
-					break;
-				case 0x07:
-					this.hposm3 = value;
-					break;
-
-				case 0x08:
-					// SIZEP0
-					this.#sizeP0 = PM_SIZES[value & 0x3]!;
-					break;
-				case 0x09:
-					// SIZEP1
-					this.#sizeP1 = PM_SIZES[value & 0x3]!;
-					break;
-				case 0x0a:
-					// SIZEP2
-					this.#sizeP2 = PM_SIZES[value & 0x3]!;
-					break;
-				case 0x0b:
-					// SIZEP3
-					this.#sizeP3 = PM_SIZES[value & 0x3]!;
-					break;
-				case 0x0c:
-					// SIZEM
-					this.#sizeM0 = PM_SIZES[value & 0x3]!;
-					this.#sizeM1 = PM_SIZES[(value >> 2) & 0x3]!;
-					this.#sizeM2 = PM_SIZES[(value >> 4) & 0x3]!;
-					this.#sizeM3 = PM_SIZES[(value >> 6) & 0x3]!;
-					break;
-				case 0x0d:
-					this.grafP0 = value;
-					break;
-				case 0x0e:
-					this.grafP1 = value;
-					break;
-				case 0x0f:
-					this.grafP2 = value;
-					break;
-				case 0x10:
-					this.grafP3 = value;
-					break;
-				case 0x11:
-					this.grafM = value;
-					break;
-
-				case 0x12:
-					// COLPM0
-					this.colpm0 = value;
-					break;
-				case 0x13:
-					// COLPM1
-					this.colpm1 = value;
-					break;
-				case 0x14:
-					// COLPM2
-					this.colpm2 = value;
-					break;
-				case 0x15:
-					// COLPM3
-					this.colpm3 = value;
-					break;
-				case 0x16:
-					// COLPF0
-					this.colpf0 = value;
-					break;
-				case 0x17:
-					// COLPF1
-					this.colpf1 = value;
-					break;
-				case 0x18:
-					// COLPF2
-					this.colpf2 = value;
-					break;
-				case 0x19:
-					// COLPF3
-					this.colpf3 = value;
-					break;
-				case 0x1a:
-					// COLBK
-					this.colbk = value;
-					break;
-				case 0x1b:
-					// PRIOR
-					this.prior = value;
-					break;
 				case 0x1c:
-					// VDELAY
+					// VDELAY — consumed at the bus-time GRAF latch, not in the
+					// paint pipeline: immediate.
 					this.vdelay = value;
 					break;
 				case 0x1d:
-					// GRACTL
+					// GRACTL — gates the bus-time GRAF latch (and trigger
+					// latching): immediate.
 					this.enablePlayers = !!(value & 0x02);
 					this.enableMissiles = !!(value & 0x01);
 					break;
 				case 0x1e:
-					// HITCLR
+					// HITCLR clears the collision latches immediately, but
+					// collisions stay off for the pipeline lag: the color
+					// clocks painted next are the ones the old
+					// ahead-of-the-beam painter had already painted — and
+					// cleared — by write time.
 					this.m0pf = 0;
 					this.m1pf = 0;
 					this.m2pf = 0;
@@ -592,6 +531,7 @@ export class AnticGtia implements Memory {
 					this.p1pl = 0;
 					this.p2pl = 0;
 					this.p3pl = 0;
+					this.#collisionSuppress = HITCLR_SUPPRESS;
 					break;
 				case 0x1f:
 					this.consolWritten = value & 0x07;
@@ -600,6 +540,12 @@ export class AnticGtia implements Memory {
 					} else {
 						this.consoleSpeaker = 1;
 					}
+					break;
+				default:
+					// Every other register feeds the paint logic and takes
+					// effect a few color clocks after the write — see the
+					// write-delay constants.
+					this.#queueGtiaWrite(address, value);
 			}
 		} else {
 			// ANTIC
@@ -701,10 +647,172 @@ export class AnticGtia implements Memory {
 
 	waitingForVbi = false;
 
-	// Playfield data, right to left
+	// Per-fetch scratch: one byte's playfield codes, right to left;
+	// #fetchPlayfield ships the batch into #anxLine.
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
 	pfPixels = new Uint8Array(16);
 	pfCounter = 0;
+
+	// Playfield codes in flight from the ANTIC fetch to the GTIA paint (the
+	// ANx bus plus GTIA's output stage). Ticked once per color clock by
+	// #drawPlayfield; an empty slot paints background. See ANX_DELAY.
+	#anxLine = new DelayLine(32);
+
+	// GTIA register writes in flight to the paint logic, one DelayLine per
+	// latency class so two writes can never fall due on the same color clock
+	// (the CPU issues at most one write per machine cycle = two color
+	// clocks). Slot payload: bit 16 marks presence, bits 8-15 the register,
+	// bits 0-7 the value. Ticked once per color clock in #generateColor.
+	#posWrites = new DelayLine(8); // HPOSPx/HPOSMx/SIZEPx/SIZEM
+	#grafWrites = new DelayLine(8); // GRAFPx/GRAFM
+	#colorWrites = new DelayLine(8); // COLPMx/COLPFx/COLBK
+	#priorWrites = new DelayLine(8); // PRIOR
+
+	// Color clocks left in the post-HITCLR collision blackout (see the
+	// HITCLR case in write()).
+	#collisionSuppress = 0;
+
+	#queueGtiaWrite(address: number, value: number): void {
+		const line =
+			address < 0x0d
+				? this.#posWrites
+				: address < 0x12
+					? this.#grafWrites
+					: address < 0x1b
+						? this.#colorWrites
+						: this.#priorWrites;
+		const delay =
+			address < 0x0d
+				? POS_WRITE_DELAY
+				: address < 0x12
+					? GRAF_WRITE_DELAY
+					: address < 0x1b
+						? COLOR_WRITE_DELAY
+						: PRIOR_WRITE_DELAY;
+		line.scheduleValue(delay, 0x10000 | (address << 8) | value);
+	}
+
+	// Tick the four write lines and apply whatever is due, just before the
+	// current color clock paints.
+	#applyPendingWrites(): void {
+		let w = this.#posWrites.tick();
+		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		w = this.#grafWrites.tick();
+		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		w = this.#colorWrites.tick();
+		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		w = this.#priorWrites.tick();
+		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+	}
+
+	#applyGtiaWrite(address: number, value: number): void {
+		switch (address) {
+			case 0x00:
+				this.hposp0 = value;
+				break;
+			case 0x01:
+				this.hposp1 = value;
+				break;
+			case 0x02:
+				this.hposp2 = value;
+				break;
+			case 0x03:
+				this.hposp3 = value;
+				break;
+			case 0x04:
+				this.hposm0 = value;
+				break;
+			case 0x05:
+				this.hposm1 = value;
+				break;
+			case 0x06:
+				this.hposm2 = value;
+				break;
+			case 0x07:
+				this.hposm3 = value;
+				break;
+
+			case 0x08:
+				// SIZEP0
+				this.#sizeP0 = PM_SIZES[value & 0x3]!;
+				break;
+			case 0x09:
+				// SIZEP1
+				this.#sizeP1 = PM_SIZES[value & 0x3]!;
+				break;
+			case 0x0a:
+				// SIZEP2
+				this.#sizeP2 = PM_SIZES[value & 0x3]!;
+				break;
+			case 0x0b:
+				// SIZEP3
+				this.#sizeP3 = PM_SIZES[value & 0x3]!;
+				break;
+			case 0x0c:
+				// SIZEM
+				this.#sizeM0 = PM_SIZES[value & 0x3]!;
+				this.#sizeM1 = PM_SIZES[(value >> 2) & 0x3]!;
+				this.#sizeM2 = PM_SIZES[(value >> 4) & 0x3]!;
+				this.#sizeM3 = PM_SIZES[(value >> 6) & 0x3]!;
+				break;
+			case 0x0d:
+				this.grafP0 = value;
+				break;
+			case 0x0e:
+				this.grafP1 = value;
+				break;
+			case 0x0f:
+				this.grafP2 = value;
+				break;
+			case 0x10:
+				this.grafP3 = value;
+				break;
+			case 0x11:
+				this.grafM = value;
+				break;
+
+			case 0x12:
+				// COLPM0
+				this.colpm0 = value;
+				break;
+			case 0x13:
+				// COLPM1
+				this.colpm1 = value;
+				break;
+			case 0x14:
+				// COLPM2
+				this.colpm2 = value;
+				break;
+			case 0x15:
+				// COLPM3
+				this.colpm3 = value;
+				break;
+			case 0x16:
+				// COLPF0
+				this.colpf0 = value;
+				break;
+			case 0x17:
+				// COLPF1
+				this.colpf1 = value;
+				break;
+			case 0x18:
+				// COLPF2
+				this.colpf2 = value;
+				break;
+			case 0x19:
+				// COLPF3
+				this.colpf3 = value;
+				break;
+			case 0x1a:
+				// COLBK
+				this.colbk = value;
+				break;
+			case 0x1b:
+				// PRIOR
+				this.prior = value;
+				break;
+		}
+	}
 
 	/** ANTIC's NMI output line. Copy to the CPU's NMI input every cycle. */
 	nmi = false;
@@ -966,7 +1074,7 @@ export class AnticGtia implements Memory {
 
 		const i = this.hpos - 1;
 
-		const x = i - 17 + 3;
+		const x = i - 17;
 		const y = this.vcount - 8;
 
 		if (y >= 0 && y < 240) {
@@ -1045,6 +1153,7 @@ export class AnticGtia implements Memory {
 	}
 
 	#generateColor(pos: 0 | 1): number {
+		this.#applyPendingWrites();
 		const pf = this.#drawPlayfield();
 		const pm = this.#drawPlayerMissile(pos);
 		this.#detectCollisions(pf, pm);
@@ -1098,7 +1207,7 @@ export class AnticGtia implements Memory {
 
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
 	#drawPlayfield(): number {
-		let pixel = this.pfCounter ? this.pfPixels[--this.pfCounter]! : 0;
+		let pixel = this.#anxLine.tick();
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
 		if (scrolled && this.hscrol & 1) {
@@ -1111,11 +1220,12 @@ export class AnticGtia implements Memory {
 		if (scrolled) {
 			// The widened fetch's margin pixels are never displayed: the
 			// window stays at the unwidened width, and ANTIC masks its
-			// output outside it (the FIFO is still consumed above). Without
+			// output outside it (the pipe is still consumed above). Without
 			// this, memory just left of the LMS window — typically the
-			// previous row's right edge — bleeds into the left border.
+			// previous row's right edge — bleeds into the left border. The
+			// bounds are the true display starts (HPOS 64/48/32, in cycles).
 			const cycle = this.hpos - 1;
-			const start = ([0, 29, 21, 13] as const)[this.playfieldWidth];
+			const start = ([0, 32, 24, 16] as const)[this.playfieldWidth];
 			const width = ([0, 64, 80, 96] as const)[this.playfieldWidth];
 			if (cycle < start || cycle >= start + width) {
 				return 0;
@@ -1128,7 +1238,7 @@ export class AnticGtia implements Memory {
 	#drawPlayerMissile(pos: 0 | 1): number {
 		const i = this.hpos - 1;
 
-		const x = i - 17 + 3;
+		const x = i - 17;
 		const y = this.vcount - 8;
 
 		if (y < 0 || y >= 240) {
@@ -1143,7 +1253,10 @@ export class AnticGtia implements Memory {
 		// in HBLANK, losing the pixels that spill into the visible area.
 		const visible = x >= 0 && x < 94;
 
-		const start = (this.hpos + 2) * 2 + pos;
+		// Beam-anchored: afterCpu for machine cycle i paints color clocks 2i
+		// and 2i+1, so the comparator matches when the beam reaches the
+		// register position (HPOS write latency comes from the write pipe).
+		const start = (this.hpos - 1) * 2 + pos;
 
 		if (start === this.hposp0) {
 			this.#shiftP0 = this.grafP0;
@@ -1273,6 +1386,12 @@ export class AnticGtia implements Memory {
 
 	// Get playfield and P/M outputs and detect collisions
 	#detectCollisions(pf: number, pm: number): void {
+		// Post-HITCLR blackout (see the HITCLR case in write()).
+		if (this.#collisionSuppress) {
+			this.#collisionSuppress--;
+			return;
+		}
+
 		// Convert PF output into individual bits
 		let f: number;
 		if (!pf) {
@@ -1858,6 +1977,13 @@ export class AnticGtia implements Memory {
 				}
 			}
 		}
+
+		// Ship the byte into the ANx pipe, leftmost pixel first (pfPixels
+		// holds it right to left).
+		for (let k = this.pfCounter - 1, delay = ANX_DELAY; k >= 0; k--, delay++) {
+			this.#anxLine.scheduleValue(delay, this.pfPixels[k]!);
+		}
+		this.pfCounter = 0;
 
 		return true;
 	}

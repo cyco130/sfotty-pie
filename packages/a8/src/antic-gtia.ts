@@ -321,6 +321,9 @@ export class AnticGtia implements Memory {
 		this.#nmiDelay.reset();
 		this.halt = false;
 		this.rdy = true;
+
+		this.#dmaVisibleLine = false;
+		this.#rebuildDmaPattern();
 	}
 
 	// Keep the assignments in sync with the field initializers. Inputs (console
@@ -584,6 +587,7 @@ export class AnticGtia implements Memory {
 					this.verticalPmResolution = value & 0x10 ? 1 : 2;
 					this.missileDmaEnabled = !!(value & 0xc);
 					this.playerDmaEnabled = !!(value & 0x8);
+					this.#rebuildDmaPattern();
 					break;
 
 				case 0x01:
@@ -605,6 +609,7 @@ export class AnticGtia implements Memory {
 				case 0x04:
 					// HSCROL
 					this.hscrol = value & 0x0f;
+					this.#rebuildDmaPattern();
 					break;
 
 				case 0x05:
@@ -872,12 +877,43 @@ export class AnticGtia implements Memory {
 	/** The RDY output line: false while a WSYNC stall is in effect. */
 	rdy = true;
 
-	// Carried from beforeCpu to busCycle: the cycle's hpos slot (captured before
-	// beforeCpu advances hpos) and whether it's a visible display line. busCycle
-	// uses these to drive the DMA fetch without re-deriving them off the
-	// already-advanced counters.
+	// Carried from beforeCpu to busCycle: the cycle's hpos slot (captured
+	// before beforeCpu advances hpos), so busCycle needn't re-derive it off
+	// the already-advanced counter.
 	#dmaHpos = 0;
+
+	// Whether the current line is a visible display line (no vertical blank,
+	// not waiting on a JVB) — a per-line input to the DMA pattern.
 	#dmaVisibleLine = false;
+
+	// The current line's DMA pattern (see buildDmaPattern) and the cache of
+	// built patterns by state key. Rebuilt — usually a cache-hit pointer swap
+	// — at line start, after the cycle-1 instruction decode, and on
+	// DMACTL/HSCROL writes.
+	#dmaPattern: Uint16Array = new Uint16Array(114);
+	#dmaPatternCache = new Map<number, Uint16Array>();
+
+	#rebuildDmaPattern(): void {
+		const scrolled =
+			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
+		const key =
+			(this.missileDmaEnabled ? 0b1 : 0) |
+			(this.playerDmaEnabled ? 0b10 : 0) |
+			(this.#dmaVisibleLine ? 0b100 : 0) |
+			(this.#newInstruction ? 0b1000 : 0) |
+			(this.displayListDmaEnabled ? 0b10000 : 0) |
+			((this.instruction & 0x0f) << 5) |
+			(this.instruction & 0x40 ? 0x200 : 0) |
+			(scrolled ? 0x400 : 0) |
+			((this.hscrol >> 1) << 11) |
+			(this.playfieldWidth << 14);
+		let pattern = this.#dmaPatternCache.get(key);
+		if (!pattern) {
+			pattern = buildDmaPattern(key);
+			this.#dmaPatternCache.set(key, pattern);
+		}
+		this.#dmaPattern = pattern;
+	}
 
 	/**
 	 * The VCOUNT register value as the CPU sees it mid-cycle. The hardware
@@ -1017,11 +1053,16 @@ export class AnticGtia implements Memory {
 			this.waitingForVbi = false;
 		}
 
-		const visibleLine =
-			!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
+		if (i === 0) {
+			// The line's DMA pattern: visibility and the instruction state are
+			// per-line inputs (mid-line register writes rebuild it too).
+			this.#dmaVisibleLine =
+				!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
+			this.#rebuildDmaPattern();
+		}
 
 		// Request 9 refresh cycles every 4 cycles starting from 25
-		if (i >= 25 && i <= 57 && !((i - 25) & 0x3)) {
+		if (REFRESH_REQUEST[i]) {
 			this.refreshPending = true;
 		}
 
@@ -1040,42 +1081,86 @@ export class AnticGtia implements Memory {
 			this.lastDisplayListAddress = this.displayListAddress;
 		}
 
-		// The DMA fetch itself — a bus access — is busCycle's job. Hand it the
-		// slot and visible-line decision computed here; beforeCpu commits the
-		// cycle's scheduling without touching the bus.
+		// The DMA fetch itself — a bus access — is busCycle's job; beforeCpu
+		// commits the cycle's scheduling without touching the bus.
 		this.#dmaHpos = i;
-		this.#dmaVisibleLine = visibleLine;
 	}
 
 	/**
-	 * The ANTIC bus phase: perform this cycle's DMA fetch (display list, P/M,
-	 * character, or playfield) or DRAM refresh, and set {@link halt} for it.
-	 * Split out from {@link beforeCpu} — which commits the cycle's scheduling
-	 * without touching the bus — so the read can be retried after a suspend
-	 * without re-advancing ANTIC's counters. Call once per cycle, between
-	 * beforeCpu and running the CPU.
+	 * The ANTIC bus phase: perform this cycle's DMA action (display list,
+	 * P/M, character, or playfield fetch) or DRAM refresh, and set
+	 * {@link halt} for it. The per-cycle decision is one lookup in the line's
+	 * precomputed DMA pattern (see {@link buildDmaPattern}). Split out from
+	 * {@link beforeCpu} — which commits the cycle's scheduling without
+	 * touching the bus — so the read can be retried after a suspend without
+	 * re-advancing ANTIC's counters. Call once per cycle, between beforeCpu
+	 * and running the CPU.
 	 */
 	busCycle(): void {
-		const i = this.#dmaHpos;
+		const entry = this.#dmaPattern[this.#dmaHpos]!;
+		const action = entry & 0xff;
 
-		if (
-			(i === 0 && this.#fetchMissiles()) ||
-			(i >= 2 && i <= 5 && this.#fetchPlayer(i - 2)) ||
-			(this.#dmaVisibleLine &&
-				((i === 1 && this.#fetchFirstByte()) ||
-					(i === 6 && this.#fetchSecondByte()) ||
-					(i === 7 && this.#fetchThirdByte()) ||
-					this.#fetchCharacter(i) ||
-					this.#fetchPlayfield(i)))
-		) {
-			// P/M or display list DMA, already handled by fetchXxx methods
-			this.halt = true;
-		} else if (this.refreshPending) {
-			// DRAM refresh cycle
-			this.refreshPending = false;
-			this.halt = true;
-		} else {
-			this.halt = false;
+		if (action === DMA_NONE) {
+			if (this.refreshPending) {
+				// DRAM refresh cycle
+				this.refreshPending = false;
+				this.halt = true;
+			} else {
+				this.halt = false;
+			}
+			return;
+		}
+
+		this.halt = true;
+		switch (action) {
+			case DMA_MISSILE:
+				this.#fetchMissiles();
+				break;
+			case DMA_PLAYER:
+				this.#fetchPlayer(entry >> 8);
+				break;
+			case DMA_DL_FETCH:
+				this.instruction = this.#dmaRead(this.displayListAddress);
+				this.#incrementDisplayListAddress();
+				this.#decodeInstruction();
+				this.#rebuildDmaPattern();
+				break;
+			case DMA_DL_DECODE:
+				// A new instruction with display-list DMA off: the stale
+				// instruction re-decodes, but the bus is free.
+				this.#decodeInstruction();
+				this.#rebuildDmaPattern();
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_DL_LO:
+				this.#fetchDlArgLo();
+				break;
+			case DMA_DL_HI:
+				this.#fetchDlArgHi();
+				break;
+			case DMA_NAME:
+				this.#fetchName(entry >> 8);
+				break;
+			case DMA_GLYPH:
+				this.#fetchGlyph(entry >> 8);
+				break;
+			case DMA_BITMAP:
+				this.#fetchBitmap(entry >> 8);
+				break;
+			case DMA_REPLAY:
+				// Line-buffer replay: pixels flow but the bus is free — a
+				// pending refresh may use the cycle.
+				this.#replayBitmap(entry >> 8);
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
 		}
 	}
 
@@ -1703,16 +1788,11 @@ export class AnticGtia implements Memory {
 		return pf01;
 	}
 
-	#fetchFirstByte(): boolean {
-		if (!this.#newInstruction) {
-			return false;
-		}
-
-		if (this.displayListDmaEnabled) {
-			this.instruction = this.#dmaRead(this.displayListAddress);
-			this.#incrementDisplayListAddress();
-		}
-
+	// Decode the current instruction's mode fields and vertical-scroll state.
+	// Runs at cycle 1 of a new instruction's first scan line — right after
+	// the display-list fetch, or on the stale instruction when display-list
+	// DMA is off.
+	#decodeInstruction(): void {
 		const mode = this.instruction & 0x0f;
 		if (mode === 0x00) {
 			// Blank
@@ -1747,33 +1827,24 @@ export class AnticGtia implements Memory {
 			this.modeLineNo = this.vscrol;
 		}
 		this.#vsRegion = vs;
-
-		return this.displayListDmaEnabled;
 	}
 
-	#fetchSecondByte(): boolean {
-		if (!this.displayListDmaEnabled || !this.#newInstruction) return false;
-
+	// Jump/LMS operand fetches (cycles 6 and 7 — the pattern emits them only
+	// when the instruction has operands).
+	#fetchDlArgLo(): void {
 		if ((this.instruction & 0x0f) === 0x01) {
 			// Jump
 			this.#temp = this.#dmaRead(this.displayListAddress);
 			this.#incrementDisplayListAddress();
-			return true;
-		} else if ((this.instruction & 0x0f) > 0x01 && this.instruction & 0x40) {
+		} else {
 			// LMS
 			const byte = this.#dmaRead(this.displayListAddress);
 			this.msc = byte | (this.msc & 0xff00);
 			this.#incrementDisplayListAddress();
-			return true;
-		} else {
-			// No read
-			return false;
 		}
 	}
 
-	#fetchThirdByte(): boolean {
-		if (!this.displayListDmaEnabled || !this.#newInstruction) return false;
-
+	#fetchDlArgHi(): void {
 		if ((this.instruction & 0x0f) === 0x01) {
 			// Jump
 			this.displayListAddress =
@@ -1781,24 +1852,15 @@ export class AnticGtia implements Memory {
 			if (this.instruction & 0x40) {
 				this.waitingForVbi = true;
 			}
-			return true;
-		} else if ((this.instruction & 0x0f) > 0x01 && this.instruction & 0x40) {
+		} else {
 			// LMS
 			const byte = this.#dmaRead(this.displayListAddress);
 			this.msc = (byte << 8) | (this.msc & 0xff);
 			this.#incrementDisplayListAddress();
-			return true;
-		} else {
-			// No read
-			return false;
 		}
 	}
 
-	#fetchMissiles() {
-		if (!this.missileDmaEnabled) {
-			return false;
-		}
-
+	#fetchMissiles(): void {
 		let base: number;
 		let offset: number;
 		if (this.verticalPmResolution === 1) {
@@ -1814,15 +1876,9 @@ export class AnticGtia implements Memory {
 		this.#dmaRead(
 			base + offset + Math.floor(this.vcount / this.verticalPmResolution),
 		);
-
-		return true;
 	}
 
-	#fetchPlayer(n: number) {
-		if (!this.playerDmaEnabled) {
-			return false;
-		}
-
+	#fetchPlayer(n: number): void {
 		let base: number;
 		let offset: number;
 		if (this.verticalPmResolution === 1) {
@@ -1838,98 +1894,27 @@ export class AnticGtia implements Memory {
 		this.#dmaRead(
 			base + offset + Math.floor(this.vcount / this.verticalPmResolution),
 		);
-
-		return true;
 	}
 
-	#fetchCharacter(cycle: number): boolean {
-		if (!this.playfieldWidth || !this.charFetchRate || !this.#newInstruction) {
-			return false;
-		}
-
-		let playfieldWidth = this.playfieldWidth;
-		// Widen if HSCROL is enabled
-		if (
-			(this.instruction & 0x0f) > 1 &&
-			this.instruction & 0x10 &&
-			(playfieldWidth === 1 || playfieldWidth === 2)
-		) {
-			playfieldWidth = (playfieldWidth + 1) as 2 | 3;
-		}
-
-		let start = NAME_FETCH_START[playfieldWidth];
-		if ((this.instruction & 0x0f) > 1 && this.instruction & 0x10) {
-			start += Math.floor(this.hscrol / 2);
-		}
-		const width = FETCH_WIDTH[playfieldWidth];
-
-		if (
-			cycle < start ||
-			cycle >= start + width ||
-			(cycle - start) & (this.charFetchRate - 1)
-		) {
-			return false;
-		}
-
-		// Read char no from MSC into line buffer
-		const bufferIndex = (cycle - start) / this.charFetchRate;
-		const char = this.#dmaRead(this.msc);
-
-		this.#buffer[bufferIndex] = char;
-
+	// Read a character name from MSC into the line buffer.
+	#fetchName(bufferIndex: number): void {
+		this.#buffer[bufferIndex] = this.#dmaRead(this.msc);
 		this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
-
-		return true;
 	}
 
-	#fetchPlayfield(cycle: number): boolean {
-		if (!this.playfieldWidth || !this.playfieldFetchRate) {
-			return false;
-		}
-
-		let playfieldWidth = this.playfieldWidth;
-
-		// Widen if HSCROL is enabled
-		if (
-			(this.instruction & 0x0f) > 1 &&
-			this.instruction & 0x10 &&
-			(playfieldWidth === 1 || playfieldWidth === 2)
-		) {
-			playfieldWidth = (playfieldWidth + 1) as 2 | 3;
-		}
-
-		// Character glyph fetches trail their name fetches by three cycles;
-		// bitmap data fetches sit at the true playfield DMA slots, one cycle
-		// earlier (antic_dmapattern's tables).
-		let start = (this.charFetchRate ? GLYPH_FETCH_START : BITMAP_FETCH_START)[
-			playfieldWidth
-		];
-		if ((this.instruction & 0x0f) > 1 && this.instruction & 0x10) {
-			start += Math.floor(this.hscrol / 2);
-		}
-		const width = FETCH_WIDTH[playfieldWidth];
-
-		if (
-			cycle < start ||
-			cycle >= start + width ||
-			(cycle - start) & (this.playfieldFetchRate - 1)
-		) {
-			return false;
-		}
-
-		const bufferIndex = Math.floor((cycle - start) / this.playfieldFetchRate);
+	// Character glyph data fetch: read the buffered name's glyph row from
+	// CHBASE and ship it into the ANx pipe.
+	#fetchGlyph(bufferIndex: number): void {
 		const mode = this.instruction & 0x0f;
+		const charNo = this.#buffer[bufferIndex]!;
+		const base =
+			mode < 6
+				? // 1024-byte char set
+					(this.chbase & 0xfe) * 256 + (charNo & 0x7f) * 8
+				: // 512-byte char set
+					this.chbase * 256 + (charNo & 0x3f) * 8;
 
-		if (this.charFetchRate) {
-			// Fetch from CHBASE
-			const charNo = this.#buffer[bufferIndex]!;
-			const base =
-				mode < 6
-					? // 1024-byte char set
-						(this.chbase & 0xfe) * 256 + (charNo & 0x7f) * 8
-					: // 512-byte char set
-						this.chbase * 256 + (charNo & 0x3f) * 8;
-
+		{
 			switch (mode) {
 				case 2:
 					{
@@ -2040,23 +2025,33 @@ export class AnticGtia implements Memory {
 				default:
 					break;
 			}
-		} else {
-			// Fetch from MSC into line buffer
-			let data: number;
+		}
 
-			// The line buffer loads on the instruction's first scan line —
-			// not row-counter zero: a vertical-scroll entry starts the row
-			// counter at VSCROL, but the load happens regardless (Acid800
-			// psuedomodee stretches a mode F line with VSCROL=1 and expects
-			// its data fetched).
-			if (this.#newInstruction) {
-				data = this.#dmaRead(this.msc);
-				this.#buffer[bufferIndex] = data;
-				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
-			} else {
-				data = this.#buffer[bufferIndex]!;
-			}
+		this.#pushPfBatch(ANX_CHAR_DELAY);
+	}
 
+	// Bitmap data fetch: read from MSC into the line buffer and ship the
+	// pixels into the ANx pipe. The pattern emits this on the instruction's
+	// first scan line — not row-counter zero: a vertical-scroll entry starts
+	// the row counter at VSCROL, but the load happens regardless (Acid800
+	// psuedomodee stretches a mode F line with VSCROL=1 and expects its data
+	// fetched).
+	#fetchBitmap(bufferIndex: number): void {
+		const data = this.#dmaRead(this.msc);
+		this.#buffer[bufferIndex] = data;
+		this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
+		this.#emitBitmapPixels(data);
+	}
+
+	// Replay a later scan line from the line buffer: the pixels flow into
+	// the pipe with no bus access.
+	#replayBitmap(bufferIndex: number): void {
+		this.#emitBitmapPixels(this.#buffer[bufferIndex]!);
+	}
+
+	#emitBitmapPixels(data: number): void {
+		const mode = this.instruction & 0x0f;
+		{
 			switch (mode) {
 				case 0x8:
 					{
@@ -2152,22 +2147,16 @@ export class AnticGtia implements Memory {
 			}
 		}
 
-		// Ship the byte into the ANx pipe, leftmost pixel first (pfPixels
-		// holds it right to left).
-		for (
-			let k = this.pfCounter - 1,
-				delay = this.charFetchRate ? ANX_CHAR_DELAY : ANX_BITMAP_DELAY;
-			k >= 0;
-			k--, delay++
-		) {
+		this.#pushPfBatch(ANX_BITMAP_DELAY);
+	}
+
+	// Ship the pending byte into the ANx pipe, leftmost pixel first
+	// (pfPixels holds it right to left).
+	#pushPfBatch(delay: number): void {
+		for (let k = this.pfCounter - 1; k >= 0; k--, delay++) {
 			this.#anxLine.scheduleValue(delay, this.pfPixels[k]!);
 		}
 		this.pfCounter = 0;
-
-		// Bitmap modes replay later scan lines from the line buffer with no
-		// bus access — those cycles don't halt the CPU (antic_dmapattern's
-		// later-line patterns show only refresh cycles blocked).
-		return this.charFetchRate !== 0 || this.#newInstruction;
 	}
 
 	// CHACTL bit 2 (vertical reflect) flips the glyph row within the 8-row
@@ -2264,6 +2253,96 @@ const NAME_FETCH_START = [0, 26, 18, 10] as const;
 const GLYPH_FETCH_START = [0, 29, 21, 13] as const;
 const BITMAP_FETCH_START = [0, 28, 20, 12] as const;
 const FETCH_WIDTH = [0, 64, 80, 96] as const;
+
+// DRAM refresh requests: 9 slots every 4 cycles starting from 25.
+const REFRESH_REQUEST = new Uint8Array(114);
+for (let c = 25; c <= 57; c += 4) REFRESH_REQUEST[c] = 1;
+
+// DMA action codes for the per-line pattern table: busCycle dispatches on
+// `pattern[cycle] & 0xff`, with the action's argument (player number or
+// line-buffer index) in the high byte.
+const DMA_NONE = 0;
+const DMA_MISSILE = 1;
+const DMA_PLAYER = 2;
+const DMA_DL_FETCH = 3; // fetch + decode the instruction (halts)
+const DMA_DL_DECODE = 4; // decode only — display-list DMA off (bus free)
+const DMA_DL_LO = 5; // jump/LMS operand low byte
+const DMA_DL_HI = 6; // jump/LMS operand high byte
+const DMA_NAME = 7; // character name into the line buffer
+const DMA_GLYPH = 8; // character glyph data
+const DMA_BITMAP = 9; // bitmap data into the line buffer (first scan line)
+const DMA_REPLAY = 10; // line-buffer replay: pixels flow, bus free
+
+/**
+ * Build a scanline's DMA pattern from a state key. A line's whole pattern is
+ * a pure function of rarely-changing state, so patterns are computed once
+ * and cached (see #rebuildDmaPattern for the key layout); busCycle then
+ * reduces to one table lookup per cycle. DRAM refresh is deliberately NOT in
+ * the table — the pending-refresh flag is live, sequential state (a blocked
+ * request slides to the next free cycle), and stays in busCycle.
+ */
+function buildDmaPattern(key: number): Uint16Array {
+	const pattern = new Uint16Array(114);
+	if (key & 0b1) pattern[0] = DMA_MISSILE;
+	if (key & 0b10) {
+		for (let n = 0; n < 4; n++) pattern[2 + n] = DMA_PLAYER | (n << 8);
+	}
+	if (!(key & 0b100)) return pattern; // not a visible line: P/M only
+
+	const newInstruction = (key & 0b1000) !== 0;
+	const dlDma = (key & 0b10000) !== 0;
+	const mode = (key >> 5) & 0x0f;
+	const lms = (key & 0x200) !== 0;
+	const scrolled = (key & 0x400) !== 0;
+	const hscrolHalf = (key >> 11) & 0x7;
+	const width = (key >> 14) & 0x3;
+
+	if (newInstruction) {
+		pattern[1] = dlDma ? DMA_DL_FETCH : DMA_DL_DECODE;
+		if (dlDma && (mode === 1 || (mode > 1 && lms))) {
+			pattern[6] = DMA_DL_LO;
+			pattern[7] = DMA_DL_HI;
+		}
+	}
+
+	if (!width) return pattern;
+	const charRate = CHAR_FETCH_RATE[mode]!;
+	const pfRate = PLAYFIELD_FETCH_RATE[mode]!;
+	if (!pfRate) return pattern;
+
+	// Widen if HSCROL is enabled; the fetch start also shifts by the whole
+	// cycles of the scroll value.
+	let fetchWidth = width;
+	if (scrolled && (fetchWidth === 1 || fetchWidth === 2)) fetchWidth++;
+	const shift = scrolled ? hscrolHalf : 0;
+	const span = FETCH_WIDTH[fetchWidth as 1 | 2 | 3];
+
+	if (charRate && newInstruction) {
+		const start = NAME_FETCH_START[fetchWidth as 1 | 2 | 3] + shift;
+		for (
+			let c = start, n = 0;
+			c < start + span && c < 114;
+			c += charRate, n++
+		) {
+			pattern[c] = DMA_NAME | (n << 8);
+		}
+	}
+
+	const start =
+		(charRate
+			? GLYPH_FETCH_START[fetchWidth as 1 | 2 | 3]
+			: BITMAP_FETCH_START[fetchWidth as 1 | 2 | 3]) + shift;
+	const action = charRate
+		? DMA_GLYPH
+		: newInstruction
+			? DMA_BITMAP
+			: DMA_REPLAY;
+	for (let c = start, n = 0; c < start + span && c < 114; c += pfRate, n++) {
+		pattern[c] = action | (n << 8);
+	}
+
+	return pattern;
+}
 
 const LINES_PER_MODE = [
 	0,

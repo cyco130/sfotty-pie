@@ -977,56 +977,54 @@ export class AnticGtia implements Memory {
 			// The GRAF registers latch the bus during the P/M DMA slots only
 			// when GRACTL enables it — with GRACTL off, direct GRAF writes
 			// persist (the GTIA collision tests rely on that). The latch runs for
-			// the whole visible region (scan lines 8-247, i.e. y < 240): an
-			// earlier cut at y < 224 froze player graphics over the bottom 16
+			// the whole visible region (scan lines 8-247 — the enclosing y < 240):
+			// an earlier cut at y < 224 froze player graphics over the bottom 16
 			// lines, which is invisible on NTSC but corrupts the lower HUD on PAL
 			// (its taller frame puts content there) — River Raid's bug.
-			if (y < 240) {
-				if (i === 0 && this.enableMissiles) {
-					// VDELAY bits 0-3 delay each missile independently, but
-					// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
-					// latch each pair on its own: a delayed missile updates only
-					// on odd scanlines, exactly like the per-player logic below.
-					let m = this.grafM;
-					if (isOddScanline || !(this.vdelay & 0x01)) {
-						m = (m & ~0x03) | (busData & 0x03);
-					}
-					if (isOddScanline || !(this.vdelay & 0x02)) {
-						m = (m & ~0x0c) | (busData & 0x0c);
-					}
-					if (isOddScanline || !(this.vdelay & 0x04)) {
-						m = (m & ~0x30) | (busData & 0x30);
-					}
-					if (isOddScanline || !(this.vdelay & 0x08)) {
-						m = (m & ~0xc0) | (busData & 0xc0);
-					}
-					this.grafM = m;
+			if (i === 0 && this.enableMissiles) {
+				// VDELAY bits 0-3 delay each missile independently, but
+				// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
+				// latch each pair on its own: a delayed missile updates only
+				// on odd scanlines, exactly like the per-player logic below.
+				let m = this.grafM;
+				if (isOddScanline || !(this.vdelay & 0x01)) {
+					m = (m & ~0x03) | (busData & 0x03);
+				}
+				if (isOddScanline || !(this.vdelay & 0x02)) {
+					m = (m & ~0x0c) | (busData & 0x0c);
+				}
+				if (isOddScanline || !(this.vdelay & 0x04)) {
+					m = (m & ~0x30) | (busData & 0x30);
+				}
+				if (isOddScanline || !(this.vdelay & 0x08)) {
+					m = (m & ~0xc0) | (busData & 0xc0);
+				}
+				this.grafM = m;
+			}
+
+			if (this.enablePlayers) {
+				if (i === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
+					this.grafP0 = busData;
 				}
 
-				if (this.enablePlayers) {
-					if (i === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
-						this.grafP0 = busData;
-					}
+				if (i === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
+					this.grafP1 = busData;
+				}
 
-					if (i === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
-						this.grafP1 = busData;
-					}
+				if (i === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
+					this.grafP2 = busData;
+				}
 
-					if (i === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
-						this.grafP2 = busData;
-					}
-
-					if (i === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
-						this.grafP3 = busData;
-					}
+				if (i === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
+					this.grafP3 = busData;
 				}
 			}
 		}
 	}
 
 	#generateColor(pos: 0 | 1): number {
-		const pf = this.#drawPlayfield2();
-		const pm = this.#drawPlayerMissile2(pos);
+		const pf = this.#drawPlayfield();
+		const pm = this.#drawPlayerMissile(pos);
 		this.#detectCollisions(pf, pm);
 		const color = this.#resolvePriority(pf, pm);
 
@@ -1077,7 +1075,7 @@ export class AnticGtia implements Memory {
 	#pfFineDelay = 0;
 
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
-	#drawPlayfield2(): number {
+	#drawPlayfield(): number {
 		let pixel = this.pfCounter ? this.pfPixels[--this.pfCounter]! : 0;
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
@@ -1105,7 +1103,7 @@ export class AnticGtia implements Memory {
 	}
 
 	// 1 bit for each player or missile. 1 means active, 0 means inactive
-	#drawPlayerMissile2(pos: 0 | 1): number {
+	#drawPlayerMissile(pos: 0 | 1): number {
 		const i = this.hpos - 1;
 
 		const x = i - 17 + 3;
@@ -1427,7 +1425,6 @@ export class AnticGtia implements Memory {
 			this.hires = false;
 		} else {
 			// Actual mode
-			this.hires = false;
 			this.modeLineHeight = LINES_PER_MODE[mode]!;
 			this.charFetchRate = CHAR_FETCH_RATE[mode]!;
 			this.playfieldFetchRate = PLAYFIELD_FETCH_RATE[mode]!;
@@ -1540,7 +1537,7 @@ export class AnticGtia implements Memory {
 		return true;
 	}
 
-	#fetchCharacter(cycle: number) {
+	#fetchCharacter(cycle: number): boolean {
 		if (!this.playfieldWidth || !this.charFetchRate || !this.#newInstruction) {
 			return false;
 		}
@@ -1576,6 +1573,8 @@ export class AnticGtia implements Memory {
 		this.#buffer[bufferIndex] = char;
 
 		this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
+
+		return true;
 	}
 
 	#fetchPlayfield(cycle: number): boolean {
@@ -1666,10 +1665,10 @@ export class AnticGtia implements Memory {
 						const data = this.#dmaRead(base + this.#charRow(this.modeLineNo));
 						const useColPf3 = !!(charNo & 0x80);
 
-						this.pfPixels[0] = lores2(data, useColPf3);
-						this.pfPixels[1] = lores2(data >> 2, useColPf3);
-						this.pfPixels[2] = lores2(data >> 4, useColPf3);
-						this.pfPixels[3] = lores2(data >> 6, useColPf3);
+						this.pfPixels[0] = loresPixel(data, useColPf3);
+						this.pfPixels[1] = loresPixel(data >> 2, useColPf3);
+						this.pfPixels[2] = loresPixel(data >> 4, useColPf3);
+						this.pfPixels[3] = loresPixel(data >> 6, useColPf3);
 						this.pfCounter = 4;
 					}
 					break;
@@ -1682,10 +1681,10 @@ export class AnticGtia implements Memory {
 						);
 						const useColPf3 = !!(charNo & 0x80);
 
-						this.pfPixels[0] = lores2(data, useColPf3);
-						this.pfPixels[1] = lores2(data >> 2, useColPf3);
-						this.pfPixels[2] = lores2(data >> 4, useColPf3);
-						this.pfPixels[3] = lores2(data >> 6, useColPf3);
+						this.pfPixels[0] = loresPixel(data, useColPf3);
+						this.pfPixels[1] = loresPixel(data >> 2, useColPf3);
+						this.pfPixels[2] = loresPixel(data >> 4, useColPf3);
+						this.pfPixels[3] = loresPixel(data >> 6, useColPf3);
 						this.pfCounter = 4;
 					}
 					break;
@@ -1702,7 +1701,7 @@ export class AnticGtia implements Memory {
 						while (data) {
 							const bit = data & 1;
 							data >>= 1;
-							const out = bit ? color : bg;
+							const out = bit ? color : BG;
 							this.pfPixels[i++] = out;
 						}
 					}
@@ -1722,7 +1721,7 @@ export class AnticGtia implements Memory {
 						while (data) {
 							const bit = data & 1;
 							data >>= 1;
-							const out = bit ? color : bg;
+							const out = bit ? color : BG;
 							this.pfPixels[i++] = out;
 						}
 					}
@@ -1746,22 +1745,22 @@ export class AnticGtia implements Memory {
 			switch (mode) {
 				case 0x8:
 					{
-						this.pfPixels[0] = lores2(data, false);
+						this.pfPixels[0] = loresPixel(data, false);
 						this.pfPixels[1] = this.pfPixels[0];
 						this.pfPixels[2] = this.pfPixels[0];
 						this.pfPixels[3] = this.pfPixels[0];
 
-						this.pfPixels[4] = lores2(data >> 2, false);
+						this.pfPixels[4] = loresPixel(data >> 2, false);
 						this.pfPixels[5] = this.pfPixels[4];
 						this.pfPixels[6] = this.pfPixels[4];
 						this.pfPixels[7] = this.pfPixels[4];
 
-						this.pfPixels[8] = lores2(data >> 4, false);
+						this.pfPixels[8] = loresPixel(data >> 4, false);
 						this.pfPixels[9] = this.pfPixels[8];
 						this.pfPixels[10] = this.pfPixels[8];
 						this.pfPixels[11] = this.pfPixels[8];
 
-						this.pfPixels[12] = lores2(data >> 6, false);
+						this.pfPixels[12] = loresPixel(data >> 6, false);
 						this.pfPixels[13] = this.pfPixels[12];
 						this.pfPixels[14] = this.pfPixels[12];
 						this.pfPixels[15] = this.pfPixels[12];
@@ -1777,7 +1776,7 @@ export class AnticGtia implements Memory {
 					while (data) {
 						const bit = data & 1;
 						data >>= 1;
-						const out = bit ? 0x8 : bg;
+						const out = bit ? 0x8 : BG;
 						this.pfPixels[i++] = out;
 						this.pfPixels[i++] = out;
 						this.pfPixels[i++] = out;
@@ -1788,13 +1787,13 @@ export class AnticGtia implements Memory {
 
 				case 0xa:
 					{
-						this.pfPixels[0] = lores2(data, false);
+						this.pfPixels[0] = loresPixel(data, false);
 						this.pfPixels[1] = this.pfPixels[0];
-						this.pfPixels[2] = lores2(data >> 2, false);
+						this.pfPixels[2] = loresPixel(data >> 2, false);
 						this.pfPixels[3] = this.pfPixels[2];
-						this.pfPixels[4] = lores2(data >> 4, false);
+						this.pfPixels[4] = loresPixel(data >> 4, false);
 						this.pfPixels[5] = this.pfPixels[4];
-						this.pfPixels[6] = lores2(data >> 6, false);
+						this.pfPixels[6] = loresPixel(data >> 6, false);
 						this.pfPixels[7] = this.pfPixels[6];
 						this.pfCounter = 8;
 					}
@@ -1809,7 +1808,7 @@ export class AnticGtia implements Memory {
 					while (data) {
 						const bit = data & 1;
 						data >>= 1;
-						const out = bit ? 0x8 : bg;
+						const out = bit ? 0x8 : BG;
 						this.pfPixels[i++] = out;
 					}
 					break;
@@ -1818,10 +1817,10 @@ export class AnticGtia implements Memory {
 				case 0xd:
 				case 0xe:
 					{
-						this.pfPixels[0] = lores2(data, false);
-						this.pfPixels[1] = lores2(data >> 2, false);
-						this.pfPixels[2] = lores2(data >> 4, false);
-						this.pfPixels[3] = lores2(data >> 6, false);
+						this.pfPixels[0] = loresPixel(data, false);
+						this.pfPixels[1] = loresPixel(data >> 2, false);
+						this.pfPixels[2] = loresPixel(data >> 4, false);
+						this.pfPixels[3] = loresPixel(data >> 6, false);
 						this.pfCounter = 4;
 					}
 					break;
@@ -1888,7 +1887,7 @@ export class AnticGtia implements Memory {
 
 			if (mode === 0) {
 				// Blank
-				line += "BLANK " + String(((this.instruction & 0x70) >> 4) + 1);
+				line += "BLANK " + String(((instruction & 0x70) >> 4) + 1);
 			} else if (mode === 1) {
 				// Jump
 				const address = this.#dmaRead(pc) + this.#dmaRead(pc + 1) * 256;
@@ -2003,7 +2002,7 @@ const PLAYFIELD_HI_RES = [
 	true, // F
 ];
 
-const bg = 0x0;
+const BG = 0x0;
 
 // C D E F (bit 2 and 3)
 function hires(bits: number): number {
@@ -2016,10 +2015,10 @@ function lores(index: number): number {
 }
 
 // 0 8 9 A B
-function lores2(index: number, pf3: boolean): number {
+function loresPixel(index: number, pf3: boolean): number {
 	index = index & 3;
 
-	if (!index) return bg;
+	if (!index) return BG;
 
 	index--;
 	if (index === 2 && pf3) {

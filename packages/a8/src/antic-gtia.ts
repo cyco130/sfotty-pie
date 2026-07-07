@@ -323,6 +323,9 @@ export class AnticGtia implements Memory {
 		this.#dmaVisibleLine = false;
 		this.#lineFetchWidth = 0;
 		this.#lineFetchShift = 0;
+		this.#lineStopCycle = 0;
+		this.#lineContinued = false;
+		this.#linePhase = 0;
 		this.#virtualLoad = 0;
 		this.#rebuildDmaPattern();
 	}
@@ -912,6 +915,19 @@ export class AnticGtia implements Memory {
 	#lineFetchWidth = 0; // latched (widened) fetch width, 0 = not started
 	#lineFetchShift = 0; // latched whole-cycle HSCROL shift
 
+	// The playfield's stop, symmetric to the start latch: the DMA clock's
+	// bit is cleared at the live width's stop deadline (AHRM 4.11: cycles
+	// 88/96/104 for narrow/normal/wide fetch, one later per 2 of live
+	// HSCROL), sampled at deadline + 1 by a DMA_STOP_CHECK flag in the
+	// pattern — before that cycle's CPU write can land. A stop moved
+	// behind the beam falls through to the always-active wide stop; if
+	// the live scroll no longer aligns with the running grid (mod the
+	// fetch rate), no stop matches at all and the clock keeps running
+	// across the line boundary (AHRM 4.12; Acid800 antic_hscrolbug).
+	#lineStopCycle = 0; // the deadline whose stop fired, 0 = clock running
+	#lineContinued = false; // the clock survived the previous line
+	#linePhase = 0; // continued lines: the bit grid's cycle mod 8
+
 	#rebuildDmaPattern(): void {
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
@@ -927,7 +943,10 @@ export class AnticGtia implements Memory {
 			((this.hscrol >> 1) << 11) |
 			(this.playfieldWidth << 14) |
 			(this.#lineFetchWidth << 16) |
-			(this.#lineFetchShift << 18);
+			(this.#lineFetchShift << 18) |
+			((this.#lineStopCycle ? this.#lineStopCycle - 87 : 0) << 21) |
+			(this.#lineContinued ? 1 << 26 : 0) |
+			(this.#linePhase << 27);
 		let pattern = this.#dmaPatternCache.get(key);
 		if (!pattern) {
 			pattern = buildDmaPattern(key);
@@ -1079,8 +1098,32 @@ export class AnticGtia implements Memory {
 			// per-line inputs (mid-line register writes rebuild it too).
 			this.#dmaVisibleLine =
 				!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
-			this.#lineFetchWidth = 0;
-			this.#lineFetchShift = 0;
+			if (
+				this.#lineFetchWidth &&
+				!this.#lineStopCycle &&
+				this.#dmaVisibleLine
+			) {
+				// No stop position matched this clock last line: it keeps
+				// running into this one on the same grid — a scanline is
+				// 114 cycles, so the phase shifts by -114 ≡ +6 mod 8
+				// (AHRM 4.12's abnormal DMA; Acid800 antic_hscrolbug).
+				this.#linePhase =
+					((this.#lineContinued
+						? this.#linePhase
+						: NAME_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3] +
+							this.#lineFetchShift) +
+						6) &
+					7;
+				this.#lineContinued = true;
+			} else {
+				// Normal case: the stop cleared the clock (or vertical
+				// blank does, unconditionally); the line starts un-armed.
+				this.#lineFetchWidth = 0;
+				this.#lineFetchShift = 0;
+				this.#lineContinued = false;
+				this.#linePhase = 0;
+			}
+			this.#lineStopCycle = 0;
 			this.#rebuildDmaPattern();
 		}
 
@@ -1121,7 +1164,24 @@ export class AnticGtia implements Memory {
 	 */
 	busCycle(): void {
 		const entry = this.#dmaPattern[this.#dmaHpos]!;
-		const action = entry & 0xff;
+		if (entry & (DMA_STOP_CHECK | DMA_DECODE_FIRST)) {
+			if (entry & DMA_DECODE_FIRST) {
+				// A carried-over playfield fetch overlapping the bus-free
+				// instruction re-decode slot: decode, then run the fetch.
+				this.#decodeInstruction();
+				this.#rebuildDmaPattern();
+			}
+			if (entry & DMA_STOP_CHECK) {
+				// The playfield stop position: clear the DMA clock. The
+				// slot sits at deadline + 1, so it samples before this
+				// cycle's CPU write can land — the write deadline. The
+				// cycle's own action (a trailing fetch) still runs off
+				// the pre-stop entry.
+				this.#lineStopCycle = this.#dmaHpos - 1;
+				this.#rebuildDmaPattern();
+			}
+		}
+		const action = entry & DMA_ACTION_MASK;
 
 		if (action === DMA_NONE) {
 			if (this.refreshPending) {
@@ -1251,7 +1311,7 @@ export class AnticGtia implements Memory {
 			const entry = this.#virtualLoad;
 			this.#virtualLoad = 0;
 			const index = entry >> 8;
-			const action = entry & 0xff;
+			const action = entry & DMA_ACTION_MASK;
 			if (action === DMA_GLYPH_VIRT) {
 				this.#emitGlyph(this.#buffer[index]!, busData);
 			} else if (action === DMA_BITMAP_VIRT) {
@@ -1880,6 +1940,17 @@ export class AnticGtia implements Memory {
 			this.hires = PLAYFIELD_HI_RES[mode]!;
 		}
 
+		if (mode < 2 && this.#lineFetchWidth) {
+			// A blank or jump line unconditionally clears the playfield
+			// DMA clock (AHRM 4.12) — a carried-over abnormal-DMA clock
+			// ends here.
+			this.#lineFetchWidth = 0;
+			this.#lineFetchShift = 0;
+			this.#lineContinued = false;
+			this.#linePhase = 0;
+			this.#lineStopCycle = 0;
+		}
+
 		// Vertical scrolling: only real modes carry the VS bit (it's a
 		// height bit on blanks and unused on jumps), but the *exit* applies
 		// to whatever instruction follows the region — antic_vscroldli
@@ -1969,7 +2040,8 @@ export class AnticGtia implements Memory {
 	// Character glyph data fetch: read the buffered name's glyph row from
 	// CHBASE and ship it into the ANx pipe.
 	#fetchGlyph(bufferIndex: number): void {
-		const charNo = this.#buffer[bufferIndex]!;
+		// A carried-over clock can run the index past the 48-byte buffer.
+		const charNo = this.#buffer[bufferIndex] ?? 0;
 		this.#emitGlyph(charNo, this.#dmaRead(this.#glyphAddress(charNo)));
 	}
 
@@ -2087,7 +2159,8 @@ export class AnticGtia implements Memory {
 	// Replay a later scan line from the line buffer: the pixels flow into
 	// the pipe with no bus access.
 	#replayBitmap(bufferIndex: number): void {
-		this.#emitBitmapPixels(this.#buffer[bufferIndex]!);
+		// A carried-over clock can run the index past the 48-byte buffer.
+		this.#emitBitmapPixels(this.#buffer[bufferIndex] ?? 0);
 	}
 
 	#emitBitmapPixels(data: number): void {
@@ -2288,13 +2361,10 @@ export class AnticGtia implements Memory {
 const PF_WINDOW_START = [0, 63, 47, 31] as const;
 const PF_WINDOW_WIDTH = [0, 128, 160, 192] as const;
 
-// Playfield fetch-slot start cycles (see the ANX delay comment at the top):
-// character names, character glyph data (names + 3), and bitmap data (the
-// true playfield DMA slots); the fetch window width in cycles.
+// The DMA clock's bit-grid start cycles per fetch width (see the ANX delay
+// comment at the top). The bit grid carries the character name tap; bitmap
+// data and character glyph data trail it at +2 and +3 (AHRM 4.12).
 const NAME_FETCH_START = [0, 26, 18, 10] as const;
-const GLYPH_FETCH_START = [0, 29, 21, 13] as const;
-const BITMAP_FETCH_START = [0, 28, 20, 12] as const;
-const FETCH_WIDTH = [0, 64, 80, 96] as const;
 
 // DRAM refresh requests: 9 slots every 4 cycles starting from 25.
 const REFRESH_REQUEST = new Uint8Array(114);
@@ -2314,15 +2384,26 @@ const DMA_NAME = 7; // character name into the line buffer
 const DMA_GLYPH = 8; // character glyph data
 const DMA_BITMAP = 9; // bitmap data into the line buffer (first scan line)
 const DMA_REPLAY = 10; // line-buffer replay: pixels flow, bus free
-const DMA_PF_SKIP = 11; // masked load slot: MSC advances, bus free
+const DMA_PF_SKIP = 11; // masked/virtual name load: MSC advances, bus free
 const DMA_GLYPH_VIRT = 12; // dropped glyph fetch: loads from the bus
 const DMA_BITMAP_VIRT = 13; // dropped bitmap fetch: loads from the bus
 const DMA_PF_ARM = 14; // the playfield start latch (deadline + 1)
+
+// Flag bits riding on top of a cycle's action (busCycle handles them
+// before dispatching the action itself).
+const DMA_ACTION_MASK = 0x3f;
+const DMA_DECODE_FIRST = 0x40; // re-decode the instruction, then the action
+const DMA_STOP_CHECK = 0x80; // the playfield stop position (deadline + 1)
 
 // The playfield-start arm cycle per fetch width (the AHRM 4.11 deadlines —
 // cycles 24/16/8 for narrow/normal/wide — plus one; HSCROL shifts it a
 // cycle per 2, added at build time).
 const PF_ARM_CYCLE = [0, 25, 17, 9] as const;
+
+// The playfield-stop deadlines per fetch width (AHRM 4.11), shifted a
+// cycle per 2 of HSCROL at build time like the start. The stop clears the
+// DMA clock's bit before it can pass the name tap at deadline + 2.
+const PF_STOP_DEADLINE = [0, 88, 96, 104] as const;
 
 // Playfield DMA may occupy cycles only through 105; a fetch slot pushed
 // past that by HSCROL on a wide (or widened) playfield is dropped as a bus
@@ -2368,6 +2449,10 @@ function buildDmaPattern(key: number): Uint16Array {
 
 	const lineWidth = (key >> 16) & 0x3;
 	const lineShift = (key >> 18) & 0x7;
+	const stopKey = (key >> 21) & 0x1f;
+	const stopCycle = stopKey ? stopKey + 87 : 0;
+	const continued = (key & (1 << 26)) !== 0;
+	const phase = (key >> 27) & 0x7;
 
 	if (!lineWidth) {
 		// The playfield hasn't started: no fetch slots yet, only the arm
@@ -2386,63 +2471,104 @@ function buildDmaPattern(key: number): Uint16Array {
 	}
 
 	// Started: the fetch geometry is the latched one — post-start register
-	// changes can't move the phase.
-	const fetchWidth = lineWidth;
-	const shift = lineShift;
-	const span = FETCH_WIDTH[fetchWidth as 1 | 2 | 3];
+	// changes can't move the phase, only the stop position (live, below).
+	// Everything hangs off the DMA clock's bit grid (the name tap), with
+	// bitmap data at +2 and character data at +3. A clock carried over
+	// the line boundary runs from the top of the line on its shifted
+	// phase — starting one bit *before* the boundary, whose trailing
+	// load taps land at the top of this line (hscrolbug's suppressed
+	// fetch at cycle 0). A stopped clock ends the grid at deadline + 2
+	// (the cleared bit's slot), the last bit's taps riding beyond.
+	const bitStart = continued
+		? (phase % pfRate) - pfRate
+		: NAME_FETCH_START[lineWidth as 1 | 2 | 3] + lineShift;
+	const bitEnd = stopCycle ? stopCycle + 2 : 114;
 
-	if (!width) {
-		// Playfield DMA disabled after the start: the load machinery keeps
-		// running without the bus — MSC advances and the buffer captures
-		// the bus value at the name/bitmap load slots (AHRM "loading the
-		// line buffer"; Acid800 linebuffering's mid-interrupted mode 8);
-		// glyph and replay slots do nothing.
-		if (!newInstruction) return pattern;
-		const start =
-			(charRate
-				? NAME_FETCH_START[fetchWidth as 1 | 2 | 3]
-				: BITMAP_FETCH_START[fetchWidth as 1 | 2 | 3]) + shift;
-		const rate = charRate || pfRate;
-		for (let c = start, n = 0; c < start + span && c < 114; c += rate, n++) {
-			pattern[c] = DMA_PF_SKIP | (n << 8);
+	let n = 0;
+	for (let c = bitStart; c < bitEnd && c < 114; c += pfRate) {
+		const loadCycle = charRate ? c : c + 2;
+		// The line buffer address counter: ordinal from the playfield
+		// start — the clock starts counting there, so the first location
+		// is always accessed at the start position (AHRM). A carried-over
+		// clock instead holds it at zero through cycle 8 and counts load
+		// slots from cycle 9 (hscrolbug's six-location shift).
+		if (continued ? loadCycle >= 9 : c > bitStart) n++;
+
+		if (charRate) {
+			if (newInstruction && c >= 0) {
+				// Name load into the line buffer: a bus-free load off the
+				// bus value when playfield DMA is disabled (Acid800
+				// linebuffering) or the slot is past the DMA cutoff.
+				placePfSlot(
+					pattern,
+					c,
+					(!width || c >= VIRTUAL_DMA_CUTOFF || c === 0
+						? DMA_PF_SKIP
+						: DMA_NAME) |
+						(n << 8),
+				);
+			}
+			if (width && c + 3 < 114) {
+				placePfSlot(
+					pattern,
+					c + 3,
+					(c + 3 >= VIRTUAL_DMA_CUTOFF ? DMA_GLYPH_VIRT : DMA_GLYPH) | (n << 8),
+				);
+			}
+		} else if (loadCycle < 114) {
+			let action: number;
+			if (!newInstruction) {
+				// Glyph and replay slots do nothing with playfield DMA
+				// disabled; replay never touches the bus regardless.
+				if (!width) continue;
+				action = DMA_REPLAY;
+			} else if (!width) {
+				action = DMA_PF_SKIP;
+			} else if (loadCycle >= VIRTUAL_DMA_CUTOFF || loadCycle === 0) {
+				action = DMA_BITMAP_VIRT;
+			} else {
+				action = DMA_BITMAP;
+			}
+			placePfSlot(pattern, loadCycle, action | (n << 8));
 		}
-		return pattern;
 	}
 
-	if (charRate && newInstruction) {
-		// Name fetches can't reach the virtual-DMA cutoff (their latest
-		// possible slot is 105).
-		const start = NAME_FETCH_START[fetchWidth as 1 | 2 | 3] + shift;
-		for (
-			let c = start, n = 0;
-			c < start + span && c < 114;
-			c += charRate, n++
-		) {
-			pattern[c] = DMA_NAME | (n << 8);
+	// The stop comparator: stop positions per the *live* fetch width and
+	// scroll, checked at deadline + 1. The clear only catches the running
+	// bit when the position aligns with the grid mod the fetch rate
+	// (AHRM 4.12's HSCROL bug). The wide stop is always active — even
+	// with the playfield disabled (Acid800 linebuffering disables it
+	// mid-line and relies on the clock still stopping); the current
+	// width's earlier stop only exists while the playfield is enabled.
+	if (!stopCycle) {
+		const liveShift = scrolled ? hscrolHalf : 0;
+		const wide = PF_STOP_DEADLINE[3] + liveShift;
+		if ((wide + 2 - bitStart) % pfRate === 0) {
+			pattern[wide + 1] = pattern[wide + 1]! | DMA_STOP_CHECK;
+			if (width) {
+				let liveFetch = width;
+				if (scrolled && liveFetch < 3) liveFetch++;
+				const stop = PF_STOP_DEADLINE[liveFetch as 1 | 2 | 3] + liveShift;
+				pattern[stop + 1] = pattern[stop + 1]! | DMA_STOP_CHECK;
+			}
 		}
-	}
-
-	const start =
-		(charRate
-			? GLYPH_FETCH_START[fetchWidth as 1 | 2 | 3]
-			: BITMAP_FETCH_START[fetchWidth as 1 | 2 | 3]) + shift;
-	const action = charRate
-		? DMA_GLYPH
-		: newInstruction
-			? DMA_BITMAP
-			: DMA_REPLAY;
-	// Slots pushed past the DMA cutoff still load — from the bus (replay
-	// never touches the bus and is unaffected).
-	const virtualAction = charRate
-		? DMA_GLYPH_VIRT
-		: newInstruction
-			? DMA_BITMAP_VIRT
-			: DMA_REPLAY;
-	for (let c = start, n = 0; c < start + span && c < 114; c += pfRate, n++) {
-		pattern[c] = (c >= VIRTUAL_DMA_CUTOFF ? virtualAction : action) | (n << 8);
 	}
 
 	return pattern;
+}
+
+// Place a playfield fetch slot, resolving collisions with the special-DMA
+// slots (cycles 0-7) that only a carried-over clock can reach: the
+// bus-free instruction re-decode gets folded into the fetch (Acid800
+// hscrolbug's second half runs with display list DMA off), while a real
+// bus DMA slot wins and the overlapped playfield fetch is dropped.
+function placePfSlot(pattern: Uint16Array, cycle: number, entry: number) {
+	const existing = pattern[cycle]!;
+	if (!existing) {
+		pattern[cycle] = entry;
+	} else if ((existing & DMA_ACTION_MASK) === DMA_DL_DECODE) {
+		pattern[cycle] = entry | DMA_DECODE_FIRST;
+	}
 }
 
 const LINES_PER_MODE = [

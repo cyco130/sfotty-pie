@@ -28,19 +28,20 @@ const POWER_ON_COLOR = 0xf0;
 // and 2i+1 — the exact color clocks the beam covers during that cycle — so
 // "the beam" below just means the color clock being painted.
 //
-// Playfield bytes reach the screen through the ANx bus with a fixed lag,
-// but the fetch slots differ by mode family (pinned by Acid800
+// Playfield bytes reach the GTIA paint through the ANx bus with a fixed
+// lag, but the fetch slots differ by mode family (pinned by Acid800
 // antic_dmapattern's cycle tables): bitmap-mode data fetches sit at cycles
 // 12/20/28 (wide/normal/narrow) and take 8 color clocks to the screen
 // (AHRM: 7 to cross the ANx bus + 1 through GTIA's output stage; also the
 // cycle-65 / positions $8C-$8F mode E anchor in AHRM 6.10), while
 // character glyph fetches sit one cycle later — three cycles after their
-// name fetches at 10/18/26 — and take 6, both landing the first pixel
-// exactly at the playfield start (HPOS 32/48/64). Scheduled from busCycle
-// time (before the cycle's own two ticks) that is a DelayLine delay of
-// lag + 1.
-const ANX_BITMAP_DELAY = 9;
-const ANX_CHAR_DELAY = 7;
+// name fetches at 10/18/26 — and take 6. Both land the first pixel exactly
+// at the playfield start (HPOS 32/48/64). The delays below cover the trip
+// to the ANx bus (as a DelayLine delay scheduled from busCycle time,
+// before the cycle's own two ticks, that is bus-lag + 1); GTIA's output
+// register (#anxHold) adds the final color clock.
+const ANX_BITMAP_DELAY = 8;
+const ANX_CHAR_DELAY = 6;
 
 // GTIA register writes reach the paint logic a few color clocks after the
 // bus write (AHRM 6.10 table 18). A write during machine cycle w scheduled
@@ -393,6 +394,13 @@ export class AnticGtia implements Memory {
 		this.#grafWrites.reset();
 		this.#colorWrites.reset();
 		this.#priorWrites.reset();
+
+		this.#anxHold = 0;
+		this.#gtiaPixel = 0;
+		this.#gtiaPixelPrev = 0;
+		this.#gtiaBkMuted = false;
+		this.#gtiaPrevBkMuted = false;
+		this.#lineGtiaMode = 0;
 	}
 
 	#log: (message: string) => void;
@@ -1153,19 +1161,139 @@ export class AnticGtia implements Memory {
 
 	#generateColor(pos: 0 | 1): number {
 		this.#applyPendingWrites();
-		const pf = this.#drawPlayfield();
-		const pm = this.#drawPlayerMissile(pos);
-		this.#detectCollisions(pf, pm);
-		const color = this.#resolvePriority(pf, pm);
 
-		if (pf & 0x4) {
-			// Apply hires luminance
-			const left = pf & 0x2 ? (color & 0xf0) | (this.colpf1 & 0xf) : color;
-			const right = pf & 0x1 ? (color & 0xf0) | (this.colpf1 & 0xf) : color;
-			return (left << 8) | right;
-		} else {
+		// The ANx value arriving this color clock; what paints now is the
+		// previous one, sitting in GTIA's output register. The special
+		// modes' pixel former pairs the two: on even color clocks it has
+		// both halves of a fat pixel in hand.
+		const incoming = this.#drawPlayfield(pos);
+		const pf = this.#anxHold;
+		this.#anxHold = incoming;
+
+		if (pos === 0) {
+			this.#gtiaPixelPrev = this.#gtiaPixel;
+			this.#gtiaPrevBkMuted = this.#gtiaBkMuted;
+			// AN2 is ignored: background and a %00 pair both contribute %00
+			// — which is why borders read as pixel data in the special
+			// modes.
+			this.#gtiaPixel = ((pf & 0x3) << 2) | (incoming & 0x3);
+			// The mode 10 lores anomaly: a true background code as the
+			// second half mutes the playfield for the whole fat pixel
+			// (AHRM 6.9; Acid800 psuedomodee).
+			this.#gtiaBkMuted = !this.hires && incoming === 0;
+		}
+
+		const pm = this.#drawPlayerMissile(pos);
+		const gtiaMode = this.prior & 0xc0;
+
+		// Latch the line's special-mode state at color clock 33 (the
+		// boundary is pinned from both sides by psuedomodee's
+		// one-cycle-apart PRIOR writes).
+		if (pos === 1 && this.hpos - 1 === 16) {
+			this.#lineGtiaMode = gtiaMode;
+		}
+
+		if (gtiaMode === 0) {
+			if (this.#lineGtiaMode !== 0) {
+				// Pseudo mode E: the special mode was still on at the line
+				// latch, so each AN0-1 pair decodes as PF0-PF3 — one pair
+				// per color clock, background included.
+				const code = 0x8 | (pf & 0x3);
+				this.#detectCollisions(code, pm);
+				const color = this.#resolvePriority(code, pm, 0);
+				return (color << 8) | color;
+			}
+			this.#detectCollisions(pf, pm);
+			const color = this.#resolvePriority(pf, pm, 0);
+			if (pf & 0x4) {
+				// Apply hires luminance
+				const left = pf & 0x2 ? (color & 0xf0) | (this.colpf1 & 0xf) : color;
+				const right = pf & 0x1 ? (color & 0xf0) | (this.colpf1 & 0xf) : color;
+				return (left << 8) | right;
+			}
 			return (color << 8) | color;
 		}
+
+		// GTIA special modes. Hires (the PF1-luma splice) is forced off.
+		let color: number;
+		if (gtiaMode === 0x80) {
+			// Mode 10 (9-color) runs one color clock behind the other modes
+			// (its extra delay line), so even color clocks replay the
+			// previous fat pixel. Pixel codes select color registers: 0-3
+			// act as that player for priority but trigger no player
+			// collisions, x100-x111 are PF0-PF3 with real playfield
+			// collisions, 10xx is background.
+			const px = pos === 0 ? this.#gtiaPixelPrev : this.#gtiaPixel;
+			const muted = pos === 0 ? this.#gtiaPrevBkMuted : this.#gtiaBkMuted;
+			if (muted || (px & 0xc) === 0x8) {
+				this.#detectCollisions(0, pm);
+				color = this.#resolvePriority(0, pm, 0);
+			} else if (px & 0x4) {
+				const code = 0x8 | (px & 0x3);
+				this.#detectCollisions(code, pm);
+				color = this.#resolvePriority(code, pm, 0);
+			} else {
+				this.#detectCollisions(0, pm);
+				color = this.#resolvePriority(0, pm, 1 << px);
+			}
+		} else {
+			// Modes 9 and 11: the playfield is background for priority and
+			// collisions — P/M always win and no playfield collision
+			// latches.
+			this.#detectCollisions(0, pm);
+			color =
+				gtiaMode === 0x40
+					? this.#resolveGtia9(this.#gtiaPixel, pm)
+					: this.#resolveGtia11(this.#gtiaPixel, pm);
+		}
+		return (color << 8) | color;
+	}
+
+	// P/M-above-playfield resolution shared by modes 9 and 11: any player
+	// (or non-fifth missile) wins outright and the playfield drops out.
+	// Returns -1 when no P/M is active — the caller supplies the playfield
+	// color and the fifth-player mix.
+	#resolveGtiaPm(pm: number): number {
+		let p = pm >> 4;
+		if (!(this.prior & 0x10)) {
+			p |= pm & 0xf;
+		}
+		if (p & 0x3) {
+			return this.prior & 0x20 && (p & 0x3) === 0x3
+				? this.colpm0 | this.colpm1
+				: p & 0x1
+					? this.colpm0
+					: this.colpm1;
+		}
+		if (p & 0xc) {
+			return this.prior & 0x20 && (p & 0xc) === 0xc
+				? this.colpm2 | this.colpm3
+				: p & 0x4
+					? this.colpm2
+					: this.colpm3;
+		}
+		return -1;
+	}
+
+	// Mode 9 (PRIOR %01): 16 luminances of COLBK's hue. The pixel bypasses
+	// the color registers (the only path to an odd luminance bit) and ORs
+	// with COLBK; a fifth-player missile mixes as PF3 OR the luminance.
+	#resolveGtia9(px: number, pm: number): number {
+		const winner = this.#resolveGtiaPm(pm);
+		if (winner >= 0) return winner;
+		if (this.prior & 0x10 && pm & 0xf) return this.colpf3 | px;
+		return this.colbk | px;
+	}
+
+	// Mode 11 (PRIOR %11): 16 hues at COLBK's luminance, except pixel %0000
+	// is forced to luminance 0. A fifth-player missile replaces COLBK with
+	// PF3 (the luma-0 rule still wins).
+	#resolveGtia11(px: number, pm: number): number {
+		const winner = this.#resolveGtiaPm(pm);
+		if (winner >= 0) return winner;
+		const base = this.prior & 0x10 && pm & 0xf ? this.colpf3 : this.colbk;
+		const color = base | (px << 4);
+		return px === 0 ? color & 0xf0 : color;
 	}
 
 	#sizeP0 = 1;
@@ -1204,8 +1332,30 @@ export class AnticGtia implements Memory {
 	// clocks); the remaining color clock is a one-pixel delay here.
 	#pfFineDelay = 0;
 
+	// GTIA's output register: the ANx value painting this color clock (the
+	// final color clock of the fetch-to-screen pipe).
+	#anxHold = 0;
+
+	// The special modes' pixel former: two consecutive AN0-1 payloads make
+	// one 4-bit fat pixel, paired on even color clocks (fixed screen
+	// alignment — odd HSCROL regroups bits rather than shifting pixels,
+	// AHRM 6.9). #gtiaPixelPrev serves mode 10's one-color-clock delay;
+	// the muted flags carry the lores background anomaly.
+	#gtiaPixel = 0;
+	#gtiaPixelPrev = 0;
+	#gtiaBkMuted = false;
+	#gtiaPrevBkMuted = false;
+
+	// The line's special-mode state, latched near the end of horizontal
+	// blank (color clock 32). Turning PRIOR bits 6-7 off after the latch
+	// leaves the pair-decode machinery engaged for the rest of the line:
+	// "pseudo mode E", where each AN0-1 pair paints and collides as
+	// PF0-PF3 (Acid800 psuedomodee pins the one-cycle window).
+	#lineGtiaMode = 0;
+
+	// The ANx bus value for this color clock.
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
-	#drawPlayfield(): number {
+	#drawPlayfield(pos: 0 | 1): number {
 		let pixel = this.#anxLine.tick();
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
@@ -1222,11 +1372,13 @@ export class AnticGtia implements Memory {
 			// output outside it (the pipe is still consumed above). Without
 			// this, memory just left of the LMS window — typically the
 			// previous row's right edge — bleeds into the left border. The
-			// bounds are the true display starts (HPOS 64/48/32, in cycles).
-			const cycle = this.hpos - 1;
-			const start = ([0, 32, 24, 16] as const)[this.playfieldWidth];
-			const width = ([0, 64, 80, 96] as const)[this.playfieldWidth];
-			if (cycle < start || cycle >= start + width) {
+			// bounds are the display starts (HPOS 64/48/32) minus the one
+			// color clock this stream still spends in GTIA's output
+			// register.
+			const t = (this.hpos - 1) * 2 + pos;
+			const start = ([0, 63, 47, 31] as const)[this.playfieldWidth];
+			const width = ([0, 128, 160, 192] as const)[this.playfieldWidth];
+			if (t < start || t >= start + width) {
 				return 0;
 			}
 		}
@@ -1434,7 +1586,7 @@ export class AnticGtia implements Memory {
 	}
 
 	// Gets playfield and pm data, resolves the priority and returns a palette index
-	#resolvePriority(pf: number, pm: number): number {
+	#resolvePriority(pf: number, pm: number, extraPlayers: number): number {
 		const prior = this.prior;
 
 		if (pf & 0x4) {
@@ -1461,6 +1613,10 @@ export class AnticGtia implements Memory {
 			// Treat missiles like players
 			p |= pm & 0xf;
 		}
+
+		// Mode 10 pixel codes 0-3 act as that player for priority only —
+		// they trigger no collisions (the caller keeps them out of pm).
+		p |= extraPlayers;
 
 		const pl01active = (p & 0x3) !== 0;
 		const pl23active = !pl01active && (p & 0xc) !== 0;

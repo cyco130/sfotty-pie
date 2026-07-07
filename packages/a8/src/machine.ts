@@ -300,7 +300,12 @@ export class Atari implements Memory {
 			case PHASE.BUS:
 				this.anticGtia.busCycle(); // ANTIC DMA read — may throw
 				this.#cpu.NMI = this.anticGtia.nmi;
-				this.#cpu.IRQ = this.irq;
+				// The CPU sees the wire-ORed /IRQ line as of the end of the
+				// previous cycle: the open-collector line settles across a
+				// phase boundary, one cycle of propagation the 6502 never
+				// sees around (Acid800 pokey_irqtiming pins the total
+				// IRQST-to-acknowledge latency this produces).
+				this.#cpu.IRQ = this.#irqLine;
 				this.#cpu.RDY = this.anticGtia.rdy;
 				this.#phase = PHASE.CPU;
 			// falls through
@@ -308,10 +313,14 @@ export class Atari implements Memory {
 				if (this.resetAsserted) this.#cpu.reset(false);
 				else if (!this.anticGtia.halt) this.#cpu.run(); // may throw
 				this.anticGtia.afterCpu(this.#frame, this.busData);
+				this.#irqLine = this.irq;
 				this.#phase = PHASE.IDLE;
 		}
 		return this.#audio;
 	}
+
+	// The /IRQ line as sampled at the end of the last completed cycle.
+	#irqLine = false;
 
 	/**
 	 * The IRQ output line: POKEY and the PIA's two IRQ outputs, wire-ORed

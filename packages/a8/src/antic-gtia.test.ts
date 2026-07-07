@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { AnticGtia } from "./antic-gtia.ts";
+import { AnticGtia, prioritySelector } from "./antic-gtia.ts";
 
 // GTIA read registers at power-on, per the Altirra Hardware Reference
 // Manual. (The write-only registers' contents are not covered by it.)
@@ -337,4 +337,111 @@ test("P/M graphics latch across the whole visible region, including the bottom b
 	expect(latchOnLine(240, 0x5a)).toBe(0x5a);
 	// Vertical blank (scan line 248): no latch — graphics are off, per the AHRM.
 	expect(latchOnLine(248, 0x5a)).toBe(0x00);
+});
+
+// The priority selector masks: bit n = colorRegisters[n].
+const PM0 = 1 << 0;
+const PM1 = 1 << 1;
+const PM2 = 1 << 2;
+const PF0 = 1 << 4;
+const PF2 = 1 << 6;
+const PF3 = 1 << 7;
+const BAK = 1 << 8;
+
+test("priority selectors match the official PRIOR modes", () => {
+	// Players above playfields (%0001), playfields above players (%0100).
+	expect(prioritySelector(0b0001, 1, 0b0001, false)).toBe(PM0);
+	expect(prioritySelector(0b0100, 1, 0b0001, false)).toBe(PF0);
+	// Split mode %1000: PF01 above players above PF23.
+	expect(prioritySelector(0b1000, 1, 0b0001, false)).toBe(PF0);
+	expect(prioritySelector(0b1000, 3, 0b0001, false)).toBe(PM0);
+	// Mode 0 mixes: PF01 with P01 (OR), but P01 still covers PF23.
+	expect(prioritySelector(0b0000, 1, 0b0001, false)).toBe(PM0 | PF0);
+	expect(prioritySelector(0b0000, 3, 0b0001, false)).toBe(PM0);
+	// Multicolor ORs the player pairs.
+	expect(prioritySelector(0b100001, 0, 0b0011, false)).toBe(PM0 | PM1);
+	// Nothing active: background.
+	expect(prioritySelector(0b0001, 0, 0, false)).toBe(BAK);
+	// The fifth player rides PF3's slot but beats other playfields.
+	expect(prioritySelector(0b0100, 1, 0, true)).toBe(PF3);
+	// The %1000 fifth-player cascade (AHRM 6.7 prose): PF01 covers the
+	// players, then the fifth player's PF3 covers PF01 — but with PF01
+	// absent, the players show.
+	expect(prioritySelector(0b1000, 1, 0b0001, true)).toBe(PF3);
+	expect(prioritySelector(0b1000, 0, 0b0001, true)).toBe(PM0);
+});
+
+test("priority conflicts match AHRM 6.7 table 16", () => {
+	// The complete table. Inputs: P01 = player 0, P23 = player 2,
+	// PF01 = playfield 0 (class 1), PF23 = playfield 2 (class 3), P5 = the
+	// fifth player. Expected output per conflicting PRIOR[3:0] value;
+	// 0 = black. Shared table rows are asserted under both layer sets.
+	const priors = [3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15];
+	const expectRow = (
+		pfClass: number,
+		p: number,
+		p5: boolean,
+		expected: number[],
+	) => {
+		priors.forEach((prior, i) => {
+			expect(
+				prioritySelector(prior, pfClass, p, p5),
+				`pf ${pfClass} p ${p} p5 ${p5} PRIOR %${prior.toString(2).padStart(4, "0")}`,
+			).toBe(expected[i]);
+		});
+	};
+	// PF01+P01 and PF01+P01+P23 (shared row)
+	const row1 = [PM0, 0, 0, 0, 0, 0, 0, PF0, 0, 0, 0];
+	expectRow(1, 0b0001, false, row1);
+	expectRow(1, 0b0101, false, row1);
+	// PF01+P23
+	expectRow(1, 0b0100, false, [
+		PM2,
+		PM2,
+		PF0,
+		PM2,
+		PM2,
+		PF0,
+		PM2,
+		PF0,
+		PM2,
+		PF0,
+		PM2,
+	]);
+	// PF23+P01
+	expectRow(3, 0b0001, false, [
+		PM0,
+		PF2,
+		PF2,
+		PF2,
+		PM0,
+		PM0,
+		PM0,
+		PF2,
+		PF2,
+		PF2,
+		PF2,
+	]);
+	// PF23+P23
+	expectRow(3, 0b0100, false, [0, 0, PF2, 0, PM2, 0, 0, 0, 0, 0, 0]);
+	// PF23+P01+P23
+	expectRow(3, 0b0101, false, [PM0, 0, PF2, 0, PM0, PM0, PM0, 0, 0, 0, 0]);
+	// P5+P01 and P5+PF23+P01 (shared row)
+	const row6 = [PM0, PF3, PF3, PF3, PM0, PM0, PM0, PF3, PF3, PF3, PF3];
+	expectRow(0, 0b0001, true, row6);
+	expectRow(3, 0b0001, true, row6);
+	// P5+P23
+	expectRow(0, 0b0100, true, [0, PM2, PF3, 0, PM2, 0, 0, PM2, 0, 0, 0]);
+	// P5+P01+P23
+	expectRow(0, 0b0101, true, [PM0, 0, PF3, 0, PM0, PM0, PM0, PM0, 0, 0, 0]);
+	// P5+PF01+P01
+	expectRow(1, 0b0001, true, [PM0, PF3, PF3, PF3, 0, 0, 0, PF3, PF3, PF3, PF3]);
+	// P5+PF01+P23 and P5+PF23+P23 (shared row)
+	const row10 = [0, 0, PF3, 0, PM2, 0, 0, 0, 0, 0, 0];
+	expectRow(1, 0b0100, true, row10);
+	expectRow(3, 0b0100, true, row10);
+	// P5+PF01+P01+P23
+	expectRow(1, 0b0101, true, [PM0, 0, PF3, 0, 0, 0, 0, 0, 0, 0, 0]);
+	// P5+PF23+P01+P23
+	expectRow(3, 0b0101, true, [PM0, 0, PF3, 0, PM0, PM0, PM0, 0, 0, 0, 0]);
 });

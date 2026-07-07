@@ -149,16 +149,12 @@ export class AnticGtia implements Memory {
 	hpos: number = 0;
 	refreshPending = false;
 
-	// Color registers
-	colpm0 = POWER_ON_COLOR;
-	colpm1 = POWER_ON_COLOR;
-	colpm2 = POWER_ON_COLOR;
-	colpm3 = POWER_ON_COLOR;
-	colpf0 = POWER_ON_COLOR;
-	colpf1 = POWER_ON_COLOR;
-	colpf2 = POWER_ON_COLOR;
-	colpf3 = POWER_ON_COLOR;
-	colbk = POWER_ON_COLOR;
+	/**
+	 * The color registers in address order — COLPM0-3, COLPF0-3, COLBK
+	 * ($D012-$D01A). The indices double as the priority table's selector
+	 * bits (see the COLPM0..COLBK constants).
+	 */
+	readonly colorRegisters = new Uint8Array(9).fill(POWER_ON_COLOR);
 
 	// P/M Horizontal positions
 	hposp0 = 0;
@@ -329,15 +325,7 @@ export class AnticGtia implements Memory {
 	// Keep the assignments in sync with the field initializers. Inputs (console
 	// keys, triggers) reflect physical switches and are left alone.
 	#resetGtia(): void {
-		this.colpm0 = POWER_ON_COLOR;
-		this.colpm1 = POWER_ON_COLOR;
-		this.colpm2 = POWER_ON_COLOR;
-		this.colpm3 = POWER_ON_COLOR;
-		this.colpf0 = POWER_ON_COLOR;
-		this.colpf1 = POWER_ON_COLOR;
-		this.colpf2 = POWER_ON_COLOR;
-		this.colpf3 = POWER_ON_COLOR;
-		this.colbk = POWER_ON_COLOR;
+		this.colorRegisters.fill(POWER_ON_COLOR);
 
 		this.hposp0 = 0;
 		this.hposp1 = 0;
@@ -733,6 +721,11 @@ export class AnticGtia implements Memory {
 	}
 
 	#applyGtiaWrite(address: number, value: number): void {
+		if (address >= 0x12 && address <= 0x1a) {
+			// COLPM0-COLPM3, COLPF0-COLPF3, COLBK — in register order.
+			this.colorRegisters[address - 0x12] = value;
+			return;
+		}
 		switch (address) {
 			case 0x00:
 				this.hposp0 = value;
@@ -798,42 +791,6 @@ export class AnticGtia implements Memory {
 				this.grafM = value;
 				break;
 
-			case 0x12:
-				// COLPM0
-				this.colpm0 = value;
-				break;
-			case 0x13:
-				// COLPM1
-				this.colpm1 = value;
-				break;
-			case 0x14:
-				// COLPM2
-				this.colpm2 = value;
-				break;
-			case 0x15:
-				// COLPM3
-				this.colpm3 = value;
-				break;
-			case 0x16:
-				// COLPF0
-				this.colpf0 = value;
-				break;
-			case 0x17:
-				// COLPF1
-				this.colpf1 = value;
-				break;
-			case 0x18:
-				// COLPF2
-				this.colpf2 = value;
-				break;
-			case 0x19:
-				// COLPF3
-				this.colpf3 = value;
-				break;
-			case 0x1a:
-				// COLBK
-				this.colbk = value;
-				break;
 			case 0x1b:
 				// PRIOR
 				this.prior = value;
@@ -1307,8 +1264,14 @@ export class AnticGtia implements Memory {
 			const color = this.#resolvePriority(pf, pm, 0);
 			if (pf & 0x4) {
 				// Apply hires luminance
-				const left = pf & 0x2 ? (color & 0xf0) | (this.colpf1 & 0xf) : color;
-				const right = pf & 0x1 ? (color & 0xf0) | (this.colpf1 & 0xf) : color;
+				const left =
+					pf & 0x2
+						? (color & 0xf0) | (this.colorRegisters[COLPF1]! & 0xf)
+						: color;
+				const right =
+					pf & 0x1
+						? (color & 0xf0) | (this.colorRegisters[COLPF1]! & 0xf)
+						: color;
 				return (left << 8) | right;
 			}
 			return (color << 8) | color;
@@ -1354,23 +1317,24 @@ export class AnticGtia implements Memory {
 	// Returns -1 when no P/M is active — the caller supplies the playfield
 	// color and the fifth-player mix.
 	#resolveGtiaPm(pm: number): number {
+		const regs = this.colorRegisters;
 		let p = pm >> 4;
 		if (!(this.prior & 0x10)) {
 			p |= pm & 0xf;
 		}
 		if (p & 0x3) {
 			return this.prior & 0x20 && (p & 0x3) === 0x3
-				? this.colpm0 | this.colpm1
+				? regs[COLPM0]! | regs[COLPM1]!
 				: p & 0x1
-					? this.colpm0
-					: this.colpm1;
+					? regs[COLPM0]!
+					: regs[COLPM1]!;
 		}
 		if (p & 0xc) {
 			return this.prior & 0x20 && (p & 0xc) === 0xc
-				? this.colpm2 | this.colpm3
+				? regs[COLPM2]! | regs[COLPM3]!
 				: p & 0x4
-					? this.colpm2
-					: this.colpm3;
+					? regs[COLPM2]!
+					: regs[COLPM3]!;
 		}
 		return -1;
 	}
@@ -1381,8 +1345,10 @@ export class AnticGtia implements Memory {
 	#resolveGtia9(px: number, pm: number): number {
 		const winner = this.#resolveGtiaPm(pm);
 		if (winner >= 0) return winner;
-		if (this.prior & 0x10 && pm & 0xf) return this.colpf3 | px;
-		return this.colbk | px;
+		if (this.prior & 0x10 && pm & 0xf) {
+			return this.colorRegisters[COLPF3]! | px;
+		}
+		return this.colorRegisters[COLBK]! | px;
 	}
 
 	// Mode 11 (PRIOR %11): 16 hues at COLBK's luminance, except pixel %0000
@@ -1391,7 +1357,10 @@ export class AnticGtia implements Memory {
 	#resolveGtia11(px: number, pm: number): number {
 		const winner = this.#resolveGtiaPm(pm);
 		if (winner >= 0) return winner;
-		const base = this.prior & 0x10 && pm & 0xf ? this.colpf3 : this.colbk;
+		const base =
+			this.prior & 0x10 && pm & 0xf
+				? this.colorRegisters[COLPF3]!
+				: this.colorRegisters[COLBK]!;
 		const color = base | (px << 4);
 		return px === 0 ? color & 0xf0 : color;
 	}
@@ -1685,30 +1654,22 @@ export class AnticGtia implements Memory {
 		if (m & 8) this.m3pf |= f;
 	}
 
-	// Gets playfield and pm data, resolves the priority and returns a palette index
+	// Resolve playfield and P/M priority to a palette index: a PRIORITY_TABLE
+	// lookup (which handles all sixteen PRIOR[3:0] values, conflicts
+	// included) selects the surviving color sources, whose registers OR
+	// together — an empty selection is a conflict and paints black.
 	#resolvePriority(pf: number, pm: number, extraPlayers: number): number {
 		const prior = this.prior;
 
-		if (pf & 0x4) {
-			// Hires. Use PF2 for priority purposes
-			pf = 3;
-		} else if (pf) {
-			// Map PF0 to 1 .. PF3 to 4
-			pf = (pf & 0x3) + 1;
-		}
+		// The playfield class: 0 BAK, 1-4 PF0-PF3. A hires pixel is PF2 for
+		// priority purposes, lit or not (the playfield covers the window).
+		const pfClass = pf & 0x4 ? 3 : pf ? (pf & 0x3) + 1 : 0;
 
 		let p = pm >> 4;
-
-		const multicolor = prior & 0x20;
-
-		let p5 = false;
-
+		let p5 = 0;
 		if (prior & 0x10 && pm & 0xf) {
 			// Fifth player
-			p5 = true;
-			if (pf === 0) {
-				pf = 4;
-			}
+			p5 = 1 << 13;
 		} else {
 			// Treat missiles like players
 			p |= pm & 0xf;
@@ -1718,74 +1679,13 @@ export class AnticGtia implements Memory {
 		// they trigger no collisions (the caller keeps them out of pm).
 		p |= extraPlayers;
 
-		const pl01active = (p & 0x3) !== 0;
-		const pl23active = !pl01active && (p & 0xc) !== 0;
-
-		if (!pl01active && !pl23active && !pf) {
-			return this.colbk;
+		let mask = PRIORITY_TABLE[(prior & 0x3f) | (pfClass << 6) | (p << 9) | p5]!;
+		let color = 0;
+		while (mask) {
+			color |= this.colorRegisters[31 - Math.clz32(mask & -mask)]!;
+			mask &= mask - 1;
 		}
-
-		const pl01 = !pl01active
-			? 0
-			: multicolor && (p & 0x3) === 0x3
-				? this.colpm0 | this.colpm1
-				: p & 0x1
-					? this.colpm0
-					: this.colpm1;
-
-		const pl23 = !pl23active
-			? 0
-			: multicolor && (p & 0xc) === 0xc
-				? this.colpm2 | this.colpm3
-				: p & 0x4
-					? this.colpm2
-					: this.colpm3;
-
-		const pf01active = pf === 1 || pf === 2;
-		const pf01 = !pf01active
-			? 0
-			: p5
-				? this.colpf3
-				: pf === 1
-					? this.colpf0
-					: this.colpf1;
-
-		const pf23active = pf === 3 || pf === 4;
-		const pf23 = !pf23active
-			? 0
-			: p5
-				? this.colpf3
-				: pf === 3
-					? this.colpf2
-					: this.colpf3;
-
-		switch (prior & 0xf) {
-			// TODO: Priority conflicts
-			case 0b0000:
-				if (pl01active || pf01active) {
-					return pl01 | pf01;
-				} else {
-					return pl23 | pf23;
-				}
-			case 0b0001:
-				if (pl01active) return pl01;
-				if (pl23active) return pl23;
-				return pf01 | pf23;
-			case 0b0010:
-				if (pl01active) return pl01;
-				if (pf) return pf01 | pf23;
-				return pl23;
-			case 0b0100:
-				if (pf) return pf01 | pf23;
-				return pl01 | pl23;
-			case 0b1000:
-				if (pf01active) return pf01;
-				if (pl01active) return pl01;
-				if (pl23active) return pl23;
-				return pf23;
-		}
-
-		return pf01;
+		return color;
 	}
 
 	// Decode the current instruction's mode fields and vertical-scroll state.
@@ -2460,3 +2360,131 @@ const PM_SIZES = [
 	0b00, // Normal
 	0b11, // Quadruple
 ];
+
+// colorRegisters indices, doubling as the priority table's selector bits.
+const COLPM0 = 0;
+const COLPM1 = 1;
+const COLPM2 = 2;
+const COLPM3 = 3;
+const COLPF0 = 4;
+const COLPF1 = 5;
+const COLPF2 = 6;
+const COLPF3 = 7;
+const COLBK = 8;
+
+/**
+ * GTIA's priority gate network (AHRM 6.7). Each PRIOR bit activates
+ * cross-disable signals between the player and playfield layers; the output
+ * is the OR of the surviving sources, and a conflict that suppresses every
+ * source paints black. The fifth player asserts the PF3 input — winning over
+ * the other playfields through the /SF3 terms — while its missiles keep
+ * their own collision identities.
+ *
+ * These are AHRM's stated "exact logic" equations, with two refinements
+ * pinned by the complete table 16 (unit-tested cell by cell):
+ *
+ * - The published /SF3 term in SF0-SF2 is really the PF3 *input* (fifth
+ *   player included) — indistinguishable for real playfields, whose classes
+ *   are exclusive, but with the fifth player it implements "always wins
+ *   against all other playfields" unconditionally.
+ * - Three cells where a player-suppressed SF3 should stop suppressing
+ *   players (P5-as-only-playfield conflicts), plus the %1000
+ *   P5-over-PF01-over-players cascade from the prose, don't follow from any
+ *   static reading of the equations: those are explicit measured overrides.
+ */
+function resolvePriorityGates(
+	prior: number,
+	pfClass: number,
+	p: number,
+	p5: boolean,
+): number {
+	const pri0 = (prior & 1) !== 0;
+	const pri1 = (prior & 2) !== 0;
+	const pri2 = (prior & 4) !== 0;
+	const pri3 = (prior & 8) !== 0;
+	const multi = (prior & 0x20) !== 0;
+
+	const p0 = (p & 1) !== 0;
+	const p1 = (p & 2) !== 0;
+	const p2 = (p & 4) !== 0;
+	const p3 = (p & 8) !== 0;
+	const pf0 = pfClass === 1;
+	const pf1 = pfClass === 2;
+	const pf2 = pfClass === 3;
+	const pf3 = pfClass === 4 || p5;
+
+	const p01 = p0 || p1;
+	const p23 = p2 || p3;
+	const pf01 = pf0 || pf1;
+	const pf23 = pf2 || pf3;
+
+	// Measured overrides — see the doc comment.
+	if (p5) {
+		const pri = prior & 0x0f;
+		const pair01 =
+			(p0 ? 1 << COLPM0 : 0) | (p1 && (!p0 || multi) ? 1 << COLPM1 : 0);
+		const pair23 =
+			(p2 ? 1 << COLPM2 : 0) | (p3 && (!p2 || multi) ? 1 << COLPM3 : 0);
+		if (pfClass === 0 && p23 && (pri === 0b0101 || pri === 0b1100)) {
+			return p01 && pri === 0b0101 ? 0 : p01 ? pair01 : pair23;
+		}
+		if (pf01 && (p01 || p23) && pri === 0b1000) {
+			return 1 << COLPF3;
+		}
+	}
+
+	const pri01 = pri0 || pri1;
+	const pri12 = pri1 || pri2;
+	const pri23 = pri2 || pri3;
+	const pri03 = pri0 || pri3;
+
+	const sp0 = p0 && !(pf01 && pri23) && !(pri2 && pf23);
+	const sp1 = p1 && !(pf01 && pri23) && !(pri2 && pf23) && (!p0 || multi);
+	const sp2 = p2 && !p01 && !(pf23 && pri12) && !(pf01 && !pri0);
+	const sp3 =
+		p3 && !p01 && !(pf23 && pri12) && !(pf01 && !pri0) && (!p2 || multi);
+	const sf3 = pf3 && !(p23 && pri03) && !(p01 && !pri2);
+	const sf0 = pf0 && !(p23 && pri0) && !(p01 && pri01) && !pf3;
+	const sf1 = pf1 && !(p23 && pri0) && !(p01 && pri01) && !pf3;
+	const sf2 = pf2 && !(p23 && pri03) && !(p01 && !pri2) && !pf3;
+	const sb = !p01 && !p23 && !pf01 && !pf23;
+
+	return (
+		(sp0 ? 1 << COLPM0 : 0) |
+		(sp1 ? 1 << COLPM1 : 0) |
+		(sp2 ? 1 << COLPM2 : 0) |
+		(sp3 ? 1 << COLPM3 : 0) |
+		(sf0 ? 1 << COLPF0 : 0) |
+		(sf1 ? 1 << COLPF1 : 0) |
+		(sf2 ? 1 << COLPF2 : 0) |
+		(sf3 ? 1 << COLPF3 : 0) |
+		(sb ? 1 << COLBK : 0)
+	);
+}
+
+// The gates, precomputed: selector masks over colorRegisters (bit 8 =
+// COLBK), indexed by PRIOR's low 6 bits, the playfield class (0 BAK,
+// 1-4 PF0-PF3), the player bits, and the fifth-player flag.
+const PRIORITY_TABLE = new Uint16Array(1 << 14);
+for (let prior = 0; prior < 64; prior++) {
+	for (let pfClass = 0; pfClass < 5; pfClass++) {
+		for (let p = 0; p < 16; p++) {
+			for (let p5 = 0; p5 < 2; p5++) {
+				PRIORITY_TABLE[prior | (pfClass << 6) | (p << 9) | (p5 << 13)] =
+					resolvePriorityGates(prior, pfClass, p, p5 === 1);
+			}
+		}
+	}
+}
+
+/** The priority selector mask for a source combination. Exported for tests. */
+export function prioritySelector(
+	prior: number,
+	pfClass: number,
+	p: number,
+	p5: boolean,
+): number {
+	return PRIORITY_TABLE[
+		(prior & 0x3f) | (pfClass << 6) | (p << 9) | (p5 ? 1 << 13 : 0)
+	]!;
+}

@@ -1,4 +1,4 @@
-export { AnticGtia } from "./antic-gtia.ts";
+export { AnticGtia, type TvAdapter } from "./antic-gtia.ts";
 export { AtrImage } from "./atr.ts";
 export {
 	canonicalize,

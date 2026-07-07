@@ -100,6 +100,7 @@ export const messages = {
 		ram: "RAM",
 		separateAntic: "Separate ANTIC access",
 		tv: "TV",
+		videoChip: "Video chip",
 		basic: "BASIC",
 		on: "On",
 		off: "Off",
@@ -546,6 +547,7 @@ export const messages = {
 		disablingBasic: "Disabling BASIC",
 		switchingMachine: (model: string) => `Switching to Atari ${model}`,
 		switchingTv: (tv: string) => `Switching TV to ${tv}`,
+		switchingVideoChip: (chip: string) => `Switching video chip to ${chip}`,
 		powerCycling: "Rebooting",
 		keyboardMode: (mode: "character" | "positional"): string =>
 			`Keyboard: ${mode === "positional" ? "Positional" : "Character"} mode`,

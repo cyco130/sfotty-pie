@@ -15,14 +15,63 @@ interface AnticGtiaConfig {
 	log: (message: string) => void;
 }
 
+/**
+ * The video output chip variant. The CTIA (in early 400/800s) predates the
+ * GTIA's special modes: PRIOR bits 6-7 are ignored and a "GTIA mode" screen
+ * displays as its base ANTIC mode — the collision difference is the
+ * documented way software detects which chip it runs on (AHRM 6.9). "fgtia"
+ * (the SECAM variant, with its trigger-sampling quirk) is a future value.
+ */
+export type TvAdapter = "ctia" | "gtia";
+
 interface AnticGtiaOptions {
 	anticTvSystem: "ntsc" | "pal";
 	gtiaTvSystem: "ntsc" | "pal";
+	/** Default "gtia". */
+	tvAdapter?: TvAdapter;
 }
 
 // What the GTIA color registers hold at power-on: a dark brown (hue $F,
 // minimum luminance). Observed behavior, not documented.
 const POWER_ON_COLOR = 0xf0;
+
+// The paint pipeline. afterCpu for machine cycle i paints color clocks 2i
+// and 2i+1 — the exact color clocks the beam covers during that cycle — so
+// "the beam" below just means the color clock being painted.
+//
+// Playfield bytes reach the GTIA paint through the ANx bus with a fixed
+// lag, but the fetch slots differ by mode family (pinned by Acid800
+// antic_dmapattern's cycle tables): bitmap-mode data fetches sit at cycles
+// 12/20/28 (wide/normal/narrow) and take 8 color clocks to the screen
+// (AHRM: 7 to cross the ANx bus + 1 through GTIA's output stage; also the
+// cycle-65 / positions $8C-$8F mode E anchor in AHRM 6.10), while
+// character glyph fetches sit one cycle later — three cycles after their
+// name fetches at 10/18/26 — and take 6. Both land the first pixel exactly
+// at the playfield start (HPOS 32/48/64). The delays below cover the trip
+// to the ANx bus (as a DelayLine delay scheduled from busCycle time,
+// before the cycle's own two ticks, that is bus-lag + 1); GTIA's output
+// register (#anxHold) adds the final color clock.
+const ANX_BITMAP_DELAY = 8;
+const ANX_CHAR_DELAY = 6;
+
+// GTIA register writes reach the paint logic a few color clocks after the
+// bus write (AHRM 6.10 table 18). A write during machine cycle w scheduled
+// with delay N applies just before color clock 2w+N-1 paints. The anchor is
+// HPOS at delay 7 — effective from color clock 2w+6, pinned by Acid800
+// gtia_retrigger and equal to Atari++'s -playerpositiondelay default (12
+// half color clocks). AHRM's table supplies the spacings between classes
+// (color = HPOS-4, PRIOR = HPOS-3, GRAF = HPOS-2; its absolute
+// $81/$82/$83/$85 column sits a uniform 3 color clocks earlier — a
+// write-phase origin difference, the ladder is what's reliable). SIZE is
+// faster than HPOS — Atari++'s -playerresizedelay (3 color clocks, i.e.
+// HPOS-3) where AHRM's prose lumps them; Acid800 pmresize arbitrates in
+// Atari++'s favor. Open refinement: PRIOR bits 6-7 are really 3-5 color
+// clocks with per-transition artifacts (GTIA modes work).
+const POS_WRITE_DELAY = 7;
+const SIZE_WRITE_DELAY = 4;
+const GRAF_WRITE_DELAY = 5;
+const COLOR_WRITE_DELAY = 3;
+const PRIOR_WRITE_DELAY = 4;
 
 export class AnticGtia implements Memory {
 	// NMIEN bits
@@ -101,16 +150,12 @@ export class AnticGtia implements Memory {
 	hpos: number = 0;
 	refreshPending = false;
 
-	// Color registers
-	colpm0 = POWER_ON_COLOR;
-	colpm1 = POWER_ON_COLOR;
-	colpm2 = POWER_ON_COLOR;
-	colpm3 = POWER_ON_COLOR;
-	colpf0 = POWER_ON_COLOR;
-	colpf1 = POWER_ON_COLOR;
-	colpf2 = POWER_ON_COLOR;
-	colpf3 = POWER_ON_COLOR;
-	colbk = POWER_ON_COLOR;
+	/**
+	 * The color registers in address order — COLPM0-3, COLPF0-3, COLBK
+	 * ($D012-$D01A). The indices double as the priority table's selector
+	 * bits (see the COLPM0..COLBK constants).
+	 */
+	readonly colorRegisters = new Uint8Array(9).fill(POWER_ON_COLOR);
 
 	// P/M Horizontal positions
 	hposp0 = 0;
@@ -178,6 +223,8 @@ export class AnticGtia implements Memory {
 
 	anticLineCount: number;
 	#gtiaPal: number;
+	// False on a CTIA: PRIOR bits 6-7 are ignored — no special modes.
+	#gtiaModes = true;
 
 	constructor(
 		{ dmaRead, log }: AnticGtiaConfig,
@@ -191,6 +238,7 @@ export class AnticGtia implements Memory {
 				? PAL_LINES_PER_FRAME
 				: NTSC_LINES_PER_FRAME;
 		this.#gtiaPal = initialOptions.gtiaTvSystem === "pal" ? 0x1 : 0xf;
+		this.#gtiaModes = initialOptions.tvAdapter !== "ctia";
 	}
 
 	setOptions(options: AnticGtiaOptions) {
@@ -199,6 +247,7 @@ export class AnticGtia implements Memory {
 				? PAL_LINES_PER_FRAME
 				: NTSC_LINES_PER_FRAME;
 		this.#gtiaPal = options.gtiaTvSystem === "pal" ? 0x1 : 0xf;
+		this.#gtiaModes = options.tvAdapter !== "ctia";
 	}
 
 	reset(cold: boolean): void {
@@ -262,26 +311,24 @@ export class AnticGtia implements Memory {
 
 		this.pfPixels.fill(0);
 		this.pfCounter = 0;
+		this.#anxLine.reset();
+		this.#anxDrain = 0;
 
 		// Output lines
 		this.nmi = false;
 		this.#nmiDelay.reset();
 		this.halt = false;
 		this.rdy = true;
+
+		this.#dmaVisibleLine = false;
+		this.#lineFetchWidth = 0;
+		this.#rebuildDmaPattern();
 	}
 
 	// Keep the assignments in sync with the field initializers. Inputs (console
 	// keys, triggers) reflect physical switches and are left alone.
 	#resetGtia(): void {
-		this.colpm0 = POWER_ON_COLOR;
-		this.colpm1 = POWER_ON_COLOR;
-		this.colpm2 = POWER_ON_COLOR;
-		this.colpm3 = POWER_ON_COLOR;
-		this.colpf0 = POWER_ON_COLOR;
-		this.colpf1 = POWER_ON_COLOR;
-		this.colpf2 = POWER_ON_COLOR;
-		this.colpf3 = POWER_ON_COLOR;
-		this.colbk = POWER_ON_COLOR;
+		this.colorRegisters.fill(POWER_ON_COLOR);
 
 		this.hposp0 = 0;
 		this.hposp1 = 0;
@@ -349,6 +396,22 @@ export class AnticGtia implements Memory {
 		this.#sizeM3 = 1;
 		this.#sizeM3Counter = 0;
 		this.#shiftM3 = 0;
+
+		this.#pmFetchCycle = -1;
+
+		this.#posWrites.reset();
+		this.#sizeWrites.reset();
+		this.#grafWrites.reset();
+		this.#colorWrites.reset();
+		this.#priorWrites.reset();
+		this.#pendingGtiaWrites = 0;
+
+		this.#anxHold = 0;
+		this.#gtiaPixel = 0;
+		this.#gtiaPixelPrev = 0;
+		this.#gtiaBkMuted = false;
+		this.#gtiaPrevBkMuted = false;
+		this.#lineGtiaMode = 0;
 	}
 
 	#log: (message: string) => void;
@@ -459,121 +522,21 @@ export class AnticGtia implements Memory {
 			// GTIA
 			address &= 0x1f;
 			switch (address) {
-				case 0x00:
-					this.hposp0 = value;
-					break;
-				case 0x01:
-					this.hposp1 = value;
-					break;
-				case 0x02:
-					this.hposp2 = value;
-					break;
-				case 0x03:
-					this.hposp3 = value;
-					break;
-				case 0x04:
-					this.hposm0 = value;
-					break;
-				case 0x05:
-					this.hposm1 = value;
-					break;
-				case 0x06:
-					this.hposm2 = value;
-					break;
-				case 0x07:
-					this.hposm3 = value;
-					break;
-
-				case 0x08:
-					// SIZEP0
-					this.#sizeP0 = PM_SIZES[value & 0x3]!;
-					break;
-				case 0x09:
-					// SIZEP1
-					this.#sizeP1 = PM_SIZES[value & 0x3]!;
-					break;
-				case 0x0a:
-					// SIZEP2
-					this.#sizeP2 = PM_SIZES[value & 0x3]!;
-					break;
-				case 0x0b:
-					// SIZEP3
-					this.#sizeP3 = PM_SIZES[value & 0x3]!;
-					break;
-				case 0x0c:
-					// SIZEM
-					this.#sizeM0 = PM_SIZES[value & 0x3]!;
-					this.#sizeM1 = PM_SIZES[(value >> 2) & 0x3]!;
-					this.#sizeM2 = PM_SIZES[(value >> 4) & 0x3]!;
-					this.#sizeM3 = PM_SIZES[(value >> 6) & 0x3]!;
-					break;
-				case 0x0d:
-					this.grafP0 = value;
-					break;
-				case 0x0e:
-					this.grafP1 = value;
-					break;
-				case 0x0f:
-					this.grafP2 = value;
-					break;
-				case 0x10:
-					this.grafP3 = value;
-					break;
-				case 0x11:
-					this.grafM = value;
-					break;
-
-				case 0x12:
-					// COLPM0
-					this.colpm0 = value;
-					break;
-				case 0x13:
-					// COLPM1
-					this.colpm1 = value;
-					break;
-				case 0x14:
-					// COLPM2
-					this.colpm2 = value;
-					break;
-				case 0x15:
-					// COLPM3
-					this.colpm3 = value;
-					break;
-				case 0x16:
-					// COLPF0
-					this.colpf0 = value;
-					break;
-				case 0x17:
-					// COLPF1
-					this.colpf1 = value;
-					break;
-				case 0x18:
-					// COLPF2
-					this.colpf2 = value;
-					break;
-				case 0x19:
-					// COLPF3
-					this.colpf3 = value;
-					break;
-				case 0x1a:
-					// COLBK
-					this.colbk = value;
-					break;
-				case 0x1b:
-					// PRIOR
-					this.prior = value;
-					break;
 				case 0x1c:
-					// VDELAY
+					// VDELAY — consumed at the bus-time GRAF latch, not in the
+					// paint pipeline: immediate.
 					this.vdelay = value;
 					break;
 				case 0x1d:
-					// GRACTL
+					// GRACTL — gates the bus-time GRAF latch (and trigger
+					// latching): immediate.
 					this.enablePlayers = !!(value & 0x02);
 					this.enableMissiles = !!(value & 0x01);
 					break;
 				case 0x1e:
-					// HITCLR
+					// HITCLR clears the collision latches immediately; the
+					// beam-anchored painter re-latches whatever it paints
+					// next, so nothing else is needed (Acid800-pinned).
 					this.m0pf = 0;
 					this.m1pf = 0;
 					this.m2pf = 0;
@@ -598,6 +561,12 @@ export class AnticGtia implements Memory {
 					} else {
 						this.consoleSpeaker = 1;
 					}
+					break;
+				default:
+					// Every other register feeds the paint logic and takes
+					// effect a few color clocks after the write — see the
+					// write-delay constants.
+					this.#queueGtiaWrite(address, value);
 			}
 		} else {
 			// ANTIC
@@ -611,6 +580,7 @@ export class AnticGtia implements Memory {
 					this.verticalPmResolution = value & 0x10 ? 1 : 2;
 					this.missileDmaEnabled = !!(value & 0xc);
 					this.playerDmaEnabled = !!(value & 0x8);
+					this.#rebuildDmaPattern();
 					break;
 
 				case 0x01:
@@ -632,6 +602,7 @@ export class AnticGtia implements Memory {
 				case 0x04:
 					// HSCROL
 					this.hscrol = value & 0x0f;
+					this.#rebuildDmaPattern();
 					break;
 
 				case 0x05:
@@ -699,10 +670,181 @@ export class AnticGtia implements Memory {
 
 	waitingForVbi = false;
 
-	// Playfield data, right to left
+	// Per-fetch scratch: one byte's playfield codes, right to left;
+	// #fetchPlayfield ships the batch into #anxLine.
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
 	pfPixels = new Uint8Array(16);
 	pfCounter = 0;
+
+	// Playfield codes in flight from the ANTIC fetch to the GTIA paint (the
+	// ANx bus plus GTIA's output stage). Ticked once per color clock by
+	// #drawPlayfield; an empty slot paints background. See ANX_BITMAP_DELAY
+	// and ANX_CHAR_DELAY.
+	#anxLine = new DelayLine(32);
+
+	// Color clocks until the ANx pipe is provably empty (the furthest
+	// scheduled slot at the last push). While zero, #drawPlayfield skips
+	// ticking the pipe and paints background.
+	#anxDrain = 0;
+
+	// GTIA register writes in flight to the paint logic, one DelayLine per
+	// latency class so two writes can never fall due on the same color clock
+	// (the CPU issues at most one write per machine cycle = two color
+	// clocks). Slot payload: bit 16 marks presence, bits 8-15 the register,
+	// bits 0-7 the value. Ticked once per color clock in #generateColor.
+	#posWrites = new DelayLine(8); // HPOSPx/HPOSMx
+	#sizeWrites = new DelayLine(8); // SIZEPx/SIZEM
+	#grafWrites = new DelayLine(8); // GRAFPx/GRAFM
+	#colorWrites = new DelayLine(8); // COLPMx/COLPFx/COLBK
+	#priorWrites = new DelayLine(8); // PRIOR
+
+	// Writes queued but not yet applied, across all five lines. While zero,
+	// #applyPendingWrites skips ticking entirely — that freezes the lines'
+	// cursors, which is sound: schedules are cursor-relative and an empty
+	// line carries no time-sensitive state, so its clock only has to run
+	// while something is in flight.
+	#pendingGtiaWrites = 0;
+
+	#queueGtiaWrite(address: number, value: number): void {
+		const line =
+			address < 0x08
+				? this.#posWrites
+				: address < 0x0d
+					? this.#sizeWrites
+					: address < 0x12
+						? this.#grafWrites
+						: address < 0x1b
+							? this.#colorWrites
+							: this.#priorWrites;
+		const delay =
+			address < 0x08
+				? POS_WRITE_DELAY
+				: address < 0x0d
+					? SIZE_WRITE_DELAY
+					: address < 0x12
+						? GRAF_WRITE_DELAY
+						: address < 0x1b
+							? COLOR_WRITE_DELAY
+							: PRIOR_WRITE_DELAY;
+		line.scheduleValue(delay, 0x10000 | (address << 8) | value);
+		this.#pendingGtiaWrites++;
+	}
+
+	// Tick the five write lines and apply whatever is due, just before the
+	// current color clock paints. The common case — nothing in flight —
+	// is one comparison.
+	#applyPendingWrites(): void {
+		if (this.#pendingGtiaWrites === 0) return;
+		let w = this.#posWrites.tick();
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
+		w = this.#sizeWrites.tick();
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
+		w = this.#grafWrites.tick();
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
+		w = this.#colorWrites.tick();
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
+		w = this.#priorWrites.tick();
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
+	}
+
+	#applyGtiaWrite(address: number, value: number): void {
+		if (address >= 0x12 && address <= 0x1a) {
+			// COLPM0-COLPM3, COLPF0-COLPF3, COLBK — in register order.
+			this.colorRegisters[address - 0x12] = value;
+			return;
+		}
+		switch (address) {
+			case 0x00:
+				this.hposp0 = value;
+				break;
+			case 0x01:
+				this.hposp1 = value;
+				break;
+			case 0x02:
+				this.hposp2 = value;
+				break;
+			case 0x03:
+				this.hposp3 = value;
+				break;
+			case 0x04:
+				this.hposm0 = value;
+				break;
+			case 0x05:
+				this.hposm1 = value;
+				break;
+			case 0x06:
+				this.hposm2 = value;
+				break;
+			case 0x07:
+				this.hposm3 = value;
+				break;
+
+			// The size bits feed the shift state machine directly as its
+			// counter mask: state' = (state + 1) & size (AHRM 6.5). %00 and
+			// %10 both render normal width, but %10 is not remapped — from
+			// state %01 the counter sticks at %10 and never reaches the
+			// shift-on-%00 transition, the documented lockup anomaly
+			// (Acid800 pmresize).
+			case 0x08:
+				// SIZEP0
+				this.#sizeP0 = value & 0x3;
+				break;
+			case 0x09:
+				// SIZEP1
+				this.#sizeP1 = value & 0x3;
+				break;
+			case 0x0a:
+				// SIZEP2
+				this.#sizeP2 = value & 0x3;
+				break;
+			case 0x0b:
+				// SIZEP3
+				this.#sizeP3 = value & 0x3;
+				break;
+			case 0x0c:
+				// SIZEM
+				this.#sizeM0 = value & 0x3;
+				this.#sizeM1 = (value >> 2) & 0x3;
+				this.#sizeM2 = (value >> 4) & 0x3;
+				this.#sizeM3 = (value >> 6) & 0x3;
+				break;
+			case 0x0d:
+				this.grafP0 = value;
+				break;
+			case 0x0e:
+				this.grafP1 = value;
+				break;
+			case 0x0f:
+				this.grafP2 = value;
+				break;
+			case 0x10:
+				this.grafP3 = value;
+				break;
+			case 0x11:
+				this.grafM = value;
+				break;
+
+			case 0x1b:
+				// PRIOR
+				this.prior = value;
+				break;
+		}
+	}
 
 	/** ANTIC's NMI output line. Copy to the CPU's NMI input every cycle. */
 	nmi = false;
@@ -740,12 +882,62 @@ export class AnticGtia implements Memory {
 	/** The RDY output line: false while a WSYNC stall is in effect. */
 	rdy = true;
 
-	// Carried from beforeCpu to busCycle: the cycle's hpos slot (captured before
-	// beforeCpu advances hpos) and whether it's a visible display line. busCycle
-	// uses these to drive the DMA fetch without re-deriving them off the
-	// already-advanced counters.
+	// Carried from beforeCpu to busCycle: the cycle's hpos slot (captured
+	// before beforeCpu advances hpos), so busCycle needn't re-derive it off
+	// the already-advanced counter.
 	#dmaHpos = 0;
+
+	// Whether the current line is a visible display line (no vertical blank,
+	// not waiting on a JVB) — a per-line input to the DMA pattern.
 	#dmaVisibleLine = false;
+
+	// The current line's DMA pattern (see buildDmaPattern) and the cache of
+	// built patterns by state key. Rebuilt — usually a cache-hit pointer swap
+	// — at line start, after the cycle-1 instruction decode, and on
+	// DMACTL/HSCROL writes.
+	#dmaPattern: Uint16Array = new Uint16Array(114);
+	#dmaPatternCache = new Map<number, Uint16Array>();
+
+	// The (widened) fetch width the line's playfield started with, 0 before
+	// it starts. Disabling playfield DMA after the start leaves the load
+	// slots running as bus-free MSC advances (see buildDmaPattern); a
+	// disable before the start means the playfield never starts at all.
+	#lineFetchWidth = 0;
+
+	#rebuildDmaPattern(): void {
+		const scrolled =
+			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
+		if (this.playfieldWidth) {
+			let fetchWidth: number = this.playfieldWidth;
+			if (scrolled && fetchWidth < 3) fetchWidth++;
+			this.#lineFetchWidth = fetchWidth;
+		} else if (this.#lineFetchWidth) {
+			const start =
+				(this.charFetchRate
+					? NAME_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3]
+					: BITMAP_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3]) +
+				(scrolled ? this.hscrol >> 1 : 0);
+			if (this.hpos - 1 <= start) this.#lineFetchWidth = 0;
+		}
+		const key =
+			(this.missileDmaEnabled ? 0b1 : 0) |
+			(this.playerDmaEnabled ? 0b10 : 0) |
+			(this.#dmaVisibleLine ? 0b100 : 0) |
+			(this.#newInstruction ? 0b1000 : 0) |
+			(this.displayListDmaEnabled ? 0b10000 : 0) |
+			((this.instruction & 0x0f) << 5) |
+			(this.instruction & 0x40 ? 0x200 : 0) |
+			(scrolled ? 0x400 : 0) |
+			((this.hscrol >> 1) << 11) |
+			(this.playfieldWidth << 14) |
+			(this.#lineFetchWidth << 16);
+		let pattern = this.#dmaPatternCache.get(key);
+		if (!pattern) {
+			pattern = buildDmaPattern(key);
+			this.#dmaPatternCache.set(key, pattern);
+		}
+		this.#dmaPattern = pattern;
+	}
 
 	/**
 	 * The VCOUNT register value as the CPU sees it mid-cycle. The hardware
@@ -885,11 +1077,17 @@ export class AnticGtia implements Memory {
 			this.waitingForVbi = false;
 		}
 
-		const visibleLine =
-			!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
+		if (i === 0) {
+			// The line's DMA pattern: visibility and the instruction state are
+			// per-line inputs (mid-line register writes rebuild it too).
+			this.#dmaVisibleLine =
+				!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
+			this.#lineFetchWidth = 0;
+			this.#rebuildDmaPattern();
+		}
 
 		// Request 9 refresh cycles every 4 cycles starting from 25
-		if (i >= 25 && i <= 57 && !((i - 25) & 0x3)) {
+		if (REFRESH_REQUEST[i]) {
 			this.refreshPending = true;
 		}
 
@@ -908,44 +1106,102 @@ export class AnticGtia implements Memory {
 			this.lastDisplayListAddress = this.displayListAddress;
 		}
 
-		// The DMA fetch itself — a bus access — is busCycle's job. Hand it the
-		// slot and visible-line decision computed here; beforeCpu commits the
-		// cycle's scheduling without touching the bus.
+		// The DMA fetch itself — a bus access — is busCycle's job; beforeCpu
+		// commits the cycle's scheduling without touching the bus.
 		this.#dmaHpos = i;
-		this.#dmaVisibleLine = visibleLine;
 	}
 
 	/**
-	 * The ANTIC bus phase: perform this cycle's DMA fetch (display list, P/M,
-	 * character, or playfield) or DRAM refresh, and set {@link halt} for it.
-	 * Split out from {@link beforeCpu} — which commits the cycle's scheduling
-	 * without touching the bus — so the read can be retried after a suspend
-	 * without re-advancing ANTIC's counters. Call once per cycle, between
-	 * beforeCpu and running the CPU.
+	 * The ANTIC bus phase: perform this cycle's DMA action (display list,
+	 * P/M, character, or playfield fetch) or DRAM refresh, and set
+	 * {@link halt} for it. The per-cycle decision is one lookup in the line's
+	 * precomputed DMA pattern (see {@link buildDmaPattern}). Split out from
+	 * {@link beforeCpu} — which commits the cycle's scheduling without
+	 * touching the bus — so the read can be retried after a suspend without
+	 * re-advancing ANTIC's counters. Call once per cycle, between beforeCpu
+	 * and running the CPU.
 	 */
 	busCycle(): void {
-		const i = this.#dmaHpos;
+		const entry = this.#dmaPattern[this.#dmaHpos]!;
+		const action = entry & 0xff;
 
-		if (
-			(i === 0 && this.#fetchMissiles()) ||
-			(i >= 2 && i <= 5 && this.#fetchPlayer(i - 2)) ||
-			(this.#dmaVisibleLine &&
-				((i === 1 && this.#fetchFirstByte()) ||
-					(i === 6 && this.#fetchSecondByte()) ||
-					(i === 7 && this.#fetchThirdByte()) ||
-					this.#fetchCharacter(i) ||
-					this.#fetchPlayfield(i)))
-		) {
-			// P/M or display list DMA, already handled by fetchXxx methods
-			this.halt = true;
-		} else if (this.refreshPending) {
-			// DRAM refresh cycle
-			this.refreshPending = false;
-			this.halt = true;
-		} else {
-			this.halt = false;
+		if (action === DMA_NONE) {
+			if (this.refreshPending) {
+				// DRAM refresh cycle
+				this.refreshPending = false;
+				this.halt = true;
+			} else {
+				this.halt = false;
+			}
+			return;
+		}
+
+		this.halt = true;
+		switch (action) {
+			case DMA_MISSILE:
+				this.#fetchMissiles();
+				break;
+			case DMA_PLAYER:
+				this.#fetchPlayer(entry >> 8);
+				break;
+			case DMA_DL_FETCH:
+				this.instruction = this.#dmaRead(this.displayListAddress);
+				this.#incrementDisplayListAddress();
+				this.#decodeInstruction();
+				this.#rebuildDmaPattern();
+				break;
+			case DMA_DL_DECODE:
+				// A new instruction with display-list DMA off: the stale
+				// instruction re-decodes, but the bus is free.
+				this.#decodeInstruction();
+				this.#rebuildDmaPattern();
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_DL_LO:
+				this.#fetchDlArgLo();
+				break;
+			case DMA_DL_HI:
+				this.#fetchDlArgHi();
+				break;
+			case DMA_NAME:
+				this.#fetchName(entry >> 8);
+				break;
+			case DMA_GLYPH:
+				this.#fetchGlyph(entry >> 8);
+				break;
+			case DMA_BITMAP:
+				this.#fetchBitmap(entry >> 8);
+				break;
+			case DMA_REPLAY:
+				// Line-buffer replay: pixels flow but the bus is free — a
+				// pending refresh may use the cycle.
+				this.#replayBitmap(entry >> 8);
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_PF_SKIP:
+				// A masked load slot (playfield DMA disabled mid-line): MSC
+				// advances, the bus stays free.
+				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000);
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
 		}
 	}
+
+	// The cycle GTIA took for this line's missile fetch: the first halted
+	// cycle within horizontal blank, or -1 while none has occurred yet.
+	#pmFetchCycle = -1;
 
 	afterCpu(frame: Uint8Array, busData: number) {
 		const pixels0 = this.#generateColor(0);
@@ -960,7 +1216,7 @@ export class AnticGtia implements Memory {
 
 		const i = this.hpos - 1;
 
-		const x = i - 17 + 3;
+		const x = i - 17;
 		const y = this.vcount - 8;
 
 		if (y >= 0 && y < 240) {
@@ -974,70 +1230,217 @@ export class AnticGtia implements Memory {
 
 			const isOddScanline = y & 1;
 
-			// The GRAF registers latch the bus during the P/M DMA slots only
+			// GTIA has no window into ANTIC's DMA schedule: it takes the
+			// first halted cycle within horizontal blank to be the missile
+			// fetch, and the four cycles starting two later to be the player
+			// fetches. With P/M DMA on that reproduces the real slots
+			// (missile 0, players 2-5); with it off, a halted display-list
+			// fetch is mistaken for the missile slot and the loads shift —
+			// and a line with no halted HBLANK cycle loads nothing (AHRM;
+			// Acid800 phantomdma).
+			if (i === 0) {
+				this.#pmFetchCycle = -1;
+			}
+			if (this.#pmFetchCycle < 0 && this.halt && i < 17) {
+				this.#pmFetchCycle = i;
+			}
+			const pmSlot = this.#pmFetchCycle < 0 ? -1 : i - this.#pmFetchCycle;
+
+			// The GRAF registers latch the bus during the P/M fetch slots only
 			// when GRACTL enables it — with GRACTL off, direct GRAF writes
 			// persist (the GTIA collision tests rely on that). The latch runs for
-			// the whole visible region (scan lines 8-247, i.e. y < 240): an
-			// earlier cut at y < 224 froze player graphics over the bottom 16
+			// the whole visible region (scan lines 8-247 — the enclosing y < 240):
+			// an earlier cut at y < 224 froze player graphics over the bottom 16
 			// lines, which is invisible on NTSC but corrupts the lower HUD on PAL
 			// (its taller frame puts content there) — River Raid's bug.
-			if (y < 240) {
-				if (i === 0 && this.enableMissiles) {
-					// VDELAY bits 0-3 delay each missile independently, but
-					// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
-					// latch each pair on its own: a delayed missile updates only
-					// on odd scanlines, exactly like the per-player logic below.
-					let m = this.grafM;
-					if (isOddScanline || !(this.vdelay & 0x01)) {
-						m = (m & ~0x03) | (busData & 0x03);
-					}
-					if (isOddScanline || !(this.vdelay & 0x02)) {
-						m = (m & ~0x0c) | (busData & 0x0c);
-					}
-					if (isOddScanline || !(this.vdelay & 0x04)) {
-						m = (m & ~0x30) | (busData & 0x30);
-					}
-					if (isOddScanline || !(this.vdelay & 0x08)) {
-						m = (m & ~0xc0) | (busData & 0xc0);
-					}
-					this.grafM = m;
+			if (pmSlot === 0 && this.enableMissiles) {
+				// VDELAY bits 0-3 delay each missile independently, but
+				// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
+				// latch each pair on its own: a delayed missile updates only
+				// on odd scanlines, exactly like the per-player logic below.
+				let m = this.grafM;
+				if (isOddScanline || !(this.vdelay & 0x01)) {
+					m = (m & ~0x03) | (busData & 0x03);
+				}
+				if (isOddScanline || !(this.vdelay & 0x02)) {
+					m = (m & ~0x0c) | (busData & 0x0c);
+				}
+				if (isOddScanline || !(this.vdelay & 0x04)) {
+					m = (m & ~0x30) | (busData & 0x30);
+				}
+				if (isOddScanline || !(this.vdelay & 0x08)) {
+					m = (m & ~0xc0) | (busData & 0xc0);
+				}
+				this.grafM = m;
+			}
+
+			if (this.enablePlayers) {
+				if (pmSlot === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
+					this.grafP0 = busData;
 				}
 
-				if (this.enablePlayers) {
-					if (i === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
-						this.grafP0 = busData;
-					}
+				if (pmSlot === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
+					this.grafP1 = busData;
+				}
 
-					if (i === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
-						this.grafP1 = busData;
-					}
+				if (pmSlot === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
+					this.grafP2 = busData;
+				}
 
-					if (i === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
-						this.grafP2 = busData;
-					}
-
-					if (i === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
-						this.grafP3 = busData;
-					}
+				if (pmSlot === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
+					this.grafP3 = busData;
 				}
 			}
 		}
 	}
 
 	#generateColor(pos: 0 | 1): number {
-		const pf = this.#drawPlayfield2();
-		const pm = this.#drawPlayerMissile2(pos);
-		this.#detectCollisions(pf, pm);
-		const color = this.#resolvePriority(pf, pm);
+		this.#applyPendingWrites();
 
-		if (pf & 0x4) {
-			// Apply hires luminance
-			const left = pf & 0x2 ? (color & 0xf0) | (this.colpf1 & 0xf) : color;
-			const right = pf & 0x1 ? (color & 0xf0) | (this.colpf1 & 0xf) : color;
-			return (left << 8) | right;
-		} else {
+		// The ANx value arriving this color clock; what paints now is the
+		// previous one, sitting in GTIA's output register. The special
+		// modes' pixel former pairs the two: on even color clocks it has
+		// both halves of a fat pixel in hand.
+		const incoming = this.#drawPlayfield(pos);
+		const pf = this.#anxHold;
+		this.#anxHold = incoming;
+
+		if (pos === 0) {
+			this.#gtiaPixelPrev = this.#gtiaPixel;
+			this.#gtiaPrevBkMuted = this.#gtiaBkMuted;
+			// AN2 is ignored: background and a %00 pair both contribute %00
+			// — which is why borders read as pixel data in the special
+			// modes.
+			this.#gtiaPixel = ((pf & 0x3) << 2) | (incoming & 0x3);
+			// The mode 10 lores anomaly: a true background code as the
+			// second half mutes the playfield for the whole fat pixel
+			// (AHRM 6.9; Acid800 psuedomodee).
+			this.#gtiaBkMuted = !this.hires && incoming === 0;
+		}
+
+		const pm = this.#drawPlayerMissile(pos);
+		const gtiaMode = this.#gtiaModes ? this.prior & 0xc0 : 0;
+
+		// Latch the line's special-mode state at color clock 33 (the
+		// boundary is pinned from both sides by psuedomodee's
+		// one-cycle-apart PRIOR writes).
+		if (pos === 1 && this.hpos - 1 === 16) {
+			this.#lineGtiaMode = gtiaMode;
+		}
+
+		if (gtiaMode === 0) {
+			if (this.#lineGtiaMode !== 0) {
+				// Pseudo mode E: the special mode was still on at the line
+				// latch, so each AN0-1 pair decodes as PF0-PF3 — one pair
+				// per color clock, background included.
+				const code = 0x8 | (pf & 0x3);
+				this.#detectCollisions(code, pm);
+				const color = this.#resolvePriority(code, pm, 0);
+				return (color << 8) | color;
+			}
+			this.#detectCollisions(pf, pm);
+			const color = this.#resolvePriority(pf, pm, 0);
+			if (pf & 0x4) {
+				// Apply hires luminance
+				const left =
+					pf & 0x2
+						? (color & 0xf0) | (this.colorRegisters[COLPF1]! & 0xf)
+						: color;
+				const right =
+					pf & 0x1
+						? (color & 0xf0) | (this.colorRegisters[COLPF1]! & 0xf)
+						: color;
+				return (left << 8) | right;
+			}
 			return (color << 8) | color;
 		}
+
+		// GTIA special modes. Hires (the PF1-luma splice) is forced off.
+		let color: number;
+		if (gtiaMode === 0x80) {
+			// Mode 10 (9-color) runs one color clock behind the other modes
+			// (its extra delay line), so even color clocks replay the
+			// previous fat pixel. Pixel codes select color registers: 0-3
+			// act as that player for priority but trigger no player
+			// collisions, x100-x111 are PF0-PF3 with real playfield
+			// collisions, 10xx is background.
+			const px = pos === 0 ? this.#gtiaPixelPrev : this.#gtiaPixel;
+			const muted = pos === 0 ? this.#gtiaPrevBkMuted : this.#gtiaBkMuted;
+			if (muted || (px & 0xc) === 0x8) {
+				this.#detectCollisions(0, pm);
+				color = this.#resolvePriority(0, pm, 0);
+			} else if (px & 0x4) {
+				const code = 0x8 | (px & 0x3);
+				this.#detectCollisions(code, pm);
+				color = this.#resolvePriority(code, pm, 0);
+			} else {
+				this.#detectCollisions(0, pm);
+				color = this.#resolvePriority(0, pm, 1 << px);
+			}
+		} else {
+			// Modes 9 and 11: the playfield is background for priority and
+			// collisions — P/M always win and no playfield collision
+			// latches.
+			this.#detectCollisions(0, pm);
+			color =
+				gtiaMode === 0x40
+					? this.#resolveGtia9(this.#gtiaPixel, pm)
+					: this.#resolveGtia11(this.#gtiaPixel, pm);
+		}
+		return (color << 8) | color;
+	}
+
+	// P/M-above-playfield resolution shared by modes 9 and 11: any player
+	// (or non-fifth missile) wins outright and the playfield drops out.
+	// Returns -1 when no P/M is active — the caller supplies the playfield
+	// color and the fifth-player mix.
+	#resolveGtiaPm(pm: number): number {
+		const regs = this.colorRegisters;
+		let p = pm >> 4;
+		if (!(this.prior & 0x10)) {
+			p |= pm & 0xf;
+		}
+		if (p & 0x3) {
+			return this.prior & 0x20 && (p & 0x3) === 0x3
+				? regs[COLPM0]! | regs[COLPM1]!
+				: p & 0x1
+					? regs[COLPM0]!
+					: regs[COLPM1]!;
+		}
+		if (p & 0xc) {
+			return this.prior & 0x20 && (p & 0xc) === 0xc
+				? regs[COLPM2]! | regs[COLPM3]!
+				: p & 0x4
+					? regs[COLPM2]!
+					: regs[COLPM3]!;
+		}
+		return -1;
+	}
+
+	// Mode 9 (PRIOR %01): 16 luminances of COLBK's hue. The pixel bypasses
+	// the color registers (the only path to an odd luminance bit) and ORs
+	// with COLBK; a fifth-player missile mixes as PF3 OR the luminance.
+	#resolveGtia9(px: number, pm: number): number {
+		const winner = this.#resolveGtiaPm(pm);
+		if (winner >= 0) return winner;
+		if (this.prior & 0x10 && pm & 0xf) {
+			return this.colorRegisters[COLPF3]! | px;
+		}
+		return this.colorRegisters[COLBK]! | px;
+	}
+
+	// Mode 11 (PRIOR %11): 16 hues at COLBK's luminance, except pixel %0000
+	// is forced to luminance 0. A fifth-player missile replaces COLBK with
+	// PF3 (the luma-0 rule still wins).
+	#resolveGtia11(px: number, pm: number): number {
+		const winner = this.#resolveGtiaPm(pm);
+		if (winner >= 0) return winner;
+		const base =
+			this.prior & 0x10 && pm & 0xf
+				? this.colorRegisters[COLPF3]!
+				: this.colorRegisters[COLBK]!;
+		const color = base | (px << 4);
+		return px === 0 ? color & 0xf0 : color;
 	}
 
 	#sizeP0 = 1;
@@ -1076,9 +1479,40 @@ export class AnticGtia implements Memory {
 	// clocks); the remaining color clock is a one-pixel delay here.
 	#pfFineDelay = 0;
 
+	// GTIA's output register: the ANx value painting this color clock (the
+	// final color clock of the fetch-to-screen pipe).
+	#anxHold = 0;
+
+	// The special modes' pixel former: two consecutive AN0-1 payloads make
+	// one 4-bit fat pixel, paired on even color clocks (fixed screen
+	// alignment — odd HSCROL regroups bits rather than shifting pixels,
+	// AHRM 6.9). #gtiaPixelPrev serves mode 10's one-color-clock delay;
+	// the muted flags carry the lores background anomaly.
+	#gtiaPixel = 0;
+	#gtiaPixelPrev = 0;
+	#gtiaBkMuted = false;
+	#gtiaPrevBkMuted = false;
+
+	// The line's special-mode state, latched near the end of horizontal
+	// blank (color clock 32). Turning PRIOR bits 6-7 off after the latch
+	// leaves the pair-decode machinery engaged for the rest of the line:
+	// "pseudo mode E", where each AN0-1 pair paints and collides as
+	// PF0-PF3 (Acid800 psuedomodee pins the one-cycle window).
+	#lineGtiaMode = 0;
+
+	// The ANx bus value for this color clock.
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
-	#drawPlayfield2(): number {
-		let pixel = this.pfCounter ? this.pfPixels[--this.pfCounter]! : 0;
+	#drawPlayfield(pos: 0 | 1): number {
+		// Tick the pipe only while codes are in flight (the drain window set
+		// at push time) — an idle pipe paints background with its cursor
+		// frozen, which is sound for the same reason as the write lines.
+		let pixel: number;
+		if (this.#anxDrain === 0) {
+			pixel = 0;
+		} else {
+			this.#anxDrain--;
+			pixel = this.#anxLine.tick();
+		}
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
 		if (scrolled && this.hscrol & 1) {
@@ -1091,13 +1525,16 @@ export class AnticGtia implements Memory {
 		if (scrolled) {
 			// The widened fetch's margin pixels are never displayed: the
 			// window stays at the unwidened width, and ANTIC masks its
-			// output outside it (the FIFO is still consumed above). Without
+			// output outside it (the pipe is still consumed above). Without
 			// this, memory just left of the LMS window — typically the
-			// previous row's right edge — bleeds into the left border.
-			const cycle = this.hpos - 1;
-			const start = ([0, 29, 21, 13] as const)[this.playfieldWidth];
-			const width = ([0, 64, 80, 96] as const)[this.playfieldWidth];
-			if (cycle < start || cycle >= start + width) {
+			// previous row's right edge — bleeds into the left border. The
+			// bounds are the display starts (HPOS 64/48/32) minus the one
+			// color clock this stream still spends in GTIA's output
+			// register.
+			const t = (this.hpos - 1) * 2 + pos;
+			const start = PF_WINDOW_START[this.playfieldWidth];
+			const width = PF_WINDOW_WIDTH[this.playfieldWidth];
+			if (t < start || t >= start + width) {
 				return 0;
 			}
 		}
@@ -1105,10 +1542,10 @@ export class AnticGtia implements Memory {
 	}
 
 	// 1 bit for each player or missile. 1 means active, 0 means inactive
-	#drawPlayerMissile2(pos: 0 | 1): number {
+	#drawPlayerMissile(pos: 0 | 1): number {
 		const i = this.hpos - 1;
 
-		const x = i - 17 + 3;
+		const x = i - 17;
 		const y = this.vcount - 8;
 
 		if (y < 0 || y >= 240) {
@@ -1123,38 +1560,58 @@ export class AnticGtia implements Memory {
 		// in HBLANK, losing the pixels that spill into the visible area.
 		const visible = x >= 0 && x < 94;
 
-		const start = (this.hpos + 2) * 2 + pos;
+		// Beam-anchored: afterCpu for machine cycle i paints color clocks 2i
+		// and 2i+1, so the comparator matches when the beam reaches the
+		// register position (HPOS write latency comes from the write pipe).
+		const start = (this.hpos - 1) * 2 + pos;
 
+		// A comparator match forces the shift state machine into %00 — a
+		// transition that itself shifts the register once — and then ORs
+		// the graphics latch in. On a bit-cell boundary the natural shift
+		// already made that transition (counter 0 here), so no extra shift
+		// happens. An empty register makes all of this invisible (the
+		// normal case); an image still in flight comes out shifted a step
+		// and merged with the new one (AHRM 6.5 "Overlapping object
+		// images"; the shift-then-OR order and the coincident-boundary case
+		// are pinned by Acid800 pmoverlap's pixel tables).
 		if (start === this.hposp0) {
-			this.#shiftP0 = this.grafP0;
+			if (this.#sizeP0Counter) this.#shiftP0 = (this.#shiftP0 << 1) & 0xff;
+			this.#shiftP0 |= this.grafP0;
 			this.#sizeP0Counter = 0;
 		}
 		if (start === this.hposp1) {
-			this.#shiftP1 = this.grafP1;
+			if (this.#sizeP1Counter) this.#shiftP1 = (this.#shiftP1 << 1) & 0xff;
+			this.#shiftP1 |= this.grafP1;
 			this.#sizeP1Counter = 0;
 		}
 		if (start === this.hposp2) {
-			this.#shiftP2 = this.grafP2;
+			if (this.#sizeP2Counter) this.#shiftP2 = (this.#shiftP2 << 1) & 0xff;
+			this.#shiftP2 |= this.grafP2;
 			this.#sizeP2Counter = 0;
 		}
 		if (start === this.hposp3) {
-			this.#shiftP3 = this.grafP3;
+			if (this.#sizeP3Counter) this.#shiftP3 = (this.#shiftP3 << 1) & 0xff;
+			this.#shiftP3 |= this.grafP3;
 			this.#sizeP3Counter = 0;
 		}
 		if (start === this.hposm0) {
-			this.#shiftM0 = (this.grafM << 6) & 0xc0;
+			if (this.#sizeM0Counter) this.#shiftM0 = (this.#shiftM0 << 1) & 0xff;
+			this.#shiftM0 |= (this.grafM << 6) & 0xc0;
 			this.#sizeM0Counter = 0;
 		}
 		if (start === this.hposm1) {
-			this.#shiftM1 = (this.grafM << 4) & 0xc0;
+			if (this.#sizeM1Counter) this.#shiftM1 = (this.#shiftM1 << 1) & 0xff;
+			this.#shiftM1 |= (this.grafM << 4) & 0xc0;
 			this.#sizeM1Counter = 0;
 		}
 		if (start === this.hposm2) {
-			this.#shiftM2 = (this.grafM << 2) & 0xc0;
+			if (this.#sizeM2Counter) this.#shiftM2 = (this.#shiftM2 << 1) & 0xff;
+			this.#shiftM2 |= (this.grafM << 2) & 0xc0;
 			this.#sizeM2Counter = 0;
 		}
 		if (start === this.hposm3) {
-			this.#shiftM3 = this.grafM & 0xc0;
+			if (this.#sizeM3Counter) this.#shiftM3 = (this.#shiftM3 << 1) & 0xff;
+			this.#shiftM3 |= this.grafM & 0xc0;
 			this.#sizeM3Counter = 0;
 		}
 
@@ -1301,115 +1758,45 @@ export class AnticGtia implements Memory {
 		if (m & 8) this.m3pf |= f;
 	}
 
-	// Gets playfield and pm data, resolves the priority and returns a palette index
-	#resolvePriority(pf: number, pm: number): number {
+	// Resolve playfield and P/M priority to a palette index: a PRIORITY_TABLE
+	// lookup (which handles all sixteen PRIOR[3:0] values, conflicts
+	// included) selects the surviving color sources, whose registers OR
+	// together — an empty selection is a conflict and paints black.
+	#resolvePriority(pf: number, pm: number, extraPlayers: number): number {
 		const prior = this.prior;
 
-		if (pf & 0x4) {
-			// Hires. Use PF2 for priority purposes
-			pf = 3;
-		} else if (pf) {
-			// Map PF0 to 1 .. PF3 to 4
-			pf = (pf & 0x3) + 1;
-		}
+		// The playfield class: 0 BAK, 1-4 PF0-PF3. A hires pixel is PF2 for
+		// priority purposes, lit or not (the playfield covers the window).
+		const pfClass = pf & 0x4 ? 3 : pf ? (pf & 0x3) + 1 : 0;
 
 		let p = pm >> 4;
-
-		const multicolor = prior & 0x20;
-
-		let p5 = false;
-
+		let p5 = 0;
 		if (prior & 0x10 && pm & 0xf) {
 			// Fifth player
-			p5 = true;
-			if (pf === 0) {
-				pf = 4;
-			}
+			p5 = 1 << 13;
 		} else {
 			// Treat missiles like players
 			p |= pm & 0xf;
 		}
 
-		const pl01active = (p & 0x3) !== 0;
-		const pl23active = !pl01active && (p & 0xc) !== 0;
+		// Mode 10 pixel codes 0-3 act as that player for priority only —
+		// they trigger no collisions (the caller keeps them out of pm).
+		p |= extraPlayers;
 
-		if (!pl01active && !pl23active && !pf) {
-			return this.colbk;
+		let mask = PRIORITY_TABLE[(prior & 0x3f) | (pfClass << 6) | (p << 9) | p5]!;
+		let color = 0;
+		while (mask) {
+			color |= this.colorRegisters[31 - Math.clz32(mask & -mask)]!;
+			mask &= mask - 1;
 		}
-
-		const pl01 = !pl01active
-			? 0
-			: multicolor && (p & 0x3) === 0x3
-				? this.colpm0 | this.colpm1
-				: p & 0x1
-					? this.colpm0
-					: this.colpm1;
-
-		const pl23 = !pl23active
-			? 0
-			: multicolor && (p & 0xc) === 0xc
-				? this.colpm2 | this.colpm3
-				: p & 0x4
-					? this.colpm2
-					: this.colpm3;
-
-		const pf01active = pf === 1 || pf === 2;
-		const pf01 = !pf01active
-			? 0
-			: p5
-				? this.colpf3
-				: pf === 1
-					? this.colpf0
-					: this.colpf1;
-
-		const pf23active = pf === 3 || pf === 4;
-		const pf23 = !pf23active
-			? 0
-			: p5
-				? this.colpf3
-				: pf === 3
-					? this.colpf2
-					: this.colpf3;
-
-		switch (prior & 0xf) {
-			// TODO: Priority conflicts
-			case 0b0000:
-				if (pl01active || pf01active) {
-					return pl01 | pf01;
-				} else {
-					return pl23 | pf23;
-				}
-			case 0b0001:
-				if (pl01active) return pl01;
-				if (pl23active) return pl23;
-				return pf01 | pf23;
-			case 0b0010:
-				if (pl01active) return pl01;
-				if (pf) return pf01 | pf23;
-				return pl23;
-			case 0b0100:
-				if (pf) return pf01 | pf23;
-				return pl01 | pl23;
-			case 0b1000:
-				if (pf01active) return pf01;
-				if (pl01active) return pl01;
-				if (pl23active) return pl23;
-				return pf23;
-		}
-
-		return pf01;
+		return color;
 	}
 
-	#fetchFirstByte(): boolean {
-		if (!this.#newInstruction) {
-			return false;
-		}
-
-		if (this.displayListDmaEnabled) {
-			this.instruction = this.#dmaRead(this.displayListAddress);
-			this.#incrementDisplayListAddress();
-		}
-
+	// Decode the current instruction's mode fields and vertical-scroll state.
+	// Runs at cycle 1 of a new instruction's first scan line — right after
+	// the display-list fetch, or on the stale instruction when display-list
+	// DMA is off.
+	#decodeInstruction(): void {
 		const mode = this.instruction & 0x0f;
 		if (mode === 0x00) {
 			// Blank
@@ -1427,7 +1814,6 @@ export class AnticGtia implements Memory {
 			this.hires = false;
 		} else {
 			// Actual mode
-			this.hires = false;
 			this.modeLineHeight = LINES_PER_MODE[mode]!;
 			this.charFetchRate = CHAR_FETCH_RATE[mode]!;
 			this.playfieldFetchRate = PLAYFIELD_FETCH_RATE[mode]!;
@@ -1445,33 +1831,24 @@ export class AnticGtia implements Memory {
 			this.modeLineNo = this.vscrol;
 		}
 		this.#vsRegion = vs;
-
-		return this.displayListDmaEnabled;
 	}
 
-	#fetchSecondByte(): boolean {
-		if (!this.displayListDmaEnabled || !this.#newInstruction) return false;
-
+	// Jump/LMS operand fetches (cycles 6 and 7 — the pattern emits them only
+	// when the instruction has operands).
+	#fetchDlArgLo(): void {
 		if ((this.instruction & 0x0f) === 0x01) {
 			// Jump
 			this.#temp = this.#dmaRead(this.displayListAddress);
 			this.#incrementDisplayListAddress();
-			return true;
-		} else if ((this.instruction & 0x0f) > 0x01 && this.instruction & 0x40) {
+		} else {
 			// LMS
 			const byte = this.#dmaRead(this.displayListAddress);
 			this.msc = byte | (this.msc & 0xff00);
 			this.#incrementDisplayListAddress();
-			return true;
-		} else {
-			// No read
-			return false;
 		}
 	}
 
-	#fetchThirdByte(): boolean {
-		if (!this.displayListDmaEnabled || !this.#newInstruction) return false;
-
+	#fetchDlArgHi(): void {
 		if ((this.instruction & 0x0f) === 0x01) {
 			// Jump
 			this.displayListAddress =
@@ -1479,24 +1856,15 @@ export class AnticGtia implements Memory {
 			if (this.instruction & 0x40) {
 				this.waitingForVbi = true;
 			}
-			return true;
-		} else if ((this.instruction & 0x0f) > 0x01 && this.instruction & 0x40) {
+		} else {
 			// LMS
 			const byte = this.#dmaRead(this.displayListAddress);
 			this.msc = (byte << 8) | (this.msc & 0xff);
 			this.#incrementDisplayListAddress();
-			return true;
-		} else {
-			// No read
-			return false;
 		}
 	}
 
-	#fetchMissiles() {
-		if (!this.missileDmaEnabled) {
-			return false;
-		}
-
+	#fetchMissiles(): void {
 		let base: number;
 		let offset: number;
 		if (this.verticalPmResolution === 1) {
@@ -1512,15 +1880,9 @@ export class AnticGtia implements Memory {
 		this.#dmaRead(
 			base + offset + Math.floor(this.vcount / this.verticalPmResolution),
 		);
-
-		return true;
 	}
 
-	#fetchPlayer(n: number) {
-		if (!this.playerDmaEnabled) {
-			return false;
-		}
-
+	#fetchPlayer(n: number): void {
 		let base: number;
 		let offset: number;
 		if (this.verticalPmResolution === 1) {
@@ -1536,91 +1898,27 @@ export class AnticGtia implements Memory {
 		this.#dmaRead(
 			base + offset + Math.floor(this.vcount / this.verticalPmResolution),
 		);
-
-		return true;
 	}
 
-	#fetchCharacter(cycle: number) {
-		if (!this.playfieldWidth || !this.charFetchRate || !this.#newInstruction) {
-			return false;
-		}
-
-		let playfieldWidth = this.playfieldWidth;
-		// Widen if HSCROL is enabled
-		if (
-			(this.instruction & 0x0f) > 1 &&
-			this.instruction & 0x10 &&
-			(playfieldWidth === 1 || playfieldWidth === 2)
-		) {
-			playfieldWidth = (playfieldWidth + 1) as 2 | 3;
-		}
-
-		let start = ([0, 26, 18, 10] as const)[playfieldWidth];
-		if ((this.instruction & 0x0f) > 1 && this.instruction & 0x10) {
-			start += Math.floor(this.hscrol / 2);
-		}
-		const width = ([0, 64, 80, 96] as const)[playfieldWidth];
-
-		if (
-			cycle < start ||
-			cycle >= start + width ||
-			(cycle - start) & (this.charFetchRate - 1)
-		) {
-			return false;
-		}
-
-		// Read char no from MSC into line buffer
-		const bufferIndex = (cycle - start) / this.charFetchRate;
-		const char = this.#dmaRead(this.msc);
-
-		this.#buffer[bufferIndex] = char;
-
+	// Read a character name from MSC into the line buffer.
+	#fetchName(bufferIndex: number): void {
+		this.#buffer[bufferIndex] = this.#dmaRead(this.msc);
 		this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
 	}
 
-	#fetchPlayfield(cycle: number): boolean {
-		if (!this.playfieldWidth || !this.playfieldFetchRate) {
-			return false;
-		}
-
-		let playfieldWidth = this.playfieldWidth;
-
-		// Widen if HSCROL is enabled
-		if (
-			(this.instruction & 0x0f) > 1 &&
-			this.instruction & 0x10 &&
-			(playfieldWidth === 1 || playfieldWidth === 2)
-		) {
-			playfieldWidth = (playfieldWidth + 1) as 2 | 3;
-		}
-
-		let start = ([0, 29, 21, 13] as const)[playfieldWidth];
-		if ((this.instruction & 0x0f) > 1 && this.instruction & 0x10) {
-			start += Math.floor(this.hscrol / 2);
-		}
-		const width = ([0, 64, 80, 96] as const)[playfieldWidth];
-
-		if (
-			cycle < start ||
-			cycle >= start + width ||
-			(cycle - start) & (this.playfieldFetchRate - 1)
-		) {
-			return false;
-		}
-
-		const bufferIndex = Math.floor((cycle - start) / this.playfieldFetchRate);
+	// Character glyph data fetch: read the buffered name's glyph row from
+	// CHBASE and ship it into the ANx pipe.
+	#fetchGlyph(bufferIndex: number): void {
 		const mode = this.instruction & 0x0f;
+		const charNo = this.#buffer[bufferIndex]!;
+		const base =
+			mode < 6
+				? // 1024-byte char set
+					(this.chbase & 0xfe) * 256 + (charNo & 0x7f) * 8
+				: // 512-byte char set
+					this.chbase * 256 + (charNo & 0x3f) * 8;
 
-		if (this.charFetchRate) {
-			// Fetch from CHBASE
-			const charNo = this.#buffer[bufferIndex]!;
-			const base =
-				mode < 6
-					? // 1024-byte char set
-						(this.chbase & 0xfe) * 256 + (charNo & 0x7f) * 8
-					: // 512-byte char set
-						this.chbase * 256 + (charNo & 0x3f) * 8;
-
+		{
 			switch (mode) {
 				case 2:
 					{
@@ -1666,10 +1964,10 @@ export class AnticGtia implements Memory {
 						const data = this.#dmaRead(base + this.#charRow(this.modeLineNo));
 						const useColPf3 = !!(charNo & 0x80);
 
-						this.pfPixels[0] = lores2(data, useColPf3);
-						this.pfPixels[1] = lores2(data >> 2, useColPf3);
-						this.pfPixels[2] = lores2(data >> 4, useColPf3);
-						this.pfPixels[3] = lores2(data >> 6, useColPf3);
+						this.pfPixels[0] = loresPixel(data, useColPf3);
+						this.pfPixels[1] = loresPixel(data >> 2, useColPf3);
+						this.pfPixels[2] = loresPixel(data >> 4, useColPf3);
+						this.pfPixels[3] = loresPixel(data >> 6, useColPf3);
 						this.pfCounter = 4;
 					}
 					break;
@@ -1682,10 +1980,10 @@ export class AnticGtia implements Memory {
 						);
 						const useColPf3 = !!(charNo & 0x80);
 
-						this.pfPixels[0] = lores2(data, useColPf3);
-						this.pfPixels[1] = lores2(data >> 2, useColPf3);
-						this.pfPixels[2] = lores2(data >> 4, useColPf3);
-						this.pfPixels[3] = lores2(data >> 6, useColPf3);
+						this.pfPixels[0] = loresPixel(data, useColPf3);
+						this.pfPixels[1] = loresPixel(data >> 2, useColPf3);
+						this.pfPixels[2] = loresPixel(data >> 4, useColPf3);
+						this.pfPixels[3] = loresPixel(data >> 6, useColPf3);
 						this.pfCounter = 4;
 					}
 					break;
@@ -1702,7 +2000,7 @@ export class AnticGtia implements Memory {
 						while (data) {
 							const bit = data & 1;
 							data >>= 1;
-							const out = bit ? color : bg;
+							const out = bit ? color : BG;
 							this.pfPixels[i++] = out;
 						}
 					}
@@ -1722,7 +2020,7 @@ export class AnticGtia implements Memory {
 						while (data) {
 							const bit = data & 1;
 							data >>= 1;
-							const out = bit ? color : bg;
+							const out = bit ? color : BG;
 							this.pfPixels[i++] = out;
 						}
 					}
@@ -1731,37 +2029,52 @@ export class AnticGtia implements Memory {
 				default:
 					break;
 			}
-		} else {
-			// Fetch from MSC into line buffer
-			let data: number;
+		}
 
-			if (this.modeLineNo === 0) {
-				data = this.#dmaRead(this.msc);
-				this.#buffer[bufferIndex] = data;
-				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
-			} else {
-				data = this.#buffer[bufferIndex]!;
-			}
+		this.#pushPfBatch(ANX_CHAR_DELAY);
+	}
 
+	// Bitmap data fetch: read from MSC into the line buffer and ship the
+	// pixels into the ANx pipe. The pattern emits this on the instruction's
+	// first scan line — not row-counter zero: a vertical-scroll entry starts
+	// the row counter at VSCROL, but the load happens regardless (Acid800
+	// psuedomodee stretches a mode F line with VSCROL=1 and expects its data
+	// fetched).
+	#fetchBitmap(bufferIndex: number): void {
+		const data = this.#dmaRead(this.msc);
+		this.#buffer[bufferIndex] = data;
+		this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000); // Cannot cross 4K without reload
+		this.#emitBitmapPixels(data);
+	}
+
+	// Replay a later scan line from the line buffer: the pixels flow into
+	// the pipe with no bus access.
+	#replayBitmap(bufferIndex: number): void {
+		this.#emitBitmapPixels(this.#buffer[bufferIndex]!);
+	}
+
+	#emitBitmapPixels(data: number): void {
+		const mode = this.instruction & 0x0f;
+		{
 			switch (mode) {
 				case 0x8:
 					{
-						this.pfPixels[0] = lores2(data, false);
+						this.pfPixels[0] = loresPixel(data, false);
 						this.pfPixels[1] = this.pfPixels[0];
 						this.pfPixels[2] = this.pfPixels[0];
 						this.pfPixels[3] = this.pfPixels[0];
 
-						this.pfPixels[4] = lores2(data >> 2, false);
+						this.pfPixels[4] = loresPixel(data >> 2, false);
 						this.pfPixels[5] = this.pfPixels[4];
 						this.pfPixels[6] = this.pfPixels[4];
 						this.pfPixels[7] = this.pfPixels[4];
 
-						this.pfPixels[8] = lores2(data >> 4, false);
+						this.pfPixels[8] = loresPixel(data >> 4, false);
 						this.pfPixels[9] = this.pfPixels[8];
 						this.pfPixels[10] = this.pfPixels[8];
 						this.pfPixels[11] = this.pfPixels[8];
 
-						this.pfPixels[12] = lores2(data >> 6, false);
+						this.pfPixels[12] = loresPixel(data >> 6, false);
 						this.pfPixels[13] = this.pfPixels[12];
 						this.pfPixels[14] = this.pfPixels[12];
 						this.pfPixels[15] = this.pfPixels[12];
@@ -1777,7 +2090,7 @@ export class AnticGtia implements Memory {
 					while (data) {
 						const bit = data & 1;
 						data >>= 1;
-						const out = bit ? 0x8 : bg;
+						const out = bit ? 0x8 : BG;
 						this.pfPixels[i++] = out;
 						this.pfPixels[i++] = out;
 						this.pfPixels[i++] = out;
@@ -1788,13 +2101,13 @@ export class AnticGtia implements Memory {
 
 				case 0xa:
 					{
-						this.pfPixels[0] = lores2(data, false);
+						this.pfPixels[0] = loresPixel(data, false);
 						this.pfPixels[1] = this.pfPixels[0];
-						this.pfPixels[2] = lores2(data >> 2, false);
+						this.pfPixels[2] = loresPixel(data >> 2, false);
 						this.pfPixels[3] = this.pfPixels[2];
-						this.pfPixels[4] = lores2(data >> 4, false);
+						this.pfPixels[4] = loresPixel(data >> 4, false);
 						this.pfPixels[5] = this.pfPixels[4];
-						this.pfPixels[6] = lores2(data >> 6, false);
+						this.pfPixels[6] = loresPixel(data >> 6, false);
 						this.pfPixels[7] = this.pfPixels[6];
 						this.pfCounter = 8;
 					}
@@ -1809,7 +2122,7 @@ export class AnticGtia implements Memory {
 					while (data) {
 						const bit = data & 1;
 						data >>= 1;
-						const out = bit ? 0x8 : bg;
+						const out = bit ? 0x8 : BG;
 						this.pfPixels[i++] = out;
 					}
 					break;
@@ -1818,10 +2131,10 @@ export class AnticGtia implements Memory {
 				case 0xd:
 				case 0xe:
 					{
-						this.pfPixels[0] = lores2(data, false);
-						this.pfPixels[1] = lores2(data >> 2, false);
-						this.pfPixels[2] = lores2(data >> 4, false);
-						this.pfPixels[3] = lores2(data >> 6, false);
+						this.pfPixels[0] = loresPixel(data, false);
+						this.pfPixels[1] = loresPixel(data >> 2, false);
+						this.pfPixels[2] = loresPixel(data >> 4, false);
+						this.pfPixels[3] = loresPixel(data >> 6, false);
 						this.pfCounter = 4;
 					}
 					break;
@@ -1838,7 +2151,18 @@ export class AnticGtia implements Memory {
 			}
 		}
 
-		return true;
+		this.#pushPfBatch(ANX_BITMAP_DELAY);
+	}
+
+	// Ship the pending byte into the ANx pipe, leftmost pixel first
+	// (pfPixels holds it right to left).
+	#pushPfBatch(delay: number): void {
+		const horizon = delay + this.pfCounter;
+		if (horizon > this.#anxDrain) this.#anxDrain = horizon;
+		for (let k = this.pfCounter - 1; k >= 0; k--, delay++) {
+			this.#anxLine.scheduleValue(delay, this.pfPixels[k]!);
+		}
+		this.pfCounter = 0;
 	}
 
 	// CHACTL bit 2 (vertical reflect) flips the glyph row within the 8-row
@@ -1888,7 +2212,7 @@ export class AnticGtia implements Memory {
 
 			if (mode === 0) {
 				// Blank
-				line += "BLANK " + String(((this.instruction & 0x70) >> 4) + 1);
+				line += "BLANK " + String(((instruction & 0x70) >> 4) + 1);
 			} else if (mode === 1) {
 				// Jump
 				const address = this.#dmaRead(pc) + this.#dmaRead(pc + 1) * 256;
@@ -1917,6 +2241,136 @@ export class AnticGtia implements Memory {
 			this.#log(line);
 		}
 	}
+}
+
+// Per-playfield-width tables, indexed by DMACTL width bits (0 = off,
+// 1/2/3 = narrow/normal/wide).
+
+// The unwidened display window on the ANx stream, in color clocks: the
+// display starts (HPOS 64/48/32) minus the one color clock the stream still
+// spends in GTIA's output register; widths in color clocks.
+const PF_WINDOW_START = [0, 63, 47, 31] as const;
+const PF_WINDOW_WIDTH = [0, 128, 160, 192] as const;
+
+// Playfield fetch-slot start cycles (see the ANX delay comment at the top):
+// character names, character glyph data (names + 3), and bitmap data (the
+// true playfield DMA slots); the fetch window width in cycles.
+const NAME_FETCH_START = [0, 26, 18, 10] as const;
+const GLYPH_FETCH_START = [0, 29, 21, 13] as const;
+const BITMAP_FETCH_START = [0, 28, 20, 12] as const;
+const FETCH_WIDTH = [0, 64, 80, 96] as const;
+
+// DRAM refresh requests: 9 slots every 4 cycles starting from 25.
+const REFRESH_REQUEST = new Uint8Array(114);
+for (let c = 25; c <= 57; c += 4) REFRESH_REQUEST[c] = 1;
+
+// DMA action codes for the per-line pattern table: busCycle dispatches on
+// `pattern[cycle] & 0xff`, with the action's argument (player number or
+// line-buffer index) in the high byte.
+const DMA_NONE = 0;
+const DMA_MISSILE = 1;
+const DMA_PLAYER = 2;
+const DMA_DL_FETCH = 3; // fetch + decode the instruction (halts)
+const DMA_DL_DECODE = 4; // decode only — display-list DMA off (bus free)
+const DMA_DL_LO = 5; // jump/LMS operand low byte
+const DMA_DL_HI = 6; // jump/LMS operand high byte
+const DMA_NAME = 7; // character name into the line buffer
+const DMA_GLYPH = 8; // character glyph data
+const DMA_BITMAP = 9; // bitmap data into the line buffer (first scan line)
+const DMA_REPLAY = 10; // line-buffer replay: pixels flow, bus free
+const DMA_PF_SKIP = 11; // masked load slot: MSC advances, bus free
+
+/**
+ * Build a scanline's DMA pattern from a state key. A line's whole pattern is
+ * a pure function of rarely-changing state, so patterns are computed once
+ * and cached (see #rebuildDmaPattern for the key layout); busCycle then
+ * reduces to one table lookup per cycle. DRAM refresh is deliberately NOT in
+ * the table — the pending-refresh flag is live, sequential state (a blocked
+ * request slides to the next free cycle), and stays in busCycle.
+ */
+function buildDmaPattern(key: number): Uint16Array {
+	const pattern = new Uint16Array(114);
+	if (key & 0b1) pattern[0] = DMA_MISSILE;
+	if (key & 0b10) {
+		for (let n = 0; n < 4; n++) pattern[2 + n] = DMA_PLAYER | (n << 8);
+	}
+	if (!(key & 0b100)) return pattern; // not a visible line: P/M only
+
+	const newInstruction = (key & 0b1000) !== 0;
+	const dlDma = (key & 0b10000) !== 0;
+	const mode = (key >> 5) & 0x0f;
+	const lms = (key & 0x200) !== 0;
+	const scrolled = (key & 0x400) !== 0;
+	const hscrolHalf = (key >> 11) & 0x7;
+	const width = (key >> 14) & 0x3;
+
+	if (newInstruction) {
+		pattern[1] = dlDma ? DMA_DL_FETCH : DMA_DL_DECODE;
+		if (dlDma && (mode === 1 || (mode > 1 && lms))) {
+			pattern[6] = DMA_DL_LO;
+			pattern[7] = DMA_DL_HI;
+		}
+	}
+
+	const charRate = CHAR_FETCH_RATE[mode]!;
+	const pfRate = PLAYFIELD_FETCH_RATE[mode]!;
+	if (!pfRate) return pattern;
+
+	if (!width) {
+		// Playfield DMA disabled after the line's playfield started: the
+		// load machinery keeps running without the bus, so MSC keeps
+		// advancing at the name/bitmap load slots (AHRM "loading the line
+		// buffer"; Acid800 linebuffering's mid-interrupted mode 8). The
+		// buffer keeps stale content where hardware loads bus noise
+		// (deliberately untested by the suite); glyph and replay slots do
+		// nothing.
+		const lineWidth = (key >> 16) & 0x3;
+		if (!lineWidth || !newInstruction) return pattern;
+		const shift = scrolled ? hscrolHalf : 0;
+		const span = FETCH_WIDTH[lineWidth as 1 | 2 | 3];
+		const start =
+			(charRate
+				? NAME_FETCH_START[lineWidth as 1 | 2 | 3]
+				: BITMAP_FETCH_START[lineWidth as 1 | 2 | 3]) + shift;
+		const rate = charRate || pfRate;
+		for (let c = start; c < start + span && c < 114; c += rate) {
+			pattern[c] = DMA_PF_SKIP;
+		}
+		return pattern;
+	}
+
+	// Widen if HSCROL is enabled; the fetch start also shifts by the whole
+	// cycles of the scroll value.
+	let fetchWidth = width;
+	if (scrolled && (fetchWidth === 1 || fetchWidth === 2)) fetchWidth++;
+	const shift = scrolled ? hscrolHalf : 0;
+	const span = FETCH_WIDTH[fetchWidth as 1 | 2 | 3];
+
+	if (charRate && newInstruction) {
+		const start = NAME_FETCH_START[fetchWidth as 1 | 2 | 3] + shift;
+		for (
+			let c = start, n = 0;
+			c < start + span && c < 114;
+			c += charRate, n++
+		) {
+			pattern[c] = DMA_NAME | (n << 8);
+		}
+	}
+
+	const start =
+		(charRate
+			? GLYPH_FETCH_START[fetchWidth as 1 | 2 | 3]
+			: BITMAP_FETCH_START[fetchWidth as 1 | 2 | 3]) + shift;
+	const action = charRate
+		? DMA_GLYPH
+		: newInstruction
+			? DMA_BITMAP
+			: DMA_REPLAY;
+	for (let c = start, n = 0; c < start + span && c < 114; c += pfRate, n++) {
+		pattern[c] = action | (n << 8);
+	}
+
+	return pattern;
 }
 
 const LINES_PER_MODE = [
@@ -2003,7 +2457,7 @@ const PLAYFIELD_HI_RES = [
 	true, // F
 ];
 
-const bg = 0x0;
+const BG = 0x0;
 
 // C D E F (bit 2 and 3)
 function hires(bits: number): number {
@@ -2016,10 +2470,10 @@ function lores(index: number): number {
 }
 
 // 0 8 9 A B
-function lores2(index: number, pf3: boolean): number {
+function loresPixel(index: number, pf3: boolean): number {
 	index = index & 3;
 
-	if (!index) return bg;
+	if (!index) return BG;
 
 	index--;
 	if (index === 2 && pf3) {
@@ -2029,9 +2483,130 @@ function lores2(index: number, pf3: boolean): number {
 	return lores(index);
 }
 
-const PM_SIZES = [
-	0b00, // Normal
-	0b01, // Double
-	0b00, // Normal
-	0b11, // Quadruple
-];
+// colorRegisters indices, doubling as the priority table's selector bits.
+const COLPM0 = 0;
+const COLPM1 = 1;
+const COLPM2 = 2;
+const COLPM3 = 3;
+const COLPF0 = 4;
+const COLPF1 = 5;
+const COLPF2 = 6;
+const COLPF3 = 7;
+const COLBK = 8;
+
+/**
+ * GTIA's priority gate network (AHRM 6.7). Each PRIOR bit activates
+ * cross-disable signals between the player and playfield layers; the output
+ * is the OR of the surviving sources, and a conflict that suppresses every
+ * source paints black. The fifth player asserts the PF3 input — winning over
+ * the other playfields through the /SF3 terms — while its missiles keep
+ * their own collision identities.
+ *
+ * These are AHRM's stated "exact logic" equations, with two refinements
+ * pinned by the complete table 16 (unit-tested cell by cell):
+ *
+ * - The published /SF3 term in SF0-SF2 is really the PF3 *input* (fifth
+ *   player included) — indistinguishable for real playfields, whose classes
+ *   are exclusive, but with the fifth player it implements "always wins
+ *   against all other playfields" unconditionally.
+ * - Three cells where a player-suppressed SF3 should stop suppressing
+ *   players (P5-as-only-playfield conflicts), plus the %1000
+ *   P5-over-PF01-over-players cascade from the prose, don't follow from any
+ *   static reading of the equations: those are explicit measured overrides.
+ */
+function resolvePriorityGates(
+	prior: number,
+	pfClass: number,
+	p: number,
+	p5: boolean,
+): number {
+	const pri0 = (prior & 1) !== 0;
+	const pri1 = (prior & 2) !== 0;
+	const pri2 = (prior & 4) !== 0;
+	const pri3 = (prior & 8) !== 0;
+	const multi = (prior & 0x20) !== 0;
+
+	const p0 = (p & 1) !== 0;
+	const p1 = (p & 2) !== 0;
+	const p2 = (p & 4) !== 0;
+	const p3 = (p & 8) !== 0;
+	const pf0 = pfClass === 1;
+	const pf1 = pfClass === 2;
+	const pf2 = pfClass === 3;
+	const pf3 = pfClass === 4 || p5;
+
+	const p01 = p0 || p1;
+	const p23 = p2 || p3;
+	const pf01 = pf0 || pf1;
+	const pf23 = pf2 || pf3;
+
+	// Measured overrides — see the doc comment.
+	if (p5) {
+		const pri = prior & 0x0f;
+		const pair01 =
+			(p0 ? 1 << COLPM0 : 0) | (p1 && (!p0 || multi) ? 1 << COLPM1 : 0);
+		const pair23 =
+			(p2 ? 1 << COLPM2 : 0) | (p3 && (!p2 || multi) ? 1 << COLPM3 : 0);
+		if (pfClass === 0 && p23 && (pri === 0b0101 || pri === 0b1100)) {
+			return p01 && pri === 0b0101 ? 0 : p01 ? pair01 : pair23;
+		}
+		if (pf01 && (p01 || p23) && pri === 0b1000) {
+			return 1 << COLPF3;
+		}
+	}
+
+	const pri01 = pri0 || pri1;
+	const pri12 = pri1 || pri2;
+	const pri23 = pri2 || pri3;
+	const pri03 = pri0 || pri3;
+
+	const sp0 = p0 && !(pf01 && pri23) && !(pri2 && pf23);
+	const sp1 = p1 && !(pf01 && pri23) && !(pri2 && pf23) && (!p0 || multi);
+	const sp2 = p2 && !p01 && !(pf23 && pri12) && !(pf01 && !pri0);
+	const sp3 =
+		p3 && !p01 && !(pf23 && pri12) && !(pf01 && !pri0) && (!p2 || multi);
+	const sf3 = pf3 && !(p23 && pri03) && !(p01 && !pri2);
+	const sf0 = pf0 && !(p23 && pri0) && !(p01 && pri01) && !pf3;
+	const sf1 = pf1 && !(p23 && pri0) && !(p01 && pri01) && !pf3;
+	const sf2 = pf2 && !(p23 && pri03) && !(p01 && !pri2) && !pf3;
+	const sb = !p01 && !p23 && !pf01 && !pf23;
+
+	return (
+		(sp0 ? 1 << COLPM0 : 0) |
+		(sp1 ? 1 << COLPM1 : 0) |
+		(sp2 ? 1 << COLPM2 : 0) |
+		(sp3 ? 1 << COLPM3 : 0) |
+		(sf0 ? 1 << COLPF0 : 0) |
+		(sf1 ? 1 << COLPF1 : 0) |
+		(sf2 ? 1 << COLPF2 : 0) |
+		(sf3 ? 1 << COLPF3 : 0) |
+		(sb ? 1 << COLBK : 0)
+	);
+}
+
+// The gates, precomputed: selector masks over colorRegisters (bit 8 =
+// COLBK), indexed by PRIOR's low 6 bits, the playfield class (0 BAK,
+// 1-4 PF0-PF3), the player bits, and the fifth-player flag.
+const PRIORITY_TABLE = new Uint16Array(1 << 14);
+for (let prior = 0; prior < 64; prior++) {
+	for (let pfClass = 0; pfClass < 5; pfClass++) {
+		for (let p = 0; p < 16; p++) {
+			for (let p5 = 0; p5 < 2; p5++) {
+				PRIORITY_TABLE[prior | (pfClass << 6) | (p << 9) | (p5 << 13)] =
+					resolvePriorityGates(prior, pfClass, p, p5 === 1);
+			}
+		}
+	}
+}
+
+/** The priority selector mask for a source combination. Exported for tests. */
+export function prioritySelector(
+	prior: number,
+	pfClass: number,
+	p: number,
+	p5: boolean,
+): number {
+	return PRIORITY_TABLE[
+		(prior & 0x3f) | (pfClass << 6) | (p << 9) | (p5 ? 1 << 13 : 0)
+	]!;
+}

@@ -1,6 +1,6 @@
-import type { AtariModel } from "@sfotty-pie/a8";
+import type { AtariModel, TvAdapter } from "@sfotty-pie/a8";
 
-export type { AtariModel };
+export type { AtariModel, TvAdapter };
 
 /**
  * PORTB-banked extended RAM. `size` is the *total* RAM with the extension
@@ -22,6 +22,8 @@ export interface MachineSettings {
 	/** PORTB-banked extended RAM, or null for none. */
 	portbExtendedRam: ExtendedRam | null;
 	tv: TvStandard;
+	/** Video chip: a CTIA has no GTIA special modes (PRIOR bits 6-7 ignored). */
+	tvAdapter: TvAdapter;
 	/** 400/800 & 1200XL: no BASIC cart. XL/XE & XEGS: hold OPTION at boot. */
 	basicDisabled: boolean;
 }
@@ -114,6 +116,7 @@ export function sanitizeSettings(
 				? { size: Number(ext.size) || 0, antic: Boolean(ext.antic) }
 				: null,
 		tv: v.tv === "pal" ? "pal" : "ntsc",
+		tvAdapter: v.tvAdapter === "ctia" ? "ctia" : "gtia",
 		basicDisabled: Boolean(v.basicDisabled),
 	};
 	return { ...base, ...clampRam(model, base) };
@@ -136,6 +139,7 @@ export function settingsEqual(a: MachineSettings, b: MachineSettings): boolean {
 	return (
 		a.model === b.model &&
 		a.tv === b.tv &&
+		a.tvAdapter === b.tvAdapter &&
 		a.basicDisabled === b.basicDisabled &&
 		a.memory === b.memory &&
 		a.portbExtendedRam?.size === b.portbExtendedRam?.size &&

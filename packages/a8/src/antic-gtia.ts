@@ -320,6 +320,7 @@ export class AnticGtia implements Memory {
 		this.rdy = true;
 
 		this.#dmaVisibleLine = false;
+		this.#lineFetchWidth = 0;
 		this.#rebuildDmaPattern();
 	}
 
@@ -865,9 +866,27 @@ export class AnticGtia implements Memory {
 	#dmaPattern: Uint16Array = new Uint16Array(114);
 	#dmaPatternCache = new Map<number, Uint16Array>();
 
+	// The (widened) fetch width the line's playfield started with, 0 before
+	// it starts. Disabling playfield DMA after the start leaves the load
+	// slots running as bus-free MSC advances (see buildDmaPattern); a
+	// disable before the start means the playfield never starts at all.
+	#lineFetchWidth = 0;
+
 	#rebuildDmaPattern(): void {
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
+		if (this.playfieldWidth) {
+			let fetchWidth: number = this.playfieldWidth;
+			if (scrolled && fetchWidth < 3) fetchWidth++;
+			this.#lineFetchWidth = fetchWidth;
+		} else if (this.#lineFetchWidth) {
+			const start =
+				(this.charFetchRate
+					? NAME_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3]
+					: BITMAP_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3]) +
+				(scrolled ? this.hscrol >> 1 : 0);
+			if (this.hpos - 1 <= start) this.#lineFetchWidth = 0;
+		}
 		const key =
 			(this.missileDmaEnabled ? 0b1 : 0) |
 			(this.playerDmaEnabled ? 0b10 : 0) |
@@ -878,7 +897,8 @@ export class AnticGtia implements Memory {
 			(this.instruction & 0x40 ? 0x200 : 0) |
 			(scrolled ? 0x400 : 0) |
 			((this.hscrol >> 1) << 11) |
-			(this.playfieldWidth << 14);
+			(this.playfieldWidth << 14) |
+			(this.#lineFetchWidth << 16);
 		let pattern = this.#dmaPatternCache.get(key);
 		if (!pattern) {
 			pattern = buildDmaPattern(key);
@@ -1030,6 +1050,7 @@ export class AnticGtia implements Memory {
 			// per-line inputs (mid-line register writes rebuild it too).
 			this.#dmaVisibleLine =
 				!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
+			this.#lineFetchWidth = 0;
 			this.#rebuildDmaPattern();
 		}
 
@@ -1127,6 +1148,16 @@ export class AnticGtia implements Memory {
 				// Line-buffer replay: pixels flow but the bus is free — a
 				// pending refresh may use the cycle.
 				this.#replayBitmap(entry >> 8);
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_PF_SKIP:
+				// A masked load slot (playfield DMA disabled mid-line): MSC
+				// advances, the bus stays free.
+				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000);
 				if (this.refreshPending) {
 					this.refreshPending = false;
 				} else {
@@ -2204,6 +2235,7 @@ const DMA_NAME = 7; // character name into the line buffer
 const DMA_GLYPH = 8; // character glyph data
 const DMA_BITMAP = 9; // bitmap data into the line buffer (first scan line)
 const DMA_REPLAY = 10; // line-buffer replay: pixels flow, bus free
+const DMA_PF_SKIP = 11; // masked load slot: MSC advances, bus free
 
 /**
  * Build a scanline's DMA pattern from a state key. A line's whole pattern is
@@ -2237,10 +2269,32 @@ function buildDmaPattern(key: number): Uint16Array {
 		}
 	}
 
-	if (!width) return pattern;
 	const charRate = CHAR_FETCH_RATE[mode]!;
 	const pfRate = PLAYFIELD_FETCH_RATE[mode]!;
 	if (!pfRate) return pattern;
+
+	if (!width) {
+		// Playfield DMA disabled after the line's playfield started: the
+		// load machinery keeps running without the bus, so MSC keeps
+		// advancing at the name/bitmap load slots (AHRM "loading the line
+		// buffer"; Acid800 linebuffering's mid-interrupted mode 8). The
+		// buffer keeps stale content where hardware loads bus noise
+		// (deliberately untested by the suite); glyph and replay slots do
+		// nothing.
+		const lineWidth = (key >> 16) & 0x3;
+		if (!lineWidth || !newInstruction) return pattern;
+		const shift = scrolled ? hscrolHalf : 0;
+		const span = FETCH_WIDTH[lineWidth as 1 | 2 | 3];
+		const start =
+			(charRate
+				? NAME_FETCH_START[lineWidth as 1 | 2 | 3]
+				: BITMAP_FETCH_START[lineWidth as 1 | 2 | 3]) + shift;
+		const rate = charRate || pfRate;
+		for (let c = start; c < start + span && c < 114; c += rate) {
+			pattern[c] = DMA_PF_SKIP;
+		}
+		return pattern;
+	}
 
 	// Widen if HSCROL is enabled; the fetch start also shifts by the whole
 	// cycles of the scroll value.

@@ -9,7 +9,7 @@
 	"ANTIC: Display list wrapping": "pass",
 	"ANTIC: HSCROL bug": "fail",
 	"ANTIC: Hires bug": "fail",
-	"ANTIC: Line buffering": "fail",
+	"ANTIC: Line buffering": "pass",
 	"ANTIC: NMIST/NMIRES test": "pass",
 	"ANTIC: P/M graphics DMA": "pass",
 	"ANTIC: Playfield start timing": "fail",

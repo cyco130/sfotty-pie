@@ -312,6 +312,7 @@ export class AnticGtia implements Memory {
 		this.pfPixels.fill(0);
 		this.pfCounter = 0;
 		this.#anxLine.reset();
+		this.#anxDrain = 0;
 
 		// Output lines
 		this.nmi = false;
@@ -403,6 +404,7 @@ export class AnticGtia implements Memory {
 		this.#grafWrites.reset();
 		this.#colorWrites.reset();
 		this.#priorWrites.reset();
+		this.#pendingGtiaWrites = 0;
 
 		this.#anxHold = 0;
 		this.#gtiaPixel = 0;
@@ -680,6 +682,11 @@ export class AnticGtia implements Memory {
 	// and ANX_CHAR_DELAY.
 	#anxLine = new DelayLine(32);
 
+	// Color clocks until the ANx pipe is provably empty (the furthest
+	// scheduled slot at the last push). While zero, #drawPlayfield skips
+	// ticking the pipe and paints background.
+	#anxDrain = 0;
+
 	// GTIA register writes in flight to the paint logic, one DelayLine per
 	// latency class so two writes can never fall due on the same color clock
 	// (the CPU issues at most one write per machine cycle = two color
@@ -690,6 +697,13 @@ export class AnticGtia implements Memory {
 	#grafWrites = new DelayLine(8); // GRAFPx/GRAFM
 	#colorWrites = new DelayLine(8); // COLPMx/COLPFx/COLBK
 	#priorWrites = new DelayLine(8); // PRIOR
+
+	// Writes queued but not yet applied, across all five lines. While zero,
+	// #applyPendingWrites skips ticking entirely — that freezes the lines'
+	// cursors, which is sound: schedules are cursor-relative and an empty
+	// line carries no time-sensitive state, so its clock only has to run
+	// while something is in flight.
+	#pendingGtiaWrites = 0;
 
 	#queueGtiaWrite(address: number, value: number): void {
 		const line =
@@ -713,21 +727,39 @@ export class AnticGtia implements Memory {
 							? COLOR_WRITE_DELAY
 							: PRIOR_WRITE_DELAY;
 		line.scheduleValue(delay, 0x10000 | (address << 8) | value);
+		this.#pendingGtiaWrites++;
 	}
 
 	// Tick the five write lines and apply whatever is due, just before the
-	// current color clock paints.
+	// current color clock paints. The common case — nothing in flight —
+	// is one comparison.
 	#applyPendingWrites(): void {
+		if (this.#pendingGtiaWrites === 0) return;
 		let w = this.#posWrites.tick();
-		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
 		w = this.#sizeWrites.tick();
-		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
 		w = this.#grafWrites.tick();
-		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
 		w = this.#colorWrites.tick();
-		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
 		w = this.#priorWrites.tick();
-		if (w) this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+		if (w) {
+			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
+			this.#pendingGtiaWrites--;
+		}
 	}
 
 	#applyGtiaWrite(address: number, value: number): void {
@@ -1471,7 +1503,16 @@ export class AnticGtia implements Memory {
 	// The ANx bus value for this color clock.
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
 	#drawPlayfield(pos: 0 | 1): number {
-		let pixel = this.#anxLine.tick();
+		// Tick the pipe only while codes are in flight (the drain window set
+		// at push time) — an idle pipe paints background with its cursor
+		// frozen, which is sound for the same reason as the write lines.
+		let pixel: number;
+		if (this.#anxDrain === 0) {
+			pixel = 0;
+		} else {
+			this.#anxDrain--;
+			pixel = this.#anxLine.tick();
+		}
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
 		if (scrolled && this.hscrol & 1) {
@@ -2116,6 +2157,8 @@ export class AnticGtia implements Memory {
 	// Ship the pending byte into the ANx pipe, leftmost pixel first
 	// (pfPixels holds it right to left).
 	#pushPfBatch(delay: number): void {
+		const horizon = delay + this.pfCounter;
+		if (horizon > this.#anxDrain) this.#anxDrain = horizon;
 		for (let k = this.pfCounter - 1; k >= 0; k--, delay++) {
 			this.#anxLine.scheduleValue(delay, this.pfPixels[k]!);
 		}

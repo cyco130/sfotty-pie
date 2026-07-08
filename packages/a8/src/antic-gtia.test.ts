@@ -445,3 +445,37 @@ test("priority conflicts match AHRM 6.7 table 16", () => {
 	// P5+PF23+P01+P23
 	expectRow(3, 0b0101, true, [PM0, 0, PF3, 0, PM0, PM0, PM0, 0, 0, 0, 0]);
 });
+
+// The halt line over cycles 0-7 of the current line (the P/M and display
+// list DMA slots; DRAM refresh doesn't request until cycle 25).
+function haltPattern(ag: AnticGtia, vcount: number): boolean[] {
+	ag.vcount = vcount;
+	ag.hpos = 0;
+	const halts: boolean[] = [];
+	for (let i = 0; i < 8; i++) {
+		ag.beforeCpu();
+		ag.busCycle();
+		halts.push(ag.halt);
+	}
+	return halts;
+}
+
+test("P/M DMA fetches only within the visible region, lines 8-247", () => {
+	const ag = makeAnticGtia();
+	ag.write(0xd400, 0x0c); // DMACTL: player + missile DMA, no playfield/DL
+
+	// A display line: the missile slot at cycle 0 and players at 2-5. A
+	// free-running cycle-counted kernel (RastaConverter) counts on the
+	// vertical-blank lines NOT having them — five phantom steals on the
+	// line between its WSYNC anchor and the display skewed every write.
+	const pm = [true, false, true, true, true, true, false, false];
+	expect(haltPattern(ag, 100)).toEqual(pm);
+	expect(haltPattern(ag, 8)).toEqual(pm);
+	expect(haltPattern(ag, 247)).toEqual(pm);
+
+	const off = new Array(8).fill(false);
+	expect(haltPattern(ag, 7)).toEqual(off);
+	expect(haltPattern(ag, 3)).toEqual(off);
+	expect(haltPattern(ag, 248)).toEqual(off);
+	expect(haltPattern(ag, 300)).toEqual(off);
+});

@@ -106,3 +106,38 @@ test("color registers ignore luminance bit 0", () => {
 	for (let i = 0; i < 8; i++) machine.cycle(); // let the write reach GTIA
 	expect(machine.anticGtia.colorRegisters[4]).toBe(0x34);
 });
+
+test("repositioning an in-flight player onto the beam retriggers and merges", () => {
+	// Player 2, quadruple width, %00111000, triggered at HPOS $22 = color
+	// clock 34: pixels at clocks 42-53 (frame x 16-39). Rewriting HPOSP2
+	// to $27 = 39 during machine cycle 17 lands the comparator value on
+	// the very clock the beam reaches it (write effect from 2w+5) — a
+	// match: the in-flight image shifts a step and the graphics latch
+	// ORs in (the pmoverlap merge), stretching the player to clocks
+	// 39-58 (x 10-49). One color clock later and the match is missed —
+	// the truncated player is a visible drop-out under beam-racing
+	// kernels (RastaConverter output).
+	const spanFor = (rewrite: boolean) => {
+		const machine = new Atari({ os: new Uint8Array(10240) });
+		machine.write(0xd00a, 0x03, ReadOptions.NONE); // SIZEP2 quad
+		machine.write(0xd002, 0x22, ReadOptions.NONE); // HPOSP2
+		machine.write(0xd00f, 0x38, ReadOptions.NONE); // GRAFP2
+		machine.write(0xd014, 0x46, ReadOptions.NONE); // COLPM2
+		const { anticGtia } = machine;
+		let guard = 0;
+		while (
+			!(anticGtia.vcount === 20 && anticGtia.hpos === 17) &&
+			guard++ < 200000
+		) {
+			machine.cycle();
+		}
+		if (rewrite) machine.write(0xd002, 0x27, ReadOptions.NONE);
+		while (anticGtia.vcount === 20 && guard++ < 300000) machine.cycle();
+		const row = machine.frame.subarray(12 * 376, 13 * 376);
+		const px = [];
+		for (let x = 0; x < 376; x++) if (row[x] === 0x46) px.push(x);
+		return `${px[0]}-${px[px.length - 1]}:${px.length}`;
+	};
+	expect(spanFor(false)).toBe("16-39:24");
+	expect(spanFor(true)).toBe("10-49:40");
+});

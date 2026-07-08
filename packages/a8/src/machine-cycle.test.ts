@@ -64,3 +64,45 @@ test("a bus-phase throw suspends the cycle; resume finishes it without re-advanc
 	// And the CPU committed the fetch on the retry.
 	expect(machine.cpu.PC).toBe(0x0601);
 });
+
+test("a mid-scanline color register write paints from color clock 2w+1", () => {
+	// One mode E + LMS line of solid PF2 pixels, then JVB.
+	const machine = new Atari({ os: new Uint8Array(10240) });
+	const dl = [0x4e, 0x00, 0x30, 0x41, 0x00, 0x20];
+	dl.forEach((b, i) => machine.write(0x2000 + i, b, ReadOptions.NONE));
+	for (let i = 0; i < 40; i++) {
+		machine.write(0x3000 + i, 0xff, ReadOptions.NONE);
+	}
+	machine.write(0xd402, 0x00, ReadOptions.NONE); // DLISTL
+	machine.write(0xd403, 0x20, ReadOptions.NONE); // DLISTH
+	machine.write(0xd400, 0x22, ReadOptions.NONE); // DMACTL: normal + DL
+	machine.write(0xd018, 0x0e, ReadOptions.NONE); // COLPF2 white
+
+	// Rewrite COLPF2 during machine cycle w of the mode line: the new
+	// color must paint from color clock 2w+1 — frame x = 4(w-17)+2. One
+	// color clock earlier than AHRM table 18's ladder relative to the
+	// HPOS anchor; pinned pixel-exact by beam-racing kernels
+	// (RastaConverter output) against a reference render.
+	const w = 55;
+	const { anticGtia } = machine;
+	let guard = 0;
+	while (
+		!(anticGtia.vcount === 8 && anticGtia.hpos === w) &&
+		guard++ < 200000
+	) {
+		machine.cycle();
+	}
+	machine.write(0xd018, 0x34, ReadOptions.NONE);
+	while (anticGtia.vcount === 8 && guard++ < 300000) machine.cycle();
+
+	const row = machine.frame.subarray(0, 376);
+	const boundary = row.findIndex((v, x) => v === 0x34 && row[x - 1] === 0x0e);
+	expect(boundary).toBe(4 * (w - 17) + 2);
+});
+
+test("color registers ignore luminance bit 0", () => {
+	const machine = quietMachine();
+	machine.write(0xd016, 0x35, ReadOptions.NONE); // COLPF0, odd luminance
+	for (let i = 0; i < 8; i++) machine.cycle(); // let the write reach GTIA
+	expect(machine.anticGtia.colorRegisters[4]).toBe(0x34);
+});

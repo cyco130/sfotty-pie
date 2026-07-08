@@ -60,17 +60,21 @@ const ANX_CHAR_DELAY = 6;
 // HPOS at delay 7 — effective from color clock 2w+6, pinned by Acid800
 // gtia_retrigger and equal to Atari++'s -playerpositiondelay default (12
 // half color clocks). AHRM's table supplies the spacings between classes
-// (color = HPOS-4, PRIOR = HPOS-3, GRAF = HPOS-2; its absolute
-// $81/$82/$83/$85 column sits a uniform 3 color clocks earlier — a
-// write-phase origin difference, the ladder is what's reliable). SIZE is
-// faster than HPOS — Atari++'s -playerresizedelay (3 color clocks, i.e.
-// HPOS-3) where AHRM's prose lumps them; Acid800 pmresize arbitrates in
-// Atari++'s favor. Open refinement: PRIOR bits 6-7 are really 3-5 color
-// clocks with per-transition artifacts (GTIA modes work).
+// (PRIOR = HPOS-3, GRAF = HPOS-2; its absolute $81/$82/$83/$85 column
+// sits a uniform 3 color clocks earlier — a write-phase origin
+// difference, the ladder is what's reliable). Color runs one color clock
+// faster than the table's ladder (HPOS-5, not the listed HPOS-4): a
+// beam-racing kernel rewriting COLPFx mid-line (RastaConverter output)
+// only matches its reference render pixel-exact at HPOS-5, on every
+// mid-line boundary over a full frame. SIZE is faster than HPOS —
+// Atari++'s -playerresizedelay (3 color clocks, i.e. HPOS-3) where
+// AHRM's prose lumps them; Acid800 pmresize arbitrates in Atari++'s
+// favor. Open refinement: PRIOR bits 6-7 are really 3-5 color clocks
+// with per-transition artifacts (GTIA modes work).
 const POS_WRITE_DELAY = 7;
 const SIZE_WRITE_DELAY = 4;
 const GRAF_WRITE_DELAY = 5;
-const COLOR_WRITE_DELAY = 3;
+const COLOR_WRITE_DELAY = 2;
 const PRIOR_WRITE_DELAY = 4;
 
 export class AnticGtia implements Memory {
@@ -769,8 +773,12 @@ export class AnticGtia implements Memory {
 
 	#applyGtiaWrite(address: number, value: number): void {
 		if (address >= 0x12 && address <= 0x1a) {
-			// COLPM0-COLPM3, COLPF0-COLPF3, COLBK — in register order.
-			this.colorRegisters[address - 0x12] = value;
+			// COLPM0-COLPM3, COLPF0-COLPF3, COLBK — in register order. The
+			// registers only hold 7 bits: luminance bit 0 is ignored on
+			// write and always reads back into the pipeline as 0 (AHRM
+			// "color encoding"); only GTIA mode 9's pixel data — OR'd in
+			// downstream of the register — can set it.
+			this.colorRegisters[address - 0x12] = value & 0xfe;
 			return;
 		}
 		switch (address) {

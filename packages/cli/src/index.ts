@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-import { ReadOptions, Sfotty, traceLine } from "@sfotty-pie/sfotty";
+import {
+	ReadOptions,
+	Sfotty,
+	traceLine,
+	type Memory,
+} from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
 import { crashDump } from "./crash-dump.ts";
@@ -73,8 +78,15 @@ async function main() {
 		onStdin = null;
 	});
 
-	const sfotty = new Sfotty({
+	const bus: Memory = {
 		read(address, options): number {
+			// A PEEK read (disassembler, debugger, crash dump) is side-effect-free:
+			// it sees plain RAM everywhere, including under the I/O page, and never
+			// triggers a break.
+			if (options & ReadOptions.PEEK) {
+				return ram[address]!;
+			}
+
 			if (address >= 0x0200 && address < 0x0300) {
 				switch (address) {
 					case 0x0201:
@@ -139,7 +151,9 @@ async function main() {
 				ram[address] = value;
 			}
 		},
-	});
+	};
+
+	const sfotty = new Sfotty(bus);
 
 	let maxCycles = Infinity;
 	let trace = false;
@@ -156,8 +170,9 @@ async function main() {
 		}
 	}
 
-	// Side-effect-free reader for the disassembler (RAM only, no I/O triggers).
-	const peek = (address: number) => ram[address & 0xffff]!;
+	// Side-effect-free reader for the disassembler and the crash dump.
+	const peek = (address: number) =>
+		bus.read(address & 0xffff, ReadOptions.PEEK);
 
 	// onFetch fires once per committed instruction: record the address in a
 	// ring buffer for the crash dump (`head` points at the oldest entry once
@@ -200,10 +215,6 @@ async function main() {
 			} else {
 				throw error;
 			}
-
-			// Not needed on the new core: a thrown bus access leaves CPU state
-			// untouched, so the next run() retries the same cycle.
-			// sfotty.cycleCounter--;
 		}
 	}
 

@@ -35,7 +35,7 @@ import { Signal } from "./signal.ts";
  * reads, per the chip.)
  *
  * On the Atari: PORTA carries joysticks 0/1, PORTB joysticks 2/3 (400/800)
- * or memory banking (XL/XE - the {@link AtariBus} watches {@link portbOut});
+ * or memory banking (XL/XE - the {@link Mmu} watches {@link portbOut});
  * the control lines belong to SIO: CA1 = proceed and CB1 = interrupt
  * (inputs), CA2 = motor control and CB2 = command (outputs).
  */

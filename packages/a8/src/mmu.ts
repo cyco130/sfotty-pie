@@ -150,7 +150,7 @@ export class Rom implements Memory {
 	}
 }
 
-export interface AtariBusOptions {
+export interface MmuOptions {
 	/**
 	 * Enable PORTB banking.
 	 */
@@ -219,8 +219,8 @@ export interface AtariBusOptions {
 	antic: Memory;
 }
 
-export class AtariBus implements Memory {
-	constructor(options: AtariBusOptions) {
+export class Mmu implements Memory {
+	constructor(options: MmuOptions) {
 		const {
 			portbBanking,
 			conventionalRamSize,
@@ -352,7 +352,7 @@ export class AtariBus implements Memory {
 
 	/**
 	 * Drop the PORTB watch. Call before discarding the bus - the host
-	 * reconfigures the machine by building a fresh `AtariBus`, and without this
+	 * reconfigures the machine by building a fresh `Mmu`, and without this
 	 * the dead bus keeps receiving PORTB changes from the shared PIA.
 	 */
 	dispose() {

@@ -2,7 +2,7 @@ import { ReadOptions, Sfotty, type Memory } from "@sfotty-pie/sfotty";
 import { AnticGtia, type TvAdapter } from "./antic-gtia.ts";
 import type { AtrImage } from "./atr.ts";
 import {
-	AtariBus,
+	Mmu,
 	type ExecuteInterceptor,
 	type ExecuteObserver,
 	type ReadInterceptor,
@@ -11,7 +11,7 @@ import {
 	type TrapOptions,
 	type WriteInterceptor,
 	type WriteObserver,
-} from "./bus-manager.ts";
+} from "./mmu.ts";
 import { builtinSlotRom, Cartridge } from "./cartridge.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
@@ -76,7 +76,7 @@ export interface MachineConfig {
 }
 
 /**
- * An Atari 8-bit machine (NTSC or PAL) built on the {@link AtariBus}, the
+ * An Atari 8-bit machine (NTSC or PAL) built on the {@link Mmu}, the
  * combined {@link AnticGtia} video chip pair, POKEY, and the PIA. Classic
  * machines as {@link MachineConfig} recipes:
  *
@@ -111,7 +111,7 @@ export interface MachineConfig {
 export class Atari implements Memory {
 	readonly anticGtia: AnticGtia;
 
-	readonly bus: AtariBus;
+	readonly mmu: Mmu;
 	readonly pia: Pia;
 	readonly pokey: Pokey;
 	readonly #xl: boolean;
@@ -143,7 +143,7 @@ export class Atari implements Memory {
 		// construction cycle.
 		this.anticGtia = new AnticGtia(
 			{
-				dmaRead: (address) => this.bus.read(address, ReadOptions.DMA),
+				dmaRead: (address) => this.mmu.read(address, ReadOptions.DMA),
 				log: log ?? (() => {}),
 			},
 			{
@@ -156,7 +156,7 @@ export class Atari implements Memory {
 		this.pia = new Pia();
 		this.pokey = new Pokey();
 
-		this.bus = new AtariBus({
+		this.mmu = new Mmu({
 			portbBanking: xl,
 			conventionalRamSize: config.conventionalRamSize ?? (xl ? 64 : 48),
 			xeBankCount: config.xeBankCount ?? 0,
@@ -188,7 +188,7 @@ export class Atari implements Memory {
 		}
 
 		// The machine is its own bus (it implements Memory), so the CPU reads and
-		// writes through the trap-aware AtariBus. Constructed last, once #bus is
+		// writes through the trap-aware Mmu. Constructed last, once the MMU is
 		// wired. Powers on into the reset sequence like real hardware.
 		this.#cpu = new Sfotty(this);
 
@@ -205,21 +205,21 @@ export class Atari implements Memory {
 		);
 	}
 
-	/** The last value driven on the data bus (see {@link AtariBus.busData}). */
+	/** The last value driven on the data bus (see {@link Mmu.busData}). */
 	get busData(): number {
-		return this.bus.busData;
+		return this.mmu.busData;
 	}
 
 	read(address: number, options: ReadOptions): number {
-		return this.bus.read(address, options);
+		return this.mmu.read(address, options);
 	}
 
 	write(address: number, value: number, options: ReadOptions): void {
-		this.bus.write(address, value, options);
+		this.mmu.write(address, value, options);
 	}
 
 	reset(cold: boolean): void {
-		this.bus.reset(cold);
+		this.mmu.reset(cold);
 		this.anticGtia.reset(cold);
 		this.pia.reset(cold);
 		this.pokey.reset(cold);
@@ -410,7 +410,7 @@ export class Atari implements Memory {
 		fn: ExecuteInterceptor,
 		opts?: { once?: boolean },
 	): TrapHandle {
-		return this.bus.interceptExecute(address, fn, opts);
+		return this.mmu.interceptExecute(address, fn, opts);
 	}
 
 	observeExecute(
@@ -418,7 +418,7 @@ export class Atari implements Memory {
 		fn: ExecuteObserver,
 		opts?: { once?: boolean },
 	): TrapHandle {
-		return this.bus.observeExecute(address, fn, opts);
+		return this.mmu.observeExecute(address, fn, opts);
 	}
 
 	interceptRead(
@@ -426,7 +426,7 @@ export class Atari implements Memory {
 		fn: ReadInterceptor,
 		opts?: TrapOptions,
 	): TrapHandle {
-		return this.bus.interceptRead(address, fn, opts);
+		return this.mmu.interceptRead(address, fn, opts);
 	}
 
 	observeRead(
@@ -434,7 +434,7 @@ export class Atari implements Memory {
 		fn: ReadObserver,
 		opts?: TrapOptions,
 	): TrapHandle {
-		return this.bus.observeRead(address, fn, opts);
+		return this.mmu.observeRead(address, fn, opts);
 	}
 
 	interceptWrite(
@@ -442,7 +442,7 @@ export class Atari implements Memory {
 		fn: WriteInterceptor,
 		opts?: TrapOptions,
 	): TrapHandle {
-		return this.bus.interceptWrite(address, fn, opts);
+		return this.mmu.interceptWrite(address, fn, opts);
 	}
 
 	observeWrite(
@@ -450,7 +450,7 @@ export class Atari implements Memory {
 		fn: WriteObserver,
 		opts?: TrapOptions,
 	): TrapHandle {
-		return this.bus.observeWrite(address, fn, opts);
+		return this.mmu.observeWrite(address, fn, opts);
 	}
 
 	/**

@@ -26,7 +26,7 @@ Between the phases, the machine copies ANTIC's NMI/RDY/HALT outputs onto the CPU
 
 ## The bus and core-owned trapping
 
-[src/bus-manager.ts](src/bus-manager.ts) owns the memory map: RAM/ROM regions, the chip registers, cartridge mapping, XL/XE PORTB banking (including 130XE extended banks with optional separate CPU/ANTIC access), and PBI ([src/pbi.ts](src/pbi.ts)).
+[src/mmu.ts](src/mmu.ts) owns the memory map: RAM/ROM regions, the chip registers, cartridge mapping, XL/XE PORTB banking (including 130XE extended banks with optional separate CPU/ANTIC access), and PBI ([src/pbi.ts](src/pbi.ts)).
 
 It also owns the **trap dispatch** - the machine-level generalization of sfotty's throw-a-sentinel idea. `Atari` exposes `interceptRead`/`interceptWrite`/`interceptExecute` (replace the access: return a substitute value/opcode, or `undefined` to pass through) and the `observe*` variants (watch without replacing), each returning a `TrapHandle` with `remove()`. Read/write traps take a `TrapMask` (`sync`/`dummy`/`dma`) to filter which access kinds fire; an execute trap is sugar for a read trap masked to `{ sync: true, dummy: false }` - i.e. committed opcode fetches only. This is what "core-owned trapping" means: hosts don't wrap the bus, they register traps with it.
 
@@ -70,7 +70,7 @@ Unit tests (vitest, `*.test.ts` beside the sources) cover the chips, traps, ATR/
 | File                                                                | Role                                                                                   |
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [src/machine.ts](src/machine.ts)                                    | `Atari`: config, the cycle/suspend phase machine, input methods, disk/trap delegation. |
-| [src/bus-manager.ts](src/bus-manager.ts)                            | `AtariBus`: memory map, PORTB banking, trap registration and dispatch.                 |
+| [src/mmu.ts](src/mmu.ts)                                            | `Mmu`: memory map, PORTB banking, trap registration and dispatch.                      |
 | [src/antic-gtia.ts](src/antic-gtia.ts)                              | ANTIC+GTIA fused: display list, P/M graphics, NMI/RDY/HALT, scanline render.           |
 | [src/pokey.ts](src/pokey.ts)                                        | POKEY: audio, keyboard scan, IRQs.                                                     |
 | [src/pia.ts](src/pia.ts)                                            | PIA: joystick ports, XL/XE banking latch.                                              |

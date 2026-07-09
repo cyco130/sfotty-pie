@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { DECODE, ReadOptions, Sfotty, traceLine } from "@sfotty-pie/sfotty";
+import { ReadOptions, Sfotty, traceLine } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
 import { crashDump } from "./crash-dump.ts";
@@ -159,14 +159,18 @@ async function main() {
 	// Side-effect-free reader for the disassembler (RAM only, no I/O triggers).
 	const peek = (address: number) => ram[address & 0xffff]!;
 
-	// Ring buffer of the last committed instruction addresses, for the crash
-	// dump. `head` points at the oldest entry once the buffer is full.
+	// onFetch fires once per committed instruction: record the address in a
+	// ring buffer for the crash dump (`head` points at the oldest entry once
+	// the buffer is full) and emit the trace line when tracing.
 	const RECENT_INSTRUCTIONS = 16;
 	const recentPCs: number[] = [];
 	let recentHead = 0;
 	sfotty.onFetch = (pc) => {
 		recentPCs[recentHead] = pc;
 		recentHead = (recentHead + 1) % RECENT_INSTRUCTIONS;
+		if (trace) {
+			process.stderr.write(traceLine(sfotty, peek, pc) + "\n");
+		}
 	};
 
 	// Post-mortem dump to stderr, shared by the CIM-crash path and the
@@ -183,9 +187,6 @@ async function main() {
 	// Construction arms the cold-reset sequence; the first seven cycles run it
 	// and load PC from the reset vector already copied into RAM.
 	while (!sfotty.crashed && maxCycles--) {
-		if (trace && sfotty.state === DECODE) {
-			process.stderr.write(traceLine(sfotty, peek) + "\n");
-		}
 		try {
 			sfotty.run();
 		} catch (error) {

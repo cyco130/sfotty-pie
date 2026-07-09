@@ -41,7 +41,9 @@ The program contents are loaded starting from the address `$0400`.
 | `$0202` | `STDOUT` | `W`          | Write a byte to the standard output.                         |
 | `$0203` | `STDERR` | `W`          | Write a byte to the standard error.                          |
 | `$0240` | `RAND`   | `R`          | Read a random byte.                                          |
-| `$0241` | `FSTIN`  | `R`          | Status of stdin: EOF if bit 7 set.                           |
+| `$0241` | `FSTIN`  | `R`          | Status of stdin: EOF if bit 7 set (blocks until decidable).  |
+
+When standard input is a terminal, it is line-buffered with echo and line editing; the program sees each line as it is entered. When it is redirected (a pipe or a file), the program receives it byte-for-byte.
 
 **Page 3** (addresses from `$0300` to `$03FF`) will contain the command line arguments as a null-terminated list of null-terminated strings, truncated to fit the page (254 bytes plus the final two terminators).
 

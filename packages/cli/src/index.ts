@@ -49,34 +49,43 @@ async function main() {
 			.slice(0, 254) + "\0\0";
 	ram.set(Buffer.from(userArgs), 0x0300);
 
-	const rl = readline.createInterface({
-		input: process.stdin,
-		output: process.stdout,
-	});
-
-	// Standard input is consumed line by line as readline emits it. The CPU
-	// pulls bytes out of this buffer; when it runs dry it throws BufferEmptyError
-	// and we wait for the next line (or EOF) before retrying the cycle.
+	// The CPU pulls bytes out of this buffer; when it runs dry it throws
+	// BufferEmptyError and we wait for more input (or EOF) before retrying the
+	// cycle.
 	let stdinBuffer = Buffer.alloc(0);
 	let stdinOffset = 0;
 	let stdinClosed = false;
 	let onStdin: (() => void) | null = null;
 
-	rl.on("line", (line) => {
-		stdinBuffer = Buffer.concat([
-			stdinBuffer.subarray(stdinOffset),
-			Buffer.from(line + "\n"),
-		]);
+	function pushStdin(chunk: Buffer) {
+		stdinBuffer = Buffer.concat([stdinBuffer.subarray(stdinOffset), chunk]);
 		stdinOffset = 0;
 		onStdin?.();
 		onStdin = null;
-	});
+	}
 
-	rl.on("close", () => {
+	function endStdin() {
 		stdinClosed = true;
 		onStdin?.();
 		onStdin = null;
-	});
+	}
+
+	if (process.stdin.isTTY) {
+		// Interactive: readline provides echo and line editing; input reaches
+		// the guest a line at a time.
+		const rl = readline.createInterface({
+			input: process.stdin,
+			output: process.stdout,
+		});
+		rl.on("line", (line) => pushStdin(Buffer.from(line + "\n")));
+		rl.on("close", endStdin);
+	} else {
+		// Redirected: consume the stream byte-for-byte. No line mangling (CR
+		// preservation, no invented trailing newline) and no readline, which
+		// would echo piped input into a TTY stdout.
+		process.stdin.on("data", pushStdin);
+		process.stdin.on("end", endStdin);
+	}
 
 	const bus: Memory = {
 		read(address, options): number {
@@ -102,9 +111,13 @@ async function main() {
 						return (Math.random() * 256) | 0;
 
 					case 0x0241:
-						return stdinClosed && stdinOffset >= stdinBuffer.length
-							? 0x80
-							: 0x00;
+						// Block while the status is undecided (buffer empty but the
+						// stream not yet ended); otherwise a check-FSTIN-then-read-STDIN
+						// sequence could see "not EOF" and still read the EOF zero.
+						if (stdinOffset >= stdinBuffer.length && !stdinClosed) {
+							throw new BufferEmptyError();
+						}
+						return stdinOffset < stdinBuffer.length ? 0x00 : 0x80;
 
 					default:
 						console.error(`Unhandled read from ${address.toString(16)}`);

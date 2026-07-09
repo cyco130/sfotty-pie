@@ -47,7 +47,7 @@ The program contents are loaded starting from the address `$0400`.
 
 Everything other than the I/O area is RAM, including the command line argument area, the program contents, and the interrupt vectors. Free areas will contain all zeroes.
 
-Executing a CIM (also known as JAM, KIL, etc.) instruction crashes the program with exit code 2.
+Executing a CIM (also known as JAM, KIL, etc.) instruction crashes the program with exit code 2. On a crash (CIM or an access to an undefined I/O address), the emulator writes a debug dump to stderr: the CPU microstate, the registers, and a disassembly of the last instructions executed.
 
 ## Sample programs
 

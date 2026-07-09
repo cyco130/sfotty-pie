@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { DECODE, Sfotty, traceLine } from "@sfotty-pie/sfotty";
+import { DECODE, ReadOptions, Sfotty, traceLine } from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
+import { crashDump } from "./crash-dump.ts";
 
 async function main() {
 	const args = process.argv.slice(2);
@@ -73,7 +74,7 @@ async function main() {
 	});
 
 	const sfotty = new Sfotty({
-		read(address, decode): number {
+		read(address, options): number {
 			if (address >= 0x0200 && address < 0x0300) {
 				switch (address) {
 					case 0x0201:
@@ -95,11 +96,19 @@ async function main() {
 
 					default:
 						console.error(`Unhandled read from ${address.toString(16)}`);
+						dump();
 						process.exit(2);
 				}
 			} else {
 				const value = ram[address]!;
-				if (decode && value === 0) {
+				// Break on a committed fetch (SYNC and not DUMMY) of a zero opcode.
+				// Dummy reads (reset's fake stack reads, CIM's jam reads) also see
+				// zero bytes and must pass through untouched.
+				if (
+					value === 0 &&
+					options & ReadOptions.SYNC &&
+					!(options & ReadOptions.DUMMY)
+				) {
 					throw new BreakError();
 				}
 				return value;
@@ -123,6 +132,7 @@ async function main() {
 
 					default:
 						console.error(`Unhandled write to address ${address.toString(16)}`);
+						dump();
 						process.exit(2);
 				}
 			} else {
@@ -149,9 +159,29 @@ async function main() {
 	// Side-effect-free reader for the disassembler (RAM only, no I/O triggers).
 	const peek = (address: number) => ram[address & 0xffff]!;
 
-	// The new core doesn't run a reset sequence yet, so jump to the reset vector.
-	sfotty.PC = ram[0xfffc]! | (ram[0xfffd]! << 8);
+	// Ring buffer of the last committed instruction addresses, for the crash
+	// dump. `head` points at the oldest entry once the buffer is full.
+	const RECENT_INSTRUCTIONS = 16;
+	const recentPCs: number[] = [];
+	let recentHead = 0;
+	sfotty.onFetch = (pc) => {
+		recentPCs[recentHead] = pc;
+		recentHead = (recentHead + 1) % RECENT_INSTRUCTIONS;
+	};
 
+	// Post-mortem dump to stderr, shared by the CIM-crash path and the
+	// unhandled-I/O exits in the bus handlers above.
+	function dump() {
+		console.error(
+			crashDump(sfotty, peek, [
+				...recentPCs.slice(recentHead),
+				...recentPCs.slice(0, recentHead),
+			]),
+		);
+	}
+
+	// Construction arms the cold-reset sequence; the first seven cycles run it
+	// and load PC from the reset vector already copied into RAM.
 	while (!sfotty.crashed && maxCycles--) {
 		if (trace && sfotty.state === DECODE) {
 			process.stderr.write(traceLine(sfotty, peek) + "\n");
@@ -178,7 +208,7 @@ async function main() {
 
 	if (sfotty.crashed) {
 		console.error("Program crashed");
-		// console.log(sfotty.print()); // TODO: print() not on the new core
+		dump();
 		process.exit(2);
 	}
 }

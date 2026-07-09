@@ -27,7 +27,7 @@ Everything exported lives in [src/index.ts](src/index.ts):
 - `DECODE` — the sentinel microstate for the opcode-fetch cycle.
 - `disassemble`, `traceLine`, `Disassembly`, `PeekReader` — the disassembler in [src/disasm.ts](src/disasm.ts), used for tracing and debugging.
 
-`Sfotty` is a thin facade ([src/sfotty.ts](src/sfotty.ts)) over the internal `SfottyCore` ([src/sfotty-core.ts](src/sfotty-core.ts)), which it holds in an ES-private field. The split exists for runtime encapsulation: the `opXxx` micro-op methods must be public on the core so the generated steps (a separate module) can call them, but the facade keeps them genuinely unreachable — inspecting a `Sfotty` in a debugger or browser console shows only real 6502 state. Hosts never see the core; everything below about registers, lines, and `run()` is exposed 1:1 on the facade as delegating accessors.
+`Sfotty` is a thin facade ([src/sfotty.ts](src/sfotty.ts)) over the internal `SfottyCore` ([src/sfotty-core.ts](src/sfotty-core.ts)), which it holds in a private field. The split exists for runtime encapsulation: the `opXxx` micro-op methods must be public on the core so the generated steps (a separate module) can call them, but the facade keeps them unreachable — inspecting a `Sfotty` in a debugger or browser console shows only real 6502 state. Hosts never see the core; everything below about registers, lines, and `run()` is exposed 1:1 on the facade as delegating accessors.
 
 Programmer-visible registers (`A`, `X`, `Y`, `S`, `PC`) and the discrete status flags (`cFlag`, `zFlag`, etc.) are public fields; `getP()`/`setP()` pack and unpack them into a status byte. The host can seed these directly, or call `reset(cold)` to run the reset sequence (see [The reset sequence](#the-reset-sequence)). The input lines `RDY`, `IRQ`, and `NMI` are public booleans the host drives between `run()` calls (see [The RDY line](#the-rdy-line) and [Interrupts](#interrupts)). The facade also exposes `onFetch` — an optional host callback fired on each _committed_ opcode fetch (`SYNC` asserted, `DUMMY` not), which is what tracing builds on — plus `crashed` (a CIM jam happened), the raw `state` microstate, and `describeState()` to render it for debugging.
 
@@ -105,13 +105,13 @@ write(address: number, value: number, options: ReadOptions): void;
 
 `ReadOptions` is a bit-flag set (a `const` object, not an `enum` — enums emit runtime code this repo's no-transpile model rejects): `NONE`, `PEEK` for side-effect-free inspection (disassembler/debugger), `SYNC` for the opcode-fetch cycle, `DUMMY` for non-committing accesses (see [Dummy cycles](#dummy-cycles)), `DMA` for accesses driven by another chip. `write` receives the same flags (only `DUMMY` is meaningful there — the RMW double write-back); an implementor that doesn't care may declare a narrower signature, which still satisfies the interface.
 
-The package has no built-in trap type. A host interrupts the CPU — for memory-mapped I/O, execute traps, or breakpoints — by **throwing its own sentinel** from `read`/`write`. It works because of the ordering invariant in every step function: the bus access happens _first_, before any register is mutated, and the `state` write happens _last_. So a throw mid-cycle unwinds with the CPU still in its exact pre-cycle state; the host catches it around `run()`, reacts, and simply re-`run()`s to retry the same cycle. The sentinel needs no payload — the host sources the address and access kind from its own bus (or from CPU state, e.g. `PC` at an execute trap).
+If the host needs to suspend the CPU for anything it can't answer inline — async I/O behind a memory-mapped register, a debugger pause, an execute trap — it can throw a sentinel value from `read` or `write`, catch it around `run()`, react, and re-`run()` to retry the same cycle. See [Traps and asynchronous behavior](readme.md#traps-and-asynchronous-behavior) for an example. Step functions are designed so that the bus access is the first thing that happens in a cycle, before any state is mutated. This way, retrying a cycle after a throw from the bus is always safe.
 
 ## Dummy cycles
 
-Many 6502 cycles perform a bus access whose value is discarded or repeated — the dummy read while adding the index register in indexed modes, the RMW double write-back, the fake stack reads of reset, the discarded fetch when an interrupt is recognized. A host with read- or write-sensitive I/O registers needs to tell these apart from real accesses, so the bus flags them with `ReadOptions.DUMMY`.
+Many 6502 cycles perform a bus access whose value is discarded or repeated — the dummy read while adding the index register in indexed modes, the RMW double write-back, the fake stack reads of reset, the discarded fetch when an interrupt is recognized. For such cycles, the CPU calls the bus methods with the `ReadOptions.DUMMY` flag, which can be useful for debugging purposes. For instance, a breakpoint can be created by looking for reads with `SYNC` set and `DUMMY` clear. `SYNC` corresponds to the `SYNC` pin on the 6502, which is asserted on every opcode-fetch cycle — even a fetch that will be discarded due to a pending interrupt, or the repeated fetch of an RDY-stalled cycle.
 
-Which cycles are dummies is static per microstate, so it's authored in the microcode: a `dummy` token on a cycle. The generator strips the token from the emitted step body and instead records the state in a `DUMMY` byte table (a third export of [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts), alongside `MICROCODE`); the `#read`/`#write` choke points in [src/sfotty-core.ts](src/sfotty-core.ts) look the current state up and OR `DUMMY` into the flags passed to the bus. One case is dynamic: an indexed read that may cross a page issues a speculative read that is a dummy _only if_ the page actually crossed. Those states live in the separate `SPECULATIVE` table and consult `#crossed` at runtime. `decode` handles its own case, OR-ing `DUMMY` when the fetched opcode will be discarded for an interrupt.
+Which cycles are dummies is mostly static per microstate, so it's authored in the microcode: a `dummy` token on a cycle. The generator strips the token from the emitted step body and instead records the state in a `DUMMY` byte table (a third export of [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts), alongside `MICROCODE`); the `#read`/`#write` choke points in [src/sfotty-core.ts](src/sfotty-core.ts) look the current state up and OR `DUMMY` into the flags passed to the bus. One case is dynamic: an indexed read that may cross a page issues a speculative read that is a dummy _only if_ the page actually crossed. Those states live in the separate `SPECULATIVE` table and consult `#crossed` at runtime. `decode` handles its own case, OR-ing `DUMMY` when the fetched opcode will be discarded for an interrupt.
 
 `onFetch` (the public tracing hook) fires only on _committed_ fetches — `SYNC` asserted and `DUMMY` not — so tracers see one event per genuinely executed instruction. The dummy classifications are covered by [src/dummy-cycles.test.ts](src/dummy-cycles.test.ts).
 
@@ -202,3 +202,23 @@ The repo-level `pnpm test` (vitest + typecheck + lint + publint) is separate and
 | [src/bus.ts](src/bus.ts)                                                 | The `Memory` bus contract and `ReadOptions`.                                                                   |
 | [src/disasm.ts](src/disasm.ts)                                           | Disassembler and trace formatting (`disassemble`, `traceLine`).                                                |
 | [src/single-step-tests.ts](src/single-step-tests.ts)                     | The cycle-exact [SingleStepTests/65x02](https://github.com/SingleStepTests/65x02) runner.                      |
+
+## Correspondence to the real 6502 pins
+
+Apart from the power and clock pins, which roughly correspond to the `reset(true)` and `run()` methods, the 6502's pins map to the CPU's public API surface as follows:
+
+| Pin      | Direction | Description                         | Emulation API      |
+| -------- | --------- | ----------------------------------- | ------------------ |
+| A0 - A15 | Out       | Address bus                         | `Memory` interface |
+| D0 - D7  | In/Out    | Data bus                            | `Memory` interface |
+| R/W      | Out       | Read/Write signal (high = read)     | `Memory` interface |
+| SYNC     | Out       | Indicates opcode fetch cycle        | `Memory` interface |
+| RES      | In        | Reset                               | `reset(false)`     |
+| IRQ      | In        | Interrupt request (active low)      | `IRQ` property     |
+| NMI      | In        | Non-maskable interrupt (active low) | `NMI` property     |
+| SO       | In        | Set overflow                        | `vFlag` property   |
+| RDY      | In        | Ready signal                        | `RDY` property     |
+
+The `bus: Memory` constructor argument implements address and data buses. The `R/W` pin is implicit in which bus method (`read` or `write`) is called. The `SYNC` pin is emulated by the `ReadOptions.SYNC` flag on `bus.read`'s second argument. Note that while the physical `IRQ` and `NMI` pins are active low, the corresponding properties use positive logic (`true` = asserted).
+
+Atari's 6502C ("Sally") has a `HALT` pin that stops the CPU by stretching the clock signal and isolating the CPU from the bus. It can be emulated simply by not calling `run()` for halted cycles.

@@ -3,7 +3,7 @@ import type { EmulatorHost, SidebarPanel } from "../../../host.ts";
 import { messages } from "../../../messages.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
-// The settings tabs, in display order, each mapped to its own panel route —
+// The settings tabs, in display order, each mapped to its own panel route -
 // the routes (and their palette commands) survive the consolidation; the
 // tabs just navigate between them.
 export type SettingsTab =

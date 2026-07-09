@@ -6,7 +6,7 @@ import {
 // Canonicalization: turn an arbitrary image file into one or more canonical
 // images, deriving their content facts. The canonical form per kind:
 //
-//   cartridge  →  `.car` (16-byte CART header + ROM) — a raw `.rom`/`.bin`
+//   cartridge  →  `.car` (16-byte CART header + ROM) - a raw `.rom`/`.bin`
 //                 gets the header prepended; the mapper/type lives in the
 //                 header, so it becomes part of the content identity.
 //   OS / XEX   →  the raw bytes (no container).
@@ -16,7 +16,7 @@ import {
 //
 // Every piece reports the SOURCE byte range `[from, to)` and the `header` it
 // prepends, so a build can keep the bundled file untouched and reconstruct the
-// canonical image at fetch time from a `header`/`from`/`to` recipe — while the
+// canonical image at fetch time from a `header`/`from`/`to` recipe - while the
 // `bytes` are the materialized canonical image for hashing or direct storage.
 
 /** Content-derived facts: a coarse kind plus its one discriminating fact. */
@@ -137,7 +137,7 @@ function carPiece(source: Uint8Array): CanonicalPiece {
 	};
 }
 
-/** ATR passthrough — geometry only; container-stripping is deferred. */
+/** ATR passthrough - geometry only; container-stripping is deferred. */
 function diskPiece(source: Uint8Array): CanonicalPiece {
 	const sectorSize =
 		((source[4] ?? 0) | ((source[5] ?? 0) << 8)) === 256 ? 256 : 128;

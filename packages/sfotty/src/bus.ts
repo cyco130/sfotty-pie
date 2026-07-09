@@ -1,5 +1,5 @@
 /**
- * Why/how a read is happening — distinguishes a normal CPU read, an opcode
+ * Why/how a read is happening - distinguishes a normal CPU read, an opcode
  * fetch (the SYNC pin), a non-committing dummy access, a side-effect-free peek,
  * and another chip's DMA.
  *
@@ -7,10 +7,10 @@
  * which Node's strip-only type support (this repo's no-transpile execution
  * model) rejects. The values are bit flags, meant to be OR'd together.
  *
- * `SYNC` is the physical pin — asserted on *every* opcode-fetch cycle, including
+ * `SYNC` is the physical pin - asserted on *every* opcode-fetch cycle, including
  * the dummy fetch the CPU does just before servicing a pending NMI/IRQ and the
  * re-fetch of an RDY-stalled cycle (verified against a Visual6502 trace). `DUMMY`
- * marks a *non-committing* CPU access — the interrupt dummy fetch and the
+ * marks a *non-committing* CPU access - the interrupt dummy fetch and the
  * RDY-stalled re-fetch today (other dummy reads/writes are not marked yet). So a
  * **committed opcode fetch is `SYNC & !DUMMY`**, which is what execute traps want:
  * fire once on the real fetch, never on the dummy (which would otherwise
@@ -34,7 +34,7 @@ export interface Memory {
 	 * May throw to interrupt the CPU (for memory-mapped I/O, breakpoints, or
 	 * execute traps). The bus access is the first thing a cycle does, before any
 	 * register is mutated, so a throw unwinds with the CPU in its exact pre-cycle
-	 * state — the host can catch it around `run()`, react, and re-`run()` to retry
+	 * state - the host can catch it around `run()`, react, and re-`run()` to retry
 	 * the same cycle. See the readme.
 	 *
 	 * @returns The byte read
@@ -46,7 +46,7 @@ export interface Memory {
 	 *
 	 * May throw to interrupt the CPU like {@link Memory.read}; the byte is not
 	 * written and the cycle can be retried. `options` carries the same
-	 * {@link ReadOptions} flags as a read — in particular `DUMMY` for the
+	 * {@link ReadOptions} flags as a read - in particular `DUMMY` for the
 	 * non-committing write-back cycle of a read-modify-write instruction, so
 	 * traps can tell it from the real store. Implementors that don't care may
 	 * omit the parameter (a narrower signature still satisfies this interface).

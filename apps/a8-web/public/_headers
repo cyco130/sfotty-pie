@@ -7,7 +7,7 @@
 # so the fingerprinted assets match only their own rule. Add a section here when
 # a new top-level route is introduced.
 
-# Fingerprinted build assets never change — cache forever.
+# Fingerprinted build assets never change - cache forever.
 /_app/assets/*
   Cache-Control: public, max-age=31536000, immutable
 

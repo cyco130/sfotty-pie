@@ -16,13 +16,13 @@ import {
 } from "./gamepad-normalize.ts";
 import { messages } from "./messages.ts";
 
-// A row of the mapping table — a Standard button, or a Standard axis.
+// A row of the mapping table - a Standard button, or a Standard axis.
 interface Row {
 	kind: "button" | "axis";
 	index: number;
 }
 
-// A capture must stay firmly held this many monitor frames before it lands —
+// A capture must stay firmly held this many monitor frames before it lands -
 // debounces transients brushed on the way to the intended control.
 const HOLD_FRAMES = 10;
 
@@ -32,7 +32,7 @@ const HOLD_FRAMES = 10;
 type Sel = string;
 
 // The current profile entries, encoded as select values. Lossy for
-// calibrated anchor details — save keeps the original entry for rows the
+// calibrated anchor details - save keeps the original entry for rows the
 // user didn't touch (see save()).
 function encode(profile: NormalizeProfile | undefined): {
 	buttons: Sel[];
@@ -96,7 +96,7 @@ function decodeAxis(
 }
 
 // The inputs active in `now` but not at rest, described tersely for the live
-// readout ("#5", "axis 3 → −0.43") — how you find out which raw index a
+// readout ("#5", "axis 3 → −0.43") - how you find out which raw index a
 // physical control is, without trusting its printed label.
 function describe(rest: CalibrationSample, now: CalibrationSample): string {
 	const parts: string[] = [];
@@ -116,11 +116,11 @@ const selectClass =
 
 /**
  * The mapping editor for one pad: an explicit translation table. Every
- * Standard button picks its source — the pad's own control (default), nothing,
- * a raw button, or one side of a raw axis — and every Standard axis picks a
+ * Standard button picks its source - the pad's own control (default), nothing,
+ * a raw button, or one side of a raw axis - and every Standard axis picks a
  * raw axis with an inverted toggle. Each row also has a capture assist: arm
  * it, press/push the physical control, and the row's select snaps to what
- * moved (axis rows ask for the positive — right/down — push and derive the
+ * moved (axis rows ask for the positive - right/down - push and derive the
  * inverted flag from the direction the value went). The live "now active"
  * readout above shows what the pad is sending, so raw indices are identified
  * by pressing things, not by reading printed labels. An existing hat mapping
@@ -134,7 +134,7 @@ export function MapperForm({
 	onSave,
 	onCancel,
 }: {
-	/** The live pad snapshot — fresh every monitor frame (see useLivePads). */
+	/** The live pad snapshot - fresh every monitor frame (see useLivePads). */
 	pad: PadView;
 	profile: NormalizeProfile | undefined;
 	onSave: (profile: NormalizeProfile | null) => void;

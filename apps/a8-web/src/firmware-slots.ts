@@ -1,7 +1,7 @@
 import type { AtariModel } from "@sfotty-pie/a8";
 
 /**
- * The firmware selector's OS slots — one per machine class. The emulated models
+ * The firmware selector's OS slots - one per machine class. The emulated models
  * map onto the first three; `1200xl`/`xegs` are selector-only until those are
  * real machines (picking them is remembered but doesn't drive anything yet).
  */

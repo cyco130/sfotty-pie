@@ -4,11 +4,11 @@ import type { Command } from "./commands.ts";
 // produced character. Covers every printable ASCII except ` { } ~, which have no
 // ATASCII equivalent.
 //
-// Symbols and digits map directly — the host's layout and Shift are already
+// Symbols and digits map directly - the host's layout and Shift are already
 // baked into the produced character (e.g. "!" is the Atari Shift+1). Letters and
 // space are the exception: the produced character can't carry their Shift (letter
 // case is unreliable under CapsLock; a space is a space either way), so it comes
-// from the Shift MODIFIER — Shift+A → Atari Shift+A, Shift+Space → Shift+Space.
+// from the Shift MODIFIER - Shift+A → Atari Shift+A, Shift+Space → Shift+Space.
 
 type Letter =
 	| "A"
@@ -84,7 +84,7 @@ const SYMBOLS: Record<string, Command> = {
 /**
  * The Atari keystroke that types `char` in Character mode, or undefined if it has
  * no ATASCII equivalent (` { } ~). For a letter the result's case follows the
- * Shift modifier (`shift`), not the produced case — so the host's CapsLock state
+ * Shift modifier (`shift`), not the produced case - so the host's CapsLock state
  * never adds a phantom Shift (`a` and a CapsLock `A` both yield plain `A`).
  */
 export function charCommand(char: string, shift: boolean): Command | undefined {

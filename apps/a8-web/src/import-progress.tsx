@@ -2,7 +2,7 @@ import { importProgress } from "./images/library.ts";
 import { messages } from "./messages.ts";
 
 /**
- * A top-level import indicator in the app chrome — visible whatever panel is
+ * A top-level import indicator in the app chrome - visible whatever panel is
  * open, and it keeps tracking after the library panel closes (the progress is a
  * module-level signal, not panel state). Renders nothing when idle. Shows an
  * indeterminate "Preparing…" while the dropped tree is walked, then a counted

@@ -75,7 +75,7 @@ test("angular hysteresis wraps across the ±π seam", () => {
 	expect(readRadialStick(...at(1, boundary + 0.15), st, CFG)).toBe(5);
 });
 
-test("recentring clears the held octant — no stale angular hold", () => {
+test("recentring clears the held octant - no stale angular hold", () => {
 	const st = initialStickState();
 	expect(readRadialStick(...at(1, Math.PI / 8 + 0.05), st, CFG)).toBe(1);
 	expect(readRadialStick(0, 0, st, CFG)).toBe(-1);

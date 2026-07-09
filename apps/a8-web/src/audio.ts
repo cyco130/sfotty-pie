@@ -41,7 +41,7 @@ registerProcessor("a8-audio", A8Audio);
 
 /**
  * The audio sink: chunks pushed in are played back-to-back by the worklet.
- * {@link buffered} estimates the queue depth from the audio clock — the
+ * {@link buffered} estimates the queue depth from the audio clock - the
  * emulator paces itself by keeping it near a target, which makes the audio
  * clock the timing master.
  */
@@ -66,7 +66,7 @@ export class AudioOutput {
 	}
 
 	/**
-	 * Mute at the output, not by withholding chunks — the emulator paces
+	 * Mute at the output, not by withholding chunks - the emulator paces
 	 * itself off the audio clock, so the worklet must keep consuming.
 	 */
 	get muted(): boolean {
@@ -99,7 +99,7 @@ export class AudioOutput {
 		return new AudioOutput(context, node, gain);
 	}
 
-	/** True while the context runs — i.e. the audio clock is ticking. */
+	/** True while the context runs - i.e. the audio clock is ticking. */
 	get running(): boolean {
 		return this.context.state === "running";
 	}
@@ -128,7 +128,7 @@ export class AudioOutput {
 		this.#node.port.postMessage(chunk, [chunk.buffer]);
 	}
 
-	/** Drop everything queued — e.g. after a pause or machine swap. */
+	/** Drop everything queued - e.g. after a pause or machine swap. */
 	clear(): void {
 		this.#node.port.postMessage("clear");
 		this.#sent = 0;

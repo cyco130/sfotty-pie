@@ -42,7 +42,7 @@ function bytesToHex(bytes: Uint8Array): string {
 	return [...bytes].map((byte) => hex(byte, 2)).join("");
 }
 
-/** Read a single file the user picks — a stand-in for the upload UI. */
+/** Read a single file the user picks - a stand-in for the upload UI. */
 function pickFile(): Promise<{ name: string; bytes: Uint8Array }> {
 	return new Promise((resolve, reject) => {
 		const input = document.createElement("input");
@@ -122,7 +122,7 @@ const images = {
 			? { encoding: record.encoding, storedSize: record.bytes.byteLength }
 			: undefined;
 	},
-	// Canonicalize and summarize each piece — role, kind, the source range and
+	// Canonicalize and summarize each piece - role, kind, the source range and
 	// header recipe (the built-in locator), and the canonical hash.
 	async canonicalize(input: ImageInput) {
 		const { name, bytes } = await toBytes(input);
@@ -210,7 +210,7 @@ const fakePad = {
 		};
 		fakePadEvent("gamepadconnected", fake);
 		console.log(
-			"fake pad connected — fire: a8.fakePad.press(5) / release(5); " +
+			"fake pad connected - fire: a8.fakePad.press(5) / release(5); " +
 				"directions: a8.fakePad.hat('up' | 'upright' | … | 'center')",
 		);
 	},
@@ -242,7 +242,7 @@ const fakePad = {
 
 // The wizard-to-be, driven by console prompts: sample rest, then wait for a
 // firm sustained change per prompted step, classify, apply. Works on any
-// connected pad — a profile on a standard pad simply overrides its native
+// connected pad - a profile on a standard pad simply overrides its native
 // layout (a8.uncalibrate() restores it).
 
 const CALIBRATION_STEPS = ["up", "down", "left", "right", "trigger"] as const;
@@ -264,7 +264,7 @@ async function calibratePad(host: EmulatorHost, index?: number): Promise<void> {
 	const id = first.id;
 	const at = first.index;
 
-	console.log(`calibrating "${id}" — leave it alone…`);
+	console.log(`calibrating "${id}" - leave it alone…`);
 	for (let i = 0; i < 45; i++) await frame(); // let it settle
 	const rest = samplePad(padNow()!);
 	const samples: CalibrationSet = { rest };
@@ -292,7 +292,7 @@ async function calibratePad(host: EmulatorHost, index?: number): Promise<void> {
 			}
 		}
 		samples[step] = sample;
-		console.log("  captured — release");
+		console.log("  captured - release");
 		for (;;) {
 			await frame();
 			const pad = navigator.getGamepads()[at];
@@ -306,7 +306,7 @@ async function calibratePad(host: EmulatorHost, index?: number): Promise<void> {
 }
 
 /**
- * Install `window.a8`: a poor-man's monitor for the browser console — live
+ * Install `window.a8`: a poor-man's monitor for the browser console - live
  * machine/cpu access, peek/poke, a disassembler, and the CPU/command traces.
  *
  *   a8.trace.cpu(true); …reproduce…; a8.trace.dump(300)
@@ -383,7 +383,7 @@ export function installDevConsole(host: EmulatorHost): void {
 					}),
 				);
 				console.log(
-					"fake pad calibrated — the hat drives the D-pad, button 5 is fire " +
+					"fake pad calibrated - the hat drives the D-pad, button 5 is fire " +
 						"(a8.fakePad.decalibrate() to undo)",
 				);
 			},
@@ -408,7 +408,7 @@ export function installDevConsole(host: EmulatorHost): void {
 			};
 		},
 		// Adjust the running standard's overscan crop (persisted; sanitized to
-		// 320–376 × 192–240, even). No args just reports the current setting.
+		// 320-376 × 192-240, even). No args just reports the current setting.
 		overscan: (width?: number, height?: number) => {
 			const tv = host.config.peek().tv;
 			if (width !== undefined && height !== undefined) {
@@ -436,7 +436,7 @@ export function installDevConsole(host: EmulatorHost): void {
 			}
 			return { tv, ...host.displaySettings.peek()[tv].palette };
 		},
-		// The running standard's frame blending (0–0.9, persisted).
+		// The running standard's frame blending (0-0.9, persisted).
 		frameBlending: (value?: number) => {
 			const tv = host.config.peek().tv;
 			if (value !== undefined) host.setFrameBlending(tv, value);

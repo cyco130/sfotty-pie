@@ -1,14 +1,14 @@
-// Built-in keyboard layouts for the manual picker — the fallback for browsers
+// Built-in keyboard layouts for the manual picker - the fallback for browsers
 // that don't expose `navigator.keyboard.getLayoutMap()` (Firefox, Safari). Each
 // `map` is a raw `code → unshifted char` dump (lowercase, exactly as
 // getLayoutMap reports), so it flows through the same `upperLegends` pipeline as
-// a live layout — casing (Turkish İ/I) and the digit-row rule fall out for free.
+// a live layout - casing (Turkish İ/I) and the digit-row rule fall out for free.
 //
 // US QWERTY needs no map: the empty one bakes plain QWERTY via the fallback, so
 // it's the zero-data baseline. The others are Chrome-harvested on macOS.
 //
 // This is the map table, keyed by a stable `id` (also what the layout preference
-// stores). Display names live separately in `LAYOUT_OPTIONS` below — several
+// stores). Display names live separately in `LAYOUT_OPTIONS` below - several
 // labels can share one map, and the names are translatable copy (messages.ts).
 
 import { messages } from "./messages.ts";
@@ -1348,7 +1348,7 @@ export interface LayoutOption {
 
 // The layout-picker options. `id` is a `KEYBOARD_LAYOUTS` map id (the value the
 // preference stores); `name` is its localized label. Several options can point
-// at the same map — Finnish uses the Swedish map, Catalan the Spanish, Austrian
+// at the same map - Finnish uses the Swedish map, Catalan the Spanish, Austrian
 // the German, Slovenian the Croatian; Dutch and Polish are US QWERTY at the base
 // layer. Source order here is grouped by map; the picker sorts by display name.
 const L = messages.shortcuts.layoutNames;

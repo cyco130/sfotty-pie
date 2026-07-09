@@ -91,7 +91,7 @@ function resolveMode(
 		// A bare shift (ASL/LSR/ROL/ROR) with no operand means accumulator.
 		if (modes.imp !== undefined) return "imp";
 		if (modes.acc !== undefined) return "acc";
-		return "imp"; // no implied form — reported by the caller
+		return "imp"; // no implied form - reported by the caller
 	}
 
 	switch (operand.type) {

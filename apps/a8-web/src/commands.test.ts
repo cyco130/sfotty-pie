@@ -3,7 +3,7 @@ import { paletteCommands } from "./commands.ts";
 
 test("dead Ctrl+Shift combos are hidden from the palette", () => {
 	const listed = new Set(paletteCommands);
-	// Unscannable while Ctrl+Shift held (base $00–$07 / $10–$17) — no-ops.
+	// Unscannable while Ctrl+Shift held (base $00-$07 / $10-$17) - no-ops.
 	expect(listed.has("PRESS_CONTROL_SHIFT_L")).toBe(false); // $C0
 	expect(listed.has("PRESS_CONTROL_SHIFT_F1")).toBe(false); // $C3
 	expect(listed.has("PRESS_CONTROL_SHIFT_HELP")).toBe(false); // $D1

@@ -21,7 +21,7 @@ export const RESET = 0x801;
 /**
  * One CPU cycle. It performs the cycle's single bus access (which may throw to
  * interrupt the CPU), applies the internal register transfers, and writes the
- * next microstate last — so a throw unwinds with the CPU untouched and the cycle
+ * next microstate last - so a throw unwinds with the CPU untouched and the cycle
  * is retried on the next `run()`. Lives in the {@link SfottyCore}-indexed dispatch
  * table emitted by `generate-steps.ts`.
  */

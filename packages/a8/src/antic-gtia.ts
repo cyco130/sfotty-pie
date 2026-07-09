@@ -18,7 +18,7 @@ interface AnticGtiaConfig {
 /**
  * The video output chip variant. The CTIA (in early 400/800s) predates the
  * GTIA's special modes: PRIOR bits 6-7 are ignored and a "GTIA mode" screen
- * displays as its base ANTIC mode — the collision difference is the
+ * displays as its base ANTIC mode - the collision difference is the
  * documented way software detects which chip it runs on (AHRM 6.9). "fgtia"
  * (the SECAM variant, with its trigger-sampling quirk) is a future value.
  */
@@ -36,7 +36,7 @@ interface AnticGtiaOptions {
 const POWER_ON_COLOR = 0xf0;
 
 // The paint pipeline. afterCpu for machine cycle i paints color clocks 2i
-// and 2i+1 — the exact color clocks the beam covers during that cycle — so
+// and 2i+1 - the exact color clocks the beam covers during that cycle - so
 // "the beam" below just means the color clock being painted.
 //
 // Playfield bytes reach the GTIA paint through the ANx bus with a fixed
@@ -45,8 +45,8 @@ const POWER_ON_COLOR = 0xf0;
 // 12/20/28 (wide/normal/narrow) and take 8 color clocks to the screen
 // (AHRM: 7 to cross the ANx bus + 1 through GTIA's output stage; also the
 // cycle-65 / positions $8C-$8F mode E anchor in AHRM 6.10), while
-// character glyph fetches sit one cycle later — three cycles after their
-// name fetches at 10/18/26 — and take 6. Both land the first pixel exactly
+// character glyph fetches sit one cycle later - three cycles after their
+// name fetches at 10/18/26 - and take 6. Both land the first pixel exactly
 // at the playfield start (HPOS 32/48/64). The delays below cover the trip
 // to the ANx bus (as a DelayLine delay scheduled from busCycle time,
 // before the cycle's own two ticks, that is bus-lag + 1); GTIA's output
@@ -57,14 +57,14 @@ const ANX_CHAR_DELAY = 6;
 // GTIA register writes reach the paint logic a few color clocks after the
 // bus write (AHRM 6.10 table 18). A write during machine cycle w scheduled
 // with delay N applies just before color clock 2w+N-1 paints. The anchor
-// is HPOS at delay 6 — effective from color clock 2w+5. Acid800
+// is HPOS at delay 6 - effective from color clock 2w+5. Acid800
 // gtia_pmretrigger passes at 6 or 7; what pins 6 is a mid-flight
 // reposition racing the beam (RastaConverter output): moving an in-flight
 // player to a comparator value the beam reaches on that exact clock must
-// still match — retriggering and merging the images — to be pixel-exact
+// still match - retriggering and merging the images - to be pixel-exact
 // against a reference render. Color at HPOS-4 matches AHRM's ladder and
 // is pinned by the same references (beam-racing COLPFx rewrites, every
-// mid-line boundary over a full frame). SIZE is faster than HPOS —
+// mid-line boundary over a full frame). SIZE is faster than HPOS -
 // Atari++'s -playerresizedelay, backed by Acid800 pmresize. GRAF and
 // PRIOR sit one slower than AHRM's spacings relative to the new anchor
 // (Acid800 pmoverlap and the GTIA-mode suite hold at these values, and
@@ -107,7 +107,7 @@ export class AnticGtia implements Memory {
 	// Vertical scrolling (VSCROL + the display list's bit 5). The first
 	// line of a VS region starts the row counter at VSCROL; the first
 	// instruction after the region (its bit 5 clear) is the exit line and
-	// ends when the row counter reaches VSCROL — shorter *or longer* than
+	// ends when the row counter reaches VSCROL - shorter *or longer* than
 	// the mode's natural height (the 4-bit counter wraps through 15).
 	// Acid800 antic_vscroll pins all of it, including the wrap.
 	vscrol = 0;
@@ -115,12 +115,12 @@ export class AnticGtia implements Memory {
 	#vsExit = false; // the current instruction ends at VSCROL
 
 	// The current scanline is an instruction's first: display list and
-	// character-name DMA happen here. Distinct from modeLineNo === 0 — a
+	// character-name DMA happen here. Distinct from modeLineNo === 0 - a
 	// VS entry starts the row counter at VSCROL on its first line.
 	#newInstruction = true;
 
 	// Armed at cycle 6: this scanline is its instruction's last. The DLI
-	// latch at cycle 7 uses this — a VSCROL write by cycle 5 still
+	// latch at cycle 7 uses this - a VSCROL write by cycle 5 still
 	// changes the decision, a cycle later doesn't (antic_vscroldli).
 	#lastLineArmed = false;
 
@@ -155,7 +155,7 @@ export class AnticGtia implements Memory {
 	refreshPending = false;
 
 	/**
-	 * The color registers in address order — COLPM0-3, COLPF0-3, COLBK
+	 * The color registers in address order - COLPM0-3, COLPF0-3, COLBK
 	 * ($D012-$D01A). The indices double as the priority table's selector
 	 * bits (see the COLPM0..COLBK constants).
 	 */
@@ -227,7 +227,7 @@ export class AnticGtia implements Memory {
 
 	anticLineCount: number;
 	#gtiaPal: number;
-	// False on a CTIA: PRIOR bits 6-7 are ignored — no special modes.
+	// False on a CTIA: PRIOR bits 6-7 are ignored - no special modes.
 	#gtiaModes = true;
 
 	constructor(
@@ -532,12 +532,12 @@ export class AnticGtia implements Memory {
 			address &= 0x1f;
 			switch (address) {
 				case 0x1c:
-					// VDELAY — consumed at the bus-time GRAF latch, not in the
+					// VDELAY - consumed at the bus-time GRAF latch, not in the
 					// paint pipeline: immediate.
 					this.vdelay = value;
 					break;
 				case 0x1d:
-					// GRACTL — gates the bus-time GRAF latch (and trigger
+					// GRACTL - gates the bus-time GRAF latch (and trigger
 					// latching): immediate.
 					this.enablePlayers = !!(value & 0x02);
 					this.enableMissiles = !!(value & 0x01);
@@ -573,7 +573,7 @@ export class AnticGtia implements Memory {
 					break;
 				default:
 					// Every other register feeds the paint logic and takes
-					// effect a few color clocks after the write — see the
+					// effect a few color clocks after the write - see the
 					// write-delay constants.
 					this.#queueGtiaWrite(address, value);
 			}
@@ -632,7 +632,7 @@ export class AnticGtia implements Memory {
 				case 0x0a:
 					// WSYNC. A second write while the stall is already
 					// armed (an RMW instruction's double write) delays the
-					// release a cycle — Acid800 antic_wsync's INC check.
+					// release a cycle - Acid800 antic_wsync's INC check.
 					if (this.wsync) this.wsyncLate = true;
 					this.wsync = true;
 					break;
@@ -642,8 +642,8 @@ export class AnticGtia implements Memory {
 					// cycle-7 arm samples it before any same-cycle write
 					// lands, so a write must complete by cycle 6 to make the
 					// line's normal cycle-8 pull. An enable landing exactly
-					// at cycle 7 — too late for the arm but catching the
-					// just-latched status — still fires, as a delayed NMI
+					// at cycle 7 - too late for the arm but catching the
+					// just-latched status - still fires, as a delayed NMI
 					// two cycles after the write; writes from cycle 8 on are
 					// too late entirely, and a stale NMIST bit from an
 					// earlier line never retriggers (Acid800 dlitiming's
@@ -667,7 +667,7 @@ export class AnticGtia implements Memory {
 
 				case 0x0f:
 					// NMIRES Reset NMI status. A status bit that latched on
-					// this very cycle survives the reset — on the hardware
+					// this very cycle survives the reset - on the hardware
 					// the set wins the race (Acid800 checks this).
 					this.res = !!(this.#justLatched & 0x20);
 					this.vbi = !!(this.#justLatched & 0x40);
@@ -708,7 +708,7 @@ export class AnticGtia implements Memory {
 	#priorWrites = new DelayLine(8); // PRIOR
 
 	// Writes queued but not yet applied, across all five lines. While zero,
-	// #applyPendingWrites skips ticking entirely — that freezes the lines'
+	// #applyPendingWrites skips ticking entirely - that freezes the lines'
 	// cursors, which is sound: schedules are cursor-relative and an empty
 	// line carries no time-sensitive state, so its clock only has to run
 	// while something is in flight.
@@ -740,7 +740,7 @@ export class AnticGtia implements Memory {
 	}
 
 	// Tick the five write lines and apply whatever is due, just before the
-	// current color clock paints. The common case — nothing in flight —
+	// current color clock paints. The common case - nothing in flight -
 	// is one comparison.
 	#applyPendingWrites(): void {
 		if (this.#pendingGtiaWrites === 0) return;
@@ -773,11 +773,11 @@ export class AnticGtia implements Memory {
 
 	#applyGtiaWrite(address: number, value: number): void {
 		if (address >= 0x12 && address <= 0x1a) {
-			// COLPM0-COLPM3, COLPF0-COLPF3, COLBK — in register order. The
+			// COLPM0-COLPM3, COLPF0-COLPF3, COLBK - in register order. The
 			// registers only hold 7 bits: luminance bit 0 is ignored on
 			// write and always reads back into the pipeline as 0 (AHRM
-			// "color encoding"); only GTIA mode 9's pixel data — OR'd in
-			// downstream of the register — can set it.
+			// "color encoding"); only GTIA mode 9's pixel data - OR'd in
+			// downstream of the register - can set it.
 			this.colorRegisters[address - 0x12] = value & 0xfe;
 			return;
 		}
@@ -809,7 +809,7 @@ export class AnticGtia implements Memory {
 
 			// The size bits feed the shift state machine directly as its
 			// counter mask: state' = (state + 1) & size (AHRM 6.5). %00 and
-			// %10 both render normal width, but %10 is not remapped — from
+			// %10 both render normal width, but %10 is not remapped - from
 			// state %01 the counter sticks at %10 and never reaches the
 			// shift-on-%00 transition, the documented lockup anomaly
 			// (Acid800 pmresize).
@@ -862,7 +862,7 @@ export class AnticGtia implements Memory {
 	/** ANTIC's NMI output line. Copy to the CPU's NMI input every cycle. */
 	nmi = false;
 
-	// NMIST bits that latched during the current cycle's beforeCpu — a
+	// NMIST bits that latched during the current cycle's beforeCpu - a
 	// same-cycle NMIRES write must not clear them.
 	#justLatched = 0;
 
@@ -879,14 +879,14 @@ export class AnticGtia implements Memory {
 	/**
 	 * The RNMI input line: the 400/800 Reset key (not wired up on XL/XE,
 	 * where the Reset button pulses the system reset line instead). Sampled
-	 * at the VBLANK NMI point — the reset NMI fires alongside the VBI, never
-	 * mid-frame — and cannot be masked through NMIEN; NMIST bit 5 reports it.
+	 * at the VBLANK NMI point - the reset NMI fires alongside the VBI, never
+	 * mid-frame - and cannot be masked through NMIEN; NMIST bit 5 reports it.
 	 */
 	rnmi = false;
 
 	/**
 	 * True when ANTIC owns the bus this cycle (DMA fetch or DRAM refresh): the
-	 * CPU is halted and `run()` must not be called. A WSYNC stall is different —
+	 * CPU is halted and `run()` must not be called. A WSYNC stall is different -
 	 * it pulls `rdy` low instead, and the CPU still runs, repeating its stalled
 	 * read on the bus every cycle.
 	 */
@@ -901,12 +901,12 @@ export class AnticGtia implements Memory {
 	#dmaHpos = 0;
 
 	// Whether the current line is a visible display line (no vertical blank,
-	// not waiting on a JVB) — a per-line input to the DMA pattern.
+	// not waiting on a JVB) - a per-line input to the DMA pattern.
 	#dmaVisibleLine = false;
 
 	// The current line's DMA pattern (see buildDmaPattern) and the cache of
-	// built patterns by state key. Rebuilt — usually a cache-hit pointer swap
-	// — at line start, after the cycle-1 instruction decode, and on
+	// built patterns by state key. Rebuilt - usually a cache-hit pointer swap
+	// - at line start, after the cycle-1 instruction decode, and on
 	// DMACTL/HSCROL writes.
 	#dmaPattern: Uint16Array = new Uint16Array(114);
 	#dmaPatternCache = new Map<number, Uint16Array>();
@@ -915,7 +915,7 @@ export class AnticGtia implements Memory {
 	// per-width deadline (AHRM 4.11: cycles 24/16/8 for narrow/normal/wide,
 	// one later per 2 of HSCROL). The DMA_PF_ARM slot in the pre-start
 	// pattern fires at deadline+1, latching the geometry the line's fetches
-	// use from then on — a width/scroll state whose arm cycle is already
+	// use from then on - a width/scroll state whose arm cycle is already
 	// behind the beam never starts at all, and post-start register changes
 	// can't move the fetch phase (Acid800 pfstarttiming). Disabling
 	// playfield DMA after the start leaves the load slots running as
@@ -927,7 +927,7 @@ export class AnticGtia implements Memory {
 	// bit is cleared at the live width's stop deadline (AHRM 4.11: cycles
 	// 88/96/104 for narrow/normal/wide fetch, one later per 2 of live
 	// HSCROL), sampled at deadline + 1 by a DMA_STOP_CHECK flag in the
-	// pattern — before that cycle's CPU write can land. A stop moved
+	// pattern - before that cycle's CPU write can land. A stop moved
 	// behind the beam falls through to the always-active wide stop; if
 	// the live scroll no longer aligns with the running grid (mod the
 	// fetch rate), no stop matches at all and the clock keeps running
@@ -940,7 +940,7 @@ export class AnticGtia implements Memory {
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
 		// P/M data is only fetched within the visible region, scan lines
-		// 8-247 (AHRM 4.10) — not during vertical blank. This is a plain
+		// 8-247 (AHRM 4.10) - not during vertical blank. This is a plain
 		// line-range gate, unlike the playfield's #dmaVisibleLine which
 		// also tracks a JVB wait.
 		const pmLine = this.vcount >= 8 && this.vcount < 248;
@@ -971,13 +971,13 @@ export class AnticGtia implements Memory {
 	/**
 	 * The VCOUNT register value as the CPU sees it mid-cycle. The hardware
 	 * line counter increments at the end of cycle 110 but only rolls over at
-	 * the end of cycle 111 — so on the last line of the frame there is a
+	 * the end of cycle 111 - so on the last line of the frame there is a
 	 * one-cycle window (cycle 111) where it reads the full line count
 	 * (262 NTSC / 312 PAL, i.e. $83/$9C after the >> 1).
 	 */
 	#vcountRead(): number {
 		// Reconstruct the cycle index and its line: during a CPU cycle, hpos
-		// has already advanced past the index — and at the line boundary
+		// has already advanced past the index - and at the line boundary
 		// (cycle 113), vcount has advanced too.
 		let line = this.vcount;
 		let cycle = this.hpos - 1;
@@ -1014,15 +1014,15 @@ export class AnticGtia implements Memory {
 
 		if (i === 6) {
 			// The "is this the instruction's last scanline" decision is made
-			// here, one cycle before the NMIST latch — a VSCROL write
+			// here, one cycle before the NMIST latch - a VSCROL write
 			// completing by cycle 5 still changes it, a cycle later
 			// doesn't (antic_vscroldli pins both sides).
 			this.#lastLineArmed =
 				this.modeLineNo ===
 				(this.#vsExit ? this.vscrol : this.modeLineHeight - 1);
 		} else if (i === 7) {
-			// The NMIST status bits latch at cycle 7 — one cycle before the
-			// NMI line pull — whenever their event occurs; NMIEN only gates
+			// The NMIST status bits latch at cycle 7 - one cycle before the
+			// NMI line pull - whenever their event occurs; NMIEN only gates
 			// the pull, so software can poll NMIST with NMIs disabled. The
 			// DLI and VBI bits report the most recent event: each clears the
 			// other; NMIRES clears everything (but loses a same-cycle race).
@@ -1046,7 +1046,7 @@ export class AnticGtia implements Memory {
 
 			// Arm the cycle-8 pull with NMIEN as of now: a disable landing
 			// after this cycle is too late to block (set-dominant), while an
-			// enable landing before the pull still fires — both per Acid800.
+			// enable landing before the pull still fires - both per Acid800.
 			this.#lineLatched = this.#justLatched;
 			this.#armedNmi =
 				(this.dliEnabled && !!(this.#lineLatched & 0x80)) ||
@@ -1055,8 +1055,8 @@ export class AnticGtia implements Memory {
 		} else if (i === 8) {
 			// ANTIC pulls NMI at cycle 8, right after the display list and P/M
 			// DMA slots, and holds it for two cycles (8 and 9). Both cycles are
-			// free of DMA contention by design, so the CPU — whose edge
-			// detector samples inside run() — is always running (or
+			// free of DMA contention by design, so the CPU - whose edge
+			// detector samples inside run() - is always running (or
 			// WSYNC-stalled, which still ticks the detector) while the line is
 			// up. That's what makes the skip-run()-on-halt model safe.
 			if (this.#armedNmi) {
@@ -1079,13 +1079,13 @@ export class AnticGtia implements Memory {
 			}
 
 			// The row counter: an instruction ends when the counter reaches
-			// the line end — VSCROL (live) on a vertical-scroll exit line,
+			// the line end - VSCROL (live) on a vertical-scroll exit line,
 			// height-1 otherwise. A non-match keeps counting through the
 			// 4-bit wrap (antic_vscroll's VSCROL-9-on-height-8 case). The
 			// counter only runs for display-region lines; the vertical
 			// blank closes any open instruction and the next one starts at
 			// the top of the next frame (a VS region spanning the blank
-			// continues there — antic_vscroll's last check).
+			// continues there - antic_vscroll's last check).
 			if (this.vcount > 8 && this.vcount < 248) {
 				const lineEnd = this.#vsExit ? this.vscrol : this.modeLineHeight - 1;
 				if (this.modeLineNo === lineEnd) {
@@ -1117,7 +1117,7 @@ export class AnticGtia implements Memory {
 				this.#dmaVisibleLine
 			) {
 				// No stop position matched this clock last line: it keeps
-				// running into this one on the same grid — a scanline is
+				// running into this one on the same grid - a scanline is
 				// 114 cycles, so the phase shifts by -114 ≡ +6 mod 8
 				// (AHRM 4.12's abnormal DMA; Acid800 antic_hscrolbug).
 				this.#linePhase =
@@ -1146,7 +1146,7 @@ export class AnticGtia implements Memory {
 		}
 
 		// The stalled fetch completes at cycle 104 (the next instruction's
-		// remaining cycles run from 105) — verified against Acid800's
+		// remaining cycles run from 105) - verified against Acid800's
 		// cycle-counted VCOUNT samples. A double-armed WSYNC completes one
 		// cycle later.
 		if (this.wsync && i === (this.wsyncLate ? 105 : 104)) {
@@ -1160,7 +1160,7 @@ export class AnticGtia implements Memory {
 			this.lastDisplayListAddress = this.displayListAddress;
 		}
 
-		// The DMA fetch itself — a bus access — is busCycle's job; beforeCpu
+		// The DMA fetch itself - a bus access - is busCycle's job; beforeCpu
 		// commits the cycle's scheduling without touching the bus.
 		this.#dmaHpos = i;
 	}
@@ -1170,8 +1170,8 @@ export class AnticGtia implements Memory {
 	 * P/M, character, or playfield fetch) or DRAM refresh, and set
 	 * {@link halt} for it. The per-cycle decision is one lookup in the line's
 	 * precomputed DMA pattern (see {@link buildDmaPattern}). Split out from
-	 * {@link beforeCpu} — which commits the cycle's scheduling without
-	 * touching the bus — so the read can be retried after a suspend without
+	 * {@link beforeCpu} - which commits the cycle's scheduling without
+	 * touching the bus - so the read can be retried after a suspend without
 	 * re-advancing ANTIC's counters. Call once per cycle, between beforeCpu
 	 * and running the CPU.
 	 */
@@ -1187,7 +1187,7 @@ export class AnticGtia implements Memory {
 			if (entry & DMA_STOP_CHECK) {
 				// The playfield stop position: clear the DMA clock. The
 				// slot sits at deadline + 1, so it samples before this
-				// cycle's CPU write can land — the write deadline. The
+				// cycle's CPU write can land - the write deadline. The
 				// cycle's own action (a trailing fetch) still runs off
 				// the pre-stop entry.
 				this.#lineStopCycle = this.#dmaHpos - 1;
@@ -1248,7 +1248,7 @@ export class AnticGtia implements Memory {
 				this.#fetchBitmap(entry >> 8);
 				break;
 			case DMA_REPLAY:
-				// Line-buffer replay: pixels flow but the bus is free — a
+				// Line-buffer replay: pixels flow but the bus is free - a
 				// pending refresh may use the cycle.
 				this.#replayBitmap(entry >> 8);
 				if (this.refreshPending) {
@@ -1292,7 +1292,7 @@ export class AnticGtia implements Memory {
 			case DMA_PF_ARM: {
 				// The playfield DMA clock starts: latch the geometry the
 				// line's fetches will use (the slot samples the registers
-				// before this cycle's CPU write can land — the deadline).
+				// before this cycle's CPU write can land - the deadline).
 				const scrolled =
 					(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
 				let fetchWidth: number = this.playfieldWidth;
@@ -1368,7 +1368,7 @@ export class AnticGtia implements Memory {
 			// fetch, and the four cycles starting two later to be the player
 			// fetches. With P/M DMA on that reproduces the real slots
 			// (missile 0, players 2-5); with it off, a halted display-list
-			// fetch is mistaken for the missile slot and the loads shift —
+			// fetch is mistaken for the missile slot and the loads shift -
 			// and a line with no halted HBLANK cycle loads nothing (AHRM;
 			// Acid800 phantomdma).
 			if (i === 0) {
@@ -1380,12 +1380,12 @@ export class AnticGtia implements Memory {
 			const pmSlot = this.#pmFetchCycle < 0 ? -1 : i - this.#pmFetchCycle;
 
 			// The GRAF registers latch the bus during the P/M fetch slots only
-			// when GRACTL enables it — with GRACTL off, direct GRAF writes
+			// when GRACTL enables it - with GRACTL off, direct GRAF writes
 			// persist (the GTIA collision tests rely on that). The latch runs for
-			// the whole visible region (scan lines 8-247 — the enclosing y < 240):
+			// the whole visible region (scan lines 8-247 - the enclosing y < 240):
 			// an earlier cut at y < 224 froze player graphics over the bottom 16
 			// lines, which is invisible on NTSC but corrupts the lower HUD on PAL
-			// (its taller frame puts content there) — River Raid's bug.
+			// (its taller frame puts content there) - River Raid's bug.
 			if (pmSlot === 0 && this.enableMissiles) {
 				// VDELAY bits 0-3 delay each missile independently, but
 				// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
@@ -1442,7 +1442,7 @@ export class AnticGtia implements Memory {
 			this.#gtiaPixelPrev = this.#gtiaPixel;
 			this.#gtiaPrevBkMuted = this.#gtiaBkMuted;
 			// AN2 is ignored: background and a %00 pair both contribute %00
-			// — which is why borders read as pixel data in the special
+			// - which is why borders read as pixel data in the special
 			// modes.
 			this.#gtiaPixel = ((pf & 0x3) << 2) | (incoming & 0x3);
 			// The mode 10 lores anomaly: a true background code as the
@@ -1464,7 +1464,7 @@ export class AnticGtia implements Memory {
 		if (gtiaMode === 0) {
 			if (this.#lineGtiaMode !== 0) {
 				// Pseudo mode E: the special mode was still on at the line
-				// latch, so each AN0-1 pair decodes as PF0-PF3 — one pair
+				// latch, so each AN0-1 pair decodes as PF0-PF3 - one pair
 				// per color clock, background included.
 				const code = 0x8 | (pf & 0x3);
 				this.#detectCollisions(code, pm);
@@ -1512,7 +1512,7 @@ export class AnticGtia implements Memory {
 			}
 		} else {
 			// Modes 9 and 11: the playfield is background for priority and
-			// collisions — P/M always win and no playfield collision
+			// collisions - P/M always win and no playfield collision
 			// latches.
 			this.#detectCollisions(0, pm);
 			color =
@@ -1525,7 +1525,7 @@ export class AnticGtia implements Memory {
 
 	// P/M-above-playfield resolution shared by modes 9 and 11: any player
 	// (or non-fifth missile) wins outright and the playfield drops out.
-	// Returns -1 when no P/M is active — the caller supplies the playfield
+	// Returns -1 when no P/M is active - the caller supplies the playfield
 	// color and the fifth-player mix.
 	#resolveGtiaPm(pm: number): number {
 		const regs = this.colorRegisters;
@@ -1618,7 +1618,7 @@ export class AnticGtia implements Memory {
 
 	// The special modes' pixel former: two consecutive AN0-1 payloads make
 	// one 4-bit fat pixel, paired on even color clocks (fixed screen
-	// alignment — odd HSCROL regroups bits rather than shifting pixels,
+	// alignment - odd HSCROL regroups bits rather than shifting pixels,
 	// AHRM 6.9). #gtiaPixelPrev serves mode 10's one-color-clock delay;
 	// the muted flags carry the lores background anomaly.
 	#gtiaPixel = 0;
@@ -1637,7 +1637,7 @@ export class AnticGtia implements Memory {
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
 	#drawPlayfield(pos: 0 | 1): number {
 		// Tick the pipe only while codes are in flight (the drain window set
-		// at push time) — an idle pipe paints background with its cursor
+		// at push time) - an idle pipe paints background with its cursor
 		// frozen, which is sound for the same reason as the write lines.
 		let pixel: number;
 		if (this.#anxDrain === 0) {
@@ -1659,8 +1659,8 @@ export class AnticGtia implements Memory {
 			// The widened fetch's margin pixels are never displayed: the
 			// window stays at the unwidened width, and ANTIC masks its
 			// output outside it (the pipe is still consumed above). Without
-			// this, memory just left of the LMS window — typically the
-			// previous row's right edge — bleeds into the left border. The
+			// this, memory just left of the LMS window - typically the
+			// previous row's right edge - bleeds into the left border. The
 			// bounds are the display starts (HPOS 64/48/32) minus the one
 			// color clock this stream still spends in GTIA's output
 			// register.
@@ -1687,7 +1687,7 @@ export class AnticGtia implements Memory {
 
 		// A sprite triggered in the left horizontal blank still shifts its
 		// pixels into the visible region and collides there, so the shift
-		// registers must load and advance regardless of the horizontal window —
+		// registers must load and advance regardless of the horizontal window -
 		// only the output is blanked outside it. Gating the load on x (as a
 		// single early return did) dropped the whole sprite when it triggered
 		// in HBLANK, losing the pixels that spill into the visible area.
@@ -1698,8 +1698,8 @@ export class AnticGtia implements Memory {
 		// register position (HPOS write latency comes from the write pipe).
 		const start = (this.hpos - 1) * 2 + pos;
 
-		// A comparator match forces the shift state machine into %00 — a
-		// transition that itself shifts the register once — and then ORs
+		// A comparator match forces the shift state machine into %00 - a
+		// transition that itself shifts the register once - and then ORs
 		// the graphics latch in. On a bit-cell boundary the natural shift
 		// already made that transition (counter 0 here), so no extra shift
 		// happens. An empty register makes all of this invisible (the
@@ -1849,7 +1849,7 @@ export class AnticGtia implements Memory {
 			// BK
 			f = 0;
 		} else if (pf & 0x4) {
-			// Hires. A lit pixel is a PF2 pixel (with PF1 luma — but the
+			// Hires. A lit pixel is a PF2 pixel (with PF1 luma - but the
 			// luma line doesn't drive collisions); an unlit one is
 			// background, no collision.
 			if (pf & 0x3) {
@@ -1865,7 +1865,7 @@ export class AnticGtia implements Memory {
 		const p = pm >> 4;
 		const m = pm & 0xf;
 
-		// Player to player. A player never collides with itself — the self
+		// Player to player. A player never collides with itself - the self
 		// bits stay clear (matching the $0E/$0D/$0B/$07 power-on pattern).
 		if (p & 1) this.p0pl |= p & 0x0e;
 		if (p & 2) this.p1pl |= p & 0x0d;
@@ -1894,7 +1894,7 @@ export class AnticGtia implements Memory {
 	// Resolve playfield and P/M priority to a palette index: a PRIORITY_TABLE
 	// lookup (which handles all sixteen PRIOR[3:0] values, conflicts
 	// included) selects the surviving color sources, whose registers OR
-	// together — an empty selection is a conflict and paints black.
+	// together - an empty selection is a conflict and paints black.
 	#resolvePriority(pf: number, pm: number, extraPlayers: number): number {
 		const prior = this.prior;
 
@@ -1912,7 +1912,7 @@ export class AnticGtia implements Memory {
 			p |= pm & 0xf;
 		}
 
-		// Mode 10 pixel codes 0-3 act as that player for priority only —
+		// Mode 10 pixel codes 0-3 act as that player for priority only -
 		// they trigger no collisions (the caller keeps them out of pm).
 		p |= extraPlayers;
 
@@ -1926,7 +1926,7 @@ export class AnticGtia implements Memory {
 	}
 
 	// Decode the current instruction's mode fields and vertical-scroll state.
-	// Runs at cycle 1 of a new instruction's first scan line — right after
+	// Runs at cycle 1 of a new instruction's first scan line - right after
 	// the display-list fetch, or on the stale instruction when display-list
 	// DMA is off.
 	#decodeInstruction(): void {
@@ -1939,7 +1939,7 @@ export class AnticGtia implements Memory {
 			this.hires = false;
 		} else if (mode === 0x01) {
 			// Jump. Bit 6 (wait for VBI) is acted on in #fetchThirdByte once
-			// the jump target has been fetched — setting it here would stop
+			// the jump target has been fetched - setting it here would stop
 			// this line's remaining display list DMA and lose the target.
 			this.modeLineHeight = 1;
 			this.charFetchRate = 0;
@@ -1955,7 +1955,7 @@ export class AnticGtia implements Memory {
 
 		if (mode < 2 && this.#lineFetchWidth) {
 			// A blank or jump line unconditionally clears the playfield
-			// DMA clock (AHRM 4.12) — a carried-over abnormal-DMA clock
+			// DMA clock (AHRM 4.12) - a carried-over abnormal-DMA clock
 			// ends here.
 			this.#lineFetchWidth = 0;
 			this.#lineFetchShift = 0;
@@ -1966,7 +1966,7 @@ export class AnticGtia implements Memory {
 
 		// Vertical scrolling: only real modes carry the VS bit (it's a
 		// height bit on blanks and unused on jumps), but the *exit* applies
-		// to whatever instruction follows the region — antic_vscroldli
+		// to whatever instruction follows the region - antic_vscroldli
 		// exits into a blank line.
 		const vs = mode > 1 && (this.instruction & 0x20) !== 0;
 		this.#vsExit = this.#vsRegion && !vs;
@@ -1977,7 +1977,7 @@ export class AnticGtia implements Memory {
 		this.#vsRegion = vs;
 	}
 
-	// Jump/LMS operand fetches (cycles 6 and 7 — the pattern emits them only
+	// Jump/LMS operand fetches (cycles 6 and 7 - the pattern emits them only
 	// when the instruction has operands).
 	#fetchDlArgLo(): void {
 		if ((this.instruction & 0x0f) === 0x01) {
@@ -2076,7 +2076,7 @@ export class AnticGtia implements Memory {
 		return base + this.#charRow(row);
 	}
 
-	// Decode a glyph row into pfPixels and ship it. `data` is the raw byte —
+	// Decode a glyph row into pfPixels and ship it. `data` is the raw byte -
 	// fetched, or straight off the bus for a virtual load; the CHACTL
 	// transforms and mode 3's blanking apply here, downstream of the fetch.
 	#emitGlyph(charNo: number, data: number): void {
@@ -2098,7 +2098,7 @@ export class AnticGtia implements Memory {
 			case 3:
 				{
 					// Like mode 2 but 10 scanlines tall: one quadrant of the
-					// char set — $60-$7F, the "descenders" — blanks rows 0-1
+					// char set - $60-$7F, the "descenders" - blanks rows 0-1
 					// and shows the wrapped fetch at rows 8-9, while the rest
 					// blank rows 8-9 (Acid800 antic_charcontrol).
 					const line = this.modeLineNo;
@@ -2158,7 +2158,7 @@ export class AnticGtia implements Memory {
 
 	// Bitmap data fetch: read from MSC into the line buffer and ship the
 	// pixels into the ANx pipe. The pattern emits this on the instruction's
-	// first scan line — not row-counter zero: a vertical-scroll entry starts
+	// first scan line - not row-counter zero: a vertical-scroll entry starts
 	// the row counter at VSCROL, but the load happens regardless (Acid800
 	// psuedomodee stretches a mode F line with VSCROL=1 and expects its data
 	// fetched).
@@ -2290,7 +2290,7 @@ export class AnticGtia implements Memory {
 
 	// CHACTL bit 2 (vertical reflect) flips the glyph row within the 8-row
 	// character cell. The row fed to the address adder is 3 bits wide either
-	// way — a counter past 7 (VSCROL abuse, mode 3's rows 8-9) wraps rather
+	// way - a counter past 7 (VSCROL abuse, mode 3's rows 8-9) wraps rather
 	// than reading into the next glyph.
 	#charRow(row: number): number {
 		return (this.chactl & 0x04 ? row ^ 7 : row) & 7;
@@ -2298,7 +2298,7 @@ export class AnticGtia implements Memory {
 
 	// CHACTL transforms for the hires char modes (2 and 3). `blankRow` is
 	// mode 3's out-of-quadrant blanking; it lands before the inverse-video
-	// handling, so an inverted blank row renders solid — and the fetch still
+	// handling, so an inverted blank row renders solid - and the fetch still
 	// happens either way. For inverse-video chars, blank (bit 0) wins over
 	// invert (bit 1): both set renders solid.
 	#charTransform(data: number, charNo: number, blankRow = false): number {
@@ -2390,7 +2390,7 @@ const DMA_NONE = 0;
 const DMA_MISSILE = 1;
 const DMA_PLAYER = 2;
 const DMA_DL_FETCH = 3; // fetch + decode the instruction (halts)
-const DMA_DL_DECODE = 4; // decode only — display-list DMA off (bus free)
+const DMA_DL_DECODE = 4; // decode only - display-list DMA off (bus free)
 const DMA_DL_LO = 5; // jump/LMS operand low byte
 const DMA_DL_HI = 6; // jump/LMS operand high byte
 const DMA_NAME = 7; // character name into the line buffer
@@ -2408,8 +2408,8 @@ const DMA_ACTION_MASK = 0x3f;
 const DMA_DECODE_FIRST = 0x40; // re-decode the instruction, then the action
 const DMA_STOP_CHECK = 0x80; // the playfield stop position (deadline + 1)
 
-// The playfield-start arm cycle per fetch width (the AHRM 4.11 deadlines —
-// cycles 24/16/8 for narrow/normal/wide — plus one; HSCROL shifts it a
+// The playfield-start arm cycle per fetch width (the AHRM 4.11 deadlines -
+// cycles 24/16/8 for narrow/normal/wide - plus one; HSCROL shifts it a
 // cycle per 2, added at build time).
 const PF_ARM_CYCLE = [0, 25, 17, 9] as const;
 
@@ -2421,7 +2421,7 @@ const PF_STOP_DEADLINE = [0, 88, 96, 104] as const;
 // Playfield DMA may occupy cycles only through 105; a fetch slot pushed
 // past that by HSCROL on a wide (or widened) playfield is dropped as a bus
 // request, but the load machinery still runs and takes whatever is on the
-// bus — "virtual DMA" (AHRM's dropped-cycles note; Acid800 antic_virtdma).
+// bus - "virtual DMA" (AHRM's dropped-cycles note; Acid800 antic_virtdma).
 const VIRTUAL_DMA_CUTOFF = 106;
 
 /**
@@ -2429,7 +2429,7 @@ const VIRTUAL_DMA_CUTOFF = 106;
  * a pure function of rarely-changing state, so patterns are computed once
  * and cached (see #rebuildDmaPattern for the key layout); busCycle then
  * reduces to one table lookup per cycle. DRAM refresh is deliberately NOT in
- * the table — the pending-refresh flag is live, sequential state (a blocked
+ * the table - the pending-refresh flag is live, sequential state (a blocked
  * request slides to the next free cycle), and stays in busCycle.
  */
 function buildDmaPattern(key: number): Uint16Array {
@@ -2483,12 +2483,12 @@ function buildDmaPattern(key: number): Uint16Array {
 		return pattern;
 	}
 
-	// Started: the fetch geometry is the latched one — post-start register
+	// Started: the fetch geometry is the latched one - post-start register
 	// changes can't move the phase, only the stop position (live, below).
 	// Everything hangs off the DMA clock's bit grid (the name tap), with
 	// bitmap data at +2 and character data at +3. A clock carried over
 	// the line boundary runs from the top of the line on its shifted
-	// phase — starting one bit *before* the boundary, whose trailing
+	// phase - starting one bit *before* the boundary, whose trailing
 	// load taps land at the top of this line (hscrolbug's suppressed
 	// fetch at cycle 0). A stopped clock ends the grid at deadline + 2
 	// (the cleared bit's slot), the last bit's taps riding beyond.
@@ -2501,7 +2501,7 @@ function buildDmaPattern(key: number): Uint16Array {
 	for (let c = bitStart; c < bitEnd && c < 114; c += pfRate) {
 		const loadCycle = charRate ? c : c + 2;
 		// The line buffer address counter: ordinal from the playfield
-		// start — the clock starts counting there, so the first location
+		// start - the clock starts counting there, so the first location
 		// is always accessed at the start position (AHRM). A carried-over
 		// clock instead holds it at zero through cycle 8 and counts load
 		// slots from cycle 9 (hscrolbug's six-location shift).
@@ -2549,7 +2549,7 @@ function buildDmaPattern(key: number): Uint16Array {
 	// The stop comparator: stop positions per the *live* fetch width and
 	// scroll, checked at deadline + 1. The clear only catches the running
 	// bit when the position aligns with the grid mod the fetch rate
-	// (AHRM 4.12's HSCROL bug). The wide stop is always active — even
+	// (AHRM 4.12's HSCROL bug). The wide stop is always active - even
 	// with the playfield disabled (Acid800 linebuffering disables it
 	// mid-line and relies on the clock still stopping); the current
 	// width's earlier stop only exists while the playfield is enabled.
@@ -2709,15 +2709,15 @@ const COLBK = 8;
  * GTIA's priority gate network (AHRM 6.7). Each PRIOR bit activates
  * cross-disable signals between the player and playfield layers; the output
  * is the OR of the surviving sources, and a conflict that suppresses every
- * source paints black. The fifth player asserts the PF3 input — winning over
- * the other playfields through the /SF3 terms — while its missiles keep
+ * source paints black. The fifth player asserts the PF3 input - winning over
+ * the other playfields through the /SF3 terms - while its missiles keep
  * their own collision identities.
  *
  * These are AHRM's stated "exact logic" equations, with two refinements
  * pinned by the complete table 16 (unit-tested cell by cell):
  *
  * - The published /SF3 term in SF0-SF2 is really the PF3 *input* (fifth
- *   player included) — indistinguishable for real playfields, whose classes
+ *   player included) - indistinguishable for real playfields, whose classes
  *   are exclusive, but with the fifth player it implements "always wins
  *   against all other playfields" unconditionally.
  * - Three cells where a player-suppressed SF3 should stop suppressing
@@ -2751,7 +2751,7 @@ function resolvePriorityGates(
 	const pf01 = pf0 || pf1;
 	const pf23 = pf2 || pf3;
 
-	// Measured overrides — see the doc comment.
+	// Measured overrides - see the doc comment.
 	if (p5) {
 		const pri = prior & 0x0f;
 		const pair01 =

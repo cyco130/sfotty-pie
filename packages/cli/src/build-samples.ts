@@ -31,5 +31,5 @@ for (const name of ["hello", "echo", "cat", "guess"]) {
 	}
 
 	await writeFile(resolve(outputDir, `${name}.65`), result.output);
-	process.stdout.write(`samples/${name}.65 — ${result.output.length} bytes\n`);
+	process.stdout.write(`samples/${name}.65 - ${result.output.length} bytes\n`);
 }

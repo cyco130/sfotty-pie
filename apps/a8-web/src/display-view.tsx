@@ -17,7 +17,7 @@ import type { EmulatorHost } from "./host.ts";
 import type { TvStandard } from "./machine-config.ts";
 import { messages } from "./messages.ts";
 
-// A palette word (0xAABBGGRR) as a CSS color — in the same color space the
+// A palette word (0xAABBGGRR) as a CSS color - in the same color space the
 // palette was generated for, so the guide matches the machine canvas exactly
 // (CSS `color(display-p3 …)` with the same component values IS the same
 // color as P3 ImageData).
@@ -34,7 +34,7 @@ function cssColor(palette: Uint32Array, wide: boolean) {
 }
 
 // Whether CSS can express display-p3 (true everywhere the canvas can be P3,
-// except some ancient Chromium versions — those fall back to rgb()).
+// except some ancient Chromium versions - those fall back to rgb()).
 // Evaluated lazily: this module is prerendered, where DOM globals are off
 // limits at module scope.
 let cssP3: boolean | undefined;
@@ -202,7 +202,7 @@ function Guide({
 /**
  * The display settings panel: per-standard tabs (defaulting to the running
  * standard) over live-applied overscan and palette-generation controls.
- * Preset buttons just set parameters — only the parameters persist. Editing
+ * Preset buttons just set parameters - only the parameters persist. Editing
  * the running standard adjusts the machine window immediately; either way the
  * guide below previews the edited standard's palette.
  */
@@ -211,7 +211,7 @@ export function DisplayView({ host }: { host: EmulatorHost }) {
 	const [tab, setTab] = useState<TvStandard>(runningTv);
 	const settings = host.displaySettings.value[tab];
 	// Generate the guide's palette in the same color space the screen canvas
-	// got, and emit CSS in that space — so the guide matches the machine
+	// got, and emit CSS in that space - so the guide matches the machine
 	// exactly, including the extra P3 saturation of corrected palettes.
 	const wide = host.outputGamut.value === "display-p3" && supportsCssP3();
 	const color = useMemo(
@@ -237,7 +237,7 @@ export function DisplayView({ host }: { host: EmulatorHost }) {
 		host.setFrameBlending(tab, defaults.frameBlending);
 	};
 
-	// NTSC / PAL are hardware tokens — inline, not translated.
+	// NTSC / PAL are hardware tokens - inline, not translated.
 	const tabButton = (tv: TvStandard, label: string) => (
 		<button
 			type="button"

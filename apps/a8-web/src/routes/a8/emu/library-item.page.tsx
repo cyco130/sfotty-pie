@@ -21,7 +21,7 @@ import { navigate } from "../../../navigate.ts";
 import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
-// /a8/emu/library/:id — one image's details and actions. Built-in or user;
+// /a8/emu/library/:id - one image's details and actions. Built-in or user;
 // boot/attach run through the host, delete is user-only and returns to the list.
 
 const LIBRARY = "/a8/emu/library";
@@ -97,7 +97,7 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 // Editable name with an explicit Save (shown only once the text differs), plus a
-// confirming toast — so a rename never happens silently. Keyed by id by the
+// confirming toast - so a rename never happens silently. Keyed by id by the
 // caller so the draft resets when switching images.
 function NameEditor({
 	entry,
@@ -213,7 +213,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 		/* keep the raw id if it isn't valid percent-encoding */
 	}
 
-	// Detect well-known firmware from the bytes — only OS/cartridge images can
+	// Detect well-known firmware from the bytes - only OS/cartridge images can
 	// be one, so other types skip the (potentially large) read.
 	const [firmware, setFirmware] = useState<FirmwareInfo | null>(null);
 	useEffect(() => {
@@ -256,7 +256,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	const type = entry.derived.type;
 	const canBoot = type === "cart" || type === "disk" || type === "xex";
 
-	// Slot flags apply to standard-8K carts (CART type 1) — the kind the BASIC
+	// Slot flags apply to standard-8K carts (CART type 1) - the kind the BASIC
 	// and built-in-game ROM slots accept.
 	const isStdCart =
 		entry.derived.type === "cart" && entry.derived.cartType === 1;
@@ -287,7 +287,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 
 	const download = async (): Promise<void> => {
 		const served = await getImageBytes(entry.id);
-		// Download the canonical form — a raw built-in cart becomes a real `.car`.
+		// Download the canonical form - a raw built-in cart becomes a real `.car`.
 		let bytes = served;
 		try {
 			const piece = canonicalize(served)[0];
@@ -346,7 +346,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 						<button
 							type="button"
 							class="truncate font-mono text-xs text-neutral-700 hover:underline"
-							title={`${entry.hash} — ${messages.library.copyHash}`}
+							title={`${entry.hash} - ${messages.library.copyHash}`}
 							onClick={copyHash}
 						>
 							{entry.hash.slice(0, 16)}…

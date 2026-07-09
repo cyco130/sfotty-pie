@@ -20,7 +20,7 @@ test("the XL self-test window requires the OS ROM to be enabled", () => {
 	machine.write(0xd301, 0x7f, ReadOptions.NONE);
 	expect(machine.read(0x5000, ReadOptions.NONE)).toBe(0xaa);
 
-	// With the OS ROM banked out, the self-test vanishes too — it lives on
+	// With the OS ROM banked out, the self-test vanishes too - it lives on
 	// the OS ROM chip. RAM shows through instead.
 	machine.write(0xd301, 0x7e, ReadOptions.NONE);
 	expect(machine.read(0x5000, ReadOptions.NONE)).toBe(0x00);

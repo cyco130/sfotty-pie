@@ -3,7 +3,7 @@ import { DECODE, ReadOptions } from "@sfotty-pie/sfotty";
 import { Atari } from "./machine.ts";
 
 // A machine poised to execute a single NOP at $0600, with ANTIC parked in a
-// quiet slot — no DMA fetch, no DRAM refresh, off a visible line — so the CPU
+// quiet slot - no DMA fetch, no DRAM refresh, off a visible line - so the CPU
 // actually runs this cycle (halt stays false).
 function quietMachine(): Atari {
 	const machine = new Atari({ os: new Uint8Array(10240) });
@@ -29,7 +29,7 @@ test("cycle runs a whole cycle and fires onInstruction once", () => {
 test("a bus-phase throw suspends the cycle; resume finishes it without re-advancing ANTIC", () => {
 	const machine = quietMachine();
 
-	// The core is agnostic about the thrown value — any object propagates.
+	// The core is agnostic about the thrown value - any object propagates.
 	const suspend = { reason: "test-suspend" };
 	let armed = true;
 	machine.interceptExecute(0x0600, () => {
@@ -42,7 +42,7 @@ test("a bus-phase throw suspends the cycle; resume finishes it without re-advanc
 
 	const hposBefore = machine.anticGtia.hpos;
 
-	// The fetch interceptor throws straight out of cycle — not caught.
+	// The fetch interceptor throws straight out of cycle - not caught.
 	let caught: unknown;
 	try {
 		machine.cycle();
@@ -59,7 +59,7 @@ test("a bus-phase throw suspends the cycle; resume finishes it without re-advanc
 
 	machine.resumeCycle();
 
-	// beforeCpu ran exactly once across the suspend — ANTIC advanced one cycle.
+	// beforeCpu ran exactly once across the suspend - ANTIC advanced one cycle.
 	expect(machine.anticGtia.hpos).toBe(hposBefore + 1);
 	// And the CPU committed the fetch on the retry.
 	expect(machine.cpu.PC).toBe(0x0601);
@@ -79,7 +79,7 @@ test("a mid-scanline color register write paints from color clock 2w+1", () => {
 	machine.write(0xd018, 0x0e, ReadOptions.NONE); // COLPF2 white
 
 	// Rewrite COLPF2 during machine cycle w of the mode line: the new
-	// color must paint from color clock 2w+1 — frame x = 4(w-17)+2. One
+	// color must paint from color clock 2w+1 - frame x = 4(w-17)+2. One
 	// color clock earlier than AHRM table 18's ladder relative to the
 	// HPOS anchor; pinned pixel-exact by beam-racing kernels
 	// (RastaConverter output) against a reference render.
@@ -111,10 +111,10 @@ test("repositioning an in-flight player onto the beam retriggers and merges", ()
 	// Player 2, quadruple width, %00111000, triggered at HPOS $22 = color
 	// clock 34: pixels at clocks 42-53 (frame x 16-39). Rewriting HPOSP2
 	// to $27 = 39 during machine cycle 17 lands the comparator value on
-	// the very clock the beam reaches it (write effect from 2w+5) — a
+	// the very clock the beam reaches it (write effect from 2w+5) - a
 	// match: the in-flight image shifts a step and the graphics latch
 	// ORs in (the pmoverlap merge), stretching the player to clocks
-	// 39-58 (x 10-49). One color clock later and the match is missed —
+	// 39-58 (x 10-49). One color clock later and the match is missed -
 	// the truncated player is a visible drop-out under beam-racing
 	// kernels (RastaConverter output).
 	const spanFor = (rewrite: boolean) => {

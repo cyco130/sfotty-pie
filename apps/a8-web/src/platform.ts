@@ -24,7 +24,7 @@ function readOverride(): "mac" | "win" | null {
 }
 
 /**
- * True on macOS — for platform-specific shortcut labels (⌘ vs Ctrl+) and the
+ * True on macOS - for platform-specific shortcut labels (⌘ vs Ctrl+) and the
  * platform default bindings. A `?os=win` / `?os=mac` query param overrides the
  * real userAgent (per-tab; `?os=auto` or closing the tab clears it) so the other
  * platform's labels can be seen while developing.

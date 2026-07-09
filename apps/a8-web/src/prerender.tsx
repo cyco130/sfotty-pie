@@ -9,7 +9,7 @@ import { Root } from "./root.tsx";
 
 // Build-time only. vite-prerender-plugin (wired via prerenderScript in
 // vite.config.ts) imports this in Node and calls `prerender` once per queued
-// route. There's no document/window here — `globalThis.location` is set by the
+// route. There's no document/window here - `globalThis.location` is set by the
 // plugin per route, which is all preact-iso's <LocationProvider> needs. This
 // module is never referenced by index.html, so it stays out of the client
 // bundle entirely.

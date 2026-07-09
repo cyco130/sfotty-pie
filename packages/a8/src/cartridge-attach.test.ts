@@ -41,7 +41,7 @@ test("the 800's cartridge slot can be left empty", () => {
 test("a cartridge shadows the XL's built-in BASIC", () => {
 	const machine = makeMachine("800XL", makeCart(0x42));
 
-	// Bank BASIC in like the OS does (DDRB all outputs, PORTB bit 1 low) —
+	// Bank BASIC in like the OS does (DDRB all outputs, PORTB bit 1 low) -
 	// the cartridge still wins at $A000.
 	machine.write(0xd303, 0x00, ReadOptions.NONE);
 	machine.write(0xd301, 0xff, ReadOptions.NONE);

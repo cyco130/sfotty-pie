@@ -59,7 +59,7 @@ function HoldButton({
 	);
 }
 
-/** The fire button — holds the joystick-0 trigger while touched. */
+/** The fire button - holds the joystick-0 trigger while touched. */
 function TriggerButton({ host }: { host: EmulatorHost }) {
 	return (
 		<button
@@ -82,7 +82,7 @@ function TriggerButton({ host }: { host: EmulatorHost }) {
 // Radial-reader thresholds for the touch stick. Much slighter hysteresis than
 // the gamepad's: a finger doesn't idle at the deadzone edge (touchmove only
 // fires while it moves) and doesn't wobble like a sprung stick at a sector
-// boundary — its angular jitter is positional jitter over radius, tiny out
+// boundary - its angular jitter is positional jitter over radius, tiny out
 // near the ring. So the thresholds stay close to the raw geometry, with just a
 // sliver of margin as anti-chatter insurance. Tuned by feel.
 const TOUCH_STICK: RadialStickConfig = {
@@ -93,7 +93,7 @@ const TOUCH_STICK: RadialStickConfig = {
 
 // Per-octant joystick direction bitmask (1 = up, 2 = down, 4 = left,
 // 8 = right) and knob offset, in the radial reader's octant order: 0 = +x
-// (east), counting towards +y, which grows down the screen — so 1 = SE.
+// (east), counting towards +y, which grows down the screen - so 1 = SE.
 const OCTANT_DIRECTION = [0x8, 0xa, 0x2, 0x6, 0x4, 0x5, 0x1, 0x9] as const;
 const D = Math.SQRT1_2;
 const OCTANT_KNOB = [
@@ -165,7 +165,7 @@ function JoystickStick({ host }: { host: EmulatorHost }) {
 }
 
 /**
- * Power (cold start) — a one-shot tap, styled recessed so it isn't
+ * Power (cold start) - a one-shot tap, styled recessed so it isn't
  * fat-fingered mid-game. Lives in the persistent top bar beside Reset.
  */
 function PowerButton({ host }: { host: EmulatorHost }) {
@@ -183,7 +183,7 @@ function PowerButton({ host }: { host: EmulatorHost }) {
 	);
 }
 
-/** Reset (hardware line) — momentary hold, in the persistent top bar. */
+/** Reset (hardware line) - momentary hold, in the persistent top bar. */
 function ResetButton({ host }: { host: EmulatorHost }) {
 	return (
 		<button

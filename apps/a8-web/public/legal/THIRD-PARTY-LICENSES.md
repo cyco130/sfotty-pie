@@ -1,6 +1,6 @@
 # Third-party licenses
 
-Sfotty Pie itself is MIT-licensed. The replacement firmware ROMs and the UI icons bundled with this web app keep their own licenses, reproduced below. (These are independent works — bundling them does not relicense Sfotty Pie's own code.)
+Sfotty Pie itself is MIT-licensed. The replacement firmware ROMs and the UI icons bundled with this web app keep their own licenses, reproduced below. (These are independent works - bundling them does not relicense Sfotty Pie's own code.)
 
 Sfotty Pie is an independent project and is not affiliated with or endorsed by Atari, the Altirra project (Avery Lee), or the Atari++ project (Thomas Richter).
 
@@ -10,8 +10,8 @@ User-supplied ROMs and any images in the local library are not covered here; the
 
 ## AltirraOS (400/800 and XL/XE/XEGS) and Altirra BASIC
 
-Copyright (C) 2008–2016 Avery Lee (AltirraOS kernel)
-Copyright (C) 2014–2016 Avery Lee, All Rights Reserved (Altirra BASIC)
+Copyright (C) 2008-2016 Avery Lee (AltirraOS kernel)
+Copyright (C) 2014-2016 Avery Lee, All Rights Reserved (Altirra BASIC)
 
 These are clean-room replacements for the Atari OS and Atari BASIC, distributed with the Altirra emulator. The firmware is offered under the FSF all-permissive license (note from the source headers):
 
@@ -25,7 +25,7 @@ Bundled items: `AltirraOS 400-800`, `AltirraOS XL-XE`, `Altirra BASIC`.
 
 Copyright (C) THOR Software, Thomas Richter.
 
-These are replacements for the Atari OS and Atari BASIC, distributed with the Atari++ emulator, under the **THOR Public License (TPL)** — a near-verbatim variant of the Mozilla Public License 1.1 (it binds modifications to Thomas Richter and is governed by German law).
+These are replacements for the Atari OS and Atari BASIC, distributed with the Atari++ emulator, under the **THOR Public License (TPL)** - a near-verbatim variant of the Mozilla Public License 1.1 (it binds modifications to Thomas Richter and is governed by German law).
 
 Per the TPL, the corresponding source code is made available here:
 

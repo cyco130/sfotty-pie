@@ -4,7 +4,7 @@ import type { Pia } from "./pia.ts";
 
 // Trap callbacks. Interceptors run *before* the access and may short-circuit it
 // (a read interceptor returns a substitute value; a write interceptor returns
-// true to suppress the store) — return undefined/void to fall through.
+// true to suppress the store) - return undefined/void to fall through.
 // Observers run *after* and only watch. Both phases are additive and run
 // last-registered-first (LIFO), so a newly installed hook takes precedence; for
 // interceptors the first non-undefined return wins. `address` is passed for
@@ -39,7 +39,7 @@ export type ExecuteObserver = (address: number) => void;
 /**
  * Which accesses a trap fires on, by flag. `true` = the flag must be set,
  * `false` = it must be clear, omitted = don't care. The default when no mask is
- * given is `{ dummy: false }` — fire on committing accesses only. An execute
+ * given is `{ dummy: false }` - fire on committing accesses only. An execute
  * trap is `{ sync: true, dummy: false }` (a committed opcode fetch).
  */
 export interface TrapMask {
@@ -351,7 +351,7 @@ export class AtariBus implements Memory {
 	}
 
 	/**
-	 * Drop the PORTB watch. Call before discarding the bus — the host
+	 * Drop the PORTB watch. Call before discarding the bus - the host
 	 * reconfigures the machine by building a fresh `AtariBus`, and without this
 	 * the dead bus keeps receiving PORTB changes from the shared PIA.
 	 */
@@ -362,7 +362,7 @@ export class AtariBus implements Memory {
 
 	/**
 	 * Hot-plug or remove the cartridge. This is the one bit of configuration
-	 * that changes at runtime — carts are physically inserted/removed — while
+	 * that changes at runtime - carts are physically inserted/removed - while
 	 * everything else is fixed at construction.
 	 */
 	setCartridge(cartridge: Cartridge | null) {
@@ -452,7 +452,7 @@ export class AtariBus implements Memory {
 			if (value & 0x04) bank |= 0x01;
 			if (value & 0x08) bank |= 0x02;
 
-			// TODO: bit 0 as a banking bit (Rambo 2112K / Compy 1088K) omitted —
+			// TODO: bit 0 as a banking bit (Rambo 2112K / Compy 1088K) omitted -
 			// never shipped.
 
 			if (this.#separateAnticAccess) {
@@ -498,7 +498,7 @@ export class AtariBus implements Memory {
 					if (address < 0x5800) {
 						// 5000..57FF
 						// The self-test window only appears while the OS ROM
-						// is also enabled — the self-test lives on the OS ROM
+						// is also enabled - the self-test lives on the OS ROM
 						// chip (Acid800's mmu_xlbanking checks this).
 						if (this.#isSelfTestEnabled && this.#isOsRomEnabled) {
 							return this.#osRom;
@@ -633,7 +633,7 @@ export class AtariBus implements Memory {
 	}
 
 	// Last value driven on the data bus. Public so a chip that reads the bus
-	// without driving the address can see it — e.g. GTIA samples the bus on
+	// without driving the address can see it - e.g. GTIA samples the bus on
 	// cycles where it expects ANTIC to drive the address via DMA; with that DMA
 	// disabled ANTIC doesn't drive, and GTIA reads whatever was last here.
 	//
@@ -646,7 +646,7 @@ export class AtariBus implements Memory {
 
 	read(address: number, options: ReadOptions) {
 		// A PEEK (debugger/disassembler inspection) must not fire traps or
-		// disturb the bus — it has no side effects. The `.size` guards keep the
+		// disturb the bus - it has no side effects. The `.size` guards keep the
 		// common no-traps path off the lookup hot path: these run on every
 		// access, so an empty registry must cost a field read, not a Map.get.
 		if (!(options & ReadOptions.PEEK) && this.#readInterceptors.size) {
@@ -677,13 +677,13 @@ export class AtariBus implements Memory {
 	write(address: number, value: number, options: ReadOptions) {
 		this.busData = value;
 		// `options` carries DUMMY for a read-modify-write write-back, so a trap's
-		// mask can exclude it (the default { dummy: false } does — observers fire
+		// mask can exclude it (the default { dummy: false } does - observers fire
 		// on the committed store only).
 		if (
 			this.#writeInterceptors.size &&
 			this.#runWriteInterceptors(address, value, options)
 		) {
-			return; // suppressed — the store didn't commit, so no observers fire
+			return; // suppressed - the store didn't commit, so no observers fire
 		}
 		this.#map(address, options).write(address, value, options);
 		if (this.#writeObservers.size) {

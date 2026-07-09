@@ -24,8 +24,8 @@ interface Row {
 	chord: string | null;
 }
 
-/** A caveat shown when we're guessing the layout — the browser doesn't expose it
- *  and the user hasn't picked one — so labels fall back to QWERTY. Links to the
+/** A caveat shown when we're guessing the layout - the browser doesn't expose it
+ *  and the user hasn't picked one - so labels fall back to QWERTY. Links to the
  *  setup page; hidden once getLayoutMap works or a layout is chosen. */
 export function LayoutWarning({ host }: { host: EmulatorHost }) {
 	if (layoutLabelsAvailable() || host.layoutPref.value !== LAYOUT_AUTO) {
@@ -48,7 +48,7 @@ export function LayoutWarning({ host }: { host: EmulatorHost }) {
 /**
  * The keyboard-shortcuts page: the raw binding set, one row per binding (a
  * command with several bindings repeats, VSCode-style), searchable by action or
- * chord. It shows the physical bindings only — the character channel (layout-
+ * chord. It shows the physical bindings only - the character channel (layout-
  * aware typing) isn't part of the table and isn't remappable, so there's no mode
  * here. Read-only for now; editing comes next.
  */
@@ -62,7 +62,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 			if (list) list.push(b);
 			else byCommand.set(b.command, [b]);
 		}
-		// Bound commands first (each binding a row), then the unbound ones — both in
+		// Bound commands first (each binding a row), then the unbound ones - both in
 		// palette order (alphabetical by label), so a command's rows stay adjacent.
 		// Within a command, its primary binding leads (matching the palette/menu),
 		// the rest keeping their order (sort is stable).
@@ -87,7 +87,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 	}, [host.keyBindings.value, host.isMac, host.layoutLabels.value]);
 
 	// Exact substring (not fuzzy), matched against the action label and the chord
-	// — so "F1" surfaces both "Press F1" (label) and "Press Help" (its F1 chord).
+	// - so "F1" surfaces both "Press F1" (label) and "Press Help" (its F1 chord).
 	const q = query.trim().toLowerCase();
 	const shown = q
 		? rows.filter(

@@ -38,7 +38,7 @@ GTIA is 8 cc behind ANTIC: 140 - 132 = 8
 Master clock rates are based on the Atari's crystal oscillator frequencies..
 
 Pixel aspect ratios are the TV standard's square-pixel clock divided by Atari's pixel clock (master clock / 2).
-The full 376-pixel width spans ~322 (NTSC) / ~391 (PAL) square pixels — slightly wider than the 4:3 picture (320 / 384).
+The full 376-pixel width spans ~322 (NTSC) / ~391 (PAL) square pixels - slightly wider than the 4:3 picture (320 / 384).
 
 Vertical: 192..240 lines (0..48 lines, increments in 2)
     Large overscan: 240 lines

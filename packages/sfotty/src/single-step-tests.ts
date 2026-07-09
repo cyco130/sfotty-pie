@@ -130,7 +130,7 @@ for (const opcode of opcodes) {
 		const failure = runTest(test);
 		if (failure) {
 			totalFailures++;
-			firstFailure ??= `${test.name} — ${failure}`;
+			firstFailure ??= `${test.name} - ${failure}`;
 		} else {
 			passed++;
 		}

@@ -5,10 +5,10 @@ import { buildBootDisk, FILE_SIZE_OFFSET } from "./xex-boot.ts";
 import { XEX_LOADER } from "./xex-loader-bytes.ts";
 
 // A four-chunk XEX exercising the whole protocol:
-// - code at $3000: inc $3100, rts — then INITAD pointed at it (runs once
+// - code at $3000: inc $3100, rts - then INITAD pointed at it (runs once
 //   mid-load)
 // - data at $2000-$2002
-// - code at $3010: inc $3101, then spin at $3013 — then RUNAD pointed at it
+// - code at $3010: inc $3101, then spin at $3013 - then RUNAD pointed at it
 const XEX = Uint8Array.from([
 	0xff, 0xff,
 	// prettier-ignore
@@ -74,7 +74,7 @@ test("booting the disk loads and runs the executable", () => {
 	cpu.S = 0xfd;
 
 	// Run until the executable spins at its RUNAD target. Check at
-	// instruction boundaries only — mid-instruction, PC already points past
+	// instruction boundaries only - mid-instruction, PC already points past
 	// the operand while writes are still pending.
 	for (
 		let i = 0;

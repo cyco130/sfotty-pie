@@ -5,7 +5,7 @@
 // reachable as cardinals (unlike a per-axis threshold, which a round gate caps
 // near 0.707 and leaves a dead wedge on every diagonal). Hysteresis stops
 // chatter: a lower release radius, and an angular margin before an engaged
-// stick jumps to a neighbouring octant. The thresholds are the caller's — a
+// stick jumps to a neighbouring octant. The thresholds are the caller's - a
 // spring-centred thumbstick and a thumb on glass want different tuning.
 
 const QUARTER_PI = Math.PI / 4;
@@ -36,7 +36,7 @@ export function initialStickState(): RadialStickState {
 /**
  * Read one stick sample. `x`/`y` are the position in −1..1 space (+y = down,
  * matching both gamepad axes and screen coordinates). Updates `state` in place
- * and returns the octant — 0 = +x, counting towards +y (so 1 = down-right on
+ * and returns the octant - 0 = +x, counting towards +y (so 1 = down-right on
  * screen), or −1 for centred.
  */
 export function readRadialStick(

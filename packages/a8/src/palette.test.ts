@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { buildNtscPalette, buildPalPalette } from "./palette.ts";
 
 // The classic ideal-pot PAL per-hue UV angles (hues 1-15) that the generator
-// model must reproduce at the default 22.5° step — including the gaps at
+// model must reproduce at the default 22.5° step - including the gaps at
 // hues 6/7 and 10/11 and hue 15 landing back on hue 1.
 const PAL_IDEAL_ANGLES = [
 	135, 112.5, 90, 67.5, 45, 22.5, 337.5, 315, 292.5, 270, 225, 202.5, 180,
@@ -92,7 +92,7 @@ test("brightness, contrast, and gamma adjust the output", () => {
 
 test("primaries correction: greys are exactly preserved", () => {
 	// Source white maps to target white by construction, and greys are
-	// scalar multiples of white — so the grey ramp must stay r = g = b.
+	// scalar multiples of white - so the grey ramp must stay r = g = b.
 	for (const primaries of ["ntsc1953", "smpteC"] as const) {
 		const palette = buildNtscPalette({ primaries });
 		for (let luma = 0; luma < 16; luma++) {

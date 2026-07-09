@@ -9,12 +9,12 @@ import { PanelFrame } from "./panel-frame.tsx";
 const KEYS = "/a8/emu/keys";
 
 // The manual keyboard-layout picker (route /a8/emu/keys/layout). A pick overrides
-// getLayoutMap and regenerates the default bindings from that layout — the
+// getLayoutMap and regenerates the default bindings from that layout - the
 // fallback for browsers that don't expose the layout, and an override elsewhere.
 export default function KeyboardLayoutPanel() {
 	const { host } = useEmu();
 	const current = host.layoutPref.value;
-	// Nothing to auto-detect from where getLayoutMap is absent — gray it out.
+	// Nothing to auto-detect from where getLayoutMap is absent - gray it out.
 	const autoAvailable = layoutLabelsAvailable();
 
 	// Flat, alphabetical by display name. Several options can share a map id, so
@@ -44,7 +44,7 @@ export default function KeyboardLayoutPanel() {
 				>
 					<option value={LAYOUT_AUTO} disabled={!autoAvailable}>
 						{messages.shortcuts.layoutAuto}
-						{!autoAvailable && ` — ${messages.shortcuts.layoutAutoUnavailable}`}
+						{!autoAvailable && ` - ${messages.shortcuts.layoutAutoUnavailable}`}
 					</option>
 					{options.map((option) => (
 						<option key={option.name} value={option.id}>

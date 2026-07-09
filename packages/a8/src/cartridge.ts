@@ -119,7 +119,7 @@ export const CART_TYPES: Record<number, CartType> = {
 		},
 
 		// Per cart.txt the bank is selected by an "access" to $D500-$D5FF, i.e.
-		// a read OR a write — so `value` is ignored (this fires on reads too).
+		// a read OR a write - so `value` is ignored (this fires on reads too).
 		control(address, _value, setMapping) {
 			switch (address & 0x9) {
 				case 0x0:
@@ -704,7 +704,7 @@ export type CartridgeMapping = {
 const CART_HEADER_SIZE = 16;
 
 /**
- * The raw ROM bytes for a built-in (PORTB-banked) 8K slot — XL/XE BASIC or the
+ * The raw ROM bytes for a built-in (PORTB-banked) 8K slot - XL/XE BASIC or the
  * XEGS game. Raw ROM passes through unchanged; a standard-8K `.car` (CART
  * type 1, the canonical form for an $A000 8K image) is unwrapped to its ROM.
  * Any other `.car` (a banked or wrong-size cartridge) is rejected: it can't
@@ -862,7 +862,7 @@ export class Cartridge implements Memory {
 	read(address: number, options: ReadOptions): number {
 		if (address >= 0xd500 && address <= 0xd5ff) {
 			// A PEEK (debugger inspection) must not bank-switch. Still run control
-			// for its return value, but drop the mapping change — matters for
+			// for its return value, but drop the mapping change - matters for
 			// access-triggered carts like OSS, which switch on reads too.
 			const peek = (options & ReadOptions.PEEK) !== 0;
 			return (

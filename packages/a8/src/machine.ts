@@ -20,7 +20,7 @@ import { createSioHandler, SIOV } from "./sio.ts";
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
 /**
- * The Atari 8-bit model class — what the firmware ranking and the UI key off.
+ * The Atari 8-bit model class - what the firmware ranking and the UI key off.
  * The machine itself only cares about `xl` (everything but the 400/800) plus
  * the bus options; these classes map onto that.
  */
@@ -36,7 +36,7 @@ const PHASE = { IDLE: 0, BUS: 1, CPU: 2 } as const;
 export interface MachineConfig {
 	/**
 	 * XL/XE architecture: PORTB banking and built-in (banked) ROM slots.
-	 * Default false — the 400/800, where BASIC/cartridges share the $A000 slot.
+	 * Default false - the 400/800, where BASIC/cartridges share the $A000 slot.
 	 */
 	xl?: boolean;
 	/** TV standard: line count, the GTIA PAL flag, and timing. Default NTSC. */
@@ -61,10 +61,10 @@ export interface MachineConfig {
 	/**
 	 * BASIC ROM (8K). Built-in (PORTB-banked) on XL/XE; on the 400/800 a passed
 	 * `basic` is wrapped as an $A000 cartridge (omit to leave the slot empty).
-	 * The 1200XL has no built-in BASIC — omit it and supply BASIC as a cart.
+	 * The 1200XL has no built-in BASIC - omit it and supply BASIC as a cart.
 	 */
 	basic?: Uint8Array;
-	/** Built-in game ROM (8K), PORTB-banked — the XEGS. Requires `xl`. */
+	/** Built-in game ROM (8K), PORTB-banked - the XEGS. Requires `xl`. */
 	game?: Uint8Array;
 	/**
 	 * Cartridge in the (left) slot. On the 400/800 it takes the slot otherwise
@@ -80,10 +80,10 @@ export interface MachineConfig {
  * combined {@link AnticGtia} video chip pair, POKEY, and the PIA. Classic
  * machines as {@link MachineConfig} recipes:
  *
- * - an 800 — OS-B, 48K, no PORTB banking; BASIC is a standard $A000 8K cart.
- * - an 800XL — `xl`, XL OS, 64K, PORTB banking; BASIC is built in and banked
+ * - an 800 - OS-B, 48K, no PORTB banking; BASIC is a standard $A000 8K cart.
+ * - an 800XL - `xl`, XL OS, 64K, PORTB banking; BASIC is built in and banked
  *   via PORTB (the OS enables it unless OPTION is held).
- * - a 130XE — the XL plus `xeBankCount: 4` (four 16K banks at $4000-$7FFF via
+ * - a 130XE - the XL plus `xeBankCount: 4` (four 16K banks at $4000-$7FFF via
  *   PORTB bits 2-3) and `separateAnticAccess` (bits 4/5).
  *
  * The host drives the machine one cycle at a time via {@link cycle}, which runs
@@ -104,7 +104,7 @@ export interface MachineConfig {
  *
  * Keyboard input goes through the `pokeyKeyDown`/`pokeyKeyUp` family of
  * methods, joystick input through the `joystick*` family. The machine knows
- * nothing about host key assignments — mapping host keys to matrix codes or
+ * nothing about host key assignments - mapping host keys to matrix codes or
  * joystick lines (layouts, special key bindings) is entirely the host's
  * business.
  */
@@ -162,9 +162,9 @@ export class Atari implements Memory {
 			xeBankCount: config.xeBankCount ?? 0,
 			separateAnticAccess: config.separateAnticAccess ?? false,
 			osRom: os,
-			// XL/XE: built-in BASIC and game, banked in via PORTB — each accepts a
+			// XL/XE: built-in BASIC and game, banked in via PORTB - each accepts a
 			// raw 8K ROM or a standard-8K `.car` (unwrapped here). 400/800: BASIC is
-			// an $A000 cart (Cartridge parses raw or `.car`) — displaced when a game
+			// an $A000 cart (Cartridge parses raw or `.car`) - displaced when a game
 			// cartridge is in the slot.
 			basicRom: xl && basic ? builtinSlotRom(basic) : undefined,
 			gameRom: game ? builtinSlotRom(game) : undefined,
@@ -179,7 +179,7 @@ export class Atari implements Memory {
 		// On XL/XE, TRIG3 ($D013) senses the cartridge line (RD5): 1 = a
 		// cartridge is in the slot, 0 = empty. The OS reads it (against the
 		// stored GINTLK) to cold-start on a hot swap, and to skip the
-		// cartridge checksum entirely when the slot is empty — without this
+		// cartridge checksum entirely when the slot is empty - without this
 		// (TRIG3 stuck at 1) every Reset runs that checksum, which then fails
 		// on the BASIC/RAM banking and forces a cold start. On the 800 TRIG3
 		// is joystick 4's trigger and stays as-is.
@@ -232,7 +232,7 @@ export class Atari implements Memory {
 
 	/**
 	 * The framebuffer the machine renders into (376×240 Atari color bytes),
-	 * updated by each cycle's render phase — the current target, which
+	 * updated by each cycle's render phase - the current target, which
 	 * {@link setFrameBuffer} can repoint.
 	 */
 	get frame(): Uint8Array {
@@ -241,7 +241,7 @@ export class Atari implements Memory {
 
 	/**
 	 * Point rendering at `buffer` (376×240) for subsequent cycles. The default
-	 * buffer is always present, so this is optional — a host uses it to render
+	 * buffer is always present, so this is optional - a host uses it to render
 	 * into its own buffer, e.g. swapping targets at frame boundaries for
 	 * tear-free double-buffering. Call it only at a frame boundary, or the
 	 * in-progress frame tears.
@@ -252,7 +252,7 @@ export class Atari implements Memory {
 
 	/**
 	 * Optional hook fired at each committed opcode fetch, with the opcode's
-	 * address — for tracing / instruction-level debugging. Forwarded to the
+	 * address - for tracing / instruction-level debugging. Forwarded to the
 	 * CPU's `onFetch`; see {@link Sfotty.onFetch} for the exact semantics.
 	 */
 	get onInstruction(): ((pc: number) => void) | undefined {
@@ -267,18 +267,18 @@ export class Atari implements Memory {
 	 * POKEY tick, then the bus phase (ANTIC's DMA fetch or the CPU's access) and
 	 * the render. Returns POKEY's audio level (0-60).
 	 *
-	 * A bus phase may **throw** — an interceptor suspending on a read/write/fetch,
+	 * A bus phase may **throw** - an interceptor suspending on a read/write/fetch,
 	 * or a host's own breakpoint signal. This method does not catch it: the throw
 	 * propagates with the cycle frozen at that phase. The host catches whatever it
 	 * threw, resolves it (await input, clear a breakpoint, …), and calls
-	 * {@link resumeCycle} to finish the *same* cycle — never `cycle`,
+	 * {@link resumeCycle} to finish the *same* cycle - never `cycle`,
 	 * which would re-run the committed scheduling. Idempotent by construction:
 	 * each bus phase does its access before any commit, so a throw unwinds clean
 	 * and the retried access repeats nothing.
 	 */
 	cycle(): number {
 		if (this.#phase !== PHASE.IDLE) {
-			throw new Error("cycle() called mid-cycle — use resumeCycle()");
+			throw new Error("cycle() called mid-cycle - use resumeCycle()");
 		}
 		this.anticGtia.beforeCpu();
 		this.#audio = this.pokey.cycle();
@@ -298,7 +298,7 @@ export class Atari implements Memory {
 	#runCycle(): number {
 		switch (this.#phase) {
 			case PHASE.BUS:
-				this.anticGtia.busCycle(); // ANTIC DMA read — may throw
+				this.anticGtia.busCycle(); // ANTIC DMA read - may throw
 				this.#cpu.NMI = this.anticGtia.nmi;
 				// The CPU sees the wire-ORed /IRQ line as of the end of the
 				// previous cycle: the open-collector line settles across a
@@ -332,7 +332,7 @@ export class Atari implements Memory {
 
 	/**
 	 * True while the Reset button holds the XL/XE system reset line. The host
-	 * must keep the CPU in reset — `cpu.reset(false)` instead of `run()` —
+	 * must keep the CPU in reset - `cpu.reset(false)` instead of `run()` -
 	 * every cycle while this is set. Always false on the 800, whose Reset key
 	 * is an NMI instead (see {@link resetButtonDown}).
 	 */
@@ -343,7 +343,7 @@ export class Atari implements Memory {
 	/**
 	 * Press a keyboard matrix key. `code` is the full KBCODE byte: the 6-bit
 	 * matrix scan code with bit 6 (Shift) and bit 7 (Ctrl) composed by the
-	 * host. The key registers update and the keyboard IRQ fires immediately —
+	 * host. The key registers update and the keyboard IRQ fires immediately -
 	 * there is no scan timing yet.
 	 */
 	pokeyKeyDown(code: number): void {
@@ -359,7 +359,7 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * Press the Shift key. Drives the SKSTAT shift sense only — the Shift bit
+	 * Press the Shift key. Drives the SKSTAT shift sense only - the Shift bit
 	 * inside KBCODE comes from {@link pokeyKeyDown}'s `code`, and the two may
 	 * disagree, just like on real hardware mid-scan.
 	 */

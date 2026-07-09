@@ -6,7 +6,7 @@
  * Fetch an image's raw bytes from its (possibly fragmented) asset URL.
  *
  * A `#start-end` URL fragment (hex byte offsets, end-exclusive) selects a slice
- * of the asset — e.g. one ROM carved out of a combined dump. The fragment is
+ * of the asset - e.g. one ROM carved out of a combined dump. The fragment is
  * stripped before the fetch, so a combined's slices all share one cached
  * download and each is a `subarray` view into it. No fragment ⇒ the whole file.
  */

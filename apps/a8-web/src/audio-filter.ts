@@ -7,7 +7,7 @@
  *   Samplerate: 88200 (the tool's maximum), Cutoff: 900, Ripple: 2.999.
  * Running it at the real 1.79MHz input rate scales the cutoff to ~18kHz.
  *
- * Implemented as eight cascaded biquads in transposed direct form II — the
+ * Implemented as eight cascaded biquads in transposed direct form II - the
  * same transfer function as the designer's reference code, without its
  * per-sample history shifting.
  */

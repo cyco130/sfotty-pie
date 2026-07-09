@@ -26,7 +26,7 @@ export interface AssembleResult {
 type Reporter = (message: string, span: readonly [number, number]) => void;
 
 /**
- * Assemble a single source string (no module imports). Synchronous — there is
+ * Assemble a single source string (no module imports). Synchronous - there is
  * no `Host` to consult, so nothing async can happen.
  */
 export function assemble(source: string, name?: string): AssembleResult;
@@ -155,8 +155,8 @@ function assembleModules(
 /**
  * Walk the statements, routing content into the current segment (OUTPUT by
  * default, switched by `.segment`) and defining constants. Returns the segment
- * map for rendering. Each segment tracks a running location counter — starting
- * at its base from the previous render — so instructions get a pc for branch
+ * map for rendering. Each segment tracks a running location counter - starting
+ * at its base from the previous render - so instructions get a pc for branch
  * offsets (same-segment branches are base-invariant, so this converges).
  */
 function collect(
@@ -176,7 +176,7 @@ function collect(
 	};
 
 	getSegment("OUTPUT");
-	// Running location per segment (shared across modules) — the pc source for
+	// Running location per segment (shared across modules) - the pc source for
 	// branch offsets; starts at the segment's base from the previous render.
 	const locations = new Map<string, bigint>();
 	const locationOf = (name: string) =>

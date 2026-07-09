@@ -1,4 +1,4 @@
-// The user blob backend — where a user image's bytes physically live. The
+// The user blob backend - where a user image's bytes physically live. The
 // library references a blob through its locator `{ backend, ref }`; this is the
 // `idb` implementation, the portable baseline. OPFS / File System Access
 // backends slot in behind the same interface later.

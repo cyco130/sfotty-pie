@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-// The bulk-import worker: ingests an entire file list off the main thread —
+// The bulk-import worker: ingests an entire file list off the main thread -
 // reading bytes, canonicalizing, hashing, compressing, and writing blobs +
 // entries straight to IndexedDB (the worker is the sole writer for the import's
 // duration). It posts progress back in batches so the library can fill in live
@@ -75,7 +75,7 @@ worker.onmessage = async (event: MessageEvent<ImportRequest>) => {
 			added += result.added;
 			deduped += result.deduped;
 		} catch {
-			failed++; // unrecognized — canonicalize threw
+			failed++; // unrecognized - canonicalize threw
 		}
 		if (into.length > 0) batch.push(...into);
 		done++;

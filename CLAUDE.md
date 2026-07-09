@@ -4,6 +4,8 @@ Project context for Claude Code and other agents. Keep this file focused on thin
 
 Markdown in this repo is not manually wrapped. Write one paragraph per line and let the editor soft-wrap.
 
+No en dashes (–) or em dashes (—) in human-facing text: code comments, string literals, and any `.md` meant for human readers (readmes, `design.md`, `CONTRIBUTING.md`, docs pages). Use a plain hyphen-minus (`-`) instead. Agent-facing files (this file, `.claude/**`) may use them.
+
 ## Layout
 
 - `packages/*` — publishable libraries. Built with tsdown, published to npm.

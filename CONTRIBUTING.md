@@ -5,8 +5,8 @@ Thanks for considering a contribution.
 ## Prerequisites
 
 - **Git**.
-- **Node** — the latest minor of the most recent LTS. Published packages support a broader range — every LTS plus every Current Node release still maintained upstream, pinned in `engines.node` of each `packages/*/package.json` — but dev/build scripts may rely on features that landed in recent LTS minors.
-- **pnpm** — the version pinned in the root `package.json`'s `packageManager` field. `corepack enable` picks it up automatically; otherwise any pnpm of the same major should work.
+- **Node** - the latest minor of the most recent LTS. Published packages support a broader range - every LTS plus every Current Node release still maintained upstream, pinned in `engines.node` of each `packages/*/package.json` - but dev/build scripts may rely on features that landed in recent LTS minors.
+- **pnpm** - the version pinned in the root `package.json`'s `packageManager` field. `corepack enable` picks it up automatically; otherwise any pnpm of the same major should work.
 
 ## Setup
 
@@ -16,12 +16,12 @@ pnpm install --frozen-lockfile
 
 ## Layout
 
-- `packages/*` — published libraries.
-- `apps/*` — deployable applications (the [a8-web](apps/a8-web) emulator front-end); not published.
-- `examples/*` — degit-cloneable consumer demos (only the `_template` scaffold so far).
-- `packages/_template/` and `examples/_template/` — scaffolds; copy from these when adding new packages.
+- `packages/*` - published libraries.
+- `apps/*` - deployable applications (the [a8-web](apps/a8-web) emulator front-end); not published.
+- `examples/*` - degit-cloneable consumer demos (only the `_template` scaffold so far).
+- `packages/_template/` and `examples/_template/` - scaffolds; copy from these when adding new packages.
 
-Some packages carry a `design.md` next to their `readme.md` that explains how they work internally — start there when working on a package's guts.
+Some packages carry a `design.md` next to their `readme.md` that explains how they work internally - start there when working on a package's guts.
 
 ## Common commands
 
@@ -43,7 +43,7 @@ Copy `packages/_template/` to `packages/<name>/`, rename `@<projname>/template-p
 
 We use Prettier and ESLint, running `pnpm format` and `pnpm test:lint` should leave nothing to argue about. Pre-commit hooks (husky + lint-staged) auto-format staged files.
 
-If you'd rather run formatters by hand, opt out of the hooks per-commit with `git commit --no-verify` (or `-n`), or for the whole shell session with `export HUSKY=0`. Either is fine — just make sure CI is green before you push.
+If you'd rather run formatters by hand, opt out of the hooks per-commit with `git commit --no-verify` (or `-n`), or for the whole shell session with `export HUSKY=0`. Either is fine - just make sure CI is green before you push.
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `release:`, etc.
 
@@ -52,7 +52,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 - AI use is fine as long and is subject to the same review standards as human-written code.
 - Small, focused, and well-described PRs are welcome.
 - For large or complex changes, open an issue first to discuss the approach before investing time in implementation.
-- CI (`.github/workflows/ci.yml`) must pass — both the `quality` job (lint, typecheck, unit) and the `conformance` job (CPU single-step tests, Acid800). PRs also get a Cloudflare Pages preview deployment of the web app, and merges to `main` deploy production.
+- CI (`.github/workflows/ci.yml`) must pass - both the `quality` job (lint, typecheck, unit) and the `conformance` job (CPU single-step tests, Acid800). PRs also get a Cloudflare Pages preview deployment of the web app, and merges to `main` deploy production.
 
 ## Releases
 

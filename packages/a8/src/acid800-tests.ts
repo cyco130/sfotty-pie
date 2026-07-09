@@ -1,8 +1,8 @@
 /* eslint-disable no-console -- conformance-test runner reports to the console */
 // Runs the Altirra Acid800 test suite (test/acid800/acid800.atr) on a 130XE
 // with the committed Altirra OS/BASIC ROMs and compares every test's result to
-// the recorded baseline (test/acid800/baseline.json). Any change — a pass
-// becoming a fail, a fail becoming a pass, or a new/missing test — fails, so an
+// the recorded baseline (test/acid800/baseline.json). Any change - a pass
+// becoming a fail, a fail becoming a pass, or a new/missing test - fails, so an
 // intentional change must be recorded with `pnpm acid800-tests --update`.
 //
 // The suite runs in-process on the headless host: `keys: [0x21, 0x16]` feeds
@@ -71,7 +71,7 @@ const tally = Object.values(results).reduce<Record<Status, number>>(
 );
 
 if (total === 0) {
-	console.error("Acid800: no test results parsed — the suite did not run.");
+	console.error("Acid800: no test results parsed - the suite did not run.");
 	process.exit(1);
 }
 
@@ -110,7 +110,7 @@ console.log(
 
 if (problems.length > 0) {
 	console.error(
-		`\n${problems.length} result(s) changed — if intentional, run \`pnpm acid800-tests --update\`:`,
+		`\n${problems.length} result(s) changed - if intentional, run \`pnpm acid800-tests --update\`:`,
 	);
 	for (const problem of problems) console.error(`  ${problem}`);
 	process.exit(1);

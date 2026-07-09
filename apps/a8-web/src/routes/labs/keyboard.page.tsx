@@ -3,7 +3,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { useHead } from "../../head.ts";
 import { messages } from "../../messages.ts";
 
-// /labs/keyboard — a scratch page for observing raw keyboard/composition events.
+// /labs/keyboard - a scratch page for observing raw keyboard/composition events.
 // Useful groundwork for the key-binding work (key/code/location/modifier model).
 
 const MODIFIER_STATES = [
@@ -41,7 +41,7 @@ function quote(value: string | null): string {
 
 function activeModifiers(event: KeyboardEvent): string {
 	const on = MODIFIER_STATES.filter((name) => event.getModifierState(name));
-	return on.length ? on.join("+") : "—";
+	return on.length ? on.join("+") : "-";
 }
 
 function describeKeyboard(event: KeyboardEvent): string {

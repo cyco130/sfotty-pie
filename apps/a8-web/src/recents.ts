@@ -1,4 +1,4 @@
-// The recently-booted images, newest first — a global (cross-tab) history kept
+// The recently-booted images, newest first - a global (cross-tab) history kept
 // in localStorage, capped. Entries are unified library ids; they're resolved
 // against the library when rendered, skipping any that no longer exist. The
 // menu's "Recents" section is this history followed by the built-in software

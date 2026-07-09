@@ -12,7 +12,7 @@ import { buildBootDisk } from "./xex-boot.ts";
 // Usage: boot.ts --os <file> [--basic <file>] [--xl | --xe] [--pal] [--trace] [--dump-frame] [file]
 // `--os`/`--basic` are paths to the OS and BASIC ROM images. `file` is an XEX,
 // ATR, or cartridge image; like the web emulator's Load, booting a file is
-// boot-image semantics — the 800's BASIC cart comes out. This is a thin CLI over
+// boot-image semantics - the 800's BASIC cart comes out. This is a thin CLI over
 // the headless host (machine + OS-ROM HLE traps + run loop); console I/O is wired
 // to stdin/stdout here, and the run loop lives in Headless.
 const argv = process.argv.slice(2);
@@ -88,7 +88,7 @@ function hex(value: number, width: number): string {
 	return value.toString(16).toUpperCase().padStart(width, "0");
 }
 
-// --- Console input via readline (line-buffered stdin) — good enough for BASIC.
+// --- Console input via readline (line-buffered stdin) - good enough for BASIC.
 // Exposed to the host as an InputSource: read() pops the next buffered byte;
 // wait() resolves when a line arrives, or false when stdin closes. ---
 const rl = readline.createInterface({
@@ -184,7 +184,7 @@ if (machine.cpu.crashed) {
 	dumpRegisters();
 } else if (result.reachedLimit) {
 	process.stderr.write(
-		`\nReached LIMIT (${result.cycles} cycles) — likely stuck; re-run with --trace.\n`,
+		`\nReached LIMIT (${result.cycles} cycles) - likely stuck; re-run with --trace.\n`,
 	);
 	dumpRegisters();
 }

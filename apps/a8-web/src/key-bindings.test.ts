@@ -25,7 +25,7 @@ function ev(partial: Partial<KeyEventLike>): KeyEventLike {
 }
 
 // Resolve an event against the flat default set (one set; the mode lives in the
-// keyboard, not the table — see keyboard.test.ts for character-channel behavior).
+// keyboard, not the table - see keyboard.test.ts for character-channel behavior).
 function resolve(event: Partial<KeyEventLike>, mac = false): string | null {
 	return resolveBinding(defaultBindingSet(mac), ev(event))?.command ?? null;
 }
@@ -48,7 +48,7 @@ test("arrows split by modifier: joystick / cursor", () => {
 	expect(resolve({ code: "ArrowUp", ctrl: true })).toBe("PRESS_CONTROL_MINUS");
 });
 
-test("nav keys → 1200XL F1–F4 with inverted Shift (universal)", () => {
+test("nav keys → 1200XL F1-F4 with inverted Shift (universal)", () => {
 	// Plain nav key gives the Atari Shift+Fn (its meaning); host Shift inverts it.
 	expect(resolve({ code: "PageUp" })).toBe("PRESS_SHIFT_F1");
 	expect(resolve({ code: "PageUp", shift: true })).toBe("PRESS_F1");
@@ -58,7 +58,7 @@ test("nav keys → 1200XL F1–F4 with inverted Shift (universal)", () => {
 });
 
 test("unscannable Ctrl+Shift combos get no binding", () => {
-	// F1–F4 and the matrix keys L/J/;/K/+/*/V/C/B/X/Z can't be scanned with both
+	// F1-F4 and the matrix keys L/J/;/K/+/*/V/C/B/X/Z can't be scanned with both
 	// Ctrl and Shift, so the Ctrl+Shift variant is dropped.
 	expect(resolve({ code: "End", ctrl: true, shift: true })).toBeNull(); // → F4
 	expect(resolve({ code: "KeyL", ctrl: true, shift: true })).toBeNull();
@@ -72,7 +72,7 @@ test("unscannable Ctrl+Shift combos get no binding", () => {
 test("Cmd (mac) / Alt (win) on -/= reach the Shift+Clear / insert-line forms", () => {
 	// The Atari </ > (Clear / Insert) sit at the -/= positions. Their Ctrl forms
 	// are positional (Ctrl+-/Ctrl+=), but host Shift+-/= type characters, so the
-	// Shift forms have no positional route — Cmd/Alt supply them.
+	// Shift forms have no positional route - Cmd/Alt supply them.
 	expect(resolve({ code: "Minus", meta: true }, true)).toBe(
 		"PRESS_SHIFT_LESS_THAN",
 	);
@@ -157,7 +157,7 @@ test("bakeDefaults anchors letter shortcuts to the layout's key", () => {
 	];
 	const [baked] = bakeDefaults(set, layout);
 	// Follows the K key (Comma here), with the hint stripped. The label is not
-	// frozen — it recomputes from the layout at display time.
+	// frozen - it recomputes from the layout at display time.
 	expect(baked).toMatchObject({ on: "Comma" });
 	expect(baked!.anchor).toBeUndefined();
 	// No layout data → keeps the QWERTY position.
@@ -188,7 +188,7 @@ test("bakeDefaults re-homes a Ctrl alias to the position's Atari key", () => {
 });
 
 test("chordLabel recomputes the key legend from the layout", () => {
-	// AZERTY: physical KeyA types "Q" — the label follows the layout, no baking.
+	// AZERTY: physical KeyA types "Q" - the label follows the layout, no baking.
 	const azerty = new Map([["KeyA", "Q"]]);
 	expect(chordLabel({ on: "KeyA", command: "PRESS_A" }, false, azerty)).toBe(
 		"Q",
@@ -281,16 +281,16 @@ test("Windows aliases browser-grabbed Ctrl combos onto Alt", () => {
 	expect(resolve({ code: "KeyN", alt: true })).toBe("PRESS_CONTROL_N");
 	// Not on Mac (Option is for chars / F-keys there)…
 	expect(resolve({ code: "Digit1", alt: true }, true)).toBeNull();
-	// …and only the grabbed keys — other Alt+letter stays free for commands.
+	// …and only the grabbed keys - other Alt+letter stays free for commands.
 	expect(resolve({ code: "KeyA", alt: true })).toBeNull();
 });
 
-test("macOS overlay: Cmd+Arrow cursor, Option+Arrow F1–F4", () => {
+test("macOS overlay: Cmd+Arrow cursor, Option+Arrow F1-F4", () => {
 	expect(resolve({ code: "ArrowUp", meta: true })).toBeNull();
 	expect(resolve({ code: "ArrowUp", meta: true }, true)).toBe(
 		"PRESS_CONTROL_MINUS",
 	);
-	// Option+Arrow → F1–F4 is mac-only (Alt is unusable for it on Windows).
+	// Option+Arrow → F1-F4 is mac-only (Alt is unusable for it on Windows).
 	expect(resolve({ code: "ArrowUp", alt: true })).toBeNull();
 	expect(resolve({ code: "ArrowUp", alt: true }, true)).toBe("PRESS_F1");
 });
@@ -302,7 +302,7 @@ test("the palette chord is a global binding (Cmd+K mac / Alt+K win)", () => {
 		(b) => b.command === "OPEN_PALETTE",
 	);
 	expect(win).toMatchObject({ on: "KeyK", alt: true, scope: "global" });
-	// Machine keys carry no scope (default "a8" — resolved on the focused input).
+	// Machine keys carry no scope (default "a8" - resolved on the focused input).
 	expect(
 		defaultBindingSet(false).find((b) => b.command === "PRESS_A")?.scope,
 	).toBeUndefined();

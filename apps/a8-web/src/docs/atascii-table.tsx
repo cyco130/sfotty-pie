@@ -86,7 +86,7 @@ const modRank = (m?: "Shift" | "Control") =>
 	m === "Shift" ? 1 : m === "Control" ? 2 : 0;
 
 // The base code, plus its inverse-video counterpart (high bit set) on a second
-// line — rendered in inverse video (filled chip) and muted.
+// line - rendered in inverse video (filled chip) and muted.
 function Code({
 	value,
 	accent,
@@ -112,7 +112,7 @@ function Code({
 }
 
 function Dash() {
-	return <span class="text-neutral-700">—</span>;
+	return <span class="text-neutral-700">-</span>;
 }
 
 function KeyCell({ code }: { code: number }) {

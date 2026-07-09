@@ -1,4 +1,4 @@
-// Thin CRUD over the IndexedDB metadata stores — user `entries` and built-in
+// Thin CRUD over the IndexedDB metadata stores - user `entries` and built-in
 // `overrides`. Blobs live in their own store (see blob-store.ts); this is only
 // the structured, queryable metadata.
 
@@ -42,7 +42,7 @@ export async function putOverride(record: OverrideRecord): Promise<void> {
 	);
 }
 
-/** Wipe every store — entries, blobs, and overrides. A dev/test reset. */
+/** Wipe every store - entries, blobs, and overrides. A dev/test reset. */
 export async function clearAll(): Promise<void> {
 	const db = await openLibraryDb();
 	await Promise.all(

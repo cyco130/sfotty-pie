@@ -11,7 +11,7 @@ import {
 	type RadialStickState,
 } from "./radial-stick.ts";
 
-// How the poller actuates the machine — the same command press/release the
+// How the poller actuates the machine - the same command press/release the
 // keyboard drives (see host.ts). A held direction/trigger sustains until the
 // poller sees it released.
 export interface GamepadActions {
@@ -55,7 +55,7 @@ const OCTANT_HALVES: readonly (readonly (readonly [number, -1 | 1])[])[] = [
 ];
 
 // The commands one joystick port actuates, indexed by Atari port (0-3). Ports
-// are filled in connection order — the first connected pad drives port 0, the
+// are filled in connection order - the first connected pad drives port 0, the
 // next port 1, and so on. (Not by gamepad.index: Chrome doesn't guarantee it
 // starts at 0, so getGamepads() can return a null slot ahead of the pad.)
 interface PortCommands {
@@ -119,7 +119,7 @@ export interface ConsoleBinding {
 
 // Default joystick bindings (Standard Gamepad layout): the D-pad (buttons 12-15)
 // and the left stick (axes 0/1) both drive the directions; button 0 is the
-// trigger. Several inputs can share a role — they OR together (see readPad).
+// trigger. Several inputs can share a role - they OR together (see readPad).
 export const DEFAULT_JOYSTICK: readonly JoyBinding[] = [
 	{ input: { button: 12 }, role: "up" },
 	{ input: { button: 13 }, role: "down" },
@@ -140,13 +140,13 @@ export const DEFAULT_CONSOLE: readonly ConsoleBinding[] = [
 	{ input: { button: 8 }, command: "PRESS_SELECT" }, // Select / − / View
 	{ input: { button: 3 }, command: "PRESS_OPTION" }, // north face (Y / △)
 	{ input: { button: 4 }, command: "TOGGLE_PAUSE" }, // L1
-	{ input: { button: 7 }, command: "TURBO_HOLD" }, // R2 — hold to fast-forward
-	// R3 — the couch game picker. Not Guide/16: macOS reserves the PS/Xbox
+	{ input: { button: 7 }, command: "TURBO_HOLD" }, // R2 - hold to fast-forward
+	// R3 - the couch game picker. Not Guide/16: macOS reserves the PS/Xbox
 	// home button (Game Controller framework), so browsers never see it there.
 	{ input: { button: 11 }, command: "OPEN_FAVORITES" },
 ];
 
-// A port's digital state — the five senses we drive, as booleans.
+// A port's digital state - the five senses we drive, as booleans.
 interface PortState {
 	up: boolean;
 	down: boolean;
@@ -176,7 +176,7 @@ function inputActive(
 }
 
 // Reduce a live pad to its digital port state by OR-ing every joystick binding
-// onto its role — so the D-pad and the stick both drive a direction, either one
+// onto its role - so the D-pad and the stick both drive a direction, either one
 // active setting it. (This replaces the old "D-pad overrides the stick" rule; a
 // deadzone, not a priority, keeps a resting stick from fighting the D-pad.)
 function readPad(
@@ -222,7 +222,7 @@ export interface PadInfo {
 
 /**
  * Polls the Gamepad API and drives the joystick commands. The Gamepad API has no
- * button/axis events — state is read by polling — so the emulation loop calls
+ * button/axis events - state is read by polling - so the emulation loop calls
  * {@link poll} after each yield to the event loop (see `Emulator.afterYield`),
  * where getGamepads() is freshly updated and the read lands just before the next
  * scanlines. We diff each poll against the last to synthesize the press/release
@@ -235,7 +235,7 @@ export interface PadInfo {
  * drives which port is an explicit assignment ({@link setPort}). Ahead of the
  * bindings sits per-device normalization ({@link setProfiles}): each pad is
  * read through its profile's Standard-shaped view (the identity for
- * unprofiled pads — see gamepad-normalize.ts).
+ * unprofiled pads - see gamepad-normalize.ts).
  */
 export class Gamepads {
 	#actions: GamepadActions;
@@ -249,7 +249,7 @@ export class Gamepads {
 	// Connected pads by gamepad.index → id/mapping, from the connect events.
 	#pads = new Map<number, { id: string; mapping: string }>();
 	// Atari port → the gamepad.index driving it (or null). The source of truth for
-	// who's which player; the UI edits it via setPort. Assignment is stable — a
+	// who's which player; the UI edits it via setPort. Assignment is stable - a
 	// disconnect frees a port without reshuffling the survivors.
 	#portToIndex: (number | null)[] = PORT_COMMANDS.map(() => null);
 	// Per-stick hysteresis state, keyed by `${gamepad.index}:${pairBase}` so it
@@ -257,7 +257,7 @@ export class Gamepads {
 	#sticks = new Map<string, RadialStickState>();
 	// Per-device normalization profiles by gamepad id (see gamepad-normalize.ts).
 	#profiles: Readonly<Record<string, NormalizeProfile>> = {};
-	// While suspended, poll() is a no-op — a full-screen surface (the game
+	// While suspended, poll() is a no-op - a full-screen surface (the game
 	// picker) is reading the pad itself and the machine must not see it.
 	#suspended = false;
 	// The first poll after a resume only records state, emitting no edges: a
@@ -320,7 +320,7 @@ export class Gamepads {
 		};
 	}
 
-	/** The connected pads with their port assignments — assigned pads first (by
+	/** The connected pads with their port assignments - assigned pads first (by
 	 *  port), then the unassigned (by index). */
 	pads(): PadInfo[] {
 		const list: PadInfo[] = [];

@@ -15,7 +15,7 @@ export function setCapturingKeys(active: boolean): void {
 }
 
 // A key event's target is a real text field (or other keyboard-driven control)
-// whose own key handling — typing, cursor keys, option navigation — we must not
+// whose own key handling - typing, cursor keys, option navigation - we must not
 // preempt. The offscreen emulator input is included: while it's focused the input
 // handler already owns the key, so the window-level guard stands down.
 function isEditable(target: EventTarget | null): boolean {
@@ -28,9 +28,9 @@ function isEditable(target: EventTarget | null): boolean {
 /**
  * The command a Character-mode key event produces. The character channel wins
  * first: a key that types a printable ATASCII character (no Ctrl/Alt/Cmd) types
- * it — layout-aware, shadowing the bare/Shift character-key bindings. Everything
+ * it - layout-aware, shadowing the bare/Shift character-key bindings. Everything
  * else falls through to `bindings`: modified combos (Ctrl resolves positionally),
- * named keys, and keys with no ATASCII character (ş, €) — which a binding can
+ * named keys, and keys with no ATASCII character (ş, €) - which a binding can
  * still claim. Dead keys yield nothing; composition delivers the glyph instead.
  */
 export function characterModeCommand(
@@ -48,7 +48,7 @@ export function characterModeCommand(
 
 /**
  * How the keyboard actuates commands. A physical key is sustained: `press` on
- * key-down, `release` on key-up. `tap` is momentary (a composed character) — it
+ * key-down, `release` on key-up. `tap` is momentary (a composed character) - it
  * presses and schedules its own release. `releaseMatrix` lets up the shared POKEY
  * matrix register once the last held matrix key is up.
  */
@@ -67,7 +67,7 @@ export interface KeyboardActions {
  * read live per keystroke.
  *
  * Keystrokes are observed on an (offscreen) input element rather than the window
- * so that dead-key composition works — the composed glyph arrives via
+ * so that dead-key composition works - the composed glyph arrives via
  * `compositionend`.
  */
 export class Keyboard {
@@ -97,7 +97,7 @@ export class Keyboard {
 		this.setBindings(bindings);
 	}
 
-	/** Replace the active bindings (one flat set). Live — it affects subsequent
+	/** Replace the active bindings (one flat set). Live - it affects subsequent
 	 *  key-downs; anything already held still releases via its own key-up. */
 	setBindings(bindings: Binding[]): void {
 		this.#bindings = bindings;
@@ -115,7 +115,7 @@ export class Keyboard {
 			if (!(event as InputEvent).isComposing) input.value = "";
 		});
 
-		// Global bindings (app commands — OPEN_PALETTE, etc.) resolve here at the
+		// Global bindings (app commands - OPEN_PALETTE, etc.) resolve here at the
 		// window, in the CAPTURE phase so they fire regardless of focus and preempt
 		// the offscreen input; machine keys (scope absent) fall through to the input
 		// handler above.
@@ -123,7 +123,7 @@ export class Keyboard {
 			"keydown",
 			(event) => {
 				if (capturingKeys) return; // the editor is recording this keystroke
-				// Resolve among the global bindings only — running first, this is what
+				// Resolve among the global bindings only - running first, this is what
 				// gives global commands precedence over machine keys cross-scope.
 				const binding = resolveBinding(
 					this.#globalBindings,
@@ -140,7 +140,7 @@ export class Keyboard {
 
 		// Browser-shortcut guard (F5 reload → cold boot is the worst offender): when
 		// focus has drifted off the input onto the canvas/body, a bound key would
-		// still trigger its browser default. Suppress it here — in the BUBBLE phase,
+		// still trigger its browser default. Suppress it here - in the BUBBLE phase,
 		// so any focused control had first claim, and skipping editable targets so we
 		// never touch typing (or cursor keys) in the palette, dialogs, or the
 		// offscreen input itself. Unbound keys (F12 → DevTools) fall through.
@@ -152,7 +152,7 @@ export class Keyboard {
 		});
 	}
 
-	/** Release everything held — call when the window loses focus. */
+	/** Release everything held - call when the window loses focus. */
 	releaseAll(): void {
 		if (this.#matrixHeld.size > 0) {
 			this.#matrixHeld.clear();
@@ -200,7 +200,7 @@ export class Keyboard {
 	#keyUp(event: KeyboardEvent): void {
 		// macOS browsers swallow keyups for other keys while Cmd is held, so a
 		// Cmd+<key> matrix press (cursor arrows, the Cmd+-/= editing keys) may never
-		// see its own keyup — release any held matrix key when Cmd itself is released.
+		// see its own keyup - release any held matrix key when Cmd itself is released.
 		if (event.key === "Meta") {
 			if (this.#matrixHeld.size > 0) {
 				this.#matrixHeld.clear();

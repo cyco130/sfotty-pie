@@ -1,4 +1,4 @@
-// The root namespace for all of this emulator's client-side storage —
+// The root namespace for all of this emulator's client-side storage -
 // IndexedDB databases, localStorage keys, and (later) OPFS directories. A
 // sibling emulator would use its own root, so storage never collides even when
 // two share an origin. Everything that names a store goes through here, so the

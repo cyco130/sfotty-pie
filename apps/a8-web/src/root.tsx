@@ -48,7 +48,7 @@ function NavigationBridge() {
 	return null;
 }
 
-// /a8/emu/* — the emulator layout wrapping a nested router of panel routes. As a
+// /a8/emu/* - the emulator layout wrapping a nested router of panel routes. As a
 // nesting `/*` parent it also matches the bare /a8/emu (empty remainder → the
 // nested "/" route). The layout renders the matched panel into its sidebar slot.
 function EmuSection() {
@@ -74,7 +74,7 @@ function EmuSection() {
 	);
 }
 
-// /a8/docs/* — the docs shell wrapping a nested router of MDX pages, mirroring
+// /a8/docs/* - the docs shell wrapping a nested router of MDX pages, mirroring
 // EmuSection. Same two-route (`/a8/docs` + `/a8/docs/*`) trick so the bare
 // /a8/docs hits the nested "/" page without remounting the layout when
 // navigating between docs.
@@ -91,7 +91,7 @@ function DocsSection() {
 
 /**
  * The SPA shell: one <Router> for the whole app. Unmatched URLs render the
- * not-found page (status 200 in pure-SPA mode — see notes.local/routing.md).
+ * not-found page (status 200 in pure-SPA mode - see notes.local/routing.md).
  */
 export function Root() {
 	return (

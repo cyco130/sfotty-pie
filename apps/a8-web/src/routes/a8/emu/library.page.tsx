@@ -18,10 +18,10 @@ import { useUrlParams } from "../../../url-params.ts";
 import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
-// /a8/emu/library — the image library: an uploader over a sortable, filterable,
+// /a8/emu/library - the image library: an uploader over a sortable, filterable,
 // paged table of every image (built-in ∪ your uploads). Sort/filter/page state
 // lives in the URL query so it survives reload and is shareable. The whole
-// (metadata-only) set is held in memory and sorted/filtered/sliced in JS —
+// (metadata-only) set is held in memory and sorted/filtered/sliced in JS -
 // fine into the tens of thousands; the IndexedDB indexes are the escape hatch
 // if a collection ever outgrows that. Selecting which image fills a slot is the
 // separate ROM-preferences panel.
@@ -83,7 +83,7 @@ interface DetailCol {
 	render: (kind: DerivedMeta, set: SetAttr) => VNode;
 }
 
-// The extra table columns for a type-filtered view (the pill is dropped — the
+// The extra table columns for a type-filtered view (the pill is dropped - the
 // type is known from the filter): OS size class, cartridge subtype, disk
 // geometry (sectors × bytes-per-sector, each clickable). Clicking a value sets
 // that attribute filter. Each render guards on the kind, though the active
@@ -150,7 +150,7 @@ function detailCols(type: ImageType): DetailCol[] {
 	}
 }
 
-// Read a directory reader's entries — it returns them in batches, so call until
+// Read a directory reader's entries - it returns them in batches, so call until
 // it yields none.
 function readEntries(
 	reader: FileSystemDirectoryReader,
@@ -180,8 +180,8 @@ async function walkEntry(entry: FileSystemEntry, out: File[]): Promise<void> {
 }
 
 // Every file from a drop, recursing into any dropped folders. Entries are
-// grabbed synchronously — the DataTransferItems are only valid during the drop
-// event — then traversed async. Falls back to the flat file list where the
+// grabbed synchronously - the DataTransferItems are only valid during the drop
+// event - then traversed async. Falls back to the flat file list where the
 // entry API is unavailable.
 async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
 	const entries = Array.from(transfer.items)
@@ -205,7 +205,7 @@ export default function LibraryPage() {
 	const [importTags, setImportTags] = useState("");
 
 	// `webkitdirectory` makes the second picker choose a folder (all files in it).
-	// Set imperatively — it isn't in the JSX input attribute types.
+	// Set imperatively - it isn't in the JSX input attribute types.
 	useEffect(() => {
 		if (folderInputRef.current) folderInputRef.current.webkitdirectory = true;
 	}, []);
@@ -319,12 +319,12 @@ export default function LibraryPage() {
 	const allEntries = libraryEntries.value;
 	const entries = allEntries.filter((entry) => !entry.transient);
 	const hasUploads = allEntries.some((entry) => entry.source === "user");
-	// Distinct tags across the curated set — the tag filter's options.
+	// Distinct tags across the curated set - the tag filter's options.
 	const tagOptions = [
 		...new Set(entries.flatMap((e) => e.user.tags ?? [])),
 	].sort();
 
-	// Fixed alphabetical order (sorting was dropped — direction wasn't
+	// Fixed alphabetical order (sorting was dropped - direction wasn't
 	// meaningful); filtering below preserves order, so typing never re-sorts.
 	const sorted = useMemo(
 		() =>
@@ -340,7 +340,7 @@ export default function LibraryPage() {
 		if (tagFilter !== "" && !e.user.tags?.includes(tagFilter)) return false;
 		if (query !== "" && !e.user.displayName.toLowerCase().includes(query))
 			return false;
-		// Attribute filters — apply only to entries of the matching kind.
+		// Attribute filters - apply only to entries of the matching kind.
 		const k = e.derived;
 		if (params.os && k.type === "os")
 			return osFamilyOf(k.sizeClass) === params.os;
@@ -405,7 +405,7 @@ export default function LibraryPage() {
 					onDragLeave={() => setDragging(false)}
 					onDrop={(event) => {
 						event.preventDefault();
-						// Keep the drop here — don't let it bubble to the window handler
+						// Keep the drop here - don't let it bubble to the window handler
 						// that boots a dropped file (app.tsx).
 						event.stopPropagation();
 						setDragging(false);
@@ -486,7 +486,7 @@ export default function LibraryPage() {
 							value={typeFilter}
 							class="min-w-32 flex-1 rounded-sm border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
 							onChange={(event) =>
-								// Changing the type clears any attribute filters — they
+								// Changing the type clears any attribute filters - they
 								// only apply within their own type.
 								setParams({
 									type: event.currentTarget.value || null,

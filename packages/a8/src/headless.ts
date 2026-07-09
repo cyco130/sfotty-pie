@@ -4,14 +4,14 @@ import type { Atari } from "./machine.ts";
 // A headless Atari session: a machine driven to completion with the console I/O
 // served by high-level emulation of the OS ROM (E: PUTBYT/GETBYT, CIOV, BLKBDV)
 // instead of a real display/keyboard. Disk I/O is the machine's own built-in SIO
-// (insert the disk before constructing this). The host injects only I/O policy —
+// (insert the disk before constructing this). The host injects only I/O policy -
 // where output goes, where input comes from, optional CH key automation, an
-// optional trace hook — so both the boot CLI and the Acid800 conformance runner
+// optional trace hook - so both the boot CLI and the Acid800 conformance runner
 // share this exact run loop and trap wiring.
 
 const RTS = 0x60; // the substitute opcode an execute interceptor returns
 const CH = 0x02fc; // POKEY keyboard code, polled by key-input routines
-const CIOV = 0xe456; // CIO entry — HATABS is set up by the first call
+const CIOV = 0xe456; // CIO entry - HATABS is set up by the first call
 const BLKBDV = 0xe471; // Memo Pad ("blackboard") entry: nothing left to run
 
 // Thrown by the GETBYT trap when no input is buffered: the run loop awaits the
@@ -33,7 +33,7 @@ export interface HeadlessConfig {
 	/** The machine to drive. Its CPU powers on into the reset sequence; insert
 	 * any boot disk on it before constructing the session. */
 	machine: Atari;
-	/** E: PUTBYT sink — each output byte, with the Atari EOL mapped to `0x0A`. */
+	/** E: PUTBYT sink - each output byte, with the Atari EOL mapped to `0x0A`. */
 	output: (byte: number) => void;
 	/** E: GETBYT source. Omit for a session that never reads console input. */
 	input?: InputSource;
@@ -83,7 +83,7 @@ export class Headless {
 	}
 
 	/**
-	 * Drive the machine until the session ends — BLKBDV reached, the key script
+	 * Drive the machine until the session ends - BLKBDV reached, the key script
 	 * exhausted, the input source closed, the CPU crashed, or the cycle cap hit.
 	 * Mostly synchronous; it only awaits when E: GETBYT has no buffered input.
 	 */
@@ -117,10 +117,10 @@ export class Headless {
 
 	#installTraps(): void {
 		// CIOV: on the first call HATABS is initialized, so discover and trap E:'s
-		// byte routines. Observe-only — the real OS routine still runs.
+		// byte routines. Observe-only - the real OS routine still runs.
 		this.#machine.observeExecute(CIOV, () => this.#installEditorTraps());
 
-		// (Disk I/O is the machine's own built-in SIO — see Atari.insertDisk.)
+		// (Disk I/O is the machine's own built-in SIO - see Atari.insertDisk.)
 
 		// BLKBDV: the OS jumps here when there is nothing left to run. Session over.
 		this.#machine.observeExecute(BLKBDV, () => {
@@ -149,7 +149,7 @@ export class Headless {
 		});
 	}
 
-	// E: PUTBYT — copy the ATASCII character in A to the output sink (mapping the
+	// E: PUTBYT - copy the ATASCII character in A to the output sink (mapping the
 	// Atari EOL to a newline), then fall through so the real ROM routine still
 	// runs and the text also lands in screen RAM.
 	#editorPutByte(): void {
@@ -157,7 +157,7 @@ export class Headless {
 		this.#output(c === 0x9b ? 0x0a : c);
 	}
 
-	// E: GETBYT — put the next input byte in A (as ATASCII) and RTS back to the
+	// E: GETBYT - put the next input byte in A (as ATASCII) and RTS back to the
 	// caller. Throws to suspend when no input is buffered; the run loop awaits the
 	// input source and retries the fetch.
 	#editorGetByte(): number {
@@ -172,7 +172,7 @@ export class Headless {
 	}
 
 	// On the first CIOV call HATABS is set up, so discover E:'s GETBYT/PUTBYT
-	// routines (each stored as address-1) and trap them — OS-version independent.
+	// routines (each stored as address-1) and trap them - OS-version independent.
 	#installEditorTraps(): void {
 		if (this.#editorTrapped) return;
 		this.#editorTrapped = true;

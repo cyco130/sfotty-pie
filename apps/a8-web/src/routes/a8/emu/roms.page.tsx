@@ -18,14 +18,14 @@ import { messages } from "../../../messages.ts";
 import { useEmu } from "./emu-context.ts";
 import { SettingsFrame } from "./settings-frame.tsx";
 
-// /a8/emu/roms — the firmware selector, populated from the unified image
+// /a8/emu/roms - the firmware selector, populated from the unified image
 // library (built-ins ∪ your uploads). Each slot lists qualifying images
 // best-first (built-ins by preference rank, then your ROMs by name), with the
 // running machine's auto-pick as the default. The slot(s) feeding the running
 // machine are marked "in use"; unsaved picks get a dot. Uploads happen in the
-// separate library panel — this only selects.
+// separate library panel - this only selects.
 //
-// Picks are staged like the machine config and committed by the apply button —
+// Picks are staged like the machine config and committed by the apply button -
 // which reboots only when the change touches the running machine, else just
 // saves. In-memory only (not persisted). Overrides reference image ids.
 
@@ -107,7 +107,7 @@ const CART_SLOTS: SlotDef[] = [
 	{
 		label: "BASIC",
 		accepts: "8K cartridge",
-		// Known BASICs only — the slot flag is primed solely from detected firmware.
+		// Known BASICs only - the slot flag is primed solely from detected firmware.
 		match: (e) => e.user.slots?.includes("basic") ?? false,
 		ranking: preferredBasicKeys(),
 		// Built-in BASIC (xl/xe, xegs) is always loaded; cart BASIC (400/800,
@@ -150,7 +150,7 @@ function candidatesFor(slot: SlotDef): ImageEntry[] {
 /** One slot: label + format hint over a full-width, suitability-ordered picker. */
 function Slot({ slot, host }: { slot: SlotDef; host: EmulatorHost }) {
 	const entries = candidatesFor(slot);
-	// The most-suitable candidate (first after the rank sort) — the value shown
+	// The most-suitable candidate (first after the rank sort) - the value shown
 	// for a not-yet-pinned slot, and the "reset to suitable" target.
 	const best = entries[0];
 	const empty = entries.length === 0;

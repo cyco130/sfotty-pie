@@ -1,16 +1,16 @@
 // Per-device gamepad normalization: makes any pad look like a W3C Standard
 // Gamepad to everything downstream (the poller, the radial reader, the
 // binding layer, binding capture). A profile is a *patch* over the pad's own
-// layout (see NormalizeProfile) — no profile means the identity fast path.
+// layout (see NormalizeProfile) - no profile means the identity fast path.
 // Profiles are edited in the mapping editor (gamepad-mapper.tsx) or built by
 // dev-console calibration ({@link classify}), and persisted per device id
 // (see gamepad-normalize-store.ts).
 //
 // The profile describes *sources*: how each Standard control is derived from
-// the raw pad. The shapes cover how real hardware misreports itself — raw
+// the raw pad. The shapes cover how real hardware misreports itself - raw
 // buttons at odd indices, button-like controls on an axis (analog triggers,
 // digital sticks declared as axes), directions on a stepped "hat" axis (one
-// axis whose discrete values encode 8 directions — the SDL-style encoding
+// axis whose discrete values encode 8 directions - the SDL-style encoding
 // some browser/driver stacks emit), and analog axes needing conditioning
 // (inverted, off-centre rest, limited range). Everything is anchored to
 // *observed* values rather than assumptions: "centred" is whatever the axis
@@ -29,7 +29,7 @@ export const DPAD_RIGHT = 15;
 /**
  * How one Standard button is sourced from the raw pad: a raw button by index,
  * or a button-like axis (active when the raw value is closer to the observed
- * `pressed` value than to `rest` — direction and polarity fall out of the
+ * `pressed` value than to `rest` - direction and polarity fall out of the
  * anchors, no invert flag needed).
  */
 export type ButtonSource =
@@ -66,7 +66,7 @@ export interface HatSource {
  * Absent index = the pad's own control at that index (the identity); a source
  * = an explicit override; `null` = explicitly nothing. The optional hat fills
  * the D-pad buttons that have no explicit entry. Raw controls consumed by an
- * explicit source stop driving their identity slot — a moved control doesn't
+ * explicit source stop driving their identity slot - a moved control doesn't
  * also fire where it used to live.
  */
 export interface NormalizeProfile {
@@ -76,7 +76,7 @@ export interface NormalizeProfile {
 }
 
 /**
- * The pad shape downstream code reads — the structural subset of Gamepad, so
+ * The pad shape downstream code reads - the structural subset of Gamepad, so
  * a raw Gamepad *is* a PadView and the no-profile path costs nothing.
  */
 export interface PadView {
@@ -100,7 +100,7 @@ const HAT_DPAD: readonly (readonly number[])[] = [
 	[DPAD_UP, DPAD_LEFT],
 ];
 
-// 0 at rest, 1 at the anchor, linear in between, clamped — 0 when the raw
+// 0 at rest, 1 at the anchor, linear in between, clamped - 0 when the raw
 // value sits on the other side of rest (or the anchor is degenerate).
 function toward(raw: number, rest: number, at: number): number {
 	const span = at - rest;
@@ -144,7 +144,7 @@ const UNPRESSED = { pressed: false, value: 0 };
  * itself (identity, no allocation). With one, the profile patches the pad's
  * own layout: explicit sources (and explicit nulls) replace their slots, the
  * hat fills D-pad slots without an explicit entry, everything else keeps the
- * pad's own control at the same index — except identity slots whose raw
+ * pad's own control at the same index - except identity slots whose raw
  * control an explicit source consumed, which read as inactive (the control
  * moved). Raw indices are preserved, so a patched pad monitors and binds
  * like the raw one plus the overrides.
@@ -239,7 +239,7 @@ export function samplePad(pad: PadView): CalibrationSample {
 
 /**
  * Whether the pad has firmly changed from rest: a newly-pressed button, or an
- * axis at least 0.5 away from where it rested — the shared "the user is
+ * axis at least 0.5 away from where it rested - the shared "the user is
  * really pressing something" test for the capture flows.
  */
 export function deviates(
@@ -284,7 +284,7 @@ export function dominantChange(
 // Fit the observed hat positions to the linear ladder value = a + b·position
 // (the SDL-style encoding is exactly linear). A good fit fills in the
 // unobserved positions (the diagonals); otherwise only the observed ones
-// match and the rest read as centred — degraded but functional.
+// match and the rest read as centred - degraded but functional.
 function buildHat(
 	axis: number,
 	observed: { position: number; value: number }[],
@@ -306,7 +306,7 @@ function buildHat(
 		}
 	}
 
-	// No ladder — match only what was observed, with a gap-derived epsilon.
+	// No ladder - match only what was observed, with a gap-derived epsilon.
 	const sorted = observed.map((o) => o.value).sort((x, y) => x - y);
 	let gap = Infinity;
 	for (let i = 1; i < sorted.length; i++) {
@@ -393,7 +393,7 @@ function buttonSourceFrom(
  * against rest, then decide the source shapes. Directions that press raw
  * buttons become D-pad sources; directions that move axes become Standard
  * axes 0/1 (anchored at the observed rest/full-push values, so inversion and
- * range fall out) — unless perpendicular directions move the *same* axis,
+ * range fall out) - unless perpendicular directions move the *same* axis,
  * which is the stepped-hat signature. The trigger becomes Standard button 0,
  * as a raw button or a button-like axis.
  */

@@ -8,7 +8,7 @@ declare module "virtual:firmware-library" {
 
 	/** A built-in library image: a whole file, or a `#range` slice of one. */
 	export interface FirmwareLibraryEntry {
-		/** Unique id — the library-relative path, plus `#range` for a slice. */
+		/** Unique id - the library-relative path, plus `#range` for a slice. */
 		id: string;
 		/** Display name (the detected identity, else the file name). */
 		name: string;
@@ -21,7 +21,7 @@ declare module "virtual:firmware-library" {
 		firmwareKey: FirmwareKey | null;
 		firmwareType: FirmwareType | null;
 		/**
-		 * SHA-256 (hex) of the image's canonical form — the content id a user
+		 * SHA-256 (hex) of the image's canonical form - the content id a user
 		 * upload dedups against. Note built-ins serve raw, so these bytes don't
 		 * re-hash to this for cartridges (the `.car` does); nothing relies on that.
 		 */

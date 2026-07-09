@@ -9,7 +9,7 @@ import { loadPersisted, savePersisted } from "./persist.ts";
 // The gamepad binding set: the joystick layer (input → role, per port) and the
 // console layer (input → command, port-0 only). Generated from the defaults on
 // first run and then owned by the user, so later changes to the code defaults
-// don't reach an existing store — bump VERSION and add a migration below to
+// don't reach an existing store - bump VERSION and add a migration below to
 // deliver a new default without discarding the user's edits.
 //
 // This is the device-independent binding layer only. Per-device normalization
@@ -35,7 +35,7 @@ export function defaultGamepadBindings(): GamepadBindings {
 
 /**
  * v1 → v2: OPEN_FAVORITES joined the default console layer on R3. The store
- * is user-owned, so instead of resetting it, append the new default — unless
+ * is user-owned, so instead of resetting it, append the new default - unless
  * the user already binds that button or that command. Exported for tests.
  */
 export function migrateV1(stored: GamepadBindings): GamepadBindings {
@@ -54,7 +54,7 @@ export function migrateV1(stored: GamepadBindings): GamepadBindings {
 	};
 }
 
-/** The persisted binding set — migrated forward if from an older version — or
+/** The persisted binding set - migrated forward if from an older version - or
  *  the defaults when absent / unknown / malformed. */
 export function loadGamepadBindings(): GamepadBindings {
 	const stored = loadPersisted(GAMEPAD_BINDINGS_KEY) as Stored | undefined;

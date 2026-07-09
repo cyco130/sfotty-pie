@@ -45,7 +45,7 @@ describe("image library", () => {
 		expect(libraryEntries.value.length).toBe(before + 1);
 		expect(getImage(entry.id)).toBeDefined();
 
-		// getImageBytes returns the stored canonical bytes — they hash to `hash`.
+		// getImageBytes returns the stored canonical bytes - they hash to `hash`.
 		const bytes = await getImageBytes(entry.id);
 		expect(await sha256Hex(bytes)).toBe(entry.hash);
 	});

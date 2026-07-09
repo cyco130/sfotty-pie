@@ -3,7 +3,7 @@ import iconsUrl from "./icons.svg";
 
 /**
  * Every icon in the sprite (src/icons.svg), keyed by its `<symbol>` id. The
- * single source of truth for icon names — keep it in sync with the sprite (a
+ * single source of truth for icon names - keep it in sync with the sprite (a
  * mismatch renders an empty icon, visible immediately in the UI).
  */
 export const ICON_NAMES = [

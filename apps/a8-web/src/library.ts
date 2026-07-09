@@ -5,12 +5,12 @@
 //   library.local/  gitignored, per-deploy extras (games, real Atari ROMs)
 //
 // `.rom` is registered as a binary asset (see vite.config `assetsInclude`), so
-// a default import yields the file's hashed-asset URL — nothing is inlined into
+// a default import yields the file's hashed-asset URL - nothing is inlined into
 // the JS bundle. Items are classified by their top-level subfolder (firmware/
 // vs other/). The local folder takes priority: on a path collision its copy
 // overrides the committed one.
 //
-// This is the first slice — filename is the identity (no content hashing) and
+// This is the first slice - filename is the identity (no content hashing) and
 // there's no sidecar metadata yet.
 
 import { loadImageBytes } from "./images/fetch.ts";
@@ -20,7 +20,7 @@ export { loadImageBytes };
 export type LibraryCategory = "firmware" | "other";
 
 export interface LibraryEntry {
-	/** Path relative to the library root, e.g. "firmware/abas.rom" — the id. */
+	/** Path relative to the library root, e.g. "firmware/abas.rom" - the id. */
 	id: string;
 	fileName: string;
 	displayName: string;
@@ -57,7 +57,7 @@ function collect(
 		// "<category>/<file>".
 		const id = path.replace(/^.*\/library(?:\.local)?\//, "");
 		const slash = id.indexOf("/");
-		if (slash < 0) continue; // loose file directly under the root — ignore
+		if (slash < 0) continue; // loose file directly under the root - ignore
 		const category = id.slice(0, slash);
 		const fileName = id.slice(slash + 1);
 		if (category !== "firmware" && category !== "other") continue;

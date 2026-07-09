@@ -16,7 +16,7 @@ type Substitution =
 const MAX_DEPTH = 64;
 
 /**
- * Expand macros in a module's statements — a static, syntactic step that runs
+ * Expand macros in a module's statements - a static, syntactic step that runs
  * once before assembly. `.macro` definitions are collected and removed; each
  * call (an instruction whose mnemonic names a macro) is replaced by the body
  * with params substituted and body-local labels renamed uniquely per expansion.

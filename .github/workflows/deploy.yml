@@ -1,6 +1,6 @@
 name: Deploy (manual)
 
-# Manual, ungated escape hatch — no CI gate. Use it to force a production deploy
+# Manual, ungated escape hatch - no CI gate. Use it to force a production deploy
 # even when CI is red, or to push a preview of an arbitrary branch on demand.
 # Pick the branch in the "Run workflow" dropdown; pick the target below.
 on:

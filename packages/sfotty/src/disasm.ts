@@ -39,7 +39,7 @@ function hex(value: number, width: number): string {
 export interface Disassembly {
 	/** Rendered instruction, e.g. `LDA $0411,X`. */
 	text: string;
-	/** Number of bytes the instruction occupies (1–3). */
+	/** Number of bytes the instruction occupies (1-3). */
 	length: number;
 	/** The instruction's raw bytes (opcode followed by operands). */
 	bytes: number[];
@@ -116,7 +116,7 @@ export function disassemble(read: PeekReader, pc: number): Disassembly {
  * One register-annotated trace line for the instruction at `pc`, e.g.
  * `E477  A2 FF     LDX #$FF      A=00 X=00 Y=00 S=FF P=34 nv-bdIzc`.
  *
- * `pc` defaults to the CPU's PC — correct when called at an instruction
+ * `pc` defaults to the CPU's PC - correct when called at an instruction
  * boundary (`cpu.state === DECODE`). Pass it explicitly from `onFetch`, which
  * fires just after PC has advanced past the opcode: hand it the opcode address.
  * `read` must be side-effect-free (peek), since it reads the instruction bytes.

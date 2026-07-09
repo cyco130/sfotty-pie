@@ -62,7 +62,7 @@ test("CA2 input transitions latch status bit 6 and obey the enable", () => {
 
 test("CB2 transitions are judged by PBCTL, not PACTL", () => {
 	const pia = new Pia();
-	pia.write(PACTL, 0x38); // CA2 manual-high output — must not matter
+	pia.write(PACTL, 0x38); // CA2 manual-high output - must not matter
 	pia.write(PBCTL, 0x08); // CB2 input, falling active, IRQ2 enabled
 
 	pia.cb2In.value = false;
@@ -77,9 +77,9 @@ test("the CA2 read strobes: handshake and one-cycle pulse", () => {
 	pia.write(PACTL, 0x26); // CA2 read handshake; CA1 rising active
 	pia.read(PORTA);
 	expect(pia.ca2Out.value).toBe(false);
-	pia.ca1In.value = false; // falling: inactive — the handshake holds
+	pia.ca1In.value = false; // falling: inactive - the handshake holds
 	expect(pia.ca2Out.value).toBe(false);
-	pia.ca1In.value = true; // rising: active — the handshake ends
+	pia.ca1In.value = true; // rising: active - the handshake ends
 	expect(pia.ca2Out.value).toBe(true);
 
 	pia.write(PACTL, 0x2c); // pulse mode: low for one cycle after the read
@@ -122,7 +122,7 @@ test("the port pin signals track DDR, latch, and external pulls", () => {
 	expect(pia.portaOut.value).toBe(0x75);
 });
 
-test("reset clears registers, IRQs, and strobes — but not the pins", () => {
+test("reset clears registers, IRQs, and strobes - but not the pins", () => {
 	const pia = new Pia();
 	pia.write(PACTL, 0x31); // CA1 IRQ enabled; CA2 manual low
 	pia.ca1In.value = false;

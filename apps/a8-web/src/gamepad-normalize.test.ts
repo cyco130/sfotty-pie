@@ -26,7 +26,7 @@ const pressedIndices = (view: PadView) =>
 // the out-of-range centred sentinel at position 8.
 const ladder = (p: number) => -1 + (2 * p) / 7;
 
-test("no profile is the identity — the raw pad object itself", () => {
+test("no profile is the identity - the raw pad object itself", () => {
 	const raw = pad([true], [0.5]);
 	expect(normalize(raw)).toBe(raw);
 });
@@ -171,7 +171,7 @@ test("classify: digital stick on odd axes + fire on an odd button", () => {
 	expect(view.buttons[0]!.pressed).toBe(true);
 });
 
-test("classify: stepped hat — cardinals fit the ladder, diagonals inferred", () => {
+test("classify: stepped hat - cardinals fit the ladder, diagonals inferred", () => {
 	const rest = { buttons: [false], axes: [0, ladder(8)] };
 	const hatAt = (p: number) => ({ buttons: [false], axes: [0, ladder(p)] });
 	const samples: CalibrationSet = {

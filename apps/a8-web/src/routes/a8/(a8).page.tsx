@@ -2,7 +2,7 @@ import { useHead } from "../../head.ts";
 import { messages } from "../../messages.ts";
 import { NavLink, PlaceholderIndex } from "../../placeholder.tsx";
 
-// /a8 — the Atari section index (emulator, reference; later: docs/manual).
+// /a8 - the Atari section index (emulator, reference; later: docs/manual).
 export default function AtariIndexPage() {
 	const t = messages.pages.atari;
 	useHead({ title: t.title });

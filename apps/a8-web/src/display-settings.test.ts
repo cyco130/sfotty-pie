@@ -16,7 +16,7 @@ test("defaults are the Normal preset per standard, frameBlending off", () => {
 	expect(d.pal.frameBlending).toBe(0);
 });
 
-test("sanitizeFrameBlending clamps to 0–0.9", () => {
+test("sanitizeFrameBlending clamps to 0-0.9", () => {
 	expect(sanitizeFrameBlending(-1)).toBe(0);
 	expect(sanitizeFrameBlending(0.5)).toBe(0.5);
 	expect(sanitizeFrameBlending(1)).toBe(0.9);

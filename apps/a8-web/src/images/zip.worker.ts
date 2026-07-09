@@ -22,7 +22,7 @@ interface ManifestImage {
 	tags?: string[];
 	slots?: ImageSlot[];
 }
-/** A built-in's override (metadata only — the bytes are bundled), by built-in id. */
+/** A built-in's override (metadata only - the bytes are bundled), by built-in id. */
 interface ManifestOverride {
 	id: string;
 	name?: string;
@@ -179,7 +179,7 @@ async function importLibrary(zip: Uint8Array): Promise<void> {
 			added += result.added;
 			deduped += result.deduped;
 		} catch {
-			failed++; // unrecognized — canonicalize threw
+			failed++; // unrecognized - canonicalize threw
 		}
 		if (into.length > 0) batch.push(...into);
 		done++;

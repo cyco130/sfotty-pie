@@ -5,7 +5,7 @@ import { decodeStringLiteral } from "./value.ts";
 /**
  * How the assembler reaches modules. `resolve` turns an `.import` specifier
  * into a canonical id (relative to the importing module); `read` returns a
- * module's source. Both may throw — the loader turns that into a diagnostic.
+ * module's source. Both may throw - the loader turns that into a diagnostic.
  */
 export interface Host {
 	resolve(specifier: string, fromId: string): string | Promise<string>;
@@ -22,7 +22,7 @@ export interface LoadedModule {
 
 /**
  * Load the entry module and its `.import` closure, deduped by canonical id
- * (each module loads once, even in diamonds), returned in dependency order —
+ * (each module loads once, even in diamonds), returned in dependency order -
  * imports before importers. Import cycles are reported, not followed.
  */
 export async function loadModules(

@@ -2,7 +2,7 @@
 //   - primary label is the main legend (bottom), centred;
 //   - secondary label sits above the primary (centred when alone);
 //   - tertiary label sits to the left of the secondary (pushing it right) and is
-//     drawn in inverse video — the glyph's colour and background swap, the way
+//     drawn in inverse video - the glyph's colour and background swap, the way
 //     the Atari prints its CONTROL graphics symbols.
 // A fixed min-height keeps every cap the same height; the top strip only renders
 // when there's a secondary/tertiary, so single-label caps centre vertically.

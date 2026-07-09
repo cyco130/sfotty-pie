@@ -267,7 +267,7 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 
 // The main menu is a set of commands: each row shows a launcher-context label
 // (messages.menu, not the palette's "Category: verb") and the command's primary
-// shortcut, and clicking dispatches it — so the chords never drift from the
+// shortcut, and clicking dispatches it - so the chords never drift from the
 // palette and keys pages. Order is settings first, then the launchers, then
 // the palette; the settings entry fans out into its own tabbed view.
 const MENU_COMMANDS = [
@@ -278,7 +278,7 @@ const MENU_COMMANDS = [
 ] as const satisfies readonly { command: Command; label: string }[];
 
 // The four arrows that drive joystick 0 as shipped. The key-mappings help shows
-// its "Arrow keys → Joystick" line only when all four still map that way — a
+// its "Arrow keys → Joystick" line only when all four still map that way - a
 // rebind makes the shorthand a lie, so we drop the line rather than guess.
 const JOYSTICK_ARROWS = [
 	["ArrowUp", "PRESS_JOY0_UP"],
@@ -317,7 +317,7 @@ export function MenuView({
 }) {
 	// Each command's primary chord, shown beside it (irrelevant without a
 	// keyboard, so hidden on touch-only). Opening the palette keeps its own
-	// handler — it primes the iOS soft keyboard within the tap gesture.
+	// handler - it primes the iOS soft keyboard within the tap gesture.
 	const chords = primaryChords(
 		host.keyBindings.value,
 		host.isMac,

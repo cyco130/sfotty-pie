@@ -4,14 +4,14 @@
  * unpacking per channel (`r = w & 0xff`, `g = (w >>> 8) & 0xff`, `b = (w >>> 16)
  * & 0xff`) when encoding an image.
  *
- * This is the GTIA colour decode — the analog signal interpretation, the visual
- * counterpart to the disassembler's text — so it lives with the machine rather
+ * This is the GTIA colour decode - the analog signal interpretation, the visual
+ * counterpart to the disassembler's text - so it lives with the machine rather
  * than in any one host; the actual presentation (scaling, pixel aspect) stays
  * host-side.
  *
- * A GTIA colour is a (hue, luma) pair. Hue 0 is grey; hues 1–15 sit at chroma
+ * A GTIA colour is a (hue, luma) pair. Hue 0 is grey; hues 1-15 sit at chroma
  * phases set by the colour generator, whose per-tap delay is a trim pot on the
- * motherboard — a real user control, exposed here as {@link
+ * motherboard - a real user control, exposed here as {@link
  * PaletteOptions.hueStep}. Hue 1 doubles as the colour burst, so its angle is
  * fixed by the display (the tint control), not the pot.
  *
@@ -21,7 +21,7 @@
  * PAL decodes as YUV. Its generator is structurally different (AHRM appendix
  * D.4): a fixed 180° inverter covers the second half of the hue wheel, the
  * delay line spans ~180° in ideally-22.5° taps, and two tap positions are
- * skipped — producing the characteristic gaps between hues 6/7 and 10/11.
+ * skipped - producing the characteristic gaps between hues 6/7 and 10/11.
  * Fitting those facts to the ideal per-hue angle table gives an exact
  * decomposition: hue h sits at `hue1 − tap(h)·step − inverter(h)·180°` with
  * the tap/inverter sequences below; at the ideal 22.5° step this reproduces
@@ -29,24 +29,24 @@
  * The line-to-line details (swinging-burst deviation at non-ideal pot
  * settings, the per-polarity inverter windows that make hues 3 and 10 stripe
  * or desaturate off-ideal) average out on delay-line displays and are not
- * modelled yet — this is the single-line, line-averaged view.
+ * modelled yet - this is the single-line, line-averaged view.
  *
  * Luminance is linear from the 4-bit value (the DAC's LUM3 mismatch and the
  * missing NTSC setup pedestal are not modelled yet), with optional
  * brightness/contrast/gamma applied at the end as display-side adjustments.
  */
 export interface PaletteOptions {
-	/** Hue 1's chroma angle in degrees — the colour-burst reference, i.e. the
+	/** Hue 1's chroma angle in degrees - the colour-burst reference, i.e. the
 	 *  display's tint control. NTSC: in I-Q space (default 303 ≈ −57° from I).
 	 *  PAL: in U-V space (default 135, the even-line burst). */
 	hue1Angle?: number;
-	/** Degrees of chroma phase per generator delay tap — the colour-adjust
+	/** Degrees of chroma phase per generator delay tap - the colour-adjust
 	 *  trim pot. NTSC default 360/14 ≈ 25.71 (the Field Service Manual
 	 *  calibration: background hue 1 matched against border hue 15, closing
 	 *  the wheel); PAL ideal (and default) 22.5, with real machines commonly
-	 *  adjusted to ~18–19 for a bluer GR.0. */
+	 *  adjusted to ~18-19 for a bluer GR.0. */
 	hueStep?: number;
-	/** Chroma amplitude relative to the full luma range. Default 0.25 — rounded up from the
+	/** Chroma amplitude relative to the full luma range. Default 0.25 - rounded up from the
 	 *  AHRM's measured XL/XE-class NTSC ratio (Table 117: 800XL 23.9%, 130XE
 	 *  23.3%; the 800 measures a much hotter 35% and the 400 30.6%, future
 	 *  per-machine preset material). No PAL measurement is published; PAL
@@ -57,13 +57,13 @@ export interface PaletteOptions {
 	/** Luma scale about mid-grey; default 1. */
 	contrast?: number;
 	/** Display gamma adjustment applied per channel (`v^(1/gamma)`), > 1
-	 *  brightens midtones; default 1 (linear — historic behaviour). */
+	 *  brightens midtones; default 1 (linear - historic behaviour). */
 	gamma?: number;
 	/** The primaries the decoded RGB is *defined* against. "srgb" (default)
-	 *  interprets the matrix output directly — the historic behaviour.
+	 *  interprets the matrix output directly - the historic behaviour.
 	 *  "ntsc1953" corrects from the original FCC primaries + Illuminant C
 	 *  white (the AHRM's demonstrated fix: less purple $94, less green
-	 *  everywhere); "smpteC" from the phosphors real 70s–80s US sets had
+	 *  everywhere); "smpteC" from the phosphors real 70s-80s US sets had
 	 *  (milder); "ebu" from PAL's official primaries (≈ identity vs sRGB). */
 	primaries?: PalettePrimaries;
 	/** The color space of the palette words. "display-p3" targets a wide-
@@ -76,7 +76,7 @@ export type PalettePrimaries = "srgb" | "ntsc1953" | "smpteC" | "ebu";
 export type OutputGamut = "srgb" | "display-p3";
 
 interface ResolvedOptions extends Required<PaletteOptions> {
-	/** The chroma phase for a hue (1–15), in degrees. */
+	/** The chroma phase for a hue (1-15), in degrees. */
 	angleFor: (hue: number, options: Required<PaletteOptions>) => number;
 	/** Chroma → RGB matrix: rows are R/G/B, columns the two chroma axes. */
 	matrix: readonly [
@@ -87,7 +87,7 @@ interface ResolvedOptions extends Required<PaletteOptions> {
 }
 
 // NTSC: YIQ decode; uniform steps from the burst-locked hue 1. Burst 303°
-// (≈ −57° from I, the calibrated-display convention); step 360/14 — the
+// (≈ −57° from I, the calibrated-display convention); step 360/14 - the
 // Field Service Manual pot calibration, which matches hue 15 to hue 1.
 const NTSC_DEFAULTS = {
 	hue1Angle: 303,
@@ -108,9 +108,9 @@ const NTSC_DEFAULTS = {
 } as const satisfies ResolvedOptions;
 
 // PAL: YUV decode (U = B-Y, V = R-Y). Generator structure per the module
-// comment: delay-tap counts and the fixed-180° inverter per hue (1–15), with
+// comment: delay-tap counts and the fixed-180° inverter per hue (1-15), with
 // the skipped taps (6 in the first half, 3 in the second) producing the
-// hue 6/7 and 10/11 gaps. Hue 15 shares hue 1's tap — the AHRM notes they
+// hue 6/7 and 10/11 gaps. Hue 15 shares hue 1's tap - the AHRM notes they
 // are identical *regardless* of the pot (14 unique hues), which pins it to
 // the burst path rather than the end of the chain.
 const PAL_TAPS = [0, 1, 2, 3, 4, 5, 7, 0, 1, 2, 4, 5, 6, 7, 0] as const;
@@ -172,7 +172,7 @@ const CHROMATICITIES: Record<PalettePrimaries | "display-p3", Chromaticities> =
 			b: [0.155, 0.07],
 			white: D65,
 		},
-		// EBU Tech 3213 (BT.470 B/G) — differs from sRGB only in green x.
+		// EBU Tech 3213 (BT.470 B/G) - differs from sRGB only in green x.
 		ebu: { r: [0.64, 0.33], g: [0.29, 0.6], b: [0.15, 0.06], white: D65 },
 		"display-p3": {
 			r: [0.68, 0.32],
@@ -312,7 +312,7 @@ function buildPalette(
 		let b = y + mb[0] * c1 + mb[1] * c2;
 
 		if (correction) {
-			// Hard-clamp first (a CRT can't emit negative light — the AHRM's
+			// Hard-clamp first (a CRT can't emit negative light - the AHRM's
 			// prescribed treatment), then convert in linear light.
 			const linear = mulVec(correction, [
 				Math.pow(clamp01(r), GAMMA),

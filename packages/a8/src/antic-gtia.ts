@@ -373,6 +373,7 @@ export class AnticGtia implements Memory {
 
 		this.prior = 0x0f;
 		this.vdelay = 0x0f;
+		this.#pfPixelCache.fill(-1);
 
 		// GRACTL
 		this.enablePlayers = false;
@@ -779,6 +780,7 @@ export class AnticGtia implements Memory {
 			// "color encoding"); only GTIA mode 9's pixel data - OR'd in
 			// downstream of the register - can set it.
 			this.colorRegisters[address - 0x12] = value & 0xfe;
+			this.#pfPixelCache.fill(-1);
 			return;
 		}
 		switch (address) {
@@ -855,6 +857,7 @@ export class AnticGtia implements Memory {
 			case 0x1b:
 				// PRIOR
 				this.prior = value;
+				this.#pfPixelCache.fill(-1);
 				break;
 		}
 	}
@@ -1427,6 +1430,13 @@ export class AnticGtia implements Memory {
 		}
 	}
 
+	// Packed (left << 8) | right pixel pairs per playfield code, for the
+	// common pixel: no P/M active, no GTIA special mode. In that case the
+	// output is a pure function of the 4-bit code, PRIOR, and the color
+	// registers, so it's computed once and invalidated on color/PRIOR writes
+	// (and reset). -1 = not computed.
+	#pfPixelCache = new Int32Array(16).fill(-1);
+
 	#generateColor(pos: 0 | 1): number {
 		this.#applyPendingWrites();
 
@@ -1471,8 +1481,18 @@ export class AnticGtia implements Memory {
 				const color = this.#resolvePriority(code, pm, 0);
 				return (color << 8) | color;
 			}
-			this.#detectCollisions(pf, pm);
+			if (pm === 0) {
+				// The common pixel: no P/M active. Collision detection is a
+				// no-op (nothing to latch) and the pixel pair is a pure
+				// function of the playfield code, PRIOR, and the color
+				// registers - served from #pfPixelCache.
+				const cached = this.#pfPixelCache[pf]!;
+				if (cached >= 0) return cached;
+			} else {
+				this.#detectCollisions(pf, pm);
+			}
 			const color = this.#resolvePriority(pf, pm, 0);
+			let pixels: number;
 			if (pf & 0x4) {
 				// Apply hires luminance
 				const left =
@@ -1483,9 +1503,14 @@ export class AnticGtia implements Memory {
 					pf & 0x1
 						? (color & 0xf0) | (this.colorRegisters[COLPF1]! & 0xf)
 						: color;
-				return (left << 8) | right;
+				pixels = (left << 8) | right;
+			} else {
+				pixels = (color << 8) | color;
 			}
-			return (color << 8) | color;
+			if (pm === 0) {
+				this.#pfPixelCache[pf] = pixels;
+			}
+			return pixels;
 		}
 
 		// GTIA special modes. Hires (the PF1-luma splice) is forced off.

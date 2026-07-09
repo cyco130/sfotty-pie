@@ -67,24 +67,24 @@ Unit tests (vitest, `*.test.ts` beside the sources) cover the chips, traps, ATR/
 
 ## File map
 
-| File                                                                | Role                                                                                   |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| [src/machine.ts](src/machine.ts)                                    | `Atari`: config, the cycle/suspend phase machine, input methods, disk/trap delegation. |
-| [src/mmu.ts](src/mmu.ts)                                            | `Mmu`: memory map, PORTB banking, trap registration and dispatch.                      |
-| [src/antic-gtia.ts](src/antic-gtia.ts)                              | ANTIC+GTIA fused: display list, P/M graphics, NMI/RDY/HALT, scanline render.           |
-| [src/pokey.ts](src/pokey.ts)                                        | POKEY: audio, keyboard scan, IRQs.                                                     |
-| [src/pia.ts](src/pia.ts)                                            | PIA: joystick ports, XL/XE banking latch.                                              |
-| [src/sio.ts](src/sio.ts)                                            | SIO high-level emulation (execute trap on SIOV).                                       |
-| [src/atr.ts](src/atr.ts)                                            | `AtrImage`: sector-level `.atr` access.                                                |
-| [src/cartridge.ts](src/cartridge.ts)                                | Cartridge formats and mappers (`CART_TYPES`).                                          |
-| [src/xex-boot.ts](src/xex-boot.ts)                                  | `buildBootDisk`: XEX -> bootable ATR via the generated loader.                         |
-| [src/build-loader.ts](src/build-loader.ts)                          | Dev-only: assembles the XEX loader with spasm -> `xex-loader-bytes.ts`.                |
-| [src/detect-firmware.ts](src/detect-firmware.ts)                    | Known-firmware table and detection.                                                    |
-| [src/firmware-preferences.ts](src/firmware-preferences.ts)          | OS/BASIC ranking per machine context.                                                  |
-| [src/canonicalize.ts](src/canonicalize.ts)                          | Container normalization / combined-dump splitting.                                     |
-| [src/detect-file-format.ts](src/detect-file-format.ts)              | ATR/XEX/CAR/ROM classification.                                                        |
-| [src/palette.ts](src/palette.ts)                                    | NTSC/PAL palette builders.                                                             |
-| [src/timing-constants.ts](src/timing-constants.ts)                  | Region timing and framebuffer dimensions (re-exported from the index).                 |
-| [src/headless.ts](src/headless.ts)                                  | Node HLE host (not exported).                                                          |
-| [src/boot.ts](src/boot.ts) / [src/screenshot.ts](src/screenshot.ts) | CLI over `Headless` / PNG rendering (not exported).                                    |
-| [src/acid800-tests.ts](src/acid800-tests.ts)                        | The Acid800 conformance harness (baseline diffing, NTSC+PAL).                          |
+| File                                                                | Role                                                                                             |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| [src/machine.ts](src/machine.ts)                                    | `Atari`: config, the cycle/suspend phase machine, input methods, disk/trap delegation.           |
+| [src/mmu.ts](src/mmu.ts)                                            | `Mmu`: memory map, PORTB banking, trap registration and dispatch.                                |
+| [src/antic-gtia.ts](src/antic-gtia.ts)                              | ANTIC+GTIA fused: display list, P/M graphics, NMI/RDY/HALT, scanline render.                     |
+| [src/pokey.ts](src/pokey.ts)                                        | POKEY: audio, keyboard scan, IRQs.                                                               |
+| [src/pia.ts](src/pia.ts)                                            | PIA: joystick ports, XL/XE banking latch.                                                        |
+| [src/sio.ts](src/sio.ts)                                            | SIO high-level emulation (execute trap on SIOV).                                                 |
+| [src/atr.ts](src/atr.ts)                                            | `AtrImage`: sector-level `.atr` access.                                                          |
+| [src/cartridge.ts](src/cartridge.ts)                                | The `Cartridge` port interface; `RomCartridge` (raw/`.car` images) and the `CART_TYPES` mappers. |
+| [src/xex-boot.ts](src/xex-boot.ts)                                  | `buildBootDisk`: XEX -> bootable ATR via the generated loader.                                   |
+| [src/build-loader.ts](src/build-loader.ts)                          | Dev-only: assembles the XEX loader with spasm -> `xex-loader-bytes.ts`.                          |
+| [src/detect-firmware.ts](src/detect-firmware.ts)                    | Known-firmware table and detection.                                                              |
+| [src/firmware-preferences.ts](src/firmware-preferences.ts)          | OS/BASIC ranking per machine context.                                                            |
+| [src/canonicalize.ts](src/canonicalize.ts)                          | Container normalization / combined-dump splitting.                                               |
+| [src/detect-file-format.ts](src/detect-file-format.ts)              | ATR/XEX/CAR/ROM classification.                                                                  |
+| [src/palette.ts](src/palette.ts)                                    | NTSC/PAL palette builders.                                                                       |
+| [src/timing-constants.ts](src/timing-constants.ts)                  | Region timing and framebuffer dimensions (re-exported from the index).                           |
+| [src/headless.ts](src/headless.ts)                                  | Node HLE host (not exported).                                                                    |
+| [src/boot.ts](src/boot.ts) / [src/screenshot.ts](src/screenshot.ts) | CLI over `Headless` / PNG rendering (not exported).                                              |
+| [src/acid800-tests.ts](src/acid800-tests.ts)                        | The Acid800 conformance harness (baseline diffing, NTSC+PAL).                                    |

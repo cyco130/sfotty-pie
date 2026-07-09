@@ -596,9 +596,19 @@ export class Mmu implements Memory {
 		else this.#setPage(page, rom, view, null);
 	}
 
-	/** A cartridge ROM page; an unmapped bank inside a mapped area reads $FF. */
+	/**
+	 * A cartridge ROM page, per the AtariMemory pageView contract: a view is
+	 * fast bytes, null is the unconnected $FF page, and undefined (an absent
+	 * hook, or a read-sensitive page) routes every access through the
+	 * cartridge's read/write.
+	 */
 	#setCartPage(page: number, cartridge: Cartridge): void {
-		this.#setPage(page, cartridge, cartridge.pageView(page) ?? FF_PAGE, null);
+		const view = cartridge.pageView?.(page);
+		if (view === undefined) {
+			this.#setPage(page, cartridge, null, null);
+		} else {
+			this.#setPage(page, cartridge, view ?? FF_PAGE, null);
+		}
 	}
 
 	#rebuildPageTables(): void {

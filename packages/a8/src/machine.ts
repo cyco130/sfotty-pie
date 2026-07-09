@@ -12,7 +12,11 @@ import {
 	type WriteInterceptor,
 	type WriteObserver,
 } from "./mmu.ts";
-import { builtinSlotRom, Cartridge } from "./cartridge.ts";
+import {
+	builtinSlotRom,
+	createCartridge,
+	type Cartridge,
+} from "./cartridge.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
@@ -168,7 +172,8 @@ export class Atari implements Memory {
 			// cartridge is in the slot.
 			basicRom: xl && basic ? builtinSlotRom(basic) : undefined,
 			gameRom: game ? builtinSlotRom(game) : undefined,
-			cartridge: cartridge ?? (!xl && basic ? new Cartridge(basic) : undefined),
+			cartridge:
+				cartridge ?? (!xl && basic ? createCartridge(basic) : undefined),
 			gtia: this.anticGtia,
 			pokey: this.pokey,
 			pia: this.pia,

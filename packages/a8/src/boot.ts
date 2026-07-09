@@ -3,7 +3,7 @@ import fs from "node:fs";
 import readline from "node:readline";
 import { basename } from "node:path";
 import { AtrImage } from "./atr.ts";
-import { Cartridge } from "./cartridge.ts";
+import { createCartridge, type Cartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 import { Headless, type InputSource } from "./headless.ts";
 import { Atari } from "./machine.ts";
@@ -63,7 +63,7 @@ if (filePath) {
 		case "raw-cart-8k-8000-9fff":
 		case "raw-cart-8k-a000-bfff":
 		case "raw-cart-16k":
-			cartridge = new Cartridge(contents, basename(filePath));
+			cartridge = createCartridge(contents, basename(filePath));
 			break;
 		default:
 			process.stderr.write(`${filePath}: not a loadable file format\n`);

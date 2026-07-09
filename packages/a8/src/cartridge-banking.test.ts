@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
-import { Cartridge } from "./cartridge.ts";
+import { createCartridge } from "./cartridge.ts";
 import { Atari } from "./machine.ts";
 
 // An Atarimax 1MB (CART type 42) image: 128 x 8K banks at A000-BFFF, the bank
@@ -20,7 +20,7 @@ test("a cartridge bank switch remaps A000 reads immediately", () => {
 	const machine = new Atari({
 		xl: true,
 		os: new Uint8Array(16384),
-		cartridge: new Cartridge(atarimaxCar(), "test.car"),
+		cartridge: createCartridge(atarimaxCar(), "test.car"),
 	});
 
 	// Powers up with bank 127 mapped.

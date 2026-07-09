@@ -3,7 +3,8 @@ import {
 	buildBootDisk,
 	buildNtscPalette,
 	buildPalPalette,
-	Cartridge,
+	createCartridge,
+	type Cartridge,
 	detectFileFormat,
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
@@ -583,7 +584,7 @@ export class EmulatorHost {
 				if (entry) {
 					const bytes = await getImageBytes(media.cart);
 					this.#cartridge = {
-						cart: new Cartridge(bytes),
+						cart: createCartridge(bytes),
 						name: entry.user.displayName,
 						sourceId: media.cart,
 					};
@@ -907,7 +908,7 @@ export class EmulatorHost {
 		const cartridge =
 			this.#cartridge?.cart ??
 			(!builtinBasic && !basicDisabled && basicBytes
-				? new Cartridge(basicBytes)
+				? createCartridge(basicBytes)
 				: undefined);
 
 		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
@@ -1616,7 +1617,7 @@ export class EmulatorHost {
 				// saveD1ToLibrary refuses it - its synthetic disk isn't the XEX.
 				disk = { disk: buildBootDisk(contents), name, sourceId };
 			} else {
-				cartridge = { cart: new Cartridge(contents), name, sourceId };
+				cartridge = { cart: createCartridge(contents), name, sourceId };
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -1805,7 +1806,7 @@ export class EmulatorHost {
 
 		let cart: Cartridge;
 		try {
-			cart = new Cartridge(contents);
+			cart = createCartridge(contents);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.toast(`${name}: ${message}`, "error");

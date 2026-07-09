@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canonicalize } from "./canonicalize.ts";
-import { builtinSlotRom, Cartridge } from "./cartridge.ts";
+import { builtinSlotRom, createCartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 
 // Minimal synthetic fixtures that satisfy the structural detectors.
@@ -83,7 +83,7 @@ describe("canonicalize", () => {
 		expect(piece!.bytes).toHaveLength(8192 + 16);
 		// Round-trips through the detector and the emulator's cartridge loader.
 		expect(detectFileFormat(piece!.bytes)).toBe("cart");
-		expect(() => new Cartridge(piece!.bytes)).not.toThrow();
+		expect(() => createCartridge(piece!.bytes)).not.toThrow();
 	});
 
 	it("maps raw 8K $8000 -> type 21 and raw 16K -> type 2", () => {

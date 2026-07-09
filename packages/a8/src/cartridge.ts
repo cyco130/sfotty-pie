@@ -1,28 +1,42 @@
-import { type Memory, ReadOptions } from "@sfotty-pie/sfotty";
+import { ReadOptions } from "@sfotty-pie/sfotty";
+import type { AtariMemory } from "./atari-memory.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 
 export interface CartType {
 	name: string;
 	machine: "800/XL/XE" | "800" | "5200";
+	/** ROM size in KB. */
 	size: number;
 
+	/** The mapping at power-on. Absent = the type isn't supported yet. */
 	initialMapping?: CartridgeMapping;
+
+	/**
+	 * The $D500-$D5FF control decode: given the accessed address, the
+	 * written value (null for a read), and the current mapping (for
+	 * sequence-switched carts like Ultracart/Blizzard 32K, whose next bank
+	 * depends on the present one), return the new mapping, or undefined for
+	 * no change. Pure - the cartridge applies the result - which is what
+	 * keeps PEEK reads side-effect-free: the caller just discards it.
+	 */
 	control?(
 		address: number,
 		value: number | null,
-		setMapping: (mapping: CartridgeMapping) => void,
-	): number; // 0xff
-	read?(
+		current: CartridgeMapping,
+	): CartridgeMapping | undefined;
+
+	/**
+	 * The data-bus value of a $D500-$D5FF read; $FF when absent. For types
+	 * with readable control registers (SIC!, The!Cart) or ROM windows in the
+	 * control region (AST, DCart) - `rom` is provided for the latter. Pure,
+	 * so PEEK reads can use it too. The value reflects the mapping *before*
+	 * `control`'s switch applies: the decode happens during the read.
+	 */
+	controlRead?(
 		address: number,
-		contents: Uint8Array,
-		mapping: CartridgeMapping,
-	): number; // 0xff
-	write?(
-		address: number,
-		value: number,
-		contents: Uint8Array,
-		mapping: CartridgeMapping,
-	): void; // ignore
+		current: CartridgeMapping,
+		rom: Uint8Array,
+	): number;
 }
 
 // Info taken from https://github.com/atari800/atari800/blob/master/DOC/cart.txt
@@ -120,28 +134,22 @@ export const CART_TYPES: Record<number, CartType> = {
 
 		// Per cart.txt the bank is selected by an "access" to $D500-$D5FF, i.e.
 		// a read OR a write - so `value` is ignored (this fires on reads too).
-		control(address, _value, setMapping) {
+		control(address) {
 			switch (address & 0x9) {
 				case 0x0:
 					// - A3=0, A0=0 - selects bank 1
-					setMapping({ area8000: "ram", areaA000: [1, 0] });
-					break;
+					return { area8000: "ram", areaA000: [1, 0] };
 				case 0x1:
 					// - A3=0, A0=1 - selects bank 3
-					setMapping({ area8000: "ram", areaA000: [3, 0] });
-					break;
+					return { area8000: "ram", areaA000: [3, 0] };
 				case 0x8:
-					// - A3=1, A0=0 - disables cartridge (enables computer's memory in address space
-					//   between $A000 and $BFFF)
-					setMapping({ area8000: "ram", areaA000: "ram" });
-					break;
-				case 0x9:
+					// - A3=1, A0=0 - disables cartridge (enables computer's memory
+					//   in address space between $A000 and $BFFF)
+					return { area8000: "ram", areaA000: "ram" };
+				default:
 					// - A3=1, A0=1 - selects bank 2
-					setMapping({ area8000: "ram", areaA000: [2, 0] });
-					break;
+					return { area8000: "ram", areaA000: [2, 0] };
 			}
-
-			return 0xff;
 		},
 	},
 	16: {
@@ -302,21 +310,11 @@ export const CART_TYPES: Record<number, CartType> = {
 		// cart.txt says the bank is selected by the address *written* to
 		// $D500-$D57F, so we switch on writes only (value !== null), unlike OSS
 		// above.
-		control(address, value, setMapping) {
-			if (value !== null) {
-				if (address >= 0xd500 && address <= 0xd57f) {
-					if (value & 0x80) {
-						// Disable
-						setMapping({ area8000: "ram", areaA000: "ram" });
-					} else {
-						// Select bank 0-127
-						const bank = value;
-						setMapping({ area8000: "ram", areaA000: bank });
-					}
-				}
-			}
-
-			return 0xff;
+		control(address, value) {
+			if (value === null || address > 0xd57f) return undefined;
+			return value & 0x80
+				? { area8000: "ram", areaA000: "ram" } // bit 7 disables
+				: { area8000: "ram", areaA000: value }; // select bank 0-127
 		},
 	},
 	43: {
@@ -681,14 +679,6 @@ export const CART_TYPES: Record<number, CartType> = {
 	},
 };
 
-/*
-
-4000-7fff
-8000-9fff: "ram"
-a000-bfff  "ram"
-
-*/
-
 export type BankMapping = null | number;
 export type AreaMapping =
 	| "ram" // Not mapped by the cartridge, accesses RAM
@@ -700,6 +690,33 @@ export type CartridgeMapping = {
 	area8000: AreaMapping; // default: "ram"
 	areaA000: AreaMapping; // no default
 };
+
+/**
+ * What the machine needs from whatever is plugged into the cartridge slot.
+ * {@link RomCartridge} - a plain `.car`/raw ROM image - is the shipped
+ * implementation; special hardware (an RTime-8, a passthrough cart with its
+ * own slot) can implement this directly.
+ *
+ * `read`/`write` (from {@link Memory}) receive the cartridge address ranges:
+ * $8000-$BFFF for whatever areas the cartridge claims, and $D500-$D5FF for
+ * the control region.
+ */
+export interface Cartridge extends AtariMemory {
+	/** Whether the cartridge currently decodes $8000-$9FFF. */
+	readonly has8000To9fff: boolean;
+	/** Whether the cartridge currently decodes $A000-$BFFF. */
+	readonly hasA000ToBfff: boolean;
+	reset(cold: boolean): void;
+	/**
+	 * Fired after anything changes which addresses the cartridge decodes or
+	 * what bytes they map. Set by the MMU so it can rebuild its page tables;
+	 * implementations must call it on every mapping change (bank switches
+	 * included) and on a mapping-restoring reset. Results of the inherited
+	 * {@link AtariMemory.pageView} must stay valid until it fires; the MMU
+	 * only consults pageView for pages inside a claimed area.
+	 */
+	onMappingChanged: (() => void) | undefined;
+}
 
 const CART_HEADER_SIZE = 16;
 
@@ -735,15 +752,38 @@ export function builtinSlotRom(bytes: Uint8Array): Uint8Array {
 	return rom;
 }
 
-export class Cartridge implements Memory {
+/**
+ * Create a cartridge from an image file (raw ROM or `.car`). The chokepoint
+ * for cartridge construction: today every supported image is a
+ * {@link RomCartridge}, but types that need their own implementation
+ * (passthrough SDX, RAM and flash carts) will be dispatched from here
+ * without callers changing.
+ */
+export function createCartridge(
+	fileContents: Uint8Array,
+	fileName?: string,
+): Cartridge {
+	return new RomCartridge(fileContents, fileName);
+}
+
+/**
+ * A ROM-image cartridge: raw 8K/16K dumps or the `.car` container, with the
+ * bank-switching schemes from `CART_TYPES`. The declarative
+ * {@link CartridgeMapping} is normalized into `#slots` - one ROM byte offset
+ * (or -1 for "reads $FF") per 2K slot of $8000-$BFFF - so every access is a
+ * single indexed lookup regardless of the type's bank granularity.
+ */
+export class RomCartridge implements Cartridge {
 	#rom: Uint8Array;
 	#type: CartType;
-	#mapping: CartridgeMapping;
+	#mapping!: CartridgeMapping; // set via #applyMapping in the constructor
 
-	/**
-	 * Fired after a control access (or reset) changes the mapping. Set by the
-	 * MMU so it can rebuild its page tables when an area maps or unmaps.
-	 */
+	// The normalized mapping: for each 2K slot of $8000-$BFFF, the ROM byte
+	// offset it maps, or -1 for unmapped (reads $FF, and covers "ram" slots,
+	// which the MMU never routes here anyway).
+	#slots = new Int32Array(8).fill(-1);
+
+	/** See {@link Cartridge.onMappingChanged}. */
 	onMappingChanged: (() => void) | undefined;
 
 	constructor(fileContents: Uint8Array, fileName?: string) {
@@ -752,19 +792,16 @@ export class Cartridge implements Memory {
 		switch (format) {
 			case "raw-cart-8k-8000-9fff":
 				this.#type = CART_TYPES[21]!;
-				this.#mapping = this.#type.initialMapping!;
 				this.#rom = fileContents;
 				break;
 
 			case "raw-cart-8k-a000-bfff":
 				this.#type = CART_TYPES[1]!;
-				this.#mapping = this.#type.initialMapping!;
 				this.#rom = fileContents;
 				break;
 
 			case "raw-cart-16k":
 				this.#type = CART_TYPES[2]!;
-				this.#mapping = this.#type.initialMapping!;
 				this.#rom = fileContents;
 				break;
 
@@ -805,13 +842,49 @@ export class Cartridge implements Memory {
 					// TODO: Check checksum
 
 					this.#type = type;
-					this.#mapping = type.initialMapping;
 					this.#rom = fileContents.subarray(16);
 				}
 				break;
 
 			default:
 				throw new Error("Unsupported cartridge image format");
+		}
+
+		this.#applyMapping(this.#type.initialMapping!);
+	}
+
+	// Install a mapping: keep the declarative form (for the area getters) and
+	// normalize it into #slots. This is the only place the AreaMapping shapes
+	// (one 8K bank, two 4K, four 2K, "ram") are interpreted.
+	#applyMapping(mapping: CartridgeMapping): void {
+		this.#mapping = mapping;
+		this.#normalizeArea(mapping.area8000, 0);
+		this.#normalizeArea(mapping.areaA000, 4);
+	}
+
+	#normalizeArea(area: AreaMapping, firstSlot: number): void {
+		if (area === "ram") {
+			this.#slots.fill(-1, firstSlot, firstSlot + 4);
+		} else if (!Array.isArray(area)) {
+			// One 8K bank.
+			for (let i = 0; i < 4; i++) {
+				this.#slots[firstSlot + i] =
+					area === null ? -1 : area * 8192 + i * 2048;
+			}
+		} else if (area.length === 2) {
+			// Two 4K banks.
+			for (let i = 0; i < 2; i++) {
+				const bank = area[i]!;
+				this.#slots[firstSlot + i * 2] = bank === null ? -1 : bank * 4096;
+				this.#slots[firstSlot + i * 2 + 1] =
+					bank === null ? -1 : bank * 4096 + 2048;
+			}
+		} else {
+			// Four 2K banks.
+			for (let i = 0; i < 4; i++) {
+				const bank = area[i]!;
+				this.#slots[firstSlot + i] = bank === null ? -1 : bank * 2048;
+			}
 		}
 	}
 
@@ -834,100 +907,62 @@ export class Cartridge implements Memory {
 	 * straddles two banks.
 	 */
 	pageView(page: number): Uint8Array | null {
-		const offset = this.#getOffset(page << 8);
-		if (offset === null) return null;
-		let view = this.#views.get(offset);
+		const offset = this.#slots[(page - 0x80) >> 3]!;
+		if (offset < 0) return null;
+		const pageOffset = offset + ((page & 0x07) << 8);
+		let view = this.#views.get(pageOffset);
 		if (!view) {
-			view = this.#rom.subarray(offset, offset + 0x100);
-			this.#views.set(offset, view);
+			view = this.#rom.subarray(pageOffset, pageOffset + 0x100);
+			this.#views.set(pageOffset, view);
 		}
 		return view;
 	}
 
-	#getOffset(address: number): number | null {
-		let mapping: AreaMapping;
-		let base: number;
-
-		if (address >= 0x8000 && address <= 0x9fff) {
-			mapping = this.#mapping.area8000;
-			base = 0x8000;
-		} else if (address >= 0xa000 && address <= 0xbfff) {
-			mapping = this.#mapping.areaA000;
-			base = 0xa000;
-		} else {
-			throw new Error(`Invalid cartridge memory address ${address}`);
-		}
-
-		if (mapping === "ram") {
-			throw new Error("Unmapped cartridge");
-		}
-
-		let bankMapping: BankMapping;
-		let bankSize: number;
-
-		if (!Array.isArray(mapping)) {
-			// 8K banks
-			bankMapping = mapping;
-			bankSize = 8192;
-		} else if (mapping.length === 2) {
-			// 4K banks
-			bankMapping = mapping[(address - base) >> 12]!;
-			bankSize = 4096;
-		} else {
-			// 2K banks
-			bankMapping = mapping[(address - base) >> 11]!;
-			bankSize = 2048;
-		}
-
-		if (bankMapping === null) {
-			return null;
-		}
-
-		return bankMapping * bankSize + (address & (bankSize - 1));
-	}
-
 	read(address: number, options: ReadOptions): number {
 		if (address >= 0xd500 && address <= 0xd5ff) {
-			// A PEEK (debugger inspection) must not bank-switch. Still run control
-			// for its return value, but drop the mapping change - matters for
-			// access-triggered carts like OSS, which switch on reads too.
-			const peek = (options & ReadOptions.PEEK) !== 0;
-			return (
-				this.#type.control?.(address, null, (mapping) => {
-					if (!peek) {
-						this.#mapping = mapping;
-						this.onMappingChanged?.();
-					}
-				}) ?? 0xff
-			);
+			// Both hooks are pure, so a PEEK (debugger inspection) can take the
+			// controlRead value and simply discard the mapping change - matters
+			// for access-triggered carts like OSS, which switch on reads too.
+			// The value is decoded before the switch applies.
+			const value =
+				this.#type.controlRead?.(address, this.#mapping, this.#rom) ?? 0xff;
+			const mapping = this.#type.control?.(address, null, this.#mapping);
+			if (mapping && !(options & ReadOptions.PEEK)) {
+				this.#applyMapping(mapping);
+				this.onMappingChanged?.();
+			}
+			return value;
 		}
 
-		const offset = this.#getOffset(address);
+		const slot = (address - 0x8000) >> 11;
+		if (slot < 0 || slot > 7) {
+			throw new Error(`Invalid cartridge memory address ${address}`);
+		}
+		const offset = this.#slots[slot]!;
 		// TODO(floating-bus): an unmapped or out-of-range cart read is undriven;
 		// $FF is the XL/XE pull-up.
-		if (offset === null) {
+		if (offset < 0) {
 			return 0xff;
 		}
-
-		return this.#rom[offset] ?? 0xff;
+		return this.#rom[offset + (address & 0x7ff)] ?? 0xff;
 	}
 
 	write(address: number, value: number): void {
 		if (address >= 0xd500 && address <= 0xd5ff) {
-			this.#type.control?.(address, value, (mapping) => {
-				this.#mapping = mapping;
+			const mapping = this.#type.control?.(address, value, this.#mapping);
+			if (mapping) {
+				this.#applyMapping(mapping);
 				this.onMappingChanged?.();
-			});
-
+			}
 			return;
 		}
 
-		// Do nothing (for now)
+		// Writes into the ROM areas do nothing (for now).
 	}
 
 	reset(cold: boolean) {
 		if (cold) {
-			this.#mapping = this.#type.initialMapping!;
+			this.#applyMapping(this.#type.initialMapping!);
 			this.onMappingChanged?.();
 		}
 	}

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
-import { Cartridge } from "./cartridge.ts";
+import { createCartridge, type Cartridge } from "./cartridge.ts";
 import { Atari } from "./machine.ts";
 
 // A standard 8K $A000 cartridge: init address $A000, start unused.
@@ -8,7 +8,7 @@ function makeCart(marker: number) {
 	const rom = new Uint8Array(8192);
 	rom[0] = marker;
 	rom[8191] = 0xa0;
-	return new Cartridge(rom);
+	return createCartridge(rom);
 }
 
 function makeMachine(model: "800" | "800XL" | "130XE", cartridge?: Cartridge) {

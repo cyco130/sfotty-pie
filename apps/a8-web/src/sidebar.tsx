@@ -278,7 +278,7 @@ const MENU_COMMANDS = [
 ] as const satisfies readonly { command: Command; label: string }[];
 
 // The four arrows that drive joystick 0 as shipped. The key-mappings help shows
-// its "Arrow keys → Joystick" line only when all four still map that way - a
+// its "Arrow keys -> Joystick" line only when all four still map that way - a
 // rebind makes the shorthand a lie, so we drop the line rather than guess.
 const JOYSTICK_ARROWS = [
 	["ArrowUp", "PRESS_JOY0_UP"],

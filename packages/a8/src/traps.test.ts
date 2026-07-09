@@ -21,9 +21,9 @@ test("execute interceptor substitutes a committed fetch only", () => {
 	m.write(0x0090, 0x42, ReadOptions.NONE); // plain zero-page RAM
 	m.interceptExecute(0x0090, () => 0x60);
 
-	expect(m.read(0x0090, FETCH)).toBe(0x60); // committed fetch → substituted
-	expect(m.read(0x0090, DUMMY)).toBe(0x42); // dummy fetch → real memory
-	expect(m.read(0x0090, ReadOptions.NONE)).toBe(0x42); // data read → real memory
+	expect(m.read(0x0090, FETCH)).toBe(0x60); // committed fetch -> substituted
+	expect(m.read(0x0090, DUMMY)).toBe(0x42); // dummy fetch -> real memory
+	expect(m.read(0x0090, ReadOptions.NONE)).toBe(0x42); // data read -> real memory
 });
 
 test("read traps fire on data reads and committed fetches, but not dummies", () => {
@@ -32,9 +32,9 @@ test("read traps fire on data reads and committed fetches, but not dummies", () 
 	const seen: number[] = [];
 	m.observeRead(0x0091, (_a, _v, flags) => seen.push(flags));
 
-	m.read(0x0091, ReadOptions.NONE); // data read → fires
-	m.read(0x0091, FETCH); // committed fetch → fires (default mask only excludes DUMMY)
-	m.read(0x0091, DUMMY); // dummy → excluded by default { dummy: false }
+	m.read(0x0091, ReadOptions.NONE); // data read -> fires
+	m.read(0x0091, FETCH); // committed fetch -> fires (default mask only excludes DUMMY)
+	m.read(0x0091, DUMMY); // dummy -> excluded by default { dummy: false }
 	expect(seen).toEqual([ReadOptions.NONE, FETCH]);
 });
 
@@ -98,7 +98,7 @@ test("write interceptor can suppress the store; observers fire only on commit", 
 	const handle = m.interceptWrite(0x0095, () => true); // suppress
 	m.write(0x0095, 0x20, ReadOptions.NONE);
 	expect(m.read(0x0095, ReadOptions.NONE)).toBe(0x10); // unchanged
-	expect(written).toEqual([]); // suppressed → no observer
+	expect(written).toEqual([]); // suppressed -> no observer
 
 	handle.remove();
 	m.write(0x0095, 0x30, ReadOptions.NONE); // now commits

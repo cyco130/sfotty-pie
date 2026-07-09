@@ -14,7 +14,7 @@ import {
 function rawCart8k(fill: number): Uint8Array {
 	const cart = new Uint8Array(8192).fill(fill);
 	// Leave a valid CART trailer regardless of `fill`: the byte at length-4 must
-	// be 0, start address unused, init = $A000 → raw-cart-8k-a000-bfff.
+	// be 0, start address unused, init = $A000 -> raw-cart-8k-a000-bfff.
 	cart[8188] = 0x00;
 	cart[8189] = 0x00;
 	cart[8190] = 0x00;

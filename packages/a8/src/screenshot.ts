@@ -3,7 +3,7 @@
 // package index, so it never reaches a browser bundle; import it directly (the
 // boot CLI / a local debug harness / a future a8-cli). Takes the framebuffer (one
 // Atari colour byte per pixel) plus a GTIA palette (0xAABBGGRR words from
-// paletteFor) → a 24-bit RGB PNG.
+// paletteFor) -> a 24-bit RGB PNG.
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";

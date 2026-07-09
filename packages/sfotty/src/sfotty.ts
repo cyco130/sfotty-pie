@@ -170,7 +170,7 @@ export class Sfotty {
 
 	/**
 	 * The NMI input line (positive logic here: `true` = asserted). Edge-triggered
-	 * - a false→true transition latches a pending NMI, serviced at the next
+	 * - a false->true transition latches a pending NMI, serviced at the next
 	 * instruction boundary regardless of the I flag. The host must wired-OR all
 	 * its NMI sources into this single boolean, and must hold the line asserted
 	 * for several cycles until the CPU acknowledges it.

@@ -20,7 +20,7 @@ const cmd = (partial: Partial<KeyEventLike>) =>
 	characterModeCommand(set, ev(partial));
 
 test("typed ATASCII characters win over the positional binding", () => {
-	// AZERTY: the key at the QWERTY-A position produces "q" → type Q, shadowing the
+	// AZERTY: the key at the QWERTY-A position produces "q" -> type Q, shadowing the
 	// positional A binding. Layout-aware, by produced character.
 	expect(cmd({ code: "KeyA", key: "q" })).toBe("PRESS_Q");
 	expect(cmd({ code: "KeyA", key: "Q", shift: true })).toBe("PRESS_SHIFT_Q");

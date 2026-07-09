@@ -54,7 +54,7 @@ export interface MachineConfig {
 	conventionalRamSize?: number;
 	/** 16K PORTB-banked extended-RAM banks (0/4/8/16/32/64). Default 0. */
 	xeBankCount?: number;
-	/** Separate CPU/ANTIC extended-RAM access (needs ≤32 banks). Default false. */
+	/** Separate CPU/ANTIC extended-RAM access (needs <=32 banks). Default false. */
 	separateAnticAccess?: boolean;
 	/** OS ROM: 10K (400/800) or 16K (XL/XE). */
 	os: Uint8Array;
@@ -96,7 +96,7 @@ export interface MachineConfig {
  * try {
  * 	audio = machine.cycle();
  * } catch (signal) {
- * 	// resolve the suspend (await input, clear a breakpoint, …)
+ * 	// resolve the suspend (await input, clear a breakpoint, ...)
  * 	audio = machine.resumeCycle();
  * }
  * // read machine.frame for video
@@ -231,7 +231,7 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * The framebuffer the machine renders into (376×240 Atari color bytes),
+	 * The framebuffer the machine renders into (376x240 Atari color bytes),
 	 * updated by each cycle's render phase - the current target, which
 	 * {@link setFrameBuffer} can repoint.
 	 */
@@ -240,7 +240,7 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * Point rendering at `buffer` (376×240) for subsequent cycles. The default
+	 * Point rendering at `buffer` (376x240) for subsequent cycles. The default
 	 * buffer is always present, so this is optional - a host uses it to render
 	 * into its own buffer, e.g. swapping targets at frame boundaries for
 	 * tear-free double-buffering. Call it only at a frame boundary, or the
@@ -270,7 +270,7 @@ export class Atari implements Memory {
 	 * A bus phase may **throw** - an interceptor suspending on a read/write/fetch,
 	 * or a host's own breakpoint signal. This method does not catch it: the throw
 	 * propagates with the cycle frozen at that phase. The host catches whatever it
-	 * threw, resolves it (await input, clear a breakpoint, …), and calls
+	 * threw, resolves it (await input, clear a breakpoint, ...), and calls
 	 * {@link resumeCycle} to finish the *same* cycle - never `cycle`,
 	 * which would re-run the committed scheduling. Idempotent by construction:
 	 * each bus phase does its access before any commit, so a throw unwinds clean

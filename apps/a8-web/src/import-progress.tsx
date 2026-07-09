@@ -5,7 +5,7 @@ import { messages } from "./messages.ts";
  * A top-level import indicator in the app chrome - visible whatever panel is
  * open, and it keeps tracking after the library panel closes (the progress is a
  * module-level signal, not panel state). Renders nothing when idle. Shows an
- * indeterminate "Preparing…" while the dropped tree is walked, then a counted
+ * indeterminate "Preparing..." while the dropped tree is walked, then a counted
  * bar with an ETA while files are ingested.
  */
 export function ImportProgress() {
@@ -25,7 +25,7 @@ export function ImportProgress() {
 		counted && progress.total > 0
 			? Math.round((progress.done / progress.total) * 100)
 			: 100;
-	// ETA from the rate so far (elapsed per item × items remaining).
+	// ETA from the rate so far (elapsed per item x items remaining).
 	const eta =
 		counted && progress.done > 0
 			? (progress.elapsedMs / 1000 / progress.done) *

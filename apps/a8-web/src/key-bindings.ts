@@ -8,7 +8,7 @@ import { messages } from "./messages.ts";
 //
 // Structured as a platform-agnostic `base` plus per-platform overlays merged in
 // to form the effective defaults (see `defaultBindingSet`). Every binding is one
-// (key + modifiers) → one fixed command; no folding. Modifiers are exact (must be
+// (key + modifiers) -> one fixed command; no folding. Modifiers are exact (must be
 // up unless stated) except device inputs, which are Shift-agnostic (see `Mod`).
 // One flat set serves both keyboard modes: in Character mode the character
 // channel resolves first and shadows the bare/Shift character keys (so typing is
@@ -25,7 +25,7 @@ import { messages } from "./messages.ts";
 type Mod = boolean | "any";
 
 /** Character mode = layout-aware typing (the character channel owns the
- *  character keys); Positional mode = the raw `code`→Atari keyboard. */
+ *  character keys); Positional mode = the raw `code`->Atari keyboard. */
 export type KeyboardMode = "character" | "positional";
 
 export interface Binding {
@@ -41,8 +41,8 @@ export interface Binding {
 	// Pressed on key-down; released on key-up when the command has a release half
 	// (a sustained control), else instant - so a held binding is one entry.
 	command: Command;
-	// Where this binding resolves. "global" → the window-level resolver dispatches
-	// it regardless of focus (app commands like OPEN_PALETTE); absent/"a8" → only
+	// Where this binding resolves. "global" -> the window-level resolver dispatches
+	// it regardless of focus (app commands like OPEN_PALETTE); absent/"a8" -> only
 	// when the emulator input is focused (machine keys). A coarse first cut of a
 	// per-binding context - it'll grow into a `when` predicate once a second axis
 	// (e.g. typing/gaming) lands.
@@ -60,7 +60,7 @@ export interface Binding {
 	// When a command has several bindings, the one to represent it (the chord
 	// shown in the palette, menu, and key-help). Set on the platform-preferred
 	// default by {@link markPrimaries}, or by the user ("Make primary"). At most
-	// one per command; absent ⇒ the resolver falls back to first-listed.
+	// one per command; absent => the resolver falls back to first-listed.
 	primary?: boolean;
 	note?: string;
 }
@@ -153,7 +153,7 @@ const DEAD_CTRL_SHIFT: ReadonlySet<MatrixBase> = new Set<MatrixBase>([
 ]);
 
 // A matrix key reached by `on`, expanded to its exact-modifier bindings: plain /
-// Shift / Ctrl / Ctrl+Shift → PRESS_[CONTROL_][SHIFT_]<base>. `extra` carries a
+// Shift / Ctrl / Ctrl+Shift -> PRESS_[CONTROL_][SHIFT_]<base>. `extra` carries a
 // held base modifier onto all of them (e.g. Option for the mac F1-F4). The
 // Ctrl+Shift variant is dropped for bases that can't be scanned (see above).
 function modVariants(
@@ -180,8 +180,8 @@ function modVariants(
 
 // A 1200XL function key (F1-F4) reached by a host navigation key whose
 // unmodified meaning matches the Atari Shift+Fn (PgUp = top-left = Shift+F1, Home
-// = line-start = Shift+F3, …). So host Shift is INVERTED - plain → Shift+Fn,
-// Shift → plain Fn - while Ctrl stays direct.
+// = line-start = Shift+F3, ...). So host Shift is INVERTED - plain -> Shift+Fn,
+// Shift -> plain Fn - while Ctrl stays direct.
 function navKey(on: string, base: "F1" | "F2" | "F3" | "F4"): Binding[] {
 	// F1-F4's Ctrl+Shift can't be scanned on real hardware, so there's no
 	// Ctrl+Shift variant here.
@@ -192,8 +192,8 @@ function navKey(on: string, base: "F1" | "F2" | "F3" | "F4"): Binding[] {
 	];
 }
 
-// A Windows/Linux alternate for a browser-grabbed Ctrl combo: Alt+<code> → the
-// Atari Ctrl+<base> (and Alt+Shift → Ctrl+Shift when `shift`). Bound only for the
+// A Windows/Linux alternate for a browser-grabbed Ctrl combo: Alt+<code> -> the
+// Atari Ctrl+<base> (and Alt+Shift -> Ctrl+Shift when `shift`). Bound only for the
 // keys the browser actually eats, so every other Alt+letter stays free for app
 // commands.
 function altCtrl(code: string, base: MatrixBase, shift = true): Binding[] {
@@ -227,7 +227,7 @@ const base: Binding[] = [
 	{ on: "F3", shift: "any", ctrl: "any", command: "PRESS_SELECT" },
 	{ on: "F4", shift: "any", ctrl: "any", command: "PRESS_START" },
 
-	// Reset (held, Shift-agnostic → Shift+Reset works); Ctrl+F5 cold-boots. Ctrl
+	// Reset (held, Shift-agnostic -> Shift+Reset works); Ctrl+F5 cold-boots. Ctrl
 	// is exact, so it cleanly splits Reset from Power-cycle with no overlap.
 	{ on: "F5", shift: "any", command: "PRESS_RESET" },
 	{ on: "F5", ctrl: true, shift: "any", command: "POWER_CYCLE" },
@@ -240,7 +240,7 @@ const base: Binding[] = [
 	// Named Atari keys - each with all four Ctrl/Shift variants. Caps/Tab/Esc/
 	// Inverse have no natural F-key home, so they take F-keys the browser leaves
 	// alone (F7/F9/F10/F11); Esc and Tab keep their own keys too, the F-key adding
-	// the reliable Ctrl/Shift combos - notably Ctrl+F9 → Atari Ctrl+Tab, which the
+	// the reliable Ctrl/Shift combos - notably Ctrl+F9 -> Atari Ctrl+Tab, which the
 	// real Ctrl+Tab can't reach.
 	...modVariants("F7", "CAPS"),
 	...modVariants("F9", "TAB"),
@@ -271,7 +271,7 @@ const base: Binding[] = [
 		note: "Insert char (Ctrl+>)",
 	},
 	{ on: "Insert", shift: true, command: "PRESS_SHIFT_GREATER_THAN" },
-	// (Home was Clear; it's now a navigation key → F3 below. Clear stays reachable
+	// (Home was Clear; it's now a navigation key -> F3 below. Clear stays reachable
 	// as Ctrl+-, since the Atari < key sits at the - position positionally - Ctrl
 	// resolves by code, so host Ctrl+< would hit the , key instead.)
 
@@ -293,7 +293,7 @@ const base: Binding[] = [
 	{ on: "ArrowLeft", ctrl: true, command: "PRESS_CONTROL_PLUS" },
 	{ on: "ArrowRight", ctrl: true, command: "PRESS_CONTROL_ASTERISK" },
 
-	// Navigation keys → the 1200XL function keys F1-F4 (the universal home for
+	// Navigation keys -> the 1200XL function keys F1-F4 (the universal home for
 	// them - reachable on every platform, including Windows where Option+Arrow
 	// isn't). Mapped by meaning: the unmodified key gives the Atari Shift+Fn (so
 	// host Shift is inverted - see navKey). macOS also gets Option+Arrow (overlay).
@@ -303,7 +303,7 @@ const base: Binding[] = [
 	...navKey("End", "F4"), // line end
 ];
 
-// Cmd (mac) / Alt (win) on the `-` and `=`/`+` keys → the Atari SHIFT functions of
+// Cmd (mac) / Alt (win) on the `-` and `=`/`+` keys -> the Atari SHIFT functions of
 // the keys that sit there: Shift+Clear (the `<`/Clear key, at `-`) and insert-line
 // (Shift on the `>`/Insert key, at `=`/`+`). The Ctrl forms - Clear, insert-char -
 // already work as Ctrl+-/Ctrl+=, since Ctrl resolves positionally. But host Shift
@@ -334,9 +334,9 @@ const macBindings: Binding[] = [
 		scope: "global",
 		anchor: "letter",
 	},
-	// Cmd+-/Cmd+= → Shift+Clear / insert-line (see editKeys).
+	// Cmd+-/Cmd+= -> Shift+Clear / insert-line (see editKeys).
 	...editKeys({ meta: true }),
-	// Option+Arrow → F1-F4 (+ Ctrl/Shift). Option (not plain Alt) avoids the
+	// Option+Arrow -> F1-F4 (+ Ctrl/Shift). Option (not plain Alt) avoids the
 	// Windows snags noted on `base` above - hence mac-only.
 	...modVariants("ArrowUp", "F1", { alt: true }),
 	...modVariants("ArrowDown", "F2", { alt: true }),
@@ -367,7 +367,7 @@ const winBindings: Binding[] = [
 		scope: "global",
 		anchor: "letter",
 	},
-	// Alt+-/Alt+= → Shift+Clear / insert-line (editKeys; Cmd's stand-in on Windows).
+	// Alt+-/Alt+= -> Shift+Clear / insert-line (editKeys; Cmd's stand-in on Windows).
 	...editKeys({ alt: true }),
 ];
 
@@ -378,7 +378,7 @@ const winBindings: Binding[] = [
 // by produced char); these still serve Ctrl combos, non-ATASCII keys, and all of
 // Positional mode. Modifiers are exact here - Ctrl/Shift are part of the keycode.
 
-// Host `code` → the Atari matrix base at that physical position.
+// Host `code` -> the Atari matrix base at that physical position.
 // Backquote/IntlBackslash double the ESC key (the key left of `1`, as on the
 // Atari).
 const positionalKeys: Record<string, MatrixBase> = {
@@ -433,7 +433,7 @@ const positionalKeys: Record<string, MatrixBase> = {
 	Space: "SPACE",
 };
 
-// Each position → its four exact-modifier bindings (see modVariants). In
+// Each position -> its four exact-modifier bindings (see modVariants). In
 // Character mode the character channel resolves first and shadows the bare/Shift
 // character keys (so typing is layout-aware); these still apply for Ctrl combos,
 // non-ATASCII keys, and the whole of Positional mode.
@@ -565,7 +565,7 @@ function choosePrimary(
 	const find = (pred: (b: Binding) => boolean) => group.find(pred);
 	const onKey = (on: string) => group.find((b) => b.on === on);
 
-	// Esc, Tab, and Break → the F-key everywhere. F11 is the only catchable route
+	// Esc, Tab, and Break -> the F-key everywhere. F11 is the only catchable route
 	// for Ctrl+Esc on Windows and F9 the only one for Ctrl+Tab; the Esc glyph (⎋)
 	// is obscure, and Pause is fading from keyboards - so the F-key leads.
 	if (
@@ -726,7 +726,7 @@ const QWERTY_PUNCT: Record<string, string> = {
 
 // The QWERTY/fallback legend for a character `code`: letters and digits read off
 // the identifier, punctuation from the table, else the identifier verbatim (so
-// "F5", "Pause" … display as-is when nothing else claims them).
+// "F5", "Pause" ... display as-is when nothing else claims them).
 function qwertyLabel(id: string): string {
 	const letter = /^Key([A-Z])$/.exec(id);
 	if (letter) return letter[1]!;
@@ -788,7 +788,7 @@ const NAMED_KEYS: Record<string, (mac: boolean) => string> = {
 	// Arrows (not triangles) on both - they align better beside the ⌘⇧ glyphs.
 	ArrowUp: () => "↑",
 	ArrowDown: () => "↓",
-	ArrowLeft: () => "←",
+	ArrowLeft: () => "<-",
 	ArrowRight: () => "→",
 	Home: (mac) => (mac ? "fn←" : messages.keys.home),
 	End: (mac) => (mac ? "fn→" : messages.keys.end),
@@ -819,7 +819,7 @@ interface KeyboardLayoutAPI {
 }
 
 /**
- * The user's physical layout labels (`code` → UPPERCASED key legend) from
+ * The user's physical layout labels (`code` -> UPPERCASED key legend) from
  * `navigator.keyboard.getLayoutMap()`. Empty where unsupported (Firefox, Safari)
  * - `keyLabel` then falls back to QWERTY. Covers only the writing-system keys
  * (letters/digits/symbols); function/named keys aren't in it.
@@ -850,7 +850,7 @@ export function upperLegends(
 	const digits: (string | undefined)[] = [];
 	for (let n = 0; n <= 9; n++) digits.push(map.get(`Digit${n}`));
 	// A full digit row (all ten present, each an ASCII digit) is trustworthy - keep
-	// it, reordering and all. Anything else (symbols on AZERTY/Dvorak) → numerals.
+	// it, reordering and all. Anything else (symbols on AZERTY/Dvorak) -> numerals.
 	const fullDigitRow =
 		digits.every((v) => v !== undefined && /^[0-9]$/.test(v)) &&
 		new Set(digits).size === 10;
@@ -869,7 +869,7 @@ export async function loadLayoutLabels(): Promise<Map<string, string>> {
 	try {
 		return upperLegends(await kb.getLayoutMap());
 	} catch {
-		return new Map(); // permission/availability hiccup → QWERTY fallback
+		return new Map(); // permission/availability hiccup -> QWERTY fallback
 	}
 }
 
@@ -893,7 +893,7 @@ export function bakeDefaults(
 	bindings: Binding[],
 	layout: Map<string, string>,
 ): Binding[] {
-	// Invert the layout (produced letter → the code that types it) so an anchored
+	// Invert the layout (produced letter -> the code that types it) so an anchored
 	// chord can hop to that key. First code wins; letters are unique in practice.
 	const codeForLetter = new Map<string, string>();
 	for (const [code, label] of layout) {
@@ -911,7 +911,7 @@ export function bakeDefaults(
 	return bindings.flatMap((b) => {
 		if (b.anchor === "letter") {
 			// App shortcut: hop to the letter's key, keep the command.
-			const letter = qwertyLabel(b.on); // the intended letter (KeyK → "K")
+			const letter = qwertyLabel(b.on); // the intended letter (KeyK -> "K")
 			const baked = { ...b, on: codeForLetter.get(letter) ?? b.on };
 			delete baked.anchor; // strip the hint; it never persists
 			return [baked];
@@ -932,7 +932,7 @@ export function bakeDefaults(
 	});
 }
 
-// Chords are labelled from the persisted layout map; empty ⇒ QWERTY fallback.
+// Chords are labelled from the persisted layout map; empty => QWERTY fallback.
 const NO_LAYOUT = new Map<string, string>();
 
 /** The required modifiers of a chord (each simply down or not). */

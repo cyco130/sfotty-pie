@@ -13,7 +13,7 @@ import { firmwareLibrary } from "./firmware-library-plugin.ts";
 // (leaving the root `index.html` alone), removing the now-empty directory.
 // Cloudflare Pages derives its trailing-slash behaviour from the file layout: a
 // directory-style `a8/docs/index.html` makes `/a8/docs/` canonical and
-// redirects `/a8/docs` → `/a8/docs/`, whereas a flat `a8/docs.html` makes
+// redirects `/a8/docs` -> `/a8/docs/`, whereas a flat `a8/docs.html` makes
 // `/a8/docs` canonical and redirects the other way - which is what we want.
 // Done in `writeBundle` (files
 // already on disk) rather than by re-keying the bundle, which desyncs Rollup's
@@ -104,7 +104,7 @@ export default defineConfig({
 		// (everything here is fingerprinted, so it's safe to cache forever).
 		assetsDir: "_app/assets",
 		// Never inline SVGs as data URIs: the icon sprite is referenced with
-		// `<use href="…#id">`, and browsers don't resolve a #fragment against a
+		// `<use href="...#id">`, and browsers don't resolve a #fragment against a
 		// data: URI - it must stay a real (hashed) file. `false` opts out;
 		// `undefined` keeps Vite's default size threshold for everything else.
 		assetsInlineLimit: (filePath) =>

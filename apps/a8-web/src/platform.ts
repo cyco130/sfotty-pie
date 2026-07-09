@@ -19,7 +19,7 @@ function readOverride(): "mac" | "win" | null {
 		const stored = sessionStorage.getItem(OVERRIDE_KEY);
 		return stored === "mac" || stored === "win" ? stored : null;
 	} catch {
-		return null; // no storage / non-browser context → fall back to detection
+		return null; // no storage / non-browser context -> fall back to detection
 	}
 }
 

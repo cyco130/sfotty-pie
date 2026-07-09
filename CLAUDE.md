@@ -4,7 +4,7 @@ Project context for Claude Code and other agents. Keep this file focused on thin
 
 Markdown in this repo is not manually wrapped. Write one paragraph per line and let the editor soft-wrap.
 
-No en dashes (–) or em dashes (—) in human-facing text: code comments, string literals, and any `.md` meant for human readers (readmes, `design.md`, `CONTRIBUTING.md`, docs pages). Use a plain hyphen-minus (`-`) instead. Agent-facing files (this file, `.claude/**`) may use them.
+Human-facing text — code comments, dev-facing strings (test names, debug/console output), and any `.md` meant for human readers (readmes, `design.md`, `CONTRIBUTING.md`) — uses plain ASCII typography. No en/em dashes (– —; use `-`), ellipses (…; use `...`), arrows (→ ←; use `->` `<-`), multiplication signs (×; use `x` or `*`), true minuses (−), interpuncts (·), or math symbols with ASCII spellings (≈ ≤ ≥ ± ° π φ; write `~` `<=` `>=` `+/-` `deg` `pi` `phi`). Exceptions: UI strings rendered in the app (cramped space — `messages.ts`, key/gamepad labels, rendered docs pages like `.mdx`), character/glyph data (keyboard layouts, ATASCII tables, key-label assertions in tests), bundled third-party license texts, and proper names. Agent-facing files (this file, `.claude/**`) are exempt.
 
 ## Layout
 

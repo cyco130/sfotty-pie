@@ -6,7 +6,7 @@
 
 const STORAGE_NS = "a8";
 
-/** A namespaced storage name, dot-joined: `a8.<…parts>`. */
+/** A namespaced storage name, dot-joined: `a8.<...parts>`. */
 export function storageName(...parts: string[]): string {
 	return [STORAGE_NS, ...parts].join(".");
 }

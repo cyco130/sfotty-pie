@@ -112,7 +112,7 @@ function userImageEntry(e: StoredEntry): ImageEntry {
 	};
 }
 
-/** The merged library: built-ins (with overrides applied) ∪ user entries. */
+/** The merged library: built-ins (with overrides applied) + user entries. */
 export const libraryEntries = computed<ImageEntry[]>(() => {
 	const overrides = builtinOverrides.value;
 	const builtins = builtinFirmware

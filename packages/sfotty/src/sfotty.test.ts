@@ -222,7 +222,7 @@ describe("reset", () => {
 		for (let i = 0; i < 7; i++) cpu.run();
 
 		expect(cpu.PC).toBe(0x1234);
-		expect(cpu.S).toBe(0xfd); // 0 − 3, the canonical power-on value
+		expect(cpu.S).toBe(0xfd); // 0 - 3, the canonical power-on value
 		expect(cpu.iFlag).toBe(true);
 		expect(cpu.A).toBe(0);
 		expect(cpu.X).toBe(0);
@@ -247,7 +247,7 @@ describe("reset", () => {
 		expect(cpu.PC).toBe(0x0300);
 	});
 
-	test("warm reset preserves registers and D; S −= 3 and I is set", () => {
+	test("warm reset preserves registers and D; S -= 3 and I is set", () => {
 		const ram = new Ram();
 		ram.bytes[0xfffc] = 0x78;
 		ram.bytes[0xfffd] = 0x56;
@@ -263,7 +263,7 @@ describe("reset", () => {
 		for (let i = 0; i < 7; i++) cpu.run();
 
 		expect(cpu.PC).toBe(0x5678);
-		expect(cpu.S).toBe(0x7d); // 0x80 − 3
+		expect(cpu.S).toBe(0x7d); // 0x80 - 3
 		expect(cpu.iFlag).toBe(true);
 		expect(cpu.A).toBe(0x42); // preserved
 		expect(cpu.X).toBe(0x33);

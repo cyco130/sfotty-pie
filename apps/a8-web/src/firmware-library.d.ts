@@ -12,7 +12,7 @@ declare module "virtual:firmware-library" {
 		id: string;
 		/** Display name (the detected identity, else the file name). */
 		name: string;
-		/** Hashed asset URL the bytes are fetched from; `…#start-end` for a slice. */
+		/** Hashed asset URL the bytes are fetched from; `...#start-end` for a slice. */
 		url: string;
 		origin: "committed" | "local";
 		/** Byte length of the raw bytes the URL serves (the slice, for slices). */

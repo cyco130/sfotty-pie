@@ -192,7 +192,7 @@ function substituteContent(
 				} as Operand;
 			}
 			break;
-		// Other content (segment/emit/emplace/import/export/global/…) carries no
+		// Other content (segment/emit/emplace/import/export/global/...) carries no
 		// substitutable expressions in a macro body for now.
 		default:
 			break;

@@ -398,7 +398,7 @@ ${funcs.join("\n\n")}
 /**
  * The microcode dispatch table, indexed by microstate ((opcode << 3) | cycle).
  * Every slot is filled - cycles past an instruction's length get badState - so
- * the array stays densely packed (no holes → V8 keeps it a fast packed array)
+ * the array stays densely packed (no holes -> V8 keeps it a fast packed array)
  * and any jump to an unwired state throws instead of calling undefined.
  */
 export const MICROCODE: Step[] = [

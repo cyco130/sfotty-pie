@@ -14,7 +14,7 @@ export interface CommandContext {
  * the action - or, for a control, its press half. `release` is the matching key
  * up; when present, a momentary trigger (palette, click) auto-releases after a
  * short pulse so it doesn't leave the control stuck, while a sustained trigger
- * (held key, touch) ties release to its own up event. Absent `release` ⇒
+ * (held key, touch) ties release to its own up event. Absent `release` =>
  * press-only: app verbs (POWER_CYCLE, SET_*) and Break alike.
  *
  * The palette lists every command - it's the catch-all fallback for any action
@@ -139,7 +139,7 @@ export const commands = {
 	OPEN_MENU: { label: "OPEN_MENU", run: ({ host }) => host.showPanel("menu") },
 	// The consolidated settings view (opens on its first tab, Hardware). The
 	// menu's Settings entry; hidden from the palette, where the per-tab
-	// commands (Settings: Hardware…, Display…, …) cover it without duplication.
+	// commands (Settings: Hardware..., Display..., ...) cover it without duplication.
 	OPEN_SETTINGS: {
 		label: "OPEN_SETTINGS",
 		run: ({ host }) => host.showPanel("config"),
@@ -636,7 +636,7 @@ export function labelOf(command: Command): string {
 	return labels[commands[command].label];
 }
 
-/** A label's searchable text: a trailing "[…]" annotation (e.g. "[reboots]") is
+/** A label's searchable text: a trailing "[...]" annotation (e.g. "[reboots]") is
  *  a reader's aside, shown but not matched by search. */
 export function searchLabel(command: Command): string {
 	return labelOf(command).replace(/\s*\[[^\]]*\]$/u, "");

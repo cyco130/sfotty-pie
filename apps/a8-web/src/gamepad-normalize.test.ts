@@ -22,7 +22,7 @@ function pad(pressed: boolean[], axes: number[]): PadView {
 const pressedIndices = (view: PadView) =>
 	view.buttons.flatMap((b, i) => (b.pressed ? [i] : []));
 
-// The SDL-style hat ladder: position p (0 = up, clockwise) → −1 + 2p/7, with
+// The SDL-style hat ladder: position p (0 = up, clockwise) -> -1 + 2p/7, with
 // the out-of-range centred sentinel at position 8.
 const ladder = (p: number) => -1 + (2 * p) / 7;
 
@@ -43,7 +43,7 @@ test("a profile is a patch: overrides apply, everything else is identity", () =>
 });
 
 test("a moved raw button stops driving its own slot", () => {
-	// Standard 0 ← raw 5, and raw 5 is held: slot 5 must not also fire.
+	// Standard 0 <- raw 5, and raw 5 is held: slot 5 must not also fire.
 	const profile = { buttons: { 0: { button: 5 } }, axes: {} };
 	const view = normalize(
 		pad([false, false, false, false, false, true], []),
@@ -85,7 +85,7 @@ test("an explicit D-pad override beats the hat for its slot only", () => {
 	expect(pressedIndices(view)).toEqual([DPAD_RIGHT]);
 });
 
-test("axis-button source: an analog trigger resting at −1", () => {
+test("axis-button source: an analog trigger resting at -1", () => {
 	const profile = {
 		buttons: { 0: { axisButton: { axis: 2, rest: -1, pressed: 1 } } },
 		axes: {},
@@ -98,11 +98,11 @@ test("axis-button source: an analog trigger resting at −1", () => {
 	);
 	const pulled = normalize(pad([], [0, 0, 0.8]), profile).buttons[0]!;
 	expect(pulled.pressed).toBe(true);
-	expect(pulled.value).toBeCloseTo(0.9); // (0.8 − (−1)) / 2
+	expect(pulled.value).toBeCloseTo(0.9); // (0.8 - (-1)) / 2
 });
 
-test("axis source: anchors map rest→0 and full pushes to ±1, clamped", () => {
-	// An off-centre, limited-range axis: rest 0.2, full left −0.6, right 1.
+test("axis source: anchors map rest->0 and full pushes to +/-1, clamped", () => {
+	// An off-centre, limited-range axis: rest 0.2, full left -0.6, right 1.
 	const profile = {
 		buttons: {},
 		axes: { 0: { axis: 1, rest: 0.2, negAt: -0.6, posAt: 1 } },

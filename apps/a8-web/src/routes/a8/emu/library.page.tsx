@@ -19,7 +19,7 @@ import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
 // /a8/emu/library - the image library: an uploader over a sortable, filterable,
-// paged table of every image (built-in ∪ your uploads). Sort/filter/page state
+// paged table of every image (built-in + your uploads). Sort/filter/page state
 // lives in the URL query so it survives reload and is shareable. The whole
 // (metadata-only) set is held in memory and sorted/filtered/sliced in JS -
 // fine into the tens of thousands; the IndexedDB indexes are the escape hatch
@@ -30,8 +30,8 @@ const PAGE_SIZE = 100;
 
 const TYPE_VALUES: readonly ImageType[] = ["os", "cart", "disk", "xex"];
 
-// An OS ROM's target machine family: the stored size class (10K → 400/800,
-// 16K → the XL/XE class) maps to a URL-clean slug and a display label, so the
+// An OS ROM's target machine family: the stored size class (10K -> 400/800,
+// 16K -> the XL/XE class) maps to a URL-clean slug and a display label, so the
 // query param reads like the UI. Hardware tokens, kept inline.
 const OS_FAMILY = {
 	"400-800": { sizeClass: 10, label: "400/800" },
@@ -41,7 +41,7 @@ type OsFamily = keyof typeof OS_FAMILY;
 const osFamilyOf = (sizeClass: number): OsFamily =>
 	sizeClass === 10 ? "400-800" : "xl-xe";
 
-// Comma-separated tag text → normalized tags (trimmed, lower-cased, deduped).
+// Comma-separated tag text -> normalized tags (trimmed, lower-cased, deduped).
 function parseTags(text: string): string[] {
 	return [
 		...new Set(
@@ -85,7 +85,7 @@ interface DetailCol {
 
 // The extra table columns for a type-filtered view (the pill is dropped - the
 // type is known from the filter): OS size class, cartridge subtype, disk
-// geometry (sectors × bytes-per-sector, each clickable). Clicking a value sets
+// geometry (sectors x bytes-per-sector, each clickable). Clicking a value sets
 // that attribute filter. Each render guards on the kind, though the active
 // filter guarantees it.
 function detailCols(type: ImageType): DetailCol[] {
@@ -221,7 +221,7 @@ export default function LibraryPage() {
 		"bps",
 	]);
 
-	// Set / clear an attribute filter (a detail value, or its chip's ×). The
+	// Set / clear an attribute filter (a detail value, or its chip's x). The
 	// computed key is a known param, but TS can't see that through the union.
 	const setAttr: SetAttr = (param, value) =>
 		setParams({ [param]: String(value), page: null } as Parameters<
@@ -233,7 +233,7 @@ export default function LibraryPage() {
 	// Pull the user's uploads into the merged list (built-ins are already there).
 	useEffect(() => void readyLibrary(), []);
 
-	// Orchestrate an import: show "Preparing…" immediately (the folder walk has no
+	// Orchestrate an import: show "Preparing..." immediately (the folder walk has no
 	// count and can take a moment at thousands of files), collect the files, then
 	// ingest them live. The top-level indicator (app.tsx) tracks it even if this
 	// panel is closed mid-import; the summary toast reports the elapsed time.

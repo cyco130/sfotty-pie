@@ -19,13 +19,13 @@ export interface GamepadActions {
 	release(command: Command): void;
 }
 
-// Analog stick → digital 8-way: axes are paired in order (0/1, 2/3) and each
+// Analog stick -> digital 8-way: axes are paired in order (0/1, 2/3) and each
 // pair goes through the shared radial reader (see radial-stick.ts). Thresholds
 // tuned for a spring-centred thumbstick; the OSD touch stick has its own.
 const STICK: RadialStickConfig = {
 	engage: 0.45,
 	release: 0.35,
-	sectorMargin: 0.1, // radians (~5.7°)
+	sectorMargin: 0.1, // radians (~5.7 deg)
 };
 
 // The axis-halves each octant activates, as [axisOffset (0 = x, 1 = y), dir]. The
@@ -41,17 +41,17 @@ const OCTANT_HALVES: readonly (readonly (readonly [number, -1 | 1])[])[] = [
 	[
 		[0, -1],
 		[1, 1],
-	], // 3: −x +y
-	[[0, -1]], // 4: −x
+	], // 3: -x +y
+	[[0, -1]], // 4: -x
 	[
 		[0, -1],
 		[1, -1],
-	], // 5: −x −y
-	[[1, -1]], // 6: −y
+	], // 5: -x -y
+	[[1, -1]], // 6: -y
 	[
 		[0, 1],
 		[1, -1],
-	], // 7: +x −y
+	], // 7: +x -y
 ];
 
 // The commands one joystick port actuates, indexed by Atari port (0-3). Ports
@@ -98,20 +98,20 @@ const PORT_COMMANDS: readonly PortCommands[] = [
 ];
 
 // A reference to a Standard Gamepad input: a button by index, or one half of an
-// axis (dir −1 = the negative side). This is the vocabulary a binding maps from.
+// axis (dir -1 = the negative side). This is the vocabulary a binding maps from.
 export type GamepadInput = { button: number } | { axis: number; dir: -1 | 1 };
 
 // The five joystick senses a per-port binding drives.
 export type JoyRole = "up" | "down" | "left" | "right" | "trigger";
 
-// Per-port binding: an input → a joystick role. Applied to every pad on its own
+// Per-port binding: an input -> a joystick role. Applied to every pad on its own
 // port (the role resolves to that port's PRESS_JOY{n}_* command).
 export interface JoyBinding {
 	input: GamepadInput;
 	role: JoyRole;
 }
 
-// Global binding: an input → a command. Applied to the port-0 pad only.
+// Global binding: an input -> a command. Applied to the port-0 pad only.
 export interface ConsoleBinding {
 	input: GamepadInput;
 	command: Command;
@@ -137,7 +137,7 @@ export const DEFAULT_JOYSTICK: readonly JoyBinding[] = [
 // is a press-only toggle, so its release half is a harmless no-op.
 export const DEFAULT_CONSOLE: readonly ConsoleBinding[] = [
 	{ input: { button: 9 }, command: "PRESS_START" }, // Start / ＋ / Menu
-	{ input: { button: 8 }, command: "PRESS_SELECT" }, // Select / − / View
+	{ input: { button: 8 }, command: "PRESS_SELECT" }, // Select / - / View
 	{ input: { button: 3 }, command: "PRESS_OPTION" }, // north face (Y / △)
 	{ input: { button: 4 }, command: "TOGGLE_PAUSE" }, // L1
 	{ input: { button: 7 }, command: "TURBO_HOLD" }, // R2 - hold to fast-forward
@@ -201,8 +201,8 @@ const NO_HALVES: ReadonlySet<string> = new Set();
 
 /**
  * A human display name for a pad: `gamepad.id` minus the vendor/product noise
- * (Chrome appends a parenthetical like "(STANDARD GAMEPAD Vendor: … Product:
- * …)", Firefox prefixes hex ids like "045e-028e-"). Falls back to the raw id.
+ * (Chrome appends a parenthetical like "(STANDARD GAMEPAD Vendor: ... Product:
+ * ...)", Firefox prefixes hex ids like "045e-028e-"). Falls back to the raw id.
  */
 export function padDisplayName(id: string): string {
 	const name = id
@@ -229,7 +229,7 @@ export interface PadInfo {
  * edges the commands want.
  *
  * The mapping targets the Standard Gamepad layout: every pad drives its assigned
- * Atari port (joystick bindings → directions/trigger), and the port-0 pad also
+ * Atari port (joystick bindings -> directions/trigger), and the port-0 pad also
  * drives the console/meta commands. The bindings are data ({@link setBindings}),
  * defaulting to {@link DEFAULT_JOYSTICK} / {@link DEFAULT_CONSOLE}; which pad
  * drives which port is an explicit assignment ({@link setPort}). Ahead of the
@@ -246,9 +246,9 @@ export class Gamepads {
 	#state: PortState[] = PORT_COMMANDS.map(() => CENTERED);
 	// Last-polled state of the port-0 console/meta buttons, parallel to #console.
 	#consoleState: boolean[] = DEFAULT_CONSOLE.map(() => false);
-	// Connected pads by gamepad.index → id/mapping, from the connect events.
+	// Connected pads by gamepad.index -> id/mapping, from the connect events.
 	#pads = new Map<number, { id: string; mapping: string }>();
-	// Atari port → the gamepad.index driving it (or null). The source of truth for
+	// Atari port -> the gamepad.index driving it (or null). The source of truth for
 	// who's which player; the UI edits it via setPort. Assignment is stable - a
 	// disconnect frees a port without reshuffling the survivors.
 	#portToIndex: (number | null)[] = PORT_COMMANDS.map(() => null);
@@ -381,7 +381,7 @@ export class Gamepads {
 	}
 
 	// The axis-halves the pad's sticks light up this poll: each axis pair (0/1,
-	// 2/3, …) through the radial reader. Returns `${axis}:${dir}` keys for
+	// 2/3, ...) through the radial reader. Returns `${axis}:${dir}` keys for
 	// inputActive.
 	#activeHalves(pad: PadView, index: number): ReadonlySet<string> {
 		const halves = new Set<string>();
@@ -410,7 +410,7 @@ export class Gamepads {
 		this.#profiles = profiles;
 	}
 
-	/** Suspend/resume the pad → command polling (the game picker reads the pad
+	/** Suspend/resume the pad -> command polling (the game picker reads the pad
 	 *  itself while open). Suspending releases everything currently held. */
 	suspend(on: boolean): void {
 		if (this.#suspended === on) return;

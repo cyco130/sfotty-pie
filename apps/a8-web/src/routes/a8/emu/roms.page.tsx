@@ -19,7 +19,7 @@ import { useEmu } from "./emu-context.ts";
 import { SettingsFrame } from "./settings-frame.tsx";
 
 // /a8/emu/roms - the firmware selector, populated from the unified image
-// library (built-ins ∪ your uploads). Each slot lists qualifying images
+// library (built-ins + your uploads). Each slot lists qualifying images
 // best-first (built-ins by preference rank, then your ROMs by name), with the
 // running machine's auto-pick as the default. The slot(s) feeding the running
 // machine are marked "in use"; unsaved picks get a dot. Uploads happen in the
@@ -48,7 +48,7 @@ interface SlotDef {
 const osRanking = (model: AtariModel): readonly FirmwareKey[] =>
 	preferredOsKeys({ model, tv: "ntsc" });
 
-// OS slots qualify by size class (10K → 400/800, 16K → XL/XE-class); a user OS
+// OS slots qualify by size class (10K -> 400/800, 16K -> XL/XE-class); a user OS
 // ROM joins the slots whose size it matches.
 const isOs =
 	(sizeClass: 10 | 16) =>

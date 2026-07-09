@@ -47,9 +47,9 @@ function useLivePads(): PadSnapshot[] {
 	return pads;
 }
 
-// One axis as a centre-anchored bar (−1 left, +1 right) plus its value.
+// One axis as a centre-anchored bar (-1 left, +1 right) plus its value.
 function AxisBar({ label, value }: { label: string; value: number }) {
-	const pct = (value / 2) * 100; // −50…50, measured from the centre
+	const pct = (value / 2) * 100; // -50...50, measured from the centre
 	return (
 		<div class="flex items-center gap-2 text-xs">
 			<span class="w-8 shrink-0 text-neutral-500">{label}</span>

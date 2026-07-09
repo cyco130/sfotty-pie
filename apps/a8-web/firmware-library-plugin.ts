@@ -15,7 +15,7 @@ import type { Plugin } from "vite";
 // A build-time scan of the image library that emits `virtual:firmware-library`.
 //
 // Both library roots are deep-scanned; the on-disk folder shape (firmware/,
-// other/, …) is for human organisation only and is ignored - every file is run
+// other/, ...) is for human organisation only and is ignored - every file is run
 // through canonicalize (which derives each image's canonical `.car`/raw form
 // and its content kind) plus detectFirmware (identity). A 32K XEGS combined ROM
 // is split by canonicalize into its three constituents, emitted as slice

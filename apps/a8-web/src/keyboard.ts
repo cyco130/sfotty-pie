@@ -138,12 +138,12 @@ export class Keyboard {
 			true,
 		);
 
-		// Browser-shortcut guard (F5 reload → cold boot is the worst offender): when
+		// Browser-shortcut guard (F5 reload -> cold boot is the worst offender): when
 		// focus has drifted off the input onto the canvas/body, a bound key would
 		// still trigger its browser default. Suppress it here - in the BUBBLE phase,
 		// so any focused control had first claim, and skipping editable targets so we
 		// never touch typing (or cursor keys) in the palette, dialogs, or the
-		// offscreen input itself. Unbound keys (F12 → DevTools) fall through.
+		// offscreen input itself. Unbound keys (F12 -> DevTools) fall through.
 		window.addEventListener("keydown", (event) => {
 			if (capturingKeys || isEditable(event.target)) return;
 			if (resolveBinding(this.#bindings, this.#normalize(event))) {

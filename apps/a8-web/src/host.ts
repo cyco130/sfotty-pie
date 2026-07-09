@@ -312,7 +312,7 @@ export class EmulatorHost {
 	// Whether the machine was running when the picker opened (resume on close).
 	#favoritesWasRunning = false;
 
-	/** The layout snapshot the bindings were baked from (`code` → legend), used to
+	/** The layout snapshot the bindings were baked from (`code` -> legend), used to
 	 *  label the editor's live preview - existing chords carry their own baked
 	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
 	readonly layoutLabels = signal<Map<string, string>>(new Map());
@@ -708,7 +708,7 @@ export class EmulatorHost {
 	}
 
 	/** Open the game picker (see favorites-menu.tsx): pause the machine and
-	 *  suspend pad → command polling - the picker reads the pad itself. */
+	 *  suspend pad -> command polling - the picker reads the pad itself. */
 	openFavorites(): void {
 		if (this.favoritesOpen.value) return;
 		this.#favoritesWasRunning = this.running.value;
@@ -1310,7 +1310,7 @@ export class EmulatorHost {
 	}
 
 	// Apply a single config change to the running machine and reboot into it -
-	// the palette's "… (reboots)" commands. A no-op change is ignored so it
+	// the palette's "... (reboots)" commands. A no-op change is ignored so it
 	// doesn't cost a pointless cold boot. The staged copy follows so the menu
 	// opens clean.
 	#applyConfigChange(change: Partial<MachineSettings>): void {
@@ -1402,7 +1402,7 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Boot a user-supplied file (the "Boot image…" picker / drag-and-drop). The
+	 * Boot a user-supplied file (the "Boot image..." picker / drag-and-drop). The
 	 * file is auto-added to the library (transient) so it has an id - for resume
 	 * and save - and booted through it; unrecognized bytes still warn directly.
 	 */
@@ -1852,7 +1852,7 @@ export class EmulatorHost {
 		}
 		const { model, basicDisabled } = this.config.value;
 		if (!hasBuiltinBasic(model) && !basicDisabled) {
-			this.applyBasicDisabled(true); // toasts "Detaching cartridge (BASIC…)"
+			this.applyBasicDisabled(true); // toasts "Detaching cartridge (BASIC...)"
 			return;
 		}
 		this.toast(messages.errors.noCartridge, "warning");
@@ -1925,7 +1925,7 @@ export class EmulatorHost {
 		);
 		const pixels = new Uint32Array(imageData.data.buffer);
 
-		// The frameCount of the frame currently on the canvas; −1 forces a
+		// The frameCount of the frame currently on the canvas; -1 forces a
 		// redraw on the next present.
 		let presented = -1;
 
@@ -1963,7 +1963,7 @@ export class EmulatorHost {
 		// Frame blending mixes in *linear light* - flicker fusion happens in
 		// light, not signal, and gamma-space blending underweights the bright
 		// phase of a flicker pair (see the analog-video appendix's averaging
-		// note). LUTs stand in for per-pixel pow: byte → linear in, linear →
+		// note). LUTs stand in for per-pixel pow: byte -> linear in, linear ->
 		// byte out.
 		const LINEAR = new Float32Array(256);
 		for (let i = 0; i < 256; i++) LINEAR[i] = Math.pow(i / 255, 2.2);
@@ -1985,7 +1985,7 @@ export class EmulatorHost {
 		const present = () => {
 			// Keepalive poll on the display cadence: the emulation loop's afterYield
 			// poll stops when paused, so this keeps the meta buttons (notably
-			// Pause→Resume) live. Harmless while running - edge detection dedupes it
+			// Pause->Resume) live. Harmless while running - edge detection dedupes it
 			// against the fresher afterYield samples, and it no-ops with no pad.
 			this.#gamepads.poll();
 

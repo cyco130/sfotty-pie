@@ -9,7 +9,7 @@ import { detectFileFormat } from "./detect-file-format.ts";
 function rawCart8kA000(): Uint8Array {
 	const cart = new Uint8Array(8192);
 	cart[8190] = 0x00; // init address low
-	cart[8191] = 0xa0; // init address high → $A000
+	cart[8191] = 0xa0; // init address high -> $A000
 	return cart;
 }
 
@@ -37,11 +37,11 @@ function fakeOsRom16k(): Uint8Array {
 		const offset = address - base;
 		rom[offset] = 0x4c; // JMP
 		rom[offset + 1] = 0x00;
-		rom[offset + 2] = 0xe0; // → $E000
+		rom[offset + 2] = 0xe0; // -> $E000
 	}
 	for (const tail of [6, 4, 2]) {
 		rom[16384 - tail] = 0x00;
-		rom[16384 - tail + 1] = 0xe0; // interrupt vector → $E000
+		rom[16384 - tail + 1] = 0xe0; // interrupt vector -> $E000
 	}
 	return rom;
 }
@@ -86,7 +86,7 @@ describe("canonicalize", () => {
 		expect(() => new Cartridge(piece!.bytes)).not.toThrow();
 	});
 
-	it("maps raw 8K $8000 → type 21 and raw 16K → type 2", () => {
+	it("maps raw 8K $8000 -> type 21 and raw 16K -> type 2", () => {
 		expect(canonicalize(rawCart8k8000())[0]!.kind).toEqual({
 			type: "cart",
 			cartType: 21,

@@ -138,7 +138,7 @@ describe("segments", () => {
 	});
 
 	// The lib.s-inlined hello, exercising the whole engine: cross-segment refs
-	// (vectors → CODE's `start`, `lda message` → RODATA), `.org`, emit/emplace.
+	// (vectors -> CODE's `start`, `lda message` -> RODATA), `.org`, emit/emplace.
 	// OUTPUT emits CODE before RODATA, so start=$0400 and message follows the code.
 	const HELLO_SEGMENTED = `EXIT := $0200
 STDOUT := $0202

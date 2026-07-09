@@ -57,13 +57,13 @@ export type ZipResponse =
 
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 
-// A filename-safe display name (illegal characters → "_"; never empty).
+// A filename-safe display name (illegal characters -> "_"; never empty).
 function sanitize(name: string): string {
 	// eslint-disable-next-line no-control-regex
 	return name.replace(/[/\\:*?"<>|\x00-\x1f]/g, "_").trim() || "image";
 }
 
-// A unique `name.ext`, suffixing " (2)", " (3)" … on collision (case-folded,
+// A unique `name.ext`, suffixing " (2)", " (3)" ... on collision (case-folded,
 // for case-insensitive filesystems).
 function uniqueName(base: string, ext: string, used: Set<string>): string {
 	let candidate = `${base}.${ext}`;

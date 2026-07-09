@@ -37,8 +37,8 @@ export type ButtonSource =
 	| { axisButton: { axis: number; rest: number; pressed: number } };
 
 /**
- * Raw analog axis → Standard axis, as observed anchor points: `rest` maps to
- * 0, `negAt` to −1, `posAt` to +1, linearly per side and clamped. Inversion
+ * Raw analog axis -> Standard axis, as observed anchor points: `rest` maps to
+ * 0, `negAt` to -1, `posAt` to +1, linearly per side and clamped. Inversion
  * and off-centre rest are just anchor placements.
  */
 export interface AxisSource {
@@ -126,7 +126,7 @@ function readButtonSource(
 	};
 }
 
-/** The hat position matching `raw`, or −1 for centred / unrecognized. */
+/** The hat position matching `raw`, or -1 for centred / unrecognized. */
 export function hatPosition(hat: HatSource, raw: number): number {
 	for (let p = 0; p < hat.values.length; p++) {
 		const v = hat.values[p];
@@ -281,7 +281,7 @@ export function dominantChange(
 	return best;
 }
 
-// Fit the observed hat positions to the linear ladder value = a + b·position
+// Fit the observed hat positions to the linear ladder value = a + b * position
 // (the SDL-style encoding is exactly linear). A good fit fills in the
 // unobserved positions (the diagonals); otherwise only the observed ones
 // match and the rest read as centred - degraded but functional.
@@ -434,7 +434,7 @@ export function classify(samples: CalibrationSet): NormalizeProfile {
 		if (y) profile.axes[1] = y;
 	}
 
-	// The trigger → Standard button 0.
+	// The trigger -> Standard button 0.
 	const trigger = buttonSourceFrom(
 		samples.trigger && dominantChange(rest, samples.trigger),
 		rest,

@@ -11,9 +11,9 @@ The opcode table is **documented opcodes only** (it's generated as the inverse o
 ## The pipeline
 
 ```
-source -> lex -> parse -> ┌───────────── multipass loop ─────────────┐ -> bytes
-                          │ collect (evaluate + encode) -> render    │
-                          └──────────────────────────────────────────┘
+source -> lex -> parse -> +------------- multipass loop -------------+ -> bytes
+                          | collect (evaluate + encode) -> render    |
+                          +------------------------------------------+
 ```
 
 1. **Lex** ([src/lexer.ts](src/lexer.ts)) - a single big anchored regex turns source into tokens.
@@ -54,11 +54,11 @@ The symbol table ([src/symbols.ts](src/symbols.ts)) is built for this: values **
 
 `Value = bigint | string` ([src/value.ts](src/value.ts)); `undefined` threads through as "unresolved." Numbers are unbounded `bigint` (range is checked at emit, not during arithmetic). Strings are first-class values, decoded with minimal C escapes; a **character literal is a single _byte_** in the target encoding (UTF-8 for now), so `'A'` is `65` but `'ü'` (two UTF-8 bytes) is an error - char and string literals share one encoder.
 
-[src/evaluate.ts](src/evaluate.ts) is a straightforward recursive evaluator over an `EvalEnv` (`resolve`, optional `resolveGlobal`, the `*` location counter, `report`, `strict`). `*` is also source-level syntax - an expression can reference the current location counter directly (`jmp *`). `undefined` propagates through arithmetic so forward references defer cleanly. With `strict` on (the assemble pass turns it on), an unresolved _identifier_ is reported as undefined - but only on the converged pass survives, since earlier passes' diagnostics are discarded. Equality is `=` (ca65-style, no `==`); precedence low→high is `|| < && < (= != < >) < (+ -) < (* / %)`, with prefix `+ - < > !` binding tightest and `::` (scope resolution) tighter still.
+[src/evaluate.ts](src/evaluate.ts) is a straightforward recursive evaluator over an `EvalEnv` (`resolve`, optional `resolveGlobal`, the `*` location counter, `report`, `strict`). `*` is also source-level syntax - an expression can reference the current location counter directly (`jmp *`). `undefined` propagates through arithmetic so forward references defer cleanly. With `strict` on (the assemble pass turns it on), an unresolved _identifier_ is reported as undefined - but only on the converged pass survives, since earlier passes' diagnostics are discarded. Equality is `=` (ca65-style, no `==`); precedence low->high is `|| < && < (= != < >) < (+ -) < (* / %)`, with prefix `+ - < > !` binding tightest and `::` (scope resolution) tighter still.
 
 ## Instruction encoding
 
-[src/encode.ts](src/encode.ts) maps an instruction's operand _shape_ (immediate, indexed, indirect, …) plus its evaluated value to an addressing mode, then to a byte, using the generated `OPCODES` table as the oracle (if a mnemonic lacks a mode, that's the error). Zero-page/absolute selection is the shrinkable decision: unresolved or ≥ `$100` → absolute; a resolved value < `$100` with a zp form available → zero page. Branch offsets are relative to `pc + 2`; range checks (byte, word, branch) fire at emit. An unresolved operand emits correctly-sized zero placeholders so later passes can fix it up.
+[src/encode.ts](src/encode.ts) maps an instruction's operand _shape_ (immediate, indexed, indirect, ...) plus its evaluated value to an addressing mode, then to a byte, using the generated `OPCODES` table as the oracle (if a mnemonic lacks a mode, that's the error). Zero-page/absolute selection is the shrinkable decision: unresolved or >= `$100` -> absolute; a resolved value < `$100` with a zp form available -> zero page. Branch offsets are relative to `pc + 2`; range checks (byte, word, branch) fire at emit. An unresolved operand emits correctly-sized zero placeholders so later passes can fix it up.
 
 ## The segment / OUTPUT layout engine
 
@@ -66,10 +66,10 @@ This is what makes "assembler = linker." It lives in [src/layout.ts](src/layout.
 
 **Segments are byte-collectors.** A `Segment` is an ordered list of _items_: literal `bytes` (from instructions, `.byte`/`.word`, or `.res N` - N zero bytes), an `.org`, a `label` (resolved later), or an `emit`/`emplace` of another segment. The "current" segment (default `OUTPUT`, switched by `.segment "X"` or the shorthands `.code`/`.rodata`/`.data`/`.bss`/`.zeropage`, which upper-case into the segment name) receives content as collection walks the statements. `OUTPUT` is not special-cased - it's just the segment written to the file at the end.
 
-**Collect → render, per pass:**
+**Collect -> render, per pass:**
 
 - _Collect_ walks statements into segments, evaluating expressions and encoding instructions against the previous pass's symbol values and segment bases. Constants (`=`/`:=`) are defined here. Labels are recorded as items (their addresses aren't known yet).
-- _Render_ (`render(segments, "OUTPUT", …)`) walks the OUTPUT segment with two counters - a **location counter** (run address; set by `.org`, advanced by content/emit/emplace) and the **file length** (advanced by content/emit, _not_ by `.org`/`.emplace`, so run addresses and file offsets diverge cleanly). It recurses through `.emit "X"` (render X at the current LC, splice its bytes) and `.emplace "X"` (same, but reserve without emitting). Reaching a label item resolves it to the current LC; reaching an emit assigns that segment its **base**. Cycles in the emit graph are detected (a stack set) and reported, not followed.
+- _Render_ (`render(segments, "OUTPUT", ...)`) walks the OUTPUT segment with two counters - a **location counter** (run address; set by `.org`, advanced by content/emit/emplace) and the **file length** (advanced by content/emit, _not_ by `.org`/`.emplace`, so run addresses and file offsets diverge cleanly). It recurses through `.emit "X"` (render X at the current LC, splice its bytes) and `.emplace "X"` (same, but reserve without emitting). Reaching a label item resolves it to the current LC; reaching an emit assigns that segment its **base**. Cycles in the emit graph are detected (a stack set) and reported, not followed.
 
 **Labels resolve as `base + offset`.** A segment's labels are offsets within it; render assigns the segment a base where it's emitted, and the label's absolute address is `base + offset`. Conceptually a label is the expression `.base("SEG") + offset` - it collapses to an absolute number once an `.org` anchors the emit chain (which, for the current samples, is immediate). The reverse, "stays symbolic until anchored" (true relocation), is deferred.
 
@@ -85,11 +85,11 @@ Scoping ([src/scopes.ts](src/scopes.ts)) layers per-module scopes and one ambien
 - `.import "m"` is a **splat**: `m`'s exports become resolvable in the importer. Resolution checks the module's own scope, then its splat-imports' export sets - there is **no bare fallback to the ambient scope**.
 - `.global name` **publishes** the local `name`'s value to the ambient scope; `.global::name` **reads** it. This is the entry-point handshake: a program does `.global start`; the format module reads `.global::start`. Values flow across modules through the ambient scope one hop per pass, which the multipass absorbs.
 
-Because labels are defined during _render_ (when addresses are known) but belong to a specific module's scope, each label item carries its `moduleId`, and render defines it via `scopes.defineLocal(moduleId, …)`.
+Because labels are defined during _render_ (when addresses are known) but belong to a specific module's scope, each label item carries its `moduleId`, and render defines it via `scopes.defineLocal(moduleId, ...)`.
 
 ## Macros
 
-Macros are a static, syntactic step ([src/macros.ts](src/macros.ts)) that runs once per module _before_ the multipass - `expandMacros` is mapped over each loaded module's statements. It collects `.macro name params … .endmacro` definitions (removing them from the stream), then replaces each call - an instruction whose mnemonic names a macro - with the body.
+Macros are a static, syntactic step ([src/macros.ts](src/macros.ts)) that runs once per module _before_ the multipass - `expandMacros` is mapped over each loaded module's statements. It collects `.macro name params ... .endmacro` definitions (removing them from the stream), then replaces each call - an instruction whose mnemonic names a macro - with the body.
 
 Expansion is hygienic: the body is `structuredClone`d per call (so the template isn't mutated), params are substituted by their argument expressions, and labels _defined_ in the body (plus `:=`/`=` names) are renamed with a per-expansion suffix (`name@N`) so repeated calls don't collide - while names merely _referenced_ (a shared `print` subroutine, say) are left alone. Nested calls expand recursively under a depth cap. Because it's purely syntactic and pre-multipass, the renamed labels just become ordinary module-scoped symbols.
 
@@ -104,14 +104,14 @@ This covers what guess needs: 0- or 1-argument macros called in instruction posi
 
 ## The opcode table
 
-[src/opcodes.ts](src/opcodes.ts) is **generated and committed**: `mnemonic → { mode: byte }`, documented opcodes only. [src/generate-opcodes.ts](src/generate-opcodes.ts) (dev-only, `pnpm --filter @sfotty-pie/spasm generate:opcodes`) imports the sibling sfotty core's `NMOS_OPCODES` _source_ directly (no package dependency), inverts it, filters undocumented opcodes, asserts the inverse is faithful, and prettier-formats the output. Treat `opcodes.ts` as pure output.
+[src/opcodes.ts](src/opcodes.ts) is **generated and committed**: `mnemonic -> { mode: byte }`, documented opcodes only. [src/generate-opcodes.ts](src/generate-opcodes.ts) (dev-only, `pnpm --filter @sfotty-pie/spasm generate:opcodes`) imports the sibling sfotty core's `NMOS_OPCODES` _source_ directly (no package dependency), inverts it, filters undocumented opcodes, asserts the inverse is faithful, and prettier-formats the output. Treat `opcodes.ts` as pure output.
 
 ## What's deferred
 
 All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (roughly in priority order - **nicer diagnostics** is the highest-value next step now that there's a CLI):
 
 - **`.if`/`.elseif`/`.else`/`.endif` + `.error`** - layout-time conditionals.
-- **Segment attributes** (`.define_segment "X", type:…, executable:…`) - the kind/exec flags and their keyword-arg syntax; emit-vs-reserve is currently chosen by `.emit`/`.emplace` alone.
+- **Segment attributes** (`.define_segment "X", type:..., executable:...`) - the kind/exec flags and their keyword-arg syntax; emit-vs-reserve is currently chosen by `.emit`/`.emplace` alone.
 - **Relocation** - symbolic `.base()`/`.reloc`, and the `.base`/`.startof`/`.sizeof` builtins.
 - **Richer modules** - named/aliased/namespace imports (`name = .import`, `.import "m": a, b`), `name::sym` on a namespace, `.global X = expr` / `.global X:`, and `.export` of anything but an assignment.
 - **Richer macros** - multi-argument and operand-typed params, and exported/imported macros (today: 0- or 1-arg macros, called in instruction position).
@@ -128,7 +128,7 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (rou
 | [src/parser.ts](src/parser.ts)                     | Recursive-descent + Pratt parser; the AST, `getExpressionLocation`, `Message`/`ParseError`. |
 | [src/value.ts](src/value.ts)                       | `Value` type and `decodeStringLiteral`.                                                     |
 | [src/evaluate.ts](src/evaluate.ts)                 | Expression evaluator and `EvalEnv`.                                                         |
-| [src/encode.ts](src/encode.ts)                     | Instruction encoder: operand shape → mode → byte, zp/abs sizing, branch offsets.            |
+| [src/encode.ts](src/encode.ts)                     | Instruction encoder: operand shape -> mode -> byte, zp/abs sizing, branch offsets.          |
 | [src/opcodes.ts](src/opcodes.ts)                   | _Generated._ The documented-opcode table (`OPCODES`).                                       |
 | [src/generate-opcodes.ts](src/generate-opcodes.ts) | Dev-only generator; inverts sfotty's `NMOS_OPCODES`.                                        |
 | [src/symbols.ts](src/symbols.ts)                   | `SymbolTable`: define-once, label/constant kind, persist-across-passes, fixpoint snapshot.  |

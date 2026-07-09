@@ -173,8 +173,8 @@ export class Emulator {
 	// Wall-clock pacing is per-TV-standard (NTSC ~1.79MHz, PAL ~1.77MHz).
 	readonly #msPerScanline: number;
 
-	// The audio pipeline: per-cycle POKEY+speaker level → anti-alias filter
-	// → nearest-neighbor decimation → DC blocker → fixed-size chunks.
+	// The audio pipeline: per-cycle POKEY+speaker level -> anti-alias filter
+	// -> nearest-neighbor decimation -> DC blocker -> fixed-size chunks.
 	#audio: AudioOutput | null;
 	#filter = new AntiAliasFilter();
 	#cyclesPerSample = 0;

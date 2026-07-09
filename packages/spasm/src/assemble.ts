@@ -65,7 +65,7 @@ async function assembleProject(
 }
 
 /**
- * The synchronous core: expand macros, then run the multipass collect→render
+ * The synchronous core: expand macros, then run the multipass collect->render
  * loop over the (already loaded) modules. `priorDiagnostics` are the load/parse
  * diagnostics gathered before this point.
  */

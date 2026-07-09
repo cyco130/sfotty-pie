@@ -88,7 +88,7 @@ function TriggerButton({ host }: { host: EmulatorHost }) {
 const TOUCH_STICK: RadialStickConfig = {
 	engage: 0.25,
 	release: 0.2,
-	sectorMargin: 0.05, // radians (~2.9°)
+	sectorMargin: 0.05, // radians (~2.9 deg)
 };
 
 // Per-octant joystick direction bitmask (1 = up, 2 = down, 4 = left,

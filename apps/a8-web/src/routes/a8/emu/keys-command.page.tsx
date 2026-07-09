@@ -19,8 +19,8 @@ import { PanelFrame } from "./panel-frame.tsx";
 
 const KEYS = "/a8/emu/keys";
 
-// A modifier's form state. "off" → must be up (omitted), "on" → required down,
-// "any" → don't-care. Maps to Binding's Mod (absent | true | "any").
+// A modifier's form state. "off" -> must be up (omitted), "on" -> required down,
+// "any" -> don't-care. Maps to Binding's Mod (absent | true | "any").
 type Tri = "off" | "on" | "any";
 const MODS = ["ctrl", "shift", "alt", "meta"] as const;
 type ModName = (typeof MODS)[number];
@@ -222,7 +222,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 
 	const add = () => {
 		if (!candidate || !candTrigger) return;
-		// One trigger → one command: drop any binding already on this trigger
+		// One trigger -> one command: drop any binding already on this trigger
 		// (the reassign), then append.
 		host.updateBindings([
 			...host.keyBindings.value.filter((b) => triggerKey(b) !== candTrigger),

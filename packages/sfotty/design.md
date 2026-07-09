@@ -56,7 +56,7 @@ One special state sits above all of these: `DECODE` (`0x800`), the shared opcode
 
 ### Cycle numbering
 
-In the generated names, `decode` is **cycle 0**, so `code[i]` is cycle `i + 1`. For example BNE's `code[0]` is `bne_rel_1`. The state encoding still indexes by the raw `code[]` position (`code[0]` → `(opcode << 3) | 0`); only the human-facing name is shifted by one so the fetch counts as cycle 0.
+In the generated names, `decode` is **cycle 0**, so `code[i]` is cycle `i + 1`. For example BNE's `code[0]` is `bne_rel_1`. The state encoding still indexes by the raw `code[]` position (`code[0]` -> `(opcode << 3) | 0`); only the human-facing name is shifted by one so the fetch counts as cycle 0.
 
 ## Anatomy of a step function
 
@@ -121,7 +121,7 @@ The `RDY` input (a public boolean on `Sfotty`, default `true`) models the NMOS r
 
 This is encoded in the bus-read micro-ops themselves. Each read op issues its read through the `#read` choke point, then checks `RDY`: if low it returns `false` _without_ mutating any register or latch; otherwise it commits (stores `DR`, bumps pointers) and returns `true`. The read happens before the `RDY` check, so the bus still sees the read every stalled cycle. The generator emits the bus op of a read cycle as `if (!cpu.opReadX()) return;`, so a stalled read bails before any internal op runs and before `state` advances - the next `run()` re-enters the same step and re-reads, until `RDY` rises and the cycle completes (its read being the consumed one). Write ops (`opWriteAddr`/`opWriteAddrDec`) never consult `RDY` and return void, so write cycles always finish. `opReadDecode` is the one read that owns its own `state` transition, so it returns `false` on a stall and simply doesn't advance.
 
-An earlier design threw a `NOT_READY` symbol from `#read` and caught it in `run()`, reusing the trap-unwind invariant. It was correct but ~15× slower per stalled cycle (a `WSYNC` kernel stalls most of every scanline), so the boolean short-circuit replaced it; stalled cycles now cost about the same as running ones. The stall path is covered by [src/sfotty.test.ts](src/sfotty.test.ts).
+An earlier design threw a `NOT_READY` symbol from `#read` and caught it in `run()`, reusing the trap-unwind invariant. It was correct but ~15x slower per stalled cycle (a `WSYNC` kernel stalls most of every scanline), so the boolean short-circuit replaced it; stalled cycles now cost about the same as running ones. The stall path is covered by [src/sfotty.test.ts](src/sfotty.test.ts).
 
 ## The reset sequence
 
@@ -133,9 +133,9 @@ It is a _dedicated_ sequence rather than a BRK variant: BRK would need runtime c
 
 The host drives two input lines, public booleans on `Sfotty` in positive logic (`true` = asserted): `IRQ` (level-sensitive, honored while the I flag is clear) and `NMI` (edge-triggered). Multiple sources must be wired-OR'd by the host into each single boolean.
 
-Recognition is a three-stage pipeline with a deliberate one-cycle delay, so an interrupt is taken based on the line state **two cycles before** the decode that services it - matching the hardware, where the poll reads edge/level detectors that lag the pins by half a cycle (we round that up to a whole cycle, since we don't model φ1/φ2):
+Recognition is a three-stage pipeline with a deliberate one-cycle delay, so an interrupt is taken based on the line state **two cycles before** the decode that services it - matching the hardware, where the poll reads edge/level detectors that lag the pins by half a cycle (we round that up to a whole cycle, since we don't model phi1/phi2):
 
-1. **Detect** - at the _end_ of every `run()`, `#nmiPending` latches on a false→true `NMI` edge (`#nmiPrev` tracks the line), and `#interruptDetected = #nmiPending || (IRQ && !iFlag)` is recomputed. Because this runs after the step, anything reading `#interruptDetected` during a step sees the _previous_ cycle's value - that's the one-cycle delay, for free.
+1. **Detect** - at the _end_ of every `run()`, `#nmiPending` latches on a false->true `NMI` edge (`#nmiPrev` tracks the line), and `#interruptDetected = #nmiPending || (IRQ && !iFlag)` is recomputed. Because this runs after the step, anything reading `#interruptDetected` during a step sees the _previous_ cycle's value - that's the one-cycle delay, for free.
 2. **Poll** - `opPoll` latches `#interruptDetected` into `#interruptPending`. The generator injects it (as a synthetic `poll` token) on every cycle that can end an instruction - terminal cycles, a branch's `cond?` cycle, an indexed read's `?` cycle - **except** BRK (the sequence never polls) and a taken branch's `pc+=dr?` (PCL-add) cycle. It sits right after the bus op, before any I-flag write, and overwrites rather than accumulates (so a later poll in the same instruction, e.g. a branch's fix-up cycle, wins).
 3. **Recognize** - `decode` (`opReadDecode`) checks `#interruptPending`. If set it does a dummy opcode fetch (PC _not_ advanced), clears the flag, sets `bFlag = false`, and forces `state = 0` - the BRK microcode - instead of dispatching the fetched opcode.
 
@@ -147,7 +147,7 @@ The IRQ/NMI sequence is the **BRK microcode reused** (RESET is separate - see ab
 
 What falls out, with no per-instruction special-casing: the two-cycles-before timing; the one-instruction `CLI`/`SEI`/`PLP` delay (the poll reads the pre-write I via `#interruptDetected`) versus immediate `RTI` (which writes I mid-sequence); the taken-non-crossing-branch delay (that cycle doesn't poll); NMI hijacking; and a too-short NMI at the push-P cycle being lost. These behaviors are tested in [src/interrupts.test.ts](src/interrupts.test.ts) (stack-frame and landing-vector observables); none are covered by the single-step tests (no async IRQ/NMI in those vectors).
 
-**Deferred / approximate.** We're cycle-exact, not φ-exact, so the _precise_ hijack window and the exact lost/caught boundary are modeled to a whole-cycle grid and still want confirmation against a Visual6502 trace.
+**Deferred / approximate.** We're cycle-exact, not phi-exact, so the _precise_ hijack window and the exact lost/caught boundary are modeled to a whole-cycle grid and still want confirmation against a Visual6502 trace.
 
 ## Relative state transitions (and why dedup falls out)
 
@@ -177,8 +177,8 @@ The NMOS decimal-mode flag quirks and the unstable opcodes (the `ANE`/`LXA` "mag
 
 Two generators produce two committed files. Regenerate after editing a generator:
 
-- [src/generate-instructions.ts](src/generate-instructions.ts) → [src/nmos-instructions.generated.ts](src/nmos-instructions.generated.ts). `pnpm --filter @sfotty-pie/sfotty generate:instructions`. Reads the hand-authored opcode table in [src/nmos-opcodes.ts](src/nmos-opcodes.ts); this is where the per-instruction microcode (the `code[]` arrays) is authored/derived.
-- [src/generate-steps.ts](src/generate-steps.ts) → [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts). `pnpm --filter @sfotty-pie/sfotty generate:steps`. Compiles the microcode data into step functions and the `MICROCODE` table. It also **validates** that every token is known, throwing with the offending opcode/cycle/token if `nmos-instructions.generated.ts` ever references one the emitter doesn't handle.
+- [src/generate-instructions.ts](src/generate-instructions.ts) -> [src/nmos-instructions.generated.ts](src/nmos-instructions.generated.ts). `pnpm --filter @sfotty-pie/sfotty generate:instructions`. Reads the hand-authored opcode table in [src/nmos-opcodes.ts](src/nmos-opcodes.ts); this is where the per-instruction microcode (the `code[]` arrays) is authored/derived.
+- [src/generate-steps.ts](src/generate-steps.ts) -> [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts). `pnpm --filter @sfotty-pie/sfotty generate:steps`. Compiles the microcode data into step functions and the `MICROCODE` table. It also **validates** that every token is known, throwing with the offending opcode/cycle/token if `nmos-instructions.generated.ts` ever references one the emitter doesn't handle.
 
 The generated files are marked twice over: the `.generated.ts` suffix and a "do not edit by hand" header (a root `.gitattributes` also flags `*.generated.ts` as `linguist-generated`, so GitHub collapses them in diffs). To change behavior, edit the generators (or the opcode table in `nmos-opcodes.ts`) and regenerate - never the output files.
 
@@ -197,7 +197,7 @@ The repo-level `pnpm test` (vitest + typecheck + lint + publint) is separate and
 | [src/microcode.ts](src/microcode.ts)                                     | Core types (`Step`, `Instruction`, `BusOp`, `InternalOp`) and the `DECODE` constant. The microcode vocabulary. |
 | [src/nmos-instructions.generated.ts](src/nmos-instructions.generated.ts) | _Generated._ The 256 instructions as microcode data (`NMOS_INSTRUCTIONS`).                                     |
 | [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts)               | _Generated._ Step functions and the `MICROCODE` dispatch table.                                                |
-| [src/generate-steps.ts](src/generate-steps.ts)                           | Compiles `nmos-instructions.generated.ts` → `nmos-steps.generated.ts`; token→method mapping and `emitBody`.    |
+| [src/generate-steps.ts](src/generate-steps.ts)                           | Compiles `nmos-instructions.generated.ts` -> `nmos-steps.generated.ts`; token->method mapping and `emitBody`.  |
 | [src/generate-instructions.ts](src/generate-instructions.ts)             | Generates `nmos-instructions.generated.ts` from the hand-authored `nmos-opcodes.ts`.                           |
 | [src/bus.ts](src/bus.ts)                                                 | The `Memory` bus contract and `ReadOptions`.                                                                   |
 | [src/disasm.ts](src/disasm.ts)                                           | Disassembler and trace formatting (`disassemble`, `traceLine`).                                                |

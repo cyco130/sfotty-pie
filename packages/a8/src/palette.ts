@@ -1,5 +1,5 @@
 /**
- * GTIA palette generation: 16 hues × 16 luminances → little-endian RGBA words
+ * GTIA palette generation: 16 hues x 16 luminances -> little-endian RGBA words
  * (`0xAABBGGRR`) for writing through a Uint32 view of canvas ImageData, or for
  * unpacking per channel (`r = w & 0xff`, `g = (w >>> 8) & 0xff`, `b = (w >>> 16)
  * & 0xff`) when encoding an image.
@@ -16,15 +16,15 @@
  * fixed by the display (the tint control), not the pot.
  *
  * NTSC steps the phase uniformly from the burst and decodes as YIQ (burst at
- * −57° from I; see the Altirra Hardware Reference's analog video appendix).
+ * -57 deg from I; see the Altirra Hardware Reference's analog video appendix).
  *
  * PAL decodes as YUV. Its generator is structurally different (AHRM appendix
- * D.4): a fixed 180° inverter covers the second half of the hue wheel, the
- * delay line spans ~180° in ideally-22.5° taps, and two tap positions are
+ * D.4): a fixed 180 deg inverter covers the second half of the hue wheel, the
+ * delay line spans ~180 deg in ideally-22.5 deg taps, and two tap positions are
  * skipped - producing the characteristic gaps between hues 6/7 and 10/11.
  * Fitting those facts to the ideal per-hue angle table gives an exact
- * decomposition: hue h sits at `hue1 − tap(h)·step − inverter(h)·180°` with
- * the tap/inverter sequences below; at the ideal 22.5° step this reproduces
+ * decomposition: hue h sits at `hue1 - tap(h) * step - inverter(h) * 180 deg` with
+ * the tap/inverter sequences below; at the ideal 22.5 deg step this reproduces
  * the classic table (and hue 15 lands back on hue 1, as on real hardware).
  * The line-to-line details (swinging-burst deviation at non-ideal pot
  * settings, the per-polarity inverter windows that make hues 3 and 10 stripe
@@ -37,11 +37,11 @@
  */
 export interface PaletteOptions {
 	/** Hue 1's chroma angle in degrees - the colour-burst reference, i.e. the
-	 *  display's tint control. NTSC: in I-Q space (default 303 ≈ −57° from I).
+	 *  display's tint control. NTSC: in I-Q space (default 303 ~ -57 deg from I).
 	 *  PAL: in U-V space (default 135, the even-line burst). */
 	hue1Angle?: number;
 	/** Degrees of chroma phase per generator delay tap - the colour-adjust
-	 *  trim pot. NTSC default 360/14 ≈ 25.71 (the Field Service Manual
+	 *  trim pot. NTSC default 360/14 ~ 25.71 (the Field Service Manual
 	 *  calibration: background hue 1 matched against border hue 15, closing
 	 *  the wheel); PAL ideal (and default) 22.5, with real machines commonly
 	 *  adjusted to ~18-19 for a bluer GR.0. */
@@ -52,7 +52,7 @@ export interface PaletteOptions {
 	 *  per-machine preset material). No PAL measurement is published; PAL
 	 *  matches the XL/XE value pending one. */
 	saturation?: number;
-	/** Luma offset added after contrast (−1..1); default 0. */
+	/** Luma offset added after contrast (-1..1); default 0. */
 	brightness?: number;
 	/** Luma scale about mid-grey; default 1. */
 	contrast?: number;
@@ -64,7 +64,7 @@ export interface PaletteOptions {
 	 *  "ntsc1953" corrects from the original FCC primaries + Illuminant C
 	 *  white (the AHRM's demonstrated fix: less purple $94, less green
 	 *  everywhere); "smpteC" from the phosphors real 70s-80s US sets had
-	 *  (milder); "ebu" from PAL's official primaries (≈ identity vs sRGB). */
+	 *  (milder); "ebu" from PAL's official primaries (~ identity vs sRGB). */
 	primaries?: PalettePrimaries;
 	/** The color space of the palette words. "display-p3" targets a wide-
 	 *  gamut canvas: sRGB-defined colors come out looking identical, while
@@ -78,7 +78,7 @@ export type OutputGamut = "srgb" | "display-p3";
 interface ResolvedOptions extends Required<PaletteOptions> {
 	/** The chroma phase for a hue (1-15), in degrees. */
 	angleFor: (hue: number, options: Required<PaletteOptions>) => number;
-	/** Chroma → RGB matrix: rows are R/G/B, columns the two chroma axes. */
+	/** Chroma -> RGB matrix: rows are R/G/B, columns the two chroma axes. */
 	matrix: readonly [
 		readonly [number, number],
 		readonly [number, number],
@@ -86,8 +86,8 @@ interface ResolvedOptions extends Required<PaletteOptions> {
 	];
 }
 
-// NTSC: YIQ decode; uniform steps from the burst-locked hue 1. Burst 303°
-// (≈ −57° from I, the calibrated-display convention); step 360/14 - the
+// NTSC: YIQ decode; uniform steps from the burst-locked hue 1. Burst 303 deg
+// (~ -57 deg from I, the calibrated-display convention); step 360/14 - the
 // Field Service Manual pot calibration, which matches hue 15 to hue 1.
 const NTSC_DEFAULTS = {
 	hue1Angle: 303,
@@ -108,7 +108,7 @@ const NTSC_DEFAULTS = {
 } as const satisfies ResolvedOptions;
 
 // PAL: YUV decode (U = B-Y, V = R-Y). Generator structure per the module
-// comment: delay-tap counts and the fixed-180° inverter per hue (1-15), with
+// comment: delay-tap counts and the fixed-180 deg inverter per hue (1-15), with
 // the skipped taps (6 in the first half, 3 in the second) producing the
 // hue 6/7 and 10/11 gaps. Hue 15 shares hue 1's tap - the AHRM notes they
 // are identical *regardless* of the pot (14 unique hues), which pins it to
@@ -138,10 +138,10 @@ const PAL_DEFAULTS = {
 //
 // Decoded RGB is defined against some set of phosphor primaries; showing it
 // on a display with different primaries needs a linear-light conversion:
-// source RGB → XYZ, Bradford-adapt the white point, XYZ → target RGB. The
+// source RGB -> XYZ, Bradford-adapt the white point, XYZ -> target RGB. The
 // matrices are derived from the published chromaticities below (nothing
 // hardcoded from folklore). Per the AHRM, the transfer curves involved are
-// all ≈ gamma 2.2 (NTSC 2.2, sRGB ≈ 2.2, Display P3 = sRGB curve), so the
+// all ~ gamma 2.2 (NTSC 2.2, sRGB ~ 2.2, Display P3 = sRGB curve), so the
 // conversion linearizes and re-encodes with 2.2 and lets the matrix carry
 // the correction. Greys are exactly preserved by construction: the source
 // white maps to the target white.
@@ -217,11 +217,11 @@ function invert(m: Mat3): Mat3 {
 	];
 }
 
-// xy chromaticity → XYZ with Y = 1.
+// xy chromaticity -> XYZ with Y = 1.
 const xyToXyz = ([x, y]: readonly [number, number]) =>
 	[x / y, 1, (1 - x - y) / y] as [number, number, number];
 
-// RGB (in the given primaries) → XYZ: primary XYZ columns scaled so that
+// RGB (in the given primaries) -> XYZ: primary XYZ columns scaled so that
 // RGB (1,1,1) lands on the white point.
 function rgbToXyz(c: Chromaticities): Mat3 {
 	const r = xyToXyz(c.r);
@@ -280,7 +280,7 @@ function buildPalette(
 	const palette = new Uint32Array(256);
 	const invGamma = 1 / o.gamma;
 
-	// The primaries correction (identity → skipped, keeping the historic
+	// The primaries correction (identity -> skipped, keeping the historic
 	// output byte-exact). sRGB source with a P3 canvas still converts, so
 	// uncorrected colors look identical rather than oversaturated.
 	const correction =

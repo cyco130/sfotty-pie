@@ -47,7 +47,7 @@ class Parser {
 
 				// Try to recover by ignoring everything until newline or EOF.
 				// The cast defeats TS narrowing `#token.type` to exclude "eof" (from
-				// the outer `while (… !== "eof")`); recovery can reach eof at a final
+				// the outer `while (... !== "eof")`); recovery can reach eof at a final
 				// statement with no trailing newline.
 				while (
 					this.#token.type !== "newline" &&

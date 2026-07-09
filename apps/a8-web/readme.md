@@ -71,7 +71,7 @@ The app's own code is MIT, like the rest of Sfotty Pie.
 The firmware committed under `library/` keeps its own license - it's data the emulator loads, not part of the MIT code:
 
 - **AltirraOS** and **Altirra BASIC** by Avery Lee - FSF all-permissive.
-- **Atari++ OS** and **Atari++ BASIC** by Thomas Richter - Thor Public License (≈ MPL 1.1); the corresponding source is bundled.
+- **Atari++ OS** and **Atari++ BASIC** by Thomas Richter - Thor Public License (~ MPL 1.1); the corresponding source is bundled.
 
 The full notices and the Atari++ source are served from `/legal/` (see [`public/legal/THIRD-PARTY-LICENSES.md`](public/legal/THIRD-PARTY-LICENSES.md)) and linked from the in-app About panel. Anything you add under `library.local/` is your responsibility: the original Atari OS/BASIC and most game ROMs are copyrighted - supply your own.
 

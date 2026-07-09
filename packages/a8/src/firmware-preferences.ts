@@ -8,7 +8,7 @@ export interface FirmwareContext {
 }
 
 // OS firmware, best-first. The emulated machines (800 NTSC/PAL, and 800XL/130XE
-// → the shared XL/XE list) and the not-yet-emulated 1200XL/XEGS each rank toward
+// -> the shared XL/XE list) and the not-yet-emulated 1200XL/XEGS each rank toward
 // their own native ROMs first, then the rest of the XL/XE-class OSes (which all
 // run with some missing functionality).
 //

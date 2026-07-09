@@ -33,7 +33,7 @@ export default [
 		// level Preact's compat targets so the version-gated rules behave.
 		settings: { react: { version: "19.0" } },
 		rules: {
-			// Preact's JSX is HTML-style (class, for, spellcheck, …), which
+			// Preact's JSX is HTML-style (class, for, spellcheck, ...), which
 			// its own TypeScript types already validate. eslint-plugin-react's
 			// no-unknown-property only knows React's camelCase DOM props, so it
 			// false-positives on every Preact attribute - turn it off here.

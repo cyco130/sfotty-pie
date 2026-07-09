@@ -91,7 +91,7 @@ export class Headless {
 		const cpu = this.#machine.cpu;
 		let cycles = 0;
 		while (cycles < this.#limit) {
-			if (!(await this.#advanceCycle())) break; // input closed → session over
+			if (!(await this.#advanceCycle())) break; // input closed -> session over
 			cycles++;
 			if (this.#done || cpu.crashed) break;
 		}
@@ -142,7 +142,7 @@ export class Headless {
 			if (!armed) return undefined;
 			armed = false;
 			if (index >= this.#keys.length) {
-				this.#done = true; // script exhausted → end the session
+				this.#done = true; // script exhausted -> end the session
 				return undefined;
 			}
 			return this.#keys[index++];
@@ -164,7 +164,7 @@ export class Headless {
 		const byte = this.#input?.read();
 		if (byte === undefined) throw NEED_INPUT;
 		const cpu = this.#machine.cpu;
-		cpu.A = byte === 0x0a ? 0x9b : byte; // newline → ATASCII EOL
+		cpu.A = byte === 0x0a ? 0x9b : byte; // newline -> ATASCII EOL
 		cpu.Y = 0x01; // IOCB status: success
 		cpu.nFlag = false;
 		cpu.zFlag = false;

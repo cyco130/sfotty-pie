@@ -95,9 +95,9 @@ const baseline = JSON.parse(readFileSync(BASELINE, "utf8")) as Record<
 
 const problems: string[] = [];
 for (const [name, status] of Object.entries(results)) {
-	if (!(name in baseline)) problems.push(`new test "${name}" → ${status}`);
+	if (!(name in baseline)) problems.push(`new test "${name}" -> ${status}`);
 	else if (baseline[name] !== status)
-		problems.push(`"${name}": ${baseline[name]} → ${status}`);
+		problems.push(`"${name}": ${baseline[name]} -> ${status}`);
 }
 for (const name of Object.keys(baseline)) {
 	if (!(name in results))

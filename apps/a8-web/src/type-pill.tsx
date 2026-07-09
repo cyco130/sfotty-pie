@@ -2,7 +2,7 @@ import type { ImageType } from "./images/metadata.ts";
 import { messages } from "./messages.ts";
 
 // Per-type pill: a three-letter format code - monospace so they align into a
-// column - tinted by kind. disk → atr, cart → car, xex → xex, os → rom. Shared
+// column - tinted by kind. disk -> atr, cart -> car, xex -> xex, os -> rom. Shared
 // by the recents menu and the library view.
 const TYPE_PILL: Record<ImageType, { code: string; tint: string }> = {
 	disk: { code: "atr", tint: "bg-sky-100 text-sky-700" },

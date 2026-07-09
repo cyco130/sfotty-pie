@@ -6,13 +6,13 @@ import {
 // Canonicalization: turn an arbitrary image file into one or more canonical
 // images, deriving their content facts. The canonical form per kind:
 //
-//   cartridge  →  `.car` (16-byte CART header + ROM) - a raw `.rom`/`.bin`
+//   cartridge  ->  `.car` (16-byte CART header + ROM) - a raw `.rom`/`.bin`
 //                 gets the header prepended; the mapper/type lives in the
 //                 header, so it becomes part of the content identity.
-//   OS / XEX   →  the raw bytes (no container).
-//   combined   →  split: an XEGS 32K dump becomes a game cart, a BASIC cart,
+//   OS / XEX   ->  the raw bytes (no container).
+//   combined   ->  split: an XEGS 32K dump becomes a game cart, a BASIC cart,
 //                 and the OS, each canonicalized independently.
-//   disk       →  passthrough for now (ATR container-stripping is deferred).
+//   disk       ->  passthrough for now (ATR container-stripping is deferred).
 //
 // Every piece reports the SOURCE byte range `[from, to)` and the `header` it
 // prepends, so a build can keep the bundled file untouched and reconstruct the
@@ -141,7 +141,7 @@ function carPiece(source: Uint8Array): CanonicalPiece {
 function diskPiece(source: Uint8Array): CanonicalPiece {
 	const sectorSize =
 		((source[4] ?? 0) | ((source[5] ?? 0) << 8)) === 256 ? 256 : 128;
-	// Paragraph (16-byte) count → total image bytes.
+	// Paragraph (16-byte) count -> total image bytes.
 	const paragraphs =
 		(source[2] ?? 0) | ((source[3] ?? 0) << 8) | ((source[6] ?? 0) << 16);
 	const dataBytes = paragraphs * 16;

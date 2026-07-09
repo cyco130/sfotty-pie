@@ -8,7 +8,7 @@ import { useContext, useEffect } from "preact/hooks";
  * document from an effect; during the build-time prerender pass it hands the
  * data up through {@link HeadCollector} so prerender.tsx can serialize it into
  * the static `<head>`. `title` also drives `og:title` and `description` drives
- * `og:description`; the constant OG/Twitter tags (og:image, og:site_name, …)
+ * `og:description`; the constant OG/Twitter tags (og:image, og:site_name, ...)
  * live statically in index.html.
  */
 export interface HeadProps {
@@ -47,7 +47,7 @@ export function useHead(head: HeadProps): void {
 
 /**
  * Render-nothing wrapper around {@link useHead} so `.mdx` (and `.tsx`) pages can
- * declare their head as JSX: `<Head title="…" description="…" />`.
+ * declare their head as JSX: `<Head title="..." description="..." />`.
  */
 export function Head(head: HeadProps): null {
 	useHead(head);

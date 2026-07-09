@@ -146,7 +146,7 @@ test("reset clears registers, IRQs, and strobes - but not the pins", () => {
 type Vector = [number, number, number, number, number, number];
 
 const TESTVEC_B: Vector[] = [
-	// A $34→$3C transition sets the pending flag, which turns into IRQB2 on
+	// A $34->$3C transition sets the pending flag, which turns into IRQB2 on
 	// entering input mode; the choice of input mode doesn't matter.
 	[0x34, 0x3c, 0x3c, 0x04, 0x44, 0],
 	[0x34, 0x3c, 0x3c, 0x0c, 0x4c, 1],

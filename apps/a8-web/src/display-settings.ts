@@ -1,20 +1,20 @@
 // Per-TV-standard display settings. The machine always renders the full
-// 376×240 frame (games draw into overscan); overscan is a display-side crop,
+// 376x240 frame (games draw into overscan); overscan is a display-side crop,
 // and the correct amounts genuinely differ per standard - 80s NTSC sets
 // showed ~204-216 lines while PAL sets showed all 240 and then some. More
 // settings (palette generation parameters, frame frameBlending) join this
 // record over time; the eventual settings page is tabbed per standard.
 //
-// Horizontal positions are in absolute hi-res pixels (GTIA color clocks × 2):
+// Horizontal positions are in absolute hi-res pixels (GTIA color clocks x 2):
 // the standard playfield spans 96..415, so "no overscan" (320) is exactly
 // that, and wider crops add equal border per side. The frame buffer's first
-// pixel is at absolute position 68 - buffer cycle x = hpos − 15 emits color
-// clocks (hpos + 2)·2 (see antic-gtia.ts). Vertically the anchors are
+// pixel is at absolute position 68 - buffer cycle x = hpos - 15 emits color
+// clocks (hpos + 2) * 2 (see antic-gtia.ts). Vertically the anchors are
 // vcount: the buffer holds vcount 8..247 and the standard display (24 blank
 // lines after VBLANK + 192 picture lines) occupies vcount 32..223, centre
 // 128.
 //
-// The crop is capped at the rendered frame (376×240). Atari genuinely can't
+// The crop is capped at the rendered frame (376x240). Atari genuinely can't
 // draw wider; taller exists via the ANTIC last-line bug (full 262/312 lines,
 // vsync-override), so an "Extended" view may one day require a taller frame
 // buffer - deliberately not modeled yet.
@@ -88,16 +88,16 @@ export const PALETTE_PRESETS: Record<
 > = {
 	// Both NTSC presets use the Field Service Manual pot calibration (set the
 	// background to hue 1 and the border to hue 15, adjust until they match -
-	// closing the wheel exactly at 360/14° per step; the guide's hue-1-vs-15
+	// closing the wheel exactly at 360/14 deg per step; the guide's hue-1-vs-15
 	// row replicates the procedure) and differ only in tint, the display's
 	// knob.
 	ntsc: {
 		// The default: a period display's tint, per Atari's own Field Repair
 		// manual - "For Hue/Phase/Color Balance TV/monitor setting correct
-		// with Phase −33", i.e. hue 1 at −33° from I (327). The same angle the
+		// with Phase -33", i.e. hue 1 at -33 deg from I (327). The same angle the
 		// AHRM documents for the Commodore 1702, and consistent with AtariAge
 		// research that NTSC games were developed on sets with a more reddish
-		// hue 1 than a calibrated modern display's −57°.
+		// hue 1 than a calibrated modern display's -57 deg.
 		vintage: {
 			hue1Angle: 327,
 			hueStep: 360 / 14,
@@ -107,7 +107,7 @@ export const PALETTE_PRESETS: Record<
 			gamma: 1,
 			primaries: "smpteC",
 		},
-		// A calibrated modern display: hue 1 at the specified −57° (303).
+		// A calibrated modern display: hue 1 at the specified -57 deg (303).
 		modern: {
 			hue1Angle: 303,
 			hueStep: 360 / 14,
@@ -119,9 +119,9 @@ export const PALETTE_PRESETS: Record<
 		},
 		// The other camp in the perennial hue-1-vs-15 forum debate: the CGIA
 		// manual (among others) insists all 15 hues are distinct, implying
-		// equal spacing over the wheel - 360/15 = 24°/step, leaving hue 15 one
+		// equal spacing over the wheel - 360/15 = 24 deg/step, leaving hue 15 one
 		// step shy of hue 1 instead of matching it. Tint 340 keeps GR.0's
-		// blue where Vintage puts it (hue 9 ≈ 172°).
+		// blue where Vintage puts it (hue 9 ~ 172 deg).
 		hues15: {
 			hue1Angle: 340,
 			hueStep: 24,
@@ -133,7 +133,7 @@ export const PALETTE_PRESETS: Record<
 		},
 	},
 	pal: {
-		// The default: the ideal 22.5°/tap pot (sea-green GR.0).
+		// The default: the ideal 22.5 deg/tap pot (sea-green GR.0).
 		calibrated: {
 			hue1Angle: 135,
 			hueStep: 22.5,
@@ -147,7 +147,7 @@ export const PALETTE_PRESETS: Record<
 		// GR.0 the name refers to): least-squares fit of the PAL generator's
 		// parameters against the NTSC vintage palette (linearized-RGB distance
 		// over all 256 entries). A reasonable match throughout - the tint
-		// lands +19° of the PAL default, echoing vintage NTSC's +24° of
+		// lands +19 deg of the PAL default, echoing vintage NTSC's +24 deg of
 		// modern - except hue 11, which sits on the PAL wheel's structural
 		// 10/11 gap and can't be bent onto NTSC's uniform wheel by any
 		// parameter choice.
@@ -164,7 +164,7 @@ export const PALETTE_PRESETS: Record<
 };
 
 /**
- * Named overscan presets per standard. Normal is 336×224 on both: it's what
+ * Named overscan presets per standard. Normal is 336x224 on both: it's what
  * games assume (International Karate assumes ~220; tighter crops clip it),
  * matches Altirra's NTSC default, and matches broadcast action-safe practice
  * (BBC: 3.5% per side vertically). PAL sets did show all 240 lines and then

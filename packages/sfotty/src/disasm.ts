@@ -9,7 +9,7 @@ interface Entry {
 	mode: string;
 }
 
-// Opcode → mnemonic/mode, indexed by opcode for O(1) lookup.
+// Opcode -> mnemonic/mode, indexed by opcode for O(1) lookup.
 const TABLE: Entry[] = [];
 for (const inst of NMOS_INSTRUCTIONS) {
 	TABLE[inst.opcode] = { mnemonic: inst.mnemonic, mode: inst.mode };

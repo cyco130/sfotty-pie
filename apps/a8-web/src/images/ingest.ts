@@ -1,5 +1,5 @@
 // The signal-free ingest core: turn file bytes into stored library entries
-// (canonicalize → hash → blob + metadata write). Kept apart from the reactive
+// (canonicalize -> hash -> blob + metadata write). Kept apart from the reactive
 // library facade so it can run unchanged inside the import worker - it touches
 // only IndexedDB, crypto, and CompressionStream, all available off the main
 // thread. Each JS context (main thread, worker) opens its own blob handle to the

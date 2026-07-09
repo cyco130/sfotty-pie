@@ -19,7 +19,7 @@ import { messages } from "./messages.ts";
 
 // A palette word (0xAABBGGRR) as a CSS color - in the same color space the
 // palette was generated for, so the guide matches the machine canvas exactly
-// (CSS `color(display-p3 …)` with the same component values IS the same
+// (CSS `color(display-p3 ...)` with the same component values IS the same
 // color as P3 ImageData).
 function cssColor(palette: Uint32Array, wide: boolean) {
 	return (index: number): string => {
@@ -136,7 +136,7 @@ function GuideRow({
  * The visual guide: swatch rows generated from the edited standard's palette
  * parameters, so tuning previews here even when the machine runs the other
  * standard. The GR.0 sample uses the OS default colors (background/border
- * from PF2 $94, text = PF2's hue at PF1's luminance → $9A); the hue-1/15 row
+ * from PF2 $94, text = PF2's hue at PF1's luminance -> $9A); the hue-1/15 row
  * shows NTSC's pot-dependent wheel wrap (on PAL the generator pins 15 to 1).
  */
 function Guide({

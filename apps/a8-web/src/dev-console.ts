@@ -91,7 +91,7 @@ const images = {
 	sha256: sha256Hex,
 	// The built-in firmware manifest (with precomputed canonical hash + kind).
 	builtin: builtinFirmware,
-	// The unified library (built-ins ∪ user uploads) and its operations.
+	// The unified library (built-ins + user uploads) and its operations.
 	//   await a8.images.library.ready()
 	//   const f = await a8.images.pick(); await a8.images.library.add(f.bytes, f.name)
 	//   a8.images.library.entries.value
@@ -149,7 +149,7 @@ const images = {
 // listeners only read `.gamepad`, so a real GamepadEvent isn't needed).
 // Deliberately scrambled layout: fire on raw button 5, directions on an
 // SDL-style stepped hat at axis 3 (resting at the out-of-range 9/7 sentinel),
-// and axis 2 idling at −1 like an unpressed analog trigger.
+// and axis 2 idling at -1 like an unpressed analog trigger.
 
 const FAKE_ID = "Fake Retro Stick (a8 dev console)";
 const hatValue = (position: number) => -1 + (2 * position) / 7;
@@ -211,7 +211,7 @@ const fakePad = {
 		fakePadEvent("gamepadconnected", fake);
 		console.log(
 			"fake pad connected - fire: a8.fakePad.press(5) / release(5); " +
-				"directions: a8.fakePad.hat('up' | 'upright' | … | 'center')",
+				"directions: a8.fakePad.hat('up' | 'upright' | ... | 'center')",
 		);
 	},
 	disconnect(): void {
@@ -264,7 +264,7 @@ async function calibratePad(host: EmulatorHost, index?: number): Promise<void> {
 	const id = first.id;
 	const at = first.index;
 
-	console.log(`calibrating "${id}" - leave it alone…`);
+	console.log(`calibrating "${id}" - leave it alone...`);
 	for (let i = 0; i < 45; i++) await frame(); // let it settle
 	const rest = samplePad(padNow()!);
 	const samples: CalibrationSet = { rest };
@@ -309,7 +309,7 @@ async function calibratePad(host: EmulatorHost, index?: number): Promise<void> {
  * Install `window.a8`: a poor-man's monitor for the browser console - live
  * machine/cpu access, peek/poke, a disassembler, and the CPU/command traces.
  *
- *   a8.trace.cpu(true); …reproduce…; a8.trace.dump(300)
+ *   a8.trace.cpu(true); ...reproduce...; a8.trace.dump(300)
  *   a8.peek(0x0244)        a8.disasm(a8.cpu.PC)
  */
 export function installDevConsole(host: EmulatorHost): void {
@@ -353,7 +353,7 @@ export function installDevConsole(host: EmulatorHost): void {
 			cpu: (enabled: boolean) => host.setCpuTrace(enabled),
 			commands: (enabled: boolean) => setCommandTrace(enabled),
 			clear: () => host.clearCpuTrace(),
-			// No count → the whole capture (after a reset, the captured boot).
+			// No count -> the whole capture (after a reset, the captured boot).
 			dump: (count?: number) =>
 				console.log(host.dumpCpuTrace(count).join("\n")),
 		},
@@ -408,7 +408,7 @@ export function installDevConsole(host: EmulatorHost): void {
 			};
 		},
 		// Adjust the running standard's overscan crop (persisted; sanitized to
-		// 320-376 × 192-240, even). No args just reports the current setting.
+		// 320-376 x 192-240, even). No args just reports the current setting.
 		overscan: (width?: number, height?: number) => {
 			const tv = host.config.peek().tv;
 			if (width !== undefined && height !== undefined) {

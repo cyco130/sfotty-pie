@@ -12,8 +12,8 @@ import type { FirmwareKey, ImageKind } from "@sfotty-pie/a8";
 
 /**
  * Content-derived facts, recomputed from the bytes - the package's
- * canonicalization result reused verbatim (`os`→`sizeClass`, `cart`→`cartType`,
- * `disk`→`sectorSize`/`sectors`, `xex`).
+ * canonicalization result reused verbatim (`os`->`sizeClass`, `cart`->`cartType`,
+ * `disk`->`sectorSize`/`sectors`, `xex`).
  */
 export type DerivedMeta = ImageKind;
 

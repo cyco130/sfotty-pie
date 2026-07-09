@@ -48,7 +48,7 @@ test("arrows split by modifier: joystick / cursor", () => {
 	expect(resolve({ code: "ArrowUp", ctrl: true })).toBe("PRESS_CONTROL_MINUS");
 });
 
-test("nav keys → 1200XL F1-F4 with inverted Shift (universal)", () => {
+test("nav keys -> 1200XL F1-F4 with inverted Shift (universal)", () => {
 	// Plain nav key gives the Atari Shift+Fn (its meaning); host Shift inverts it.
 	expect(resolve({ code: "PageUp" })).toBe("PRESS_SHIFT_F1");
 	expect(resolve({ code: "PageUp", shift: true })).toBe("PRESS_F1");
@@ -60,7 +60,7 @@ test("nav keys → 1200XL F1-F4 with inverted Shift (universal)", () => {
 test("unscannable Ctrl+Shift combos get no binding", () => {
 	// F1-F4 and the matrix keys L/J/;/K/+/*/V/C/B/X/Z can't be scanned with both
 	// Ctrl and Shift, so the Ctrl+Shift variant is dropped.
-	expect(resolve({ code: "End", ctrl: true, shift: true })).toBeNull(); // → F4
+	expect(resolve({ code: "End", ctrl: true, shift: true })).toBeNull(); // -> F4
 	expect(resolve({ code: "KeyL", ctrl: true, shift: true })).toBeNull();
 	expect(resolve({ code: "Semicolon", ctrl: true, shift: true })).toBeNull();
 	// A scannable key keeps its Ctrl+Shift binding.
@@ -127,7 +127,7 @@ test("resolveBinding prefers the most specific match (any ranks lower)", () => {
 		{ on: "KeyA", shift: "any", command: "PRESS_A" }, // catch-all
 		{ on: "KeyA", shift: true, command: "PRESS_SHIFT_A" }, // precise
 	];
-	// Shift+A matches both → the precise one wins, regardless of array order.
+	// Shift+A matches both -> the precise one wins, regardless of array order.
 	expect(resolveBinding(set, ev({ code: "KeyA", shift: true }))?.command).toBe(
 		"PRESS_SHIFT_A",
 	);
@@ -160,7 +160,7 @@ test("bakeDefaults anchors letter shortcuts to the layout's key", () => {
 	// frozen - it recomputes from the layout at display time.
 	expect(baked).toMatchObject({ on: "Comma" });
 	expect(baked!.anchor).toBeUndefined();
-	// No layout data → keeps the QWERTY position.
+	// No layout data -> keeps the QWERTY position.
 	const [fallback] = bakeDefaults(set, new Map());
 	expect(fallback).toMatchObject({ on: "KeyK" });
 });
@@ -182,7 +182,7 @@ test("bakeDefaults re-homes a Ctrl alias to the position's Atari key", () => {
 	const alias = bakeDefaults(set, layout).find((b) => b.alt);
 	expect(alias).toMatchObject({ on: "KeyI", command: "PRESS_CONTROL_I" });
 	expect(alias!.anchor).toBeUndefined();
-	// No layout data → stays on the QWERTY position and its command.
+	// No layout data -> stays on the QWERTY position and its command.
 	const fallback = bakeDefaults(set, new Map()).find((b) => b.alt);
 	expect(fallback).toMatchObject({ on: "KeyN", command: "PRESS_CONTROL_N" });
 });
@@ -193,12 +193,12 @@ test("chordLabel recomputes the key legend from the layout", () => {
 	expect(chordLabel({ on: "KeyA", command: "PRESS_A" }, false, azerty)).toBe(
 		"Q",
 	);
-	// Empty layout → QWERTY fallback.
+	// Empty layout -> QWERTY fallback.
 	expect(chordLabel({ on: "KeyA", command: "PRESS_A" }, false)).toBe("A");
 });
 
 test("Turkish layout uppercases the dotted/dotless i as İ / I", () => {
-	// Both i and ı present → case in the "tr" locale so each keeps its dot.
+	// Both i and ı present -> case in the "tr" locale so each keeps its dot.
 	const tr = upperLegends([
 		["KeyI", "i"],
 		["Backslash", "ı"],
@@ -217,7 +217,7 @@ test("German ß keeps its keycap form, not the SS expansion", () => {
 });
 
 test("upperLegends numbers a symbol number row (AZERTY) but keeps a real one", () => {
-	// AZERTY: the number row is symbols unshifted → label each DigitN as its numeral.
+	// AZERTY: the number row is symbols unshifted -> label each DigitN as its numeral.
 	const azerty = upperLegends([
 		["Digit1", "&"],
 		["Digit2", "é"],
@@ -279,9 +279,9 @@ test("Windows aliases browser-grabbed Ctrl combos onto Alt", () => {
 		"PRESS_CONTROL_SHIFT_1",
 	);
 	expect(resolve({ code: "KeyN", alt: true })).toBe("PRESS_CONTROL_N");
-	// Not on Mac (Option is for chars / F-keys there)…
+	// Not on Mac (Option is for chars / F-keys there)...
 	expect(resolve({ code: "Digit1", alt: true }, true)).toBeNull();
-	// …and only the grabbed keys - other Alt+letter stays free for commands.
+	// ...and only the grabbed keys - other Alt+letter stays free for commands.
 	expect(resolve({ code: "KeyA", alt: true })).toBeNull();
 });
 
@@ -290,7 +290,7 @@ test("macOS overlay: Cmd+Arrow cursor, Option+Arrow F1-F4", () => {
 	expect(resolve({ code: "ArrowUp", meta: true }, true)).toBe(
 		"PRESS_CONTROL_MINUS",
 	);
-	// Option+Arrow → F1-F4 is mac-only (Alt is unusable for it on Windows).
+	// Option+Arrow -> F1-F4 is mac-only (Alt is unusable for it on Windows).
 	expect(resolve({ code: "ArrowUp", alt: true })).toBeNull();
 	expect(resolve({ code: "ArrowUp", alt: true }, true)).toBe("PRESS_F1");
 });

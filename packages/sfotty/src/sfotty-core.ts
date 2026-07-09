@@ -110,7 +110,7 @@ export class SfottyCore {
 
 	/**
 	 * The NMI input line (positive logic here: `true` = asserted). Edge-triggered
-	 * - a false→true transition latches a pending NMI, serviced at the next
+	 * - a false->true transition latches a pending NMI, serviced at the next
 	 * instruction boundary regardless of the I flag. The host must wired-OR all
 	 * its NMI sources into this single boolean, and must hold the line asserted
 	 * for several cycles until the CPU acknowledges it.
@@ -217,7 +217,7 @@ export class SfottyCore {
 			this.#nmiPending = false;
 			this.#interruptDetected = false;
 			// Baseline the edge detector to the current line so a held NMI doesn't
-			// register a phantom false→true edge on the first post-reset cycle.
+			// register a phantom false->true edge on the first post-reset cycle.
 			this.#nmiPrev = this.NMI;
 		}
 		this.crashed = false;
@@ -256,27 +256,27 @@ export class SfottyCore {
 
 	/**
 	 * Human-readable description of a microstate, for logging/debugging - e.g.
-	 * `"LDA abs · cycle 3"` or `"decode"`. Cycles count the opcode fetch as cycle
+	 * `"LDA abs - cycle 3"` or `"decode"`. Cycles count the opcode fetch as cycle
 	 * 0 (`decode`), so `code[i]` is cycle `i + 1`, matching the generated step
 	 * names.
 	 */
 	describeState(state: number = this.state): string {
 		if (state === DECODE) return "decode";
 		if (state >= RESET && state <= RESET + 6) {
-			return `reset · cycle ${state - RESET + 1}`;
+			return `reset - cycle ${state - RESET + 1}`;
 		}
 		const instruction = NMOS_INSTRUCTIONS[state >> 3];
 		const cycle = state & 7;
 		if (!instruction || cycle >= instruction.code.length) {
 			return `<invalid state ${state}>`;
 		}
-		return `${instruction.mnemonic} ${instruction.mode} · cycle ${cycle + 1}`;
+		return `${instruction.mnemonic} ${instruction.mode} - cycle ${cycle + 1}`;
 	}
 
 	// --- Micro-op implementations (called by the microcode table) -------------
 	// One method per microcode token, all prefixed `op` so they stand apart from
 	// the public CPU API. The generator maps each token to one of these (e.g.
-	// "r-pc++" → opReadOperand). They are grouped below as bus reads, then bus
+	// "r-pc++" -> opReadOperand). They are grouped below as bus reads, then bus
 	// writes, then internal ops: bus ops perform the single read/write and bump
 	// pointers *after* the access returns (so a bus throw leaves state intact); internal
 	// ops are pure register transfers.
@@ -697,7 +697,7 @@ export class SfottyCore {
 		}
 	}
 
-	/** `ro-sbx` (SBX/AXS): X ← (A & X) − imm; carry set on no borrow. @internal */
+	/** `ro-sbx` (SBX/AXS): X = (A & X) - imm; carry set on no borrow. @internal */
 	opSbx(): void {
 		const diff = (this.A & this.X) - this.#dr;
 		this.cFlag = diff >= 0;
@@ -705,13 +705,13 @@ export class SfottyCore {
 		this.#setNZ(this.X);
 	}
 
-	/** `ro-ane` (ANE/XAA): A ← (A | magic) & X & imm - unstable. @internal */
+	/** `ro-ane` (ANE/XAA): A = (A | magic) & X & imm - unstable. @internal */
 	opAne(): void {
 		this.A = (this.A | ANE_MAGIC) & this.X & this.#dr;
 		this.#setNZ(this.A);
 	}
 
-	/** `ro-lxa` (LXA/LAX imm): A = X ← (A | magic) & imm - unstable. @internal */
+	/** `ro-lxa` (LXA/LAX imm): A = X = (A | magic) & imm - unstable. @internal */
 	opLxa(): void {
 		const value = (this.A | ANE_MAGIC) & this.#dr;
 		this.A = value;
@@ -719,7 +719,7 @@ export class SfottyCore {
 		this.#setNZ(value);
 	}
 
-	/** `ro-las` (LAS/LAR): A = X = S ← memory & S. @internal */
+	/** `ro-las` (LAS/LAR): A = X = S = memory & S. @internal */
 	opLas(): void {
 		const value = this.#dr & this.S;
 		this.A = value;

@@ -10,7 +10,7 @@
 npm install @sfotty-pie/a8
 ```
 
-Construct an `Atari` with a `MachineConfig` - only the `os` ROM image is required; the other options (`xl`, `tvSystem`, RAM sizes, `basic`, `cartridge`, …) select the machine variant. Then drive it one machine cycle at a time:
+Construct an `Atari` with a `MachineConfig` - only the `os` ROM image is required; the other options (`xl`, `tvSystem`, RAM sizes, `basic`, `cartridge`, ...) select the machine variant. Then drive it one machine cycle at a time:
 
 ```ts
 import { Atari, AtrImage, paletteFor } from "@sfotty-pie/a8";
@@ -26,13 +26,13 @@ try {
   audio = machine.resumeCycle();
 }
 // video: machine.frame holds one Atari color byte per pixel
-// (FRAME_BUFFER_WIDTH × FRAME_BUFFER_HEIGHT); map it through
+// (FRAME_BUFFER_WIDTH x FRAME_BUFFER_HEIGHT); map it through
 // paletteFor(tvSystem) to get RGBA pixels.
 ```
 
 A bus access may **throw** to suspend the machine mid-cycle (the same host-defined-sentinel model as the underlying CPU core); an ordinary host that just boots software never triggers this - disk I/O is served internally by a high-level SIO handler, no serial hardware emulation involved.
 
-The rest of the surface - keyboard/joystick/console input methods, the memory-trap API (`interceptRead`/`observeWrite`/`interceptExecute`/…), firmware detection and ranking helpers, cartridge and disk-image types, boot-disk building for XEX files, and the timing constants - is documented in the JSDoc comments on the exported types.
+The rest of the surface - keyboard/joystick/console input methods, the memory-trap API (`interceptRead`/`observeWrite`/`interceptExecute`/...), firmware detection and ranking helpers, cartridge and disk-image types, boot-disk building for XEX files, and the timing constants - is documented in the JSDoc comments on the exported types.
 
 ## License and credits
 

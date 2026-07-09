@@ -12,7 +12,7 @@ import { EmuContext } from "./emu-context.ts";
 // The audio sink is a page-level singleton - created once and reused across
 // emulator mounts (the machine reboots on re-entry, but the sink doesn't),
 // lazily on first entry to /a8/emu so content pages never pay for it. The host
-// resolves firmware through the image library (built-ins ∪ user uploads) and
+// resolves firmware through the image library (built-ins + user uploads) and
 // fetches only the ROMs it picks, which the browser caches.
 
 interface Audio {

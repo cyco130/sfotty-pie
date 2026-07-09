@@ -12,7 +12,7 @@ Accuracy is tracked against the Altirra **Acid800** conformance suite (see [Conf
 
 The host drives the machine one cycle at a time, mirroring how the CPU core is driven. `cycle()` (in [src/machine.ts](src/machine.ts)) runs the committed pre-work - ANTIC scheduling (`beforeCpu`) and the POKEY tick - then the bus phase (ANTIC DMA or the CPU) and the scanline render, and returns the POKEY audio level.
 
-A bus phase may **throw** - an interceptor suspending on a read/write/fetch, or a host breakpoint. The machine defines no sentinel and catches nothing; the throw is whatever the interceptor threw, the same host-defined-sentinel model as sfotty's traps. The host catches it around `cycle()`, resolves it (await input, service a debugger, …), and calls `resumeCycle()` to finish the _same_ cycle.
+A bus phase may **throw** - an interceptor suspending on a read/write/fetch, or a host breakpoint. The machine defines no sentinel and catches nothing; the throw is whatever the interceptor threw, the same host-defined-sentinel model as sfotty's traps. The host catches it around `cycle()`, resolves it (await input, service a debugger, ...), and calls `resumeCycle()` to finish the _same_ cycle.
 
 Resumability is implemented as a three-phase machine:
 
@@ -39,7 +39,7 @@ Built-in machine features use the same public trap machinery: the SIO handler is
 - **[src/pia.ts](src/pia.ts)** - the 6520: PORTA (joysticks), PORTB (joysticks on the 400/800; memory banking on XL/XE), IRQ lines.
 - The CPU is not in this package - it's the `Sfotty` core, driven through the bus.
 
-Framebuffer: `frame` is one Atari color byte per pixel, `FRAME_BUFFER_WIDTH × FRAME_BUFFER_HEIGHT` (376×240 - the full overscan region). Palette decode is the host's job; [src/palette.ts](src/palette.ts) provides NTSC (YIQ) and PAL (YUV) palette builders returning 256-entry `Uint32Array`s of little-endian RGBA words, designed to be written straight through a `Uint32Array` view of canvas `ImageData`. NTSC/PAL timing (line counts, rates) lives in [src/timing-constants.ts](src/timing-constants.ts), re-exported wholesale from the index.
+Framebuffer: `frame` is one Atari color byte per pixel, `FRAME_BUFFER_WIDTH x FRAME_BUFFER_HEIGHT` (376x240 - the full overscan region). Palette decode is the host's job; [src/palette.ts](src/palette.ts) provides NTSC (YIQ) and PAL (YUV) palette builders returning 256-entry `Uint32Array`s of little-endian RGBA words, designed to be written straight through a `Uint32Array` view of canvas `ImageData`. NTSC/PAL timing (line counts, rates) lives in [src/timing-constants.ts](src/timing-constants.ts), re-exported wholesale from the index.
 
 ## Disk I/O: SIO high-level emulation
 
@@ -49,7 +49,7 @@ No serial hardware is emulated. `createSioHandler` ([src/sio.ts](src/sio.ts)) is
 
 ## XEX booting and the generated loader
 
-`buildBootDisk` ([src/xex-boot.ts](src/xex-boot.ts)) wraps a XEX executable in a minimal bootable ATR: a three-boot-sector loader that reads and launches the executable over SIO. The loader binary is a **committed generated file**, [src/xex-loader-bytes.ts](src/xex-loader-bytes.ts), produced by [src/build-loader.ts](src/build-loader.ts) (`pnpm build:loader`, the first step of the package `build`): it assembles [atari-src/xex-loader.s](atari-src/xex-loader.s) with `@sfotty-pie/spasm`, enforces the 384-byte (3 × 128) budget, and pads. spasm must be built first - the workspace dependency orders that. `atari-src/` ships in the published package (it's the "corresponding source" for the baked loader bytes).
+`buildBootDisk` ([src/xex-boot.ts](src/xex-boot.ts)) wraps a XEX executable in a minimal bootable ATR: a three-boot-sector loader that reads and launches the executable over SIO. The loader binary is a **committed generated file**, [src/xex-loader-bytes.ts](src/xex-loader-bytes.ts), produced by [src/build-loader.ts](src/build-loader.ts) (`pnpm build:loader`, the first step of the package `build`): it assembles [atari-src/xex-loader.s](atari-src/xex-loader.s) with `@sfotty-pie/spasm`, enforces the 384-byte (3 x 128) budget, and pads. spasm must be built first - the workspace dependency orders that. `atari-src/` ships in the published package (it's the "corresponding source" for the baked loader bytes).
 
 ## Firmware identification and preferences
 
@@ -77,8 +77,8 @@ Unit tests (vitest, `*.test.ts` beside the sources) cover the chips, traps, ATR/
 | [src/sio.ts](src/sio.ts)                                            | SIO high-level emulation (execute trap on SIOV).                                       |
 | [src/atr.ts](src/atr.ts)                                            | `AtrImage`: sector-level `.atr` access.                                                |
 | [src/cartridge.ts](src/cartridge.ts)                                | Cartridge formats and mappers (`CART_TYPES`).                                          |
-| [src/xex-boot.ts](src/xex-boot.ts)                                  | `buildBootDisk`: XEX → bootable ATR via the generated loader.                          |
-| [src/build-loader.ts](src/build-loader.ts)                          | Dev-only: assembles the XEX loader with spasm → `xex-loader-bytes.ts`.                 |
+| [src/xex-boot.ts](src/xex-boot.ts)                                  | `buildBootDisk`: XEX -> bootable ATR via the generated loader.                         |
+| [src/build-loader.ts](src/build-loader.ts)                          | Dev-only: assembles the XEX loader with spasm -> `xex-loader-bytes.ts`.                |
 | [src/detect-firmware.ts](src/detect-firmware.ts)                    | Known-firmware table and detection.                                                    |
 | [src/firmware-preferences.ts](src/firmware-preferences.ts)          | OS/BASIC ranking per machine context.                                                  |
 | [src/canonicalize.ts](src/canonicalize.ts)                          | Container normalization / combined-dump splitting.                                     |

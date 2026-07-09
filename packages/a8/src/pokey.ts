@@ -369,7 +369,7 @@ export class Pokey implements Memory {
 		}
 
 		if (this.#shiftBitsLeft === 0 && this.#serout !== null) {
-			// Load: holding register → shifter. The start bit (0) goes out
+			// Load: holding register -> shifter. The start bit (0) goes out
 			// now; SEROR reports the holding register free.
 			this.#lastShiftedByte = this.#serout;
 			this.#shiftData = this.#serout | 0x100; // data LSB first, stop high

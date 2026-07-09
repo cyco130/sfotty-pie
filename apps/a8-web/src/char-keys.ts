@@ -8,7 +8,7 @@ import type { Command } from "./commands.ts";
 // baked into the produced character (e.g. "!" is the Atari Shift+1). Letters and
 // space are the exception: the produced character can't carry their Shift (letter
 // case is unreliable under CapsLock; a space is a space either way), so it comes
-// from the Shift MODIFIER - Shift+A → Atari Shift+A, Shift+Space → Shift+Space.
+// from the Shift MODIFIER - Shift+A -> Atari Shift+A, Shift+Space -> Shift+Space.
 
 type Letter =
 	| "A"
@@ -38,7 +38,7 @@ type Letter =
 	| "Y"
 	| "Z";
 
-// Non-letter printable characters → their Atari keystroke. Space is handled like
+// Non-letter printable characters -> their Atari keystroke. Space is handled like
 // a letter (folds by the Shift modifier), so it isn't here.
 const SYMBOLS: Record<string, Command> = {
 	"!": "PRESS_SHIFT_1",
@@ -99,10 +99,10 @@ export function charCommand(char: string, shift: boolean): Command | undefined {
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("") as Letter[];
 
 /**
- * The inverse of the character channel: each Atari character command → the host
+ * The inverse of the character channel: each Atari character command -> the host
  * character that types it in Character mode, for showing shortcuts. Symbols carry
  * their own Shift in the glyph ("!" not "Shift+1"); letters fold by the Shift
- * modifier, so Shift is shown explicitly (`PRESS_SHIFT_A` → "Shift+A").
+ * modifier, so Shift is shown explicitly (`PRESS_SHIFT_A` -> "Shift+A").
  */
 export const characterChords: ReadonlyMap<Command, string> = new Map<
 	Command,

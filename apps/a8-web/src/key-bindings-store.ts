@@ -16,12 +16,12 @@ import { loadPersisted, savePersisted } from "./persist.ts";
 // on refresh; bump VERSION to invalidate stores when the shape changes.
 export const KEY_BINDINGS_KEY = "key-bindings";
 // v2: bindings keyed by `code` only (the `{ key }` trigger arm was dropped).
-// v3: + the global Cmd/Alt+K → OPEN_PALETTE binding and the `scope` field.
+// v3: + the global Cmd/Alt+K -> OPEN_PALETTE binding and the `scope` field.
 // v4: letter app-shortcuts (palette, the Alt/Ctrl+letter aliases) anchored to
 //     the produced letter via the layout, not the QWERTY position.
 const VERSION = 4;
 
-// The layout snapshot the current bindings were baked from - `code` → legend.
+// The layout snapshot the current bindings were baked from - `code` -> legend.
 // Persisted alongside the bindings so it survives refresh (labels stay stable)
 // and so the editor can label brand-new bindings the same way; on reset it's
 // re-read from the live keyboard (or, absent getLayoutMap, the user's saved

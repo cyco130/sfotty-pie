@@ -823,6 +823,27 @@ export class Cartridge implements Memory {
 		return this.#mapping.areaA000 !== "ram";
 	}
 
+	#views = new Map<number, Uint8Array>();
+
+	/**
+	 * A 256-byte view of the ROM as currently banked at `page` (addresses
+	 * `page << 8` up), for the MMU's fast page tables - or `null` when the
+	 * bank at that position is unmapped (reads $FF). Only meaningful for
+	 * pages inside an area the mapping covers (check {@link has8000To9fff} /
+	 * {@link hasA000ToBfff} first). Banks are 2K/4K/8K, so a page never
+	 * straddles two banks.
+	 */
+	pageView(page: number): Uint8Array | null {
+		const offset = this.#getOffset(page << 8);
+		if (offset === null) return null;
+		let view = this.#views.get(offset);
+		if (!view) {
+			view = this.#rom.subarray(offset, offset + 0x100);
+			this.#views.set(offset, view);
+		}
+		return view;
+	}
+
 	#getOffset(address: number): number | null {
 		let mapping: AreaMapping;
 		let base: number;

@@ -171,12 +171,62 @@ export class AnticGtia implements Memory {
 	hposm2 = 0;
 	hposm3 = 0;
 
-	// P/M data
-	grafP0 = 0;
-	grafP1 = 0;
-	grafP2 = 0;
-	grafP3 = 0;
-	grafM = 0;
+	// P/M data. Accessors so any nonzero value - a register write, a DMA
+	// latch, or a direct poke - wakes the P/M pipeline out of its idle fast
+	// path (see #drawPlayerMissile). Zero writes can't break an idle state:
+	// idle already implies every latch is zero.
+	#grafP0 = 0;
+	#grafP1 = 0;
+	#grafP2 = 0;
+	#grafP3 = 0;
+	#grafM = 0;
+
+	get grafP0(): number {
+		return this.#grafP0;
+	}
+	set grafP0(value: number) {
+		this.#grafP0 = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	get grafP1(): number {
+		return this.#grafP1;
+	}
+	set grafP1(value: number) {
+		this.#grafP1 = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	get grafP2(): number {
+		return this.#grafP2;
+	}
+	set grafP2(value: number) {
+		this.#grafP2 = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	get grafP3(): number {
+		return this.#grafP3;
+	}
+	set grafP3(value: number) {
+		this.#grafP3 = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	get grafM(): number {
+		return this.#grafM;
+	}
+	set grafM(value: number) {
+		this.#grafM = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	// False while any P/M state could produce output or change: while true,
+	// #drawPlayerMissile is a no-op (all shift registers and GRAF latches are
+	// zero, so comparator loads only OR in zeros and the counter resets they
+	// perform are unobservable). Re-evaluated at each visible line start;
+	// cleared by the graf* setters.
+	#pmIdle = false;
 
 	// Collision registers
 	m0pf = 0;
@@ -1707,6 +1757,32 @@ export class AnticGtia implements Memory {
 		const y = this.vcount - 8;
 
 		if (y < 0 || y >= 240) {
+			return 0;
+		}
+
+		// The idle fast path: with every shift register and GRAF latch zero,
+		// this whole function is a no-op returning 0 (a comparator match
+		// would OR in zeros, and its counter reset is unobservable while the
+		// register is empty). Evaluated at each line start; the graf*
+		// setters drop the flag the moment any latch goes nonzero.
+		if (i === 0 && pos === 0) {
+			this.#pmIdle =
+				(this.#shiftP0 |
+					this.#shiftP1 |
+					this.#shiftP2 |
+					this.#shiftP3 |
+					this.#shiftM0 |
+					this.#shiftM1 |
+					this.#shiftM2 |
+					this.#shiftM3 |
+					this.#grafP0 |
+					this.#grafP1 |
+					this.#grafP2 |
+					this.#grafP3 |
+					this.#grafM) ===
+				0;
+		}
+		if (this.#pmIdle) {
 			return 0;
 		}
 

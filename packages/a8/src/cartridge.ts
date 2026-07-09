@@ -740,6 +740,12 @@ export class Cartridge implements Memory {
 	#type: CartType;
 	#mapping: CartridgeMapping;
 
+	/**
+	 * Fired after a control access (or reset) changes the mapping. Set by the
+	 * MMU so it can rebuild its page tables when an area maps or unmaps.
+	 */
+	onMappingChanged: (() => void) | undefined;
+
 	constructor(fileContents: Uint8Array, fileName?: string) {
 		const format = detectFileFormat(fileContents, fileName);
 
@@ -867,7 +873,10 @@ export class Cartridge implements Memory {
 			const peek = (options & ReadOptions.PEEK) !== 0;
 			return (
 				this.#type.control?.(address, null, (mapping) => {
-					if (!peek) this.#mapping = mapping;
+					if (!peek) {
+						this.#mapping = mapping;
+						this.onMappingChanged?.();
+					}
 				}) ?? 0xff
 			);
 		}
@@ -886,6 +895,7 @@ export class Cartridge implements Memory {
 		if (address >= 0xd500 && address <= 0xd5ff) {
 			this.#type.control?.(address, value, (mapping) => {
 				this.#mapping = mapping;
+				this.onMappingChanged?.();
 			});
 
 			return;
@@ -897,6 +907,7 @@ export class Cartridge implements Memory {
 	reset(cold: boolean) {
 		if (cold) {
 			this.#mapping = this.#type.initialMapping!;
+			this.onMappingChanged?.();
 		}
 	}
 }

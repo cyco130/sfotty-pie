@@ -26,7 +26,7 @@ Between the phases, the machine copies ANTIC's NMI/RDY/HALT outputs onto the CPU
 
 ## The bus and core-owned trapping
 
-[src/mmu.ts](src/mmu.ts) owns the memory map: RAM/ROM regions, the chip registers, cartridge mapping, XL/XE PORTB banking (including 130XE extended banks with optional separate CPU/ANTIC access), and PBI ([src/pbi.ts](src/pbi.ts)).
+[src/mmu.ts](src/mmu.ts) owns the memory map: RAM/ROM regions, the chip registers, cartridge mapping, XL/XE PORTB banking (including 130XE extended banks with optional separate CPU/ANTIC access), and PBI ([src/pbi.ts](src/pbi.ts)). Dispatch is two 256-entry page tables - one for CPU access, one for ANTIC DMA, since the two bus masters can see different extended banks - so read/write are a single indexed lookup. The tables are rebuilt on every mapping event: a PORTB change, cartridge insertion/removal, a cartridge bank switch that maps or unmaps an area (the cart's `onMappingChanged` callback), and reset.
 
 It also owns the **trap dispatch** - the machine-level generalization of sfotty's throw-a-sentinel idea. `Atari` exposes `interceptRead`/`interceptWrite`/`interceptExecute` (replace the access: return a substitute value/opcode, or `undefined` to pass through) and the `observe*` variants (watch without replacing), each returning a `TrapHandle` with `remove()`. Read/write traps take a `TrapMask` (`sync`/`dummy`/`dma`) to filter which access kinds fire; an execute trap is sugar for a read trap masked to `{ sync: true, dummy: false }` - i.e. committed opcode fetches only. This is what "core-owned trapping" means: hosts don't wrap the bus, they register traps with it.
 

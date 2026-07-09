@@ -299,7 +299,8 @@ export class Mmu implements Memory {
 		}
 
 		// TODO: non-power-of-two xeBankCount leaves bank indices within #bankMask
-		// that aren't backed by a Ram; #map falls back to conventional RAM for
+		// that aren't backed by a Ram; the page tables fall back to conventional
+		// RAM for
 		// those. The UI restricts to powers of two until we research the real
 		// aliasing schemes.
 		if (xeBankCount > 32) {
@@ -345,9 +346,15 @@ export class Mmu implements Memory {
 		this.portbChanged = this.portbChanged.bind(this);
 		this.#unwatchPortbChanged = pia.portbOut.watch(this.portbChanged);
 
+		if (cartridge) {
+			cartridge.onMappingChanged = this.#cartMappingChanged;
+		}
+
 		// Sync derived banking state to the current PORTB instead of relying on
-		// the field defaults matching it.
+		// the field defaults matching it. portbChanged rebuilds the page tables;
+		// rebuild explicitly too for the non-banking case, where it early-outs.
 		this.portbChanged();
+		this.#rebuildPageTables();
 	}
 
 	/**
@@ -358,6 +365,9 @@ export class Mmu implements Memory {
 	dispose() {
 		this.#unwatchPortbChanged?.();
 		this.#unwatchPortbChanged = null;
+		if (this.#cartridge) {
+			this.#cartridge.onMappingChanged = undefined;
+		}
 	}
 
 	/**
@@ -366,7 +376,14 @@ export class Mmu implements Memory {
 	 * everything else is fixed at construction.
 	 */
 	setCartridge(cartridge: Cartridge | null) {
+		if (this.#cartridge) {
+			this.#cartridge.onMappingChanged = undefined;
+		}
 		this.#cartridge = cartridge ?? undefined;
+		if (this.#cartridge) {
+			this.#cartridge.onMappingChanged = this.#cartMappingChanged;
+		}
+		this.#rebuildPageTables();
 	}
 
 	reset(cold: boolean) {
@@ -384,6 +401,8 @@ export class Mmu implements Memory {
 		this.#isBasicRomEnabled = false;
 		this.#isGameRomEnabled = false;
 		this.#isOsRomEnabled = true;
+
+		this.#rebuildPageTables();
 	}
 
 	#ram: Ram;
@@ -468,168 +487,120 @@ export class Mmu implements Memory {
 
 			this.#bank = bank & this.#bankMask;
 		}
+
+		this.#rebuildPageTables();
 	}
 
-	#map(address: number, options: ReadOptions): Memory {
-		if (address < 0xd100) {
-			// 0000..D0FF
-			if (address < 0x8000) {
-				// 0000..7FFF
-				if (address < 0x5000) {
-					// 0000..4FFF
-					if (address < 0x4000) {
-						// 0000..3FFF
-						return this.#ram;
-					} else {
-						// 4000..4FFF
-						const extended =
-							options & ReadOptions.DMA
-								? this.#anticSeesExtendedRam
-								: this.#cpuSeesExtendedRam;
+	// The page-dispatch tables: one Memory target per 256-byte page, one table
+	// per bus master (the CPU, and ANTIC via ReadOptions.DMA - they can see
+	// different extended-RAM banks). read/write are a single indexed lookup;
+	// everything the old per-access decision tree consulted is baked in by
+	// #rebuildPageTables, which runs on any event that can change the map:
+	// a PORTB change, cartridge insertion/removal, a cartridge bank switch
+	// that maps/unmaps an area, and reset.
+	#cpuPages: Memory[] = new Array<Memory>(256).fill(unconnectedMemory);
+	#dmaPages: Memory[] = new Array<Memory>(256).fill(unconnectedMemory);
 
-						if (extended) {
-							return this.#banks[this.#bank] ?? this.#ram;
-						} else {
-							return this.#ram;
-						}
-					}
-				} else {
-					// 5000..7FFF
-					if (address < 0x5800) {
-						// 5000..57FF
-						// The self-test window only appears while the OS ROM
-						// is also enabled - the self-test lives on the OS ROM
-						// chip (Acid800's mmu_xlbanking checks this).
-						if (this.#isSelfTestEnabled && this.#isOsRomEnabled) {
-							return this.#osRom;
-						}
+	// Cartridge area presence as of the last rebuild; a bank switch inside a
+	// mapped area doesn't move pages, so #cartMappingChanged only rebuilds
+	// when one of these flips.
+	#cartHas8000 = false;
+	#cartHasA000 = false;
 
-						const extended =
-							options & ReadOptions.DMA
-								? this.#anticSeesExtendedRam
-								: this.#cpuSeesExtendedRam;
+	#cartMappingChanged = () => {
+		if (
+			(this.#cartridge?.has8000To9fff ?? false) !== this.#cartHas8000 ||
+			(this.#cartridge?.hasA000ToBfff ?? false) !== this.#cartHasA000
+		) {
+			this.#rebuildPageTables();
+		}
+	};
 
-						if (extended) {
-							return this.#banks[this.#bank] ?? this.#ram;
-						}
+	#rebuildPageTables(): void {
+		const cpu = this.#cpuPages;
+		const dma = this.#dmaPages;
+		const ram = this.#ram;
+		const cartridge = this.#cartridge;
 
-						return this.#ram;
-					} else {
-						// 5800..7FFF
-						const extended =
-							options & ReadOptions.DMA
-								? this.#anticSeesExtendedRam
-								: this.#cpuSeesExtendedRam;
+		// 0000-3FFF: conventional RAM (RAM handles its own size bounds).
+		for (let page = 0x00; page < 0x40; page++) {
+			cpu[page] = ram;
+			dma[page] = ram;
+		}
 
-						if (extended) {
-							return this.#banks[this.#bank] ?? this.#ram;
-						} else {
-							return this.#ram;
-						}
-					}
-				}
-			} else {
-				// 8000..D0FF
-				if (address < 0xc000) {
-					// 8000..BFFF
-					if (address < 0xa000) {
-						// 8000..9FFF
-						if (this.#cartridge?.has8000To9fff) {
-							return this.#cartridge;
-						}
+		// 4000-7FFF: the extended-RAM window, selected per bus master.
+		const extendedBank = this.#banks[this.#bank] ?? ram;
+		const cpuWindow = this.#cpuSeesExtendedRam ? extendedBank : ram;
+		const anticWindow = this.#anticSeesExtendedRam ? extendedBank : ram;
+		for (let page = 0x40; page < 0x80; page++) {
+			cpu[page] = cpuWindow;
+			dma[page] = anticWindow;
+		}
 
-						return this.#ram;
-					} else {
-						// A000..BFFF
-						if (this.#cartridge?.hasA000ToBfff) {
-							return this.#cartridge;
-						}
-
-						if (this.#basicRom && this.#isBasicRomEnabled) {
-							return this.#basicRom;
-						}
-
-						if (this.#gameRom && this.#isGameRomEnabled) {
-							return this.#gameRom;
-						}
-
-						return this.#ram;
-					}
-				} else {
-					// C000..D0FF
-					if (address < 0xd000) {
-						// C000..CFFF
-						if (this.#portbBanking) {
-							if (this.#isOsRomEnabled) {
-								return this.#osRom;
-							}
-
-							return this.#ram;
-						}
-
-						// TODO: Axlon
-						return this.#ram;
-					} else {
-						// D000..D0FF
-						return this.#gtia;
-					}
-				}
-			}
-		} else {
-			// D100..FFFF
-			if (address < 0xd500) {
-				// D100..D4FF
-				if (address < 0xd300) {
-					// D100..D3FF
-					if (address < 0xd200) {
-						// D100..D1FF
-						return this.#pbi;
-					} else {
-						// D200..D2FF
-						return this.#pokey;
-					}
-				} else {
-					// D300..D4FF
-					if (address < 0xd400) {
-						// D300..D3FF
-						return this.#pia;
-					} else {
-						// D400..D4FF
-						return this.#antic;
-					}
-				}
-			} else {
-				// D500..FFFF
-				if (address < 0xd800) {
-					// D500..D7FF
-					if (address < 0xd600) {
-						// D500..D5FF
-						return this.#cartridge ?? unconnectedMemory;
-					} else {
-						// D600..D6FF
-						return this.#pbi;
-					}
-				} else {
-					// D800..FFFF
-					if (address < 0xe000) {
-						// D800..DFFF
-						// TODO: PBI firmware
-						if (!this.#portbBanking || this.#isOsRomEnabled) {
-							return this.#osRom;
-						}
-
-						return this.#ram;
-					} else {
-						// E000..FFFF
-						if (!this.#portbBanking || this.#isOsRomEnabled) {
-							return this.#osRom;
-						}
-
-						return this.#ram;
-					}
-				}
+		// 5000-57FF: the self-test window overlays it, but only while the OS ROM
+		// is also enabled - the self-test lives on the OS ROM chip (Acid800's
+		// mmu_xlbanking checks this).
+		if (this.#isSelfTestEnabled && this.#isOsRomEnabled) {
+			for (let page = 0x50; page < 0x58; page++) {
+				cpu[page] = this.#osRom;
+				dma[page] = this.#osRom;
 			}
 		}
+
+		// 8000-9FFF: cartridge or RAM.
+		const area8000 = cartridge?.has8000To9fff ? cartridge : ram;
+		for (let page = 0x80; page < 0xa0; page++) {
+			cpu[page] = area8000;
+			dma[page] = area8000;
+		}
+
+		// A000-BFFF: cartridge, else built-in BASIC / game ROM, else RAM.
+		const areaA000 = cartridge?.hasA000ToBfff
+			? cartridge
+			: this.#basicRom && this.#isBasicRomEnabled
+				? this.#basicRom
+				: this.#gameRom && this.#isGameRomEnabled
+					? this.#gameRom
+					: ram;
+		for (let page = 0xa0; page < 0xc0; page++) {
+			cpu[page] = areaA000;
+			dma[page] = areaA000;
+		}
+
+		// C000-CFFF: OS ROM on XL/XE when enabled, RAM otherwise. TODO: Axlon.
+		const areaC000 =
+			this.#portbBanking && this.#isOsRomEnabled ? this.#osRom : ram;
+		for (let page = 0xc0; page < 0xd0; page++) {
+			cpu[page] = areaC000;
+			dma[page] = areaC000;
+		}
+
+		// D000-D7FF: the hardware register pages.
+		const io = [
+			this.#gtia, // D0
+			this.#pbi, // D1
+			this.#pokey, // D2
+			this.#pia, // D3
+			this.#antic, // D4
+			cartridge ?? unconnectedMemory, // D5 (cartridge control)
+			this.#pbi, // D6
+			this.#pbi, // D7
+		];
+		for (let i = 0; i < io.length; i++) {
+			cpu[0xd0 + i] = io[i]!;
+			dma[0xd0 + i] = io[i]!;
+		}
+
+		// D800-FFFF: OS ROM, or RAM when banked out. TODO: PBI firmware.
+		const areaD800 =
+			!this.#portbBanking || this.#isOsRomEnabled ? this.#osRom : ram;
+		for (let page = 0xd8; page < 0x100; page++) {
+			cpu[page] = areaD800;
+			dma[page] = areaD800;
+		}
+
+		this.#cartHas8000 = cartridge?.has8000To9fff ?? false;
+		this.#cartHasA000 = cartridge?.hasA000ToBfff ?? false;
 	}
 
 	// Last value driven on the data bus. Public so a chip that reads the bus
@@ -664,7 +635,8 @@ export class Mmu implements Memory {
 			}
 		}
 
-		const value = this.#map(address, options).read(address, options);
+		const pages = options & ReadOptions.DMA ? this.#dmaPages : this.#cpuPages;
+		const value = pages[address >>> 8]!.read(address, options);
 		if (!(options & ReadOptions.PEEK)) {
 			this.busData = value;
 			if (this.#readObservers.size) {
@@ -685,7 +657,8 @@ export class Mmu implements Memory {
 		) {
 			return; // suppressed - the store didn't commit, so no observers fire
 		}
-		this.#map(address, options).write(address, value, options);
+		const pages = options & ReadOptions.DMA ? this.#dmaPages : this.#cpuPages;
+		pages[address >>> 8]!.write(address, value, options);
 		if (this.#writeObservers.size) {
 			this.#runWriteObservers(address, value, options);
 		}

@@ -392,7 +392,9 @@ export class Mmu implements Memory {
 		this.#unwatchPortbChanged = pia.portbOut.watch(this.portbChanged);
 
 		if (cartridge) {
-			cartridge.onMappingChanged = this.#cartMappingChanged;
+			this.#unwatchCartMapping = cartridge.mappingChanged.watch(
+				this.#cartMappingChanged,
+			);
 		}
 
 		// Sync derived banking state to the current PORTB instead of relying on
@@ -410,9 +412,8 @@ export class Mmu implements Memory {
 	dispose() {
 		this.#unwatchPortbChanged?.();
 		this.#unwatchPortbChanged = null;
-		if (this.#cartridge) {
-			this.#cartridge.onMappingChanged = undefined;
-		}
+		this.#unwatchCartMapping?.();
+		this.#unwatchCartMapping = null;
 	}
 
 	/**
@@ -421,12 +422,13 @@ export class Mmu implements Memory {
 	 * everything else is fixed at construction.
 	 */
 	setCartridge(cartridge: Cartridge | null) {
-		if (this.#cartridge) {
-			this.#cartridge.onMappingChanged = undefined;
-		}
+		this.#unwatchCartMapping?.();
+		this.#unwatchCartMapping = null;
 		this.#cartridge = cartridge ?? undefined;
 		if (this.#cartridge) {
-			this.#cartridge.onMappingChanged = this.#cartMappingChanged;
+			this.#unwatchCartMapping = this.#cartridge.mappingChanged.watch(
+				this.#cartMappingChanged,
+			);
 		}
 		this.#rebuildPageTables();
 	}
@@ -488,6 +490,7 @@ export class Mmu implements Memory {
 	}
 
 	#unwatchPortbChanged: (() => void) | null = null;
+	#unwatchCartMapping: (() => void) | null = null;
 	portbChanged() {
 		if (!this.#portbBanking) return;
 

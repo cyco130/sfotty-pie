@@ -417,7 +417,14 @@ export class Pokey implements Memory {
 	 * Advance the chip one machine cycle. Returns the summed audio output of
 	 * the four channels, 0-60 (each channel contributes its 0-15 volume).
 	 */
-	cycle(): number {
+	/**
+	 * The AUD pin: the summed audio output level (0-60) as of the last
+	 * {@link cycle} - four channels of volume 0-15. A plain value the host
+	 * samples after each cycle, not a signal: it changes at machine rate.
+	 */
+	audio = 0;
+
+	cycle(): void {
 		// Init mode holds the polynomial counters and both slow clocks in
 		// reset. The 1.79MHz channels run on - that's the machine clock.
 		let slowTick = false;
@@ -615,7 +622,7 @@ export class Pokey implements Memory {
 		result += (audc3 & AUDC_VOLUME_ONLY ? 1 : out3) * (audc3 & 15);
 		result += (audc4 & AUDC_VOLUME_ONLY ? 1 : out4) * (audc4 & 15);
 
-		return result;
+		this.audio = result;
 	}
 
 	read(address: number): number {

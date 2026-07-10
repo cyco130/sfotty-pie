@@ -92,20 +92,19 @@ export interface MachineConfig {
  * - a 130XE - the XL plus `xeBankCount: 4` (four 16K banks at $4000-$7FFF via
  *   PORTB bits 2-3) and `separateAnticAccess` (bits 4/5).
  *
- * The host drives the machine one cycle at a time via {@link cycle}, which runs
- * ANTIC scheduling, the bus phase (ANTIC DMA or the CPU), and the render, and
- * returns the audio level. A bus phase may throw to suspend; the host catches
- * it, resolves it, and calls {@link resumeCycle}:
+ * The host drives the machine one cycle at a time via {@link cycle}, which
+ * runs ANTIC scheduling, the bus phase (ANTIC DMA or the CPU), and the
+ * render. A bus phase may throw to suspend; the host catches it, resolves
+ * it, and calls {@link resumeCycle}:
  *
  * ```ts
- * let audio;
  * try {
- * 	audio = machine.cycle();
+ * 	machine.cycle();
  * } catch (signal) {
  * 	// resolve the suspend (await input, clear a breakpoint, ...)
- * 	audio = machine.resumeCycle();
+ * 	machine.resumeCycle();
  * }
- * // read machine.frame for video
+ * // read machine.frame for video and machine.audio for sound
  * ```
  *
  * Keyboard input goes through the `pokeyKeyDown`/`pokeyKeyUp` family of
@@ -132,15 +131,16 @@ export class Atari implements Memory {
 	// The D1: disk image served by the built-in trap-based SIO; undefined = no
 	// disk (SIO times out and the OS moves on). Set via insertDisk.
 	#disk: AtrImage | undefined;
-	// The framebuffer afterCpu renders into (one Atari color byte per pixel). The
-	// constructor allocates a default so it is never absent; a host wanting its
-	// own buffer (e.g. double-buffering) repoints it with setFrameBuffer.
-	#frame: Uint8Array = new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT);
+	/**
+	 * The framebuffer the machine renders into (376x240 Atari color bytes),
+	 * updated by each cycle's render phase. Reassign only at a frame
+	 * boundary (e.g. swapping targets for tear-free double-buffering), or
+	 * the in-progress frame tears.
+	 */
+	frame: Uint8Array = new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT);
+
 	// Continuation marker for the cycle phase machine; see PHASE.
 	#phase: number = PHASE.IDLE;
-	// POKEY's audio level for this cycle, sampled once in cycle() and
-	// returned again by resumeCycle() so a resumed cycle doesn't re-tick.
-	#audio = 0;
 
 	constructor(config: MachineConfig) {
 		const { os, basic, game, cartridge, log } = config;
@@ -385,23 +385,11 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * The framebuffer the machine renders into (376x240 Atari color bytes),
-	 * updated by each cycle's render phase - the current target, which
-	 * {@link setFrameBuffer} can repoint.
+	 * POKEY's audio output level (0-60) as of the last cycle - a re-export of
+	 * {@link Pokey.audio} for the host's per-cycle sampling.
 	 */
-	get frame(): Uint8Array {
-		return this.#frame;
-	}
-
-	/**
-	 * Point rendering at `buffer` (376x240) for subsequent cycles. The default
-	 * buffer is always present, so this is optional - a host uses it to render
-	 * into its own buffer, e.g. swapping targets at frame boundaries for
-	 * tear-free double-buffering. Call it only at a frame boundary, or the
-	 * in-progress frame tears.
-	 */
-	setFrameBuffer(buffer: Uint8Array): void {
-		this.#frame = buffer;
+	get audio(): number {
+		return this.pokey.audio;
 	}
 
 	/**
@@ -419,7 +407,7 @@ export class Atari implements Memory {
 	/**
 	 * Run one whole machine cycle: ANTIC scheduling (`beforeCpu`, commits) + the
 	 * POKEY tick, then the bus phase (ANTIC's DMA fetch or the CPU's access) and
-	 * the render. Returns POKEY's audio level (0-60).
+	 * the render. Sample {@link audio} afterwards for POKEY's output level.
 	 *
 	 * A bus phase may **throw** - an interceptor suspending on a read/write/fetch,
 	 * or a host's own breakpoint signal. This method does not catch it: the throw
@@ -430,26 +418,26 @@ export class Atari implements Memory {
 	 * each bus phase does its access before any commit, so a throw unwinds clean
 	 * and the retried access repeats nothing.
 	 */
-	cycle(): number {
+	cycle(): void {
 		if (this.#phase !== PHASE.IDLE) {
 			throw new Error("cycle() called mid-cycle - use resumeCycle()");
 		}
 		this.anticGtia.beforeCpu();
-		this.#audio = this.pokey.cycle();
+		this.pokey.cycle();
 		this.#phase = PHASE.BUS;
-		return this.#runCycle();
+		this.#runCycle();
 	}
 
 	/** Finish a cycle that a bus phase suspended; see {@link cycle}. */
-	resumeCycle(): number {
-		return this.#runCycle();
+	resumeCycle(): void {
+		this.#runCycle();
 	}
 
 	// The phase machine shared by cycle/resumeCycle: a fall-through
 	// switch that enters at the saved #phase and runs forward to the end of the
 	// cycle. The marker is set to the current phase *before* each throwable call,
 	// so a throw leaves it pointing where to resume.
-	#runCycle(): number {
+	#runCycle(): void {
 		switch (this.#phase) {
 			case PHASE.BUS:
 				this.anticGtia.busCycle(); // ANTIC DMA read - may throw
@@ -466,11 +454,10 @@ export class Atari implements Memory {
 			case PHASE.CPU:
 				if (this.resetAsserted) this.cpu.reset(false);
 				else if (!this.anticGtia.halt) this.cpu.run(); // may throw
-				this.anticGtia.afterCpu(this.#frame, this.busData);
+				this.anticGtia.afterCpu(this.frame, this.busData);
 				this.#irqLine = this.irq;
 				this.#phase = PHASE.IDLE;
 		}
-		return this.#audio;
 	}
 
 	// The /IRQ line as sampled at the end of the last completed cycle.

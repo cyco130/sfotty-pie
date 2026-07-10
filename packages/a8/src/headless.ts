@@ -102,7 +102,7 @@ export class Headless {
 	// resuming the same cycle (retrying through a spurious wakeup). Returns false
 	// only when input is closed while a cycle is suspended.
 	async #advanceCycle(): Promise<boolean> {
-		let step = (): number => this.#machine.cycle();
+		let step = (): void => this.#machine.cycle();
 		for (;;) {
 			try {
 				step();

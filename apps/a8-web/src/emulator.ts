@@ -360,13 +360,14 @@ export class Emulator {
 	}
 
 	#runScanline(): void {
-		const ag = this.machine.anticGtia;
+		const machine = this.machine;
+		const ag = machine.anticGtia;
 
 		for (let cycle = 0; cycle < CYCLES_PER_LINE; cycle++) {
 			// On the XL Reset line's release, start a fresh trace capture of the
 			// boot that follows (the 800's Reset is an NMI, captured in normal
 			// flow). The CPU reset itself is handled inside cycle().
-			const resetAsserted = this.machine.resetAsserted;
+			const resetAsserted = machine.resetAsserted;
 			if (this.#trace && this.#wasResetAsserted && !resetAsserted) {
 				this.#traceCount = 0;
 				this.#traceFreezeAt = RESET_TRACE_CAPTURE;
@@ -374,11 +375,12 @@ export class Emulator {
 			}
 			this.#wasResetAsserted = resetAsserted;
 
-			// One whole machine cycle: ANTIC + POKEY + bus + CPU + render, the
-			// audio level returned. Instructions are recorded via onInstruction
-			// (see #recordTrace). a8-web installs no suspending traps, so cycle()
-			// never throws - no resumeCycle() needed here.
-			this.#collectAudio(this.machine.cycle(), ag.consoleSpeaker);
+			// One whole machine cycle: ANTIC + POKEY + bus + CPU + render.
+			// Instructions are recorded via onInstruction (see #recordTrace).
+			// a8-web installs no suspending traps, so cycle() never throws -
+			// no resumeCycle() needed here.
+			machine.cycle();
+			this.#collectAudio(machine.audio, ag.consoleSpeaker);
 		}
 
 		// vcount wraps to 0 while the last line of the frame is run: present the
@@ -387,7 +389,7 @@ export class Emulator {
 			// The `=== 0 ? 0 : 1` keeps a literal tuple index (no undefined).
 			this.frame = this.#frames[this.#back === 0 ? 0 : 1];
 			this.#back ^= 1;
-			this.machine.setFrameBuffer(this.#frames[this.#back === 0 ? 0 : 1]);
+			machine.frame = this.#frames[this.#back === 0 ? 0 : 1];
 			this.frameCount++;
 
 			// Fire any timed callbacks that come due this frame (e.g. the boot

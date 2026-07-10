@@ -360,6 +360,15 @@ export const messages = {
 			sectors: "Sectors",
 			sectorSize: "Sector size",
 		},
+		// The cartridge-type picker on unknown ROMs / cart entries.
+		cartTypeUnknown:
+			"The cartridge type of this ROM couldn't be detected. Pick one to boot it - if it doesn't run, come back and try another.",
+		cartTypeUnknownToast: (name: string) =>
+			`${name}: Pick a cartridge type first`,
+		pickCartType: "Pick a cartridge type…",
+		suggestedSuffix: " (suggested)",
+		notEmulatedSuffix: " - not emulated yet",
+		is5200Suffix: " - Atari 5200",
 		// The slot flags an 8K cart can be tagged with (the BASIC / built-in-game
 		// ROM slots). "BASIC" is a hardware token; the rest is translatable.
 		slots: {
@@ -513,15 +522,17 @@ export const messages = {
 	},
 
 	errors: {
-		osRom: "that looks like an OS ROM, not something loadable",
-		unrecognized: "unrecognized file format",
+		osRom: "That looks like an OS ROM, not something loadable.",
+		unrecognized: "Unrecognized file format.",
+		cartTypeUnsupported: "This cartridge type isn't emulated yet.",
+		cart5200: "Atari 5200 cartridges can't run on this machine.",
 		audioUnavailable: "Audio is unavailable in this browser.",
 		audioUnavailableReason: (reason: string) => `Audio unavailable: ${reason}`,
 		noWritableDisk: "No writable disk in D1: to download.",
 		noDiskToSave: "No disk in D1: to save.",
 		notLibraryDisk: "Only a disk attached from the library can be saved.",
 		noDiskToDetach: "No disk in D1: to detach.",
-		notACartridge: "not a cartridge image",
+		notACartridge: "Not a cartridge image.",
 		noCartridge: "No cartridge to detach.",
 		fullscreenUnavailable: "Full screen isn't available in this browser.",
 		noCompatibleOs: (model: string, tv: string) =>
@@ -554,6 +565,7 @@ export const messages = {
 			`Keyboard: ${mode === "positional" ? "Positional" : "Character"} mode`,
 		keyBindingsReset: "Key bindings reset to defaults",
 		saving: (name: string) => `Saving (${name})`,
+		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
 		copy: "Copy",
 		copied: "Copied",

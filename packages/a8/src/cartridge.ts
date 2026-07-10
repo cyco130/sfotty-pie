@@ -1112,11 +1112,52 @@ export interface CartTypeOption {
 	supported: boolean;
 }
 
+// Rough real-world prevalence of dumps per scheme, most common first - the
+// type picker's default ordering (a per-image suggestion can still trump
+// it). Hand-maintained judgment, not data: the standards, then the big game
+// families (XEGS, Atarimax, OSS, MegaCart, Williams, SDX), then the
+// switchable/rarer variants, homebrew flash boards, and finally protection
+// oddities and one-off hardware. Types absent here sort after all ranked
+// ones, by number.
+const CART_TYPE_LIKELIHOOD: readonly number[] = [
+	// The standards.
+	1, 2, 57, 58,
+	// XEGS at Atari's own cart sizes.
+	12, 13,
+	// Atarimax flash (the dominant homebrew/multicart boards) - at the large
+	// sizes these far outnumber the XEGS reissue extensions below.
+	42, 75, 41,
+	// The larger and switchable XEGS variants.
+	14, 23, 24, 25, 33, 34, 35, 36, 37, 38, 67,
+	// OSS (BASIC XL/XE, Action!, MAC/65).
+	15, 3, 45, 44,
+	// MegaCart.
+	26, 27, 28, 29, 30, 31, 32, 64,
+	// Williams and SpartaDOS X.
+	8, 22, 76, 11, 43,
+	// Atrax (decoded first - most circulating dumps are).
+	17, 68,
+	// SIC! flash and Turbosoft.
+	54, 55, 56, 83, 50, 51,
+	// The!Cart.
+	62, 65, 66,
+	// Express/Diamond, Phoenix/Blizzard, DB, Ultracart, MegaMax, Flash MegaCart.
+	9, 10, 39, 40, 46, 60, 5, 52, 61, 63,
+	// Right slot / low bank oddities.
+	21, 59, 53,
+	// Scrambled SDX, aDawliah, MIO, JRC64, JCart, XE Multicart, DCart, AST.
+	48, 49, 69, 70, 77, 80, 160, 104, 105, 106, 107, 108, 109, 110, 111, 112, 47,
+];
+
+const LIKELIHOOD_RANK = new Map(
+	CART_TYPE_LIKELIHOOD.map((type, index) => [type, index]),
+);
+
 /**
  * Every CART type whose ROM size matches `sizeKB`, for a type picker:
- * supported types first, then by type number. Unsupported entries
- * (unimplemented schemes, 5200 carts) are listed so a known type can still
- * be recorded; the UI marks them and refuses to boot them.
+ * supported types before unsupported (unimplemented schemes, 5200 carts -
+ * listed so a known type can still be recorded; the UI marks them and
+ * refuses to boot them), each group ordered by real-world likelihood.
  */
 export function cartTypesForSize(sizeKB: number): CartTypeOption[] {
 	const options: CartTypeOption[] = [];
@@ -1129,9 +1170,13 @@ export function cartTypesForSize(sizeKB: number): CartTypeOption[] {
 			supported: isCartTypeSupported(Number(key)),
 		});
 	}
+	const rank = (option: CartTypeOption) =>
+		LIKELIHOOD_RANK.get(option.cartType) ?? Infinity;
 	options.sort(
 		(a, b) =>
-			Number(b.supported) - Number(a.supported) || a.cartType - b.cartType,
+			Number(b.supported) - Number(a.supported) ||
+			rank(a) - rank(b) ||
+			a.cartType - b.cartType,
 	);
 	return options;
 }

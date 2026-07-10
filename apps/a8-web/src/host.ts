@@ -3,7 +3,9 @@ import {
 	buildBootDisk,
 	buildNtscPalette,
 	buildPalPalette,
+	CART_TYPES,
 	createCartridge,
+	isCartTypeSupported,
 	type Cartridge,
 	detectFileFormat,
 	FRAME_BUFFER_HEIGHT,
@@ -1418,11 +1420,41 @@ export class EmulatorHost {
 	// points fetch the bytes through the facade and reuse the boot/attach cores
 	// below. ---
 
+	/**
+	 * An unknown-ROM can't boot until its cartridge type is picked: send the
+	 * user to its library page, where the picker lives. A typed cart whose
+	 * type isn't runnable (unimplemented scheme, a 5200 cart) explains
+	 * itself; the picker on its page allows trying another type.
+	 */
+	#interceptUnresolvedCart(entry: ImageEntry): boolean {
+		if (entry.derived.type === "unknown-rom") {
+			this.toast(
+				messages.library.cartTypeUnknownToast(entry.user.displayName),
+				"warning",
+			);
+			navigate(`/a8/emu/library/${encodeURIComponent(entry.id)}`);
+			return true;
+		}
+		if (
+			entry.derived.type === "cart" &&
+			!isCartTypeSupported(entry.derived.cartType)
+		) {
+			const message =
+				CART_TYPES[entry.derived.cartType]?.machine === "5200"
+					? messages.errors.cart5200
+					: messages.errors.cartTypeUnsupported;
+			this.toast(`${entry.user.displayName}: ${message}`, "warning");
+			return true;
+		}
+		return false;
+	}
+
 	/** Boot a library image as a fresh machine. */
 	async bootImage(id: string): Promise<void> {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
+		if (this.#interceptUnresolvedCart(entry)) return;
 		this.#bootImage(await getImageBytes(id), entry.user.displayName, id);
 	}
 
@@ -1439,6 +1471,7 @@ export class EmulatorHost {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
+		if (this.#interceptUnresolvedCart(entry)) return;
 		this.#attachCartridgeBytes(
 			await getImageBytes(id),
 			entry.user.displayName,

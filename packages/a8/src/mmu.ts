@@ -477,6 +477,16 @@ export class Mmu implements Memory {
 	#isGameRomEnabled = false;
 	#isOsRomEnabled = true;
 
+	/**
+	 * Whether the OS ROM is currently mapped at $D800-$FFFF (always true
+	 * without PORTB banking). OS entry-point traps key on this: with RAM
+	 * banked in under the OS, an address like SIOV holds the running
+	 * program's own code, not the OS routine the trap stands in for.
+	 */
+	get isOsRomMapped(): boolean {
+		return !this.#portbBanking || this.#isOsRomEnabled;
+	}
+
 	#unwatchPortbChanged: (() => void) | null = null;
 	portbChanged() {
 		if (!this.#portbBanking) return;

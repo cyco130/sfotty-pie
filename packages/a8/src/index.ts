@@ -3,6 +3,7 @@ export type { AtariMemory } from "./atari-memory.ts";
 export { AtrImage } from "./atr.ts";
 export {
 	canonicalize,
+	withCartType,
 	type CanonicalPiece,
 	type ImageKind,
 } from "./canonicalize.ts";

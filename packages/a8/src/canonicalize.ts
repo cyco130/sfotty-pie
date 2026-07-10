@@ -1,4 +1,4 @@
-import { cartTypesForSize } from "./cartridge.ts";
+import { CART_TYPES, cartTypesForSize } from "./cartridge.ts";
 import {
 	type AtariFileFormat,
 	detectFileFormat,
@@ -165,6 +165,35 @@ function diskPiece(source: Uint8Array): CanonicalPiece {
 		bytes: source,
 		kind: { type: "disk", sectorSize, sectors },
 	};
+}
+
+/**
+ * Re-canonicalize a cartridge image under CART type `cartType`: a raw dump
+ * gets the 16-byte header written, an existing `.car` gets its header
+ * rebuilt (type and checksum both refreshed). This is the pick-the-mapper /
+ * change-the-mapper primitive; the header is part of content identity, so
+ * callers must treat the result as a new image (new hash). Throws when the
+ * type is unknown or the ROM size doesn't match it; unimplemented and 5200
+ * types are allowed - recording a known-but-unsupported mapper is valid.
+ */
+export function withCartType(image: Uint8Array, cartType: number): Uint8Array {
+	const type = CART_TYPES[cartType];
+	if (!type) {
+		throw new Error(`Unknown cartridge type #${cartType}`);
+	}
+	const isCar =
+		image[0] === 0x43 && // 'C'
+		image[1] === 0x41 && // 'A'
+		image[2] === 0x52 && // 'R'
+		image[3] === 0x54; // 'T'
+	const rom = isCar ? image.subarray(16) : image;
+	if (rom.length !== type.size * 1024) {
+		throw new Error(
+			`Cartridge type #${cartType} (${type.name}) needs ${type.size}K, ` +
+				`got ${rom.length} bytes`,
+		);
+	}
+	return concat(cartHeader(cartType, rom), rom);
 }
 
 /**

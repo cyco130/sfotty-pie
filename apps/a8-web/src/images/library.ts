@@ -4,7 +4,7 @@
 // uploaded, and where its bytes physically live.
 
 import { computed, signal } from "@preact/signals";
-import { canonicalize, type ImageKind } from "@sfotty-pie/a8";
+import { canonicalize, withCartType, type ImageKind } from "@sfotty-pie/a8";
 import {
 	builtinFirmware,
 	type FirmwareLibraryEntry,
@@ -478,6 +478,7 @@ export async function nukeLibrary(): Promise<void> {
 export async function updateImage(
 	id: string,
 	bytes: Uint8Array,
+	derived?: ImageKind,
 ): Promise<boolean> {
 	await readyLibrary();
 	const entry = userEntries.value.find((e) => e.id === id);
@@ -490,6 +491,7 @@ export async function updateImage(
 		...entry,
 		hash,
 		size: bytes.length,
+		derived: derived ?? entry.derived,
 		locator: { ...entry.locator, ref: hash },
 	};
 	await putEntry(updated);
@@ -501,6 +503,35 @@ export async function updateImage(
 		await blobs.delete(oldRef);
 	}
 	return true;
+}
+
+/**
+ * Set or change a cartridge's CART type: rewrite the header (wrapping a raw
+ * unknown-rom dump the first time) and re-derive the kind. The header is
+ * part of content identity, so the blob is swapped like any byte update -
+ * but the entry id stays stable, so favorites, ROM slots, and recents
+ * survive. User cart/unknown-rom entries only; returns false for anything
+ * else or a size-mismatched type.
+ */
+export async function retypeImage(
+	id: string,
+	cartType: number,
+): Promise<boolean> {
+	await readyLibrary();
+	const entry = userEntries.value.find((e) => e.id === id);
+	if (!entry) return false;
+	const kind = entry.derived.type;
+	if (kind !== "cart" && kind !== "unknown-rom") return false;
+	const bytes = await blobs.get(entry.locator.ref);
+	if (!bytes) return false;
+
+	let retyped: Uint8Array;
+	try {
+		retyped = withCartType(bytes, cartType);
+	} catch {
+		return false; // unknown type or size mismatch
+	}
+	return updateImage(id, retyped, { type: "cart", cartType });
 }
 
 /** Remove a user image; reclaim its blob if no other entry still references it. */

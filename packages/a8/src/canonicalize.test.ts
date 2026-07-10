@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalize } from "./canonicalize.ts";
+import { canonicalize, withCartType } from "./canonicalize.ts";
 import { builtinSlotRom, createCartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 
@@ -195,5 +195,31 @@ describe("unknown-rom canonicalization", () => {
 		expect(() => canonicalize(new Uint8Array(32768), "movie.mp4")).toThrow(
 			"Unrecognized image format",
 		);
+	});
+});
+
+describe("withCartType", () => {
+	it("wraps a raw dump and rebuilds an existing header", () => {
+		const rom = new Uint8Array(32768).fill(3);
+		const typed = withCartType(rom, 12);
+		expect(typed.length).toBe(32768 + 16);
+		expect(typed[7]).toBe(12);
+		// Checksum = 32-bit sum of the ROM bytes, MSB-first at offset 8.
+		const sum = 3 * 32768;
+		expect(typed[10]).toBe((sum >>> 8) & 0xff);
+		expect(typed[11]).toBe(sum & 0xff);
+
+		// Re-typing a .car swaps the header, not the ROM.
+		const retyped = withCartType(typed, 33);
+		expect(retyped[7]).toBe(33);
+		expect(retyped.length).toBe(typed.length);
+		expect(retyped[16]).toBe(3);
+	});
+
+	it("throws on unknown types and size mismatches", () => {
+		expect(() => withCartType(new Uint8Array(32768), 9999)).toThrow(
+			"Unknown cartridge type",
+		);
+		expect(() => withCartType(new Uint8Array(16384), 12)).toThrow("needs 32K");
 	});
 });

@@ -108,10 +108,11 @@ export interface MachineConfig {
  * ```
  *
  * Keyboard input goes through the `pokeyKeyDown`/`pokeyKeyUp` family of
- * methods, joystick input through the `joystick*` family. The machine knows
- * nothing about host key assignments - mapping host keys to matrix codes or
- * joystick lines (layouts, special key bindings) is entirely the host's
- * business.
+ * methods. Joystick input goes through the {@link joysticks} connectors -
+ * plug a {@link Joystick} device into one and drive the device. The machine
+ * knows nothing about host key assignments - mapping host keys to matrix
+ * codes or joystick lines (layouts, special key bindings) is entirely the
+ * host's business.
  */
 export class Atari implements Memory {
 	// Connectors - the supported host surface; devices plug in here.
@@ -537,40 +538,6 @@ export class Atari implements Memory {
 	 */
 	ejectDisk(): void {
 		this.#disk = undefined;
-	}
-
-	/**
-	 * Press joystick directions. `port` is 0-1 on the XL (two jacks) and 0-3
-	 * on the 800, whose ports 2/3 live on PIA port B; presses on ports the
-	 * machine doesn't have are ignored. `mask` is a set of direction bits:
-	 * 1 = up, 2 = down, 4 = left, 8 = right. The PIA lines are active low;
-	 * the mask here is "1 = press". The hardware can't stop opposite
-	 * directions being pressed at once; avoiding them is the host's call.
-	 */
-	joystickDown(port: number, mask: number): void {
-		const connector = this.joysticks[port];
-		if (!connector) return;
-		connector.directionIn.value = connector.directionIn.value & ~mask & 0x0f;
-	}
-
-	/** Release joystick directions. Takes the same mask as
-	 * {@link joystickDown}. */
-	joystickUp(port: number, mask: number): void {
-		const connector = this.joysticks[port];
-		if (!connector) return;
-		connector.directionIn.value = (connector.directionIn.value | mask) & 0x0f;
-	}
-
-	/** Press the joystick trigger on `port` (drives the GTIA TRIG line low). */
-	joystickTriggerDown(port: number): void {
-		const connector = this.joysticks[port];
-		if (connector) connector.triggerIn.value = false;
-	}
-
-	/** Release the joystick trigger on `port`. */
-	joystickTriggerUp(port: number): void {
-		const connector = this.joysticks[port];
-		if (connector) connector.triggerIn.value = true;
 	}
 
 	/**

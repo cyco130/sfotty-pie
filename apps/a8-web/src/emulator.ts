@@ -3,6 +3,7 @@ import {
 	CYCLES_PER_LINE,
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
+	Joystick,
 	NTSC_CYCLES_PER_SECOND,
 	PAL_CYCLES_PER_SECOND,
 	type AtrImage,
@@ -65,6 +66,10 @@ const OPTION_HOLD_FRAMES = 7;
  */
 export class Emulator {
 	readonly machine: Atari;
+
+	/** One Joystick device plugged into each of the machine's ports (two on
+	 *  the XL/XE, four on the 400/800). Index = Atari port. */
+	readonly joysticks: readonly Joystick[];
 
 	// Double buffer for tear-free display: the machine renders into #frames[#back]
 	// (its own default buffer is reused as one half), and at each frame boundary
@@ -187,6 +192,9 @@ export class Emulator {
 
 	constructor(config: EmulatorConfig) {
 		this.machine = new Atari(config);
+		this.joysticks = this.machine.joysticks.map(
+			(connector) => new Joystick(connector),
+		);
 		// Reuse the machine's default buffer as one half of the double buffer; the
 		// machine already renders into it (#back starts at 0), so the first frame
 		// needs no setFrameBuffer. The front starts on the other (empty) half.

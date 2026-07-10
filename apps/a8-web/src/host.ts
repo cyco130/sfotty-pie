@@ -641,12 +641,10 @@ export class EmulatorHost {
 	 * Set joystick 0 to an absolute direction - for the analog OSD stick,
 	 * which (unlike the keyboard's per-direction press/release) reports a
 	 * whole position at once. `mask` bits: 1 = up, 2 = down, 4 = left,
-	 * 8 = right; 0 = centred. Release-then-press is atomic between frames.
+	 * 8 = right; 0 = centred.
 	 */
 	setJoystickDirection(mask: number): void {
-		const machine = this.#emulator.machine;
-		machine.joystickUp(0, 0x0f & ~mask);
-		machine.joystickDown(0, mask);
+		this.#emulator.joysticks[0]!.direction = mask;
 	}
 
 	/** Assign a connected gamepad (by its `gamepad.index`) to an Atari port (0-3)

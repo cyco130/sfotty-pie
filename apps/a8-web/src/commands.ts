@@ -55,17 +55,23 @@ const press = (code: number, label: LabelKey): CommandSpec => ({
 // Joystick direction/trigger presses, one factory per kind. `port` is 0-3;
 // direction `mask` bits are 1 = up, 2 = down, 4 = left, 8 = right. Held while a
 // trigger sustains them; a palette pick pulses a single step. Ports 2/3 exist on
-// the 800 only - on the XL/XE the machine ignores them (see
-// `machine.joystickDown`), so their commands are harmless there.
+// the 800 only - on the XL/XE `emulator.joysticks` has no device there, so
+// their commands are harmless no-ops.
 const joyDir = (port: number, mask: number, label: LabelKey): CommandSpec => ({
 	label,
-	run: ({ emulator }) => emulator.machine.joystickDown(port, mask),
-	release: ({ emulator }) => emulator.machine.joystickUp(port, mask),
+	run: ({ emulator }) => emulator.joysticks[port]?.press(mask),
+	release: ({ emulator }) => emulator.joysticks[port]?.release(mask),
 });
 const joyTrigger = (port: number, label: LabelKey): CommandSpec => ({
 	label,
-	run: ({ emulator }) => emulator.machine.joystickTriggerDown(port),
-	release: ({ emulator }) => emulator.machine.joystickTriggerUp(port),
+	run: ({ emulator }) => {
+		const joystick = emulator.joysticks[port];
+		if (joystick) joystick.trigger = true;
+	},
+	release: ({ emulator }) => {
+		const joystick = emulator.joysticks[port];
+		if (joystick) joystick.trigger = false;
+	},
 });
 
 export const commands = {

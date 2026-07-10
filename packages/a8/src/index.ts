@@ -38,6 +38,7 @@ export {
 	type FirmwareContext,
 } from "./firmware-preferences.ts";
 export { JoystickConnector } from "./joystick-connector.ts";
+export { Joystick } from "./joystick.ts";
 export { Atari, type AtariModel, type MachineConfig } from "./machine.ts";
 export {
 	Pulse,

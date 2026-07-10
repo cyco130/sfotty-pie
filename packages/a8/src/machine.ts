@@ -32,12 +32,14 @@ import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
  */
 export type AtariModel = "400/800" | "1200xl" | "xl/xe" | "xegs";
 
-// Where cycle()/resumeCycle() are within one machine cycle. A
-// throw from a bus phase (ANTIC's DMA read in BUS, the CPU's access in CPU)
-// leaves the marker on that phase, so resumeCycle() re-enters there
-// without re-running the committed beforeCpu. A const object, not an enum
-// (enums emit runtime code, which this repo's strip-only TS execution rejects).
-const PHASE = { IDLE: 0, BUS: 1, CPU: 2 } as const;
+/**
+ * Where {@link Atari.cycle} is within one machine cycle. A throw from a bus
+ * phase (ANTIC's DMA read in BUS, the CPU's access in CPU) leaves the marker
+ * on that phase, so the next cycle() call re-enters there without re-running
+ * the committed beforeCpu. A const object, not an enum (enums emit runtime
+ * code, which this repo's strip-only TS execution rejects).
+ */
+export const PHASE = { IDLE: 0, BUS: 1, CPU: 2 } as const;
 
 export interface MachineConfig {
 	/**
@@ -95,14 +97,15 @@ export interface MachineConfig {
  * The host drives the machine one cycle at a time via {@link cycle}, which
  * runs ANTIC scheduling, the bus phase (ANTIC DMA or the CPU), and the
  * render. A bus phase may throw to suspend; the host catches it, resolves
- * it, and calls {@link resumeCycle}:
+ * it, and calls {@link cycle} again, which picks up the same cycle where it
+ * left off:
  *
  * ```ts
  * try {
  * 	machine.cycle();
  * } catch (signal) {
  * 	// resolve the suspend (await input, clear a breakpoint, ...)
- * 	machine.resumeCycle();
+ * 	machine.cycle();
  * }
  * // read machine.frame for video and machine.audio for sound
  * ```
@@ -139,8 +142,12 @@ export class Atari implements Memory {
 	 */
 	frame: Uint8Array = new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT);
 
-	// Continuation marker for the cycle phase machine; see PHASE.
-	#phase: number = PHASE.IDLE;
+	/**
+	 * The cycle phase machine's continuation marker - one of {@link PHASE}.
+	 * IDLE between cycles, BUS/CPU while a cycle is suspended mid-phase.
+	 * Public for debug consumers; treat as read-only.
+	 */
+	phase: number = PHASE.IDLE;
 
 	constructor(config: MachineConfig) {
 		const { os, basic, game, cartridge, log } = config;
@@ -411,34 +418,25 @@ export class Atari implements Memory {
 	 *
 	 * A bus phase may **throw** - an interceptor suspending on a read/write/fetch,
 	 * or a host's own breakpoint signal. This method does not catch it: the throw
-	 * propagates with the cycle frozen at that phase. The host catches whatever it
-	 * threw, resolves it (await input, clear a breakpoint, ...), and calls
-	 * {@link resumeCycle} to finish the *same* cycle - never `cycle`,
-	 * which would re-run the committed scheduling. Idempotent by construction:
-	 * each bus phase does its access before any commit, so a throw unwinds clean
-	 * and the retried access repeats nothing.
+	 * propagates with the cycle frozen at that phase. The host catches whatever
+	 * it threw, resolves it (await input, clear a breakpoint, ...), and calls
+	 * cycle() again - the call picks up the *same* suspended cycle where it left
+	 * off rather than starting a new one. Idempotent by construction: each bus
+	 * phase does its access before any commit, so a throw unwinds clean and the
+	 * retried access repeats nothing.
 	 */
 	cycle(): void {
-		if (this.#phase !== PHASE.IDLE) {
-			throw new Error("cycle() called mid-cycle - use resumeCycle()");
-		}
-		this.anticGtia.beforeCpu();
-		this.pokey.cycle();
-		this.#phase = PHASE.BUS;
-		this.#runCycle();
-	}
+		// The phase machine: a fall-through switch entered at the saved
+		// phase - IDLE starts a fresh cycle, BUS/CPU resume a suspended one.
+		// The marker is set to the current phase *before* each throwable
+		// call, so a throw leaves it pointing where to resume.
+		switch (this.phase) {
+			case PHASE.IDLE:
+				this.anticGtia.beforeCpu();
+				this.pokey.cycle();
+				this.phase = PHASE.BUS;
 
-	/** Finish a cycle that a bus phase suspended; see {@link cycle}. */
-	resumeCycle(): void {
-		this.#runCycle();
-	}
-
-	// The phase machine shared by cycle/resumeCycle: a fall-through
-	// switch that enters at the saved #phase and runs forward to the end of the
-	// cycle. The marker is set to the current phase *before* each throwable call,
-	// so a throw leaves it pointing where to resume.
-	#runCycle(): void {
-		switch (this.#phase) {
+			// falls through
 			case PHASE.BUS:
 				this.anticGtia.busCycle(); // ANTIC DMA read - may throw
 				this.cpu.NMI = this.anticGtia.nmi;
@@ -449,14 +447,15 @@ export class Atari implements Memory {
 				// IRQST-to-acknowledge latency this produces).
 				this.cpu.IRQ = this.#irqLine;
 				this.cpu.RDY = this.anticGtia.rdy;
-				this.#phase = PHASE.CPU;
+				this.phase = PHASE.CPU;
+
 			// falls through
 			case PHASE.CPU:
 				if (this.resetAsserted) this.cpu.reset(false);
 				else if (!this.anticGtia.halt) this.cpu.run(); // may throw
 				this.anticGtia.afterCpu(this.frame, this.busData);
 				this.#irqLine = this.irq;
-				this.#phase = PHASE.IDLE;
+				this.phase = PHASE.IDLE;
 		}
 	}
 

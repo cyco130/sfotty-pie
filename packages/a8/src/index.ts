@@ -41,7 +41,12 @@ export { ConsoleConnector } from "./console-connector.ts";
 export { ConsolePanel } from "./console-panel.ts";
 export { JoystickConnector } from "./joystick-connector.ts";
 export { Joystick } from "./joystick.ts";
-export { Atari, type AtariModel, type MachineConfig } from "./machine.ts";
+export {
+	Atari,
+	PHASE,
+	type AtariModel,
+	type MachineConfig,
+} from "./machine.ts";
 export {
 	Pulse,
 	Signal,

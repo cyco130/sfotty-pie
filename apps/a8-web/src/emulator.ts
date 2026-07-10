@@ -377,8 +377,7 @@ export class Emulator {
 
 			// One whole machine cycle: ANTIC + POKEY + bus + CPU + render.
 			// Instructions are recorded via onInstruction (see #recordTrace).
-			// a8-web installs no suspending traps, so cycle() never throws -
-			// no resumeCycle() needed here.
+			// a8-web installs no suspending traps, so cycle() never throws.
 			machine.cycle();
 			this.#collectAudio(machine.audio, ag.consoleSpeaker);
 		}

@@ -26,7 +26,7 @@ test("cycle runs a whole cycle and fires onInstruction once", () => {
 	expect(fetched).toEqual([0x0600]); // exactly once, at the opcode address
 });
 
-test("a bus-phase throw suspends the cycle; resume finishes it without re-advancing ANTIC", () => {
+test("a bus-phase throw suspends the cycle; the next cycle() finishes it without re-advancing ANTIC", () => {
 	const machine = quietMachine();
 
 	// The core is agnostic about the thrown value - any object propagates.
@@ -51,13 +51,11 @@ test("a bus-phase throw suspends the cycle; resume finishes it without re-advanc
 	}
 	expect(caught).toBe(suspend);
 
-	// Frozen mid-cycle: starting a fresh cycle is rejected (the host must resume).
-	expect(() => machine.cycle()).toThrow(/mid-cycle/);
-
 	// The fetch didn't commit: PC is untouched and the interrupt-free retry is clean.
 	expect(machine.cpu.PC).toBe(0x0600);
 
-	machine.resumeCycle();
+	// The next cycle() picks the suspended cycle up where it left off.
+	machine.cycle();
 
 	// beforeCpu ran exactly once across the suspend - ANTIC advanced one cycle.
 	expect(machine.anticGtia.hpos).toBe(hposBefore + 1);

@@ -982,18 +982,13 @@ export class EmulatorHost {
 			this.leds.value = null;
 			return;
 		}
-		const portb = this.#emulator.machine.pia.portbOut;
-		const refresh = (): void => {
-			const value = portb.value;
-			const l1 = (value & 0x04) === 0;
-			const l2 = (value & 0x08) === 0;
-			// PORTB changes on every bank switch; only repaint when an LED moves.
-			const current = this.leds.value;
-			if (current && current[0] === l1 && current[1] === l2) return;
-			this.leds.value = [l1, l2];
-		};
-		this.#unwatchLeds = portb.watch(refresh);
-		refresh();
+		// The connector's LED signals only fire on real level changes, so the
+		// bank-switch noise on the underlying PIA port never reaches us.
+		const panel = this.#emulator.consolePanel;
+		this.#unwatchLeds = panel.watchLeds((led1, led2) => {
+			this.leds.value = [led1, led2];
+		});
+		this.leds.value = [panel.led1, panel.led2];
 	}
 
 	// Fetch whatever firmware the new config needs, then power-cycle into it.

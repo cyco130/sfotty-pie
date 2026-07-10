@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
 import { AnticGtia } from "./antic-gtia.ts";
+import { ConsolePanel } from "./console-panel.ts";
 import { Atari } from "./machine.ts";
 import { Pokey } from "./pokey.ts";
 
@@ -155,11 +156,12 @@ test("the 800 Reset key drives the RNMI line, not the reset line", () => {
 	machine.write(0xd302, 0x3c, ReadOptions.NONE); // PACTL: CA2 manual high, data register
 	machine.write(0xd300, 0xa5, ReadOptions.NONE); // PORTA output latch
 
-	machine.resetButtonDown();
+	const panel = new ConsolePanel(machine.console);
+	panel.reset = true;
 	expect(machine.anticGtia.rnmi).toBe(true);
 	expect(machine.resetAsserted).toBe(false);
 
-	machine.resetButtonUp();
+	panel.reset = false;
 	expect(machine.anticGtia.rnmi).toBe(false);
 	expect(machine.read(0xd302, ReadOptions.NONE)).toBe(0x3c);
 });
@@ -178,7 +180,8 @@ test("the XL Reset button resets components and holds the reset line", () => {
 	machine.write(0xe000, 0x55, ReadOptions.NONE);
 	expect(machine.read(0xe000, ReadOptions.NONE)).toBe(0x55);
 
-	machine.resetButtonDown();
+	const panel = new ConsolePanel(machine.console);
+	panel.reset = true;
 	expect(machine.resetAsserted).toBe(true);
 	expect(machine.anticGtia.rnmi).toBe(false);
 	// ANTIC sits on the system reset line.
@@ -187,7 +190,7 @@ test("the XL Reset button resets components and holds the reset line", () => {
 	// ROM back in over the marker. The RAM itself survives the warm reset.
 	expect(machine.read(0xe000, ReadOptions.NONE)).toBe(0x00);
 
-	machine.resetButtonUp();
+	panel.reset = false;
 	expect(machine.resetAsserted).toBe(false);
 });
 
@@ -198,11 +201,12 @@ test("console keys drive the CONSOL register (active low)", () => {
 	machine.write(CONSOL, 0x08, ReadOptions.NONE);
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
 
-	machine.consoleKeyDown(4); // Option
-	machine.consoleKeyDown(1); // Start
+	const panel = new ConsolePanel(machine.console);
+	panel.option = true;
+	panel.start = true;
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(2);
 
-	machine.consoleKeyUp(4);
+	panel.option = false;
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(6);
 });
 

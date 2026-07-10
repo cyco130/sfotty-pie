@@ -293,7 +293,7 @@ export class Atari implements Memory {
 
 		// The power switch cold-resets every component, the CPU included.
 		connector.power.watch(() => {
-			this.reset(true);
+			this.#reset(true);
 			this.cpu.reset(true);
 		});
 
@@ -304,7 +304,7 @@ export class Atari implements Memory {
 		connector.reset.watch((source) => {
 			if (this.#xl) {
 				if (source.value) {
-					this.reset(false);
+					this.#reset(false);
 					this.#resetHeld = true;
 				} else {
 					this.#resetHeld = false;
@@ -375,7 +375,9 @@ export class Atari implements Memory {
 		this.mmu.write(address, value, options);
 	}
 
-	reset(cold: boolean): void {
+	// Reset the components. Reached only through the console connector: the
+	// power switch resets cold, the XL/XE Reset key warm.
+	#reset(cold: boolean): void {
 		this.mmu.reset(cold);
 		this.anticGtia.reset(cold);
 		this.pia.reset(cold);
@@ -483,10 +485,11 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * True while the Reset button holds the XL/XE system reset line. The host
-	 * must keep the CPU in reset - `cpu.reset(false)` instead of `run()` -
-	 * every cycle while this is set. Always false on the 800, whose Reset key
-	 * is an NMI instead (see {@link resetButtonDown}).
+	 * True while the Reset key holds the XL/XE system reset line (the
+	 * {@link console} connector's reset signal). The host must keep the CPU
+	 * in reset - `cpu.reset(false)` instead of `run()` - every cycle while
+	 * this is set. Always false on the 800, whose Reset key is an NMI
+	 * instead.
 	 */
 	get resetAsserted(): boolean {
 		return this.#resetHeld;
@@ -530,24 +533,6 @@ export class Atari implements Memory {
 	 */
 	breakKeyDown(): void {
 		this.pokey.breakKeyDown();
-	}
-
-	/**
-	 * Press console keys. `mask` is a set of CONSOL bits: 1 = Start,
-	 * 2 = Select, 4 = Option. Several can be pressed at once (CONSOL itself
-	 * is active low; the mask here is "1 = press").
-	 */
-	consoleKeyDown(mask: number): void {
-		if (mask & 0x01) this.console.startIn.value = false;
-		if (mask & 0x02) this.console.selectIn.value = false;
-		if (mask & 0x04) this.console.optionIn.value = false;
-	}
-
-	/** Release console keys. Takes the same mask as {@link consoleKeyDown}. */
-	consoleKeyUp(mask: number): void {
-		if (mask & 0x01) this.console.startIn.value = true;
-		if (mask & 0x02) this.console.selectIn.value = true;
-		if (mask & 0x04) this.console.optionIn.value = true;
 	}
 
 	/**
@@ -624,26 +609,5 @@ export class Atari implements Memory {
 	 */
 	ejectDisk(): void {
 		this.#disk = undefined;
-	}
-
-	/**
-	 * Press the Reset key/button.
-	 *
-	 * On the 800 it drives ANTIC's RNMI line: a non-maskable NMI fires at the
-	 * next VBLANK with NMIST bit 5 set, the OS warmstarts in software, and
-	 * nothing is hardware-reset.
-	 *
-	 * On the XL it pulses the system reset line: the soft-resettable
-	 * components reset immediately (notably the PIA, which banks the OS ROM
-	 * and BASIC back in) and {@link resetAsserted} stays true until
-	 * {@link resetButtonUp} so the host holds the CPU's RES line.
-	 */
-	resetButtonDown(): void {
-		this.console.reset.value = true;
-	}
-
-	/** Release the Reset key/button. */
-	resetButtonUp(): void {
-		this.console.reset.value = false;
 	}
 }

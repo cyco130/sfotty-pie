@@ -3,6 +3,7 @@ import {
 	CYCLES_PER_LINE,
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
+	ConsolePanel,
 	Joystick,
 	NTSC_CYCLES_PER_SECOND,
 	PAL_CYCLES_PER_SECOND,
@@ -70,6 +71,9 @@ export class Emulator {
 	/** One Joystick device plugged into each of the machine's ports (two on
 	 *  the XL/XE, four on the 400/800). Index = Atari port. */
 	readonly joysticks: readonly Joystick[];
+
+	/** The console's switches, buttons, and LEDs as a device. */
+	readonly consolePanel: ConsolePanel;
 
 	// Double buffer for tear-free display: the machine renders into #frames[#back]
 	// (its own default buffer is reused as one half), and at each frame boundary
@@ -195,6 +199,7 @@ export class Emulator {
 		this.joysticks = this.machine.joysticks.map(
 			(connector) => new Joystick(connector),
 		);
+		this.consolePanel = new ConsolePanel(this.machine.console);
 		// Reuse the machine's default buffer as one half of the double buffer; the
 		// machine already renders into it (#back starts at 0), so the first frame
 		// needs no setFrameBuffer. The front starts on the other (empty) half.
@@ -249,8 +254,7 @@ export class Emulator {
 
 	/** Power cycle: cold-reset the machine and the CPU. */
 	coldStart(): void {
-		this.machine.reset(true);
-		this.machine.cpu.reset(true);
+		this.consolePanel.powerCycle();
 		// Drop any timed releases queued against the old machine - a stale OPTION
 		// release could otherwise cut the fresh boot's hold short.
 		this.#pending = [];
@@ -268,8 +272,10 @@ export class Emulator {
 	// Press OPTION at boot (BASIC-disable); release it after OPTION_HOLD_FRAMES.
 	#startOptionHold(): void {
 		if (!this.#holdOption) return;
-		this.machine.consoleKeyDown(0x04);
-		this.afterFrames(OPTION_HOLD_FRAMES, () => this.machine.consoleKeyUp(0x04));
+		this.consolePanel.option = true;
+		this.afterFrames(OPTION_HOLD_FRAMES, () => {
+			this.consolePanel.option = false;
+		});
 	}
 
 	async #loop(): Promise<void> {

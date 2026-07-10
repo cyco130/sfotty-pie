@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
+import { ConsolePanel } from "./console-panel.ts";
 import { Atari } from "./machine.ts";
 
 const CONSOL = 0xd01f;
@@ -29,12 +30,13 @@ test("console buttons drive CONSOL reads, active low", () => {
 	machine.console.startIn.value = false;
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(6);
 
-	// The old mask API drives the same wires (4 = Option).
-	machine.consoleKeyDown(4);
+	// The ConsolePanel device drives the same wires.
+	const panel = new ConsolePanel(machine.console);
+	panel.option = true;
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(2);
 
 	machine.console.startIn.value = true;
-	machine.consoleKeyUp(4);
+	panel.option = false;
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
 });
 
@@ -70,10 +72,11 @@ test("the Reset key holds the XL system reset line", () => {
 	machine.console.reset.value = false;
 	expect(machine.resetAsserted).toBe(false);
 
-	// The old API drives the same wire.
-	machine.resetButtonDown();
+	// The ConsolePanel device drives the same wire.
+	const panel = new ConsolePanel(machine.console);
+	panel.reset = true;
 	expect(machine.resetAsserted).toBe(true);
-	machine.resetButtonUp();
+	panel.reset = false;
 	expect(machine.resetAsserted).toBe(false);
 });
 

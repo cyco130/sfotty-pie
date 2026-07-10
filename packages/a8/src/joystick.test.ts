@@ -130,9 +130,12 @@ test("a stick switch pulls even an output-driven PORTA pin low", () => {
 });
 
 test("joystick state survives a reset (switches are physical)", () => {
-	const machine = makeMachine("800");
+	// The XL, whose Reset key actually resets the components (the 800's is
+	// only an NMI source).
+	const machine = makeMachine("800XL");
 	plugStick(machine, 0).press(0x08);
-	machine.reset(false);
+	machine.console.reset.value = true;
+	machine.console.reset.value = false;
 	machine.write(PACTL, 0x04, ReadOptions.NONE);
 	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xf7);
 });

@@ -113,16 +113,15 @@ export interface MachineConfig {
  * business.
  */
 export class Atari implements Memory {
+	// Internal components
+	readonly cpu: Sfotty;
 	readonly anticGtia: AnticGtia;
-
-	readonly mmu: Mmu;
 	readonly pia: Pia;
 	readonly pokey: Pokey;
+	readonly mmu: Mmu;
+
 	readonly #xl: boolean;
 	#resetHeld = false;
-
-	// The CPU the machine owns and drives via cycle()/resumeCycle().
-	readonly #cpu: Sfotty;
 	// The D1: disk image served by the built-in trap-based SIO; undefined = no
 	// disk (SIO times out and the OS moves on). Set via insertDisk.
 	#disk: AtrImage | undefined;
@@ -195,7 +194,7 @@ export class Atari implements Memory {
 		// The machine is its own bus (it implements Memory), so the CPU reads and
 		// writes through the trap-aware Mmu. Constructed last, once the MMU is
 		// wired. Powers on into the reset sequence like real hardware.
-		this.#cpu = new Sfotty(this);
+		this.cpu = new Sfotty(this);
 
 		// Built-in SIO high-level emulation: a JSR through SIOV is trapped and
 		// served from the inserted D1: image (no serial hardware emulated). Wired
@@ -205,7 +204,7 @@ export class Atari implements Memory {
 		// there), so the fetch must fall through to it.
 		const sioHandler = createSioHandler({
 			machine: this,
-			cpu: this.#cpu,
+			cpu: this.cpu,
 			getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
 		});
 		this.interceptExecute(SIOV, (address) =>
@@ -231,11 +230,6 @@ export class Atari implements Memory {
 		this.anticGtia.reset(cold);
 		this.pia.reset(cold);
 		this.pokey.reset(cold);
-	}
-
-	/** The CPU the machine owns and drives. */
-	get cpu(): Sfotty {
-		return this.#cpu;
 	}
 
 	/**
@@ -264,10 +258,10 @@ export class Atari implements Memory {
 	 * CPU's `onFetch`; see {@link Sfotty.onFetch} for the exact semantics.
 	 */
 	get onInstruction(): ((pc: number) => void) | undefined {
-		return this.#cpu.onFetch;
+		return this.cpu.onFetch;
 	}
 	set onInstruction(fn: ((pc: number) => void) | undefined) {
-		this.#cpu.onFetch = fn;
+		this.cpu.onFetch = fn;
 	}
 
 	/**
@@ -307,19 +301,19 @@ export class Atari implements Memory {
 		switch (this.#phase) {
 			case PHASE.BUS:
 				this.anticGtia.busCycle(); // ANTIC DMA read - may throw
-				this.#cpu.NMI = this.anticGtia.nmi;
+				this.cpu.NMI = this.anticGtia.nmi;
 				// The CPU sees the wire-ORed /IRQ line as of the end of the
 				// previous cycle: the open-collector line settles across a
 				// phase boundary, one cycle of propagation the 6502 never
 				// sees around (Acid800 pokey_irqtiming pins the total
 				// IRQST-to-acknowledge latency this produces).
-				this.#cpu.IRQ = this.#irqLine;
-				this.#cpu.RDY = this.anticGtia.rdy;
+				this.cpu.IRQ = this.#irqLine;
+				this.cpu.RDY = this.anticGtia.rdy;
 				this.#phase = PHASE.CPU;
 			// falls through
 			case PHASE.CPU:
-				if (this.resetAsserted) this.#cpu.reset(false);
-				else if (!this.anticGtia.halt) this.#cpu.run(); // may throw
+				if (this.resetAsserted) this.cpu.reset(false);
+				else if (!this.anticGtia.halt) this.cpu.run(); // may throw
 				this.anticGtia.afterCpu(this.#frame, this.busData);
 				this.#irqLine = this.irq;
 				this.#phase = PHASE.IDLE;

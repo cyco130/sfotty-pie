@@ -1,43 +1,7 @@
-// The AudioWorklet processor: plays Float32Array chunks posted to its port,
-// holding the last level on underrun (the DC blocker upstream keeps that
-// near zero). Defined as source text and loaded from a Blob so no bundler
-// worklet plumbing is needed.
-const PROCESSOR_SOURCE = `
-class A8Audio extends AudioWorkletProcessor {
-	constructor() {
-		super();
-		this.queue = [];
-		this.offset = 0;
-		this.last = 0;
-		this.port.onmessage = (event) => {
-			if (event.data === "clear") {
-				this.queue.length = 0;
-				this.offset = 0;
-			} else {
-				this.queue.push(event.data);
-			}
-		};
-	}
-
-	process(inputs, outputs) {
-		const out = outputs[0][0];
-		for (let i = 0; i < out.length; i++) {
-			const head = this.queue[0];
-			if (head) {
-				out[i] = this.last = head[this.offset++];
-				if (this.offset >= head.length) {
-					this.queue.shift();
-					this.offset = 0;
-				}
-			} else {
-				out[i] = this.last;
-			}
-		}
-		return true;
-	}
-}
-registerProcessor("a8-audio", A8Audio);
-`;
+// The worklet processor module (see audio-processor.ts): `?worker&url` makes
+// Vite transpile it as a self-contained worker entry and hands back its URL,
+// which is all audioWorklet.addModule needs.
+import processorUrl from "./audio-processor.ts?worker&url";
 
 /**
  * The audio sink: chunks pushed in are played back-to-back by the worklet.
@@ -81,14 +45,7 @@ export class AudioOutput {
 	static async create(): Promise<AudioOutput | null> {
 		if (typeof AudioContext === "undefined") return null;
 		const context = new AudioContext({ latencyHint: "interactive" });
-		const url = URL.createObjectURL(
-			new Blob([PROCESSOR_SOURCE], { type: "text/javascript" }),
-		);
-		try {
-			await context.audioWorklet.addModule(url);
-		} finally {
-			URL.revokeObjectURL(url);
-		}
+		await context.audioWorklet.addModule(processorUrl);
 		const node = new AudioWorkletNode(context, "a8-audio", {
 			numberOfInputs: 0,
 			outputChannelCount: [1],

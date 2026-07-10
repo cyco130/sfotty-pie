@@ -12,11 +12,7 @@ import {
 	type WriteInterceptor,
 	type WriteObserver,
 } from "./mmu.ts";
-import {
-	builtinSlotRom,
-	createCartridge,
-	type Cartridge,
-} from "./cartridge.ts";
+import { builtinSlotRom, type Cartridge } from "./cartridge.ts";
 import { ConsoleConnector } from "./console-connector.ts";
 import { JoystickConnector } from "./joystick-connector.ts";
 import { Pbi } from "./pbi.ts";
@@ -67,18 +63,15 @@ export interface MachineConfig {
 	/** OS ROM: 10K (400/800) or 16K (XL/XE). */
 	os: Uint8Array;
 	/**
-	 * BASIC ROM (8K). Built-in (PORTB-banked) on XL/XE; on the 400/800 a passed
-	 * `basic` is wrapped as an $A000 cartridge (omit to leave the slot empty).
-	 * The 1200XL has no built-in BASIC - omit it and supply BASIC as a cart.
+	 * Built-in BASIC ROM (8K), PORTB-banked - XL/XE only (the 1200XL has
+	 * none). Ignored on the 400/800, where BASIC is an ordinary $A000
+	 * cartridge: attach it via the {@link Atari.cartridge} accessor like any
+	 * cart. Disabling built-in BASIC (holding OPTION through boot) is the
+	 * host's business.
 	 */
 	basic?: Uint8Array;
 	/** Built-in game ROM (8K), PORTB-banked - the XEGS. Requires `xl`. */
 	game?: Uint8Array;
-	/**
-	 * Cartridge in the (left) slot. On the 400/800 it takes the slot otherwise
-	 * occupied by the BASIC cartridge; on XL/XE it shadows built-in BASIC.
-	 */
-	cartridge?: Cartridge;
 	/** Debug log sink (used by ANTIC's display list disassembler). */
 	log?: (message: string) => void;
 }
@@ -88,7 +81,8 @@ export interface MachineConfig {
  * combined {@link AnticGtia} video chip pair, POKEY, and the PIA. Classic
  * machines as {@link MachineConfig} recipes:
  *
- * - an 800 - OS-B, 48K, no PORTB banking; BASIC is a standard $A000 8K cart.
+ * - an 800 - OS-B, 48K, no PORTB banking; BASIC is a standard $A000 8K cart
+ *   the host attaches via {@link cartridge}.
  * - an 800XL - `xl`, XL OS, 64K, PORTB banking; BASIC is built in and banked
  *   via PORTB (the OS enables it unless OPTION is held).
  * - a 130XE - the XL plus `xeBankCount: 4` (four 16K banks at $4000-$7FFF via
@@ -122,6 +116,13 @@ export class Atari implements Memory {
 	readonly joysticks: readonly JoystickConnector[];
 	readonly console: ConsoleConnector;
 
+	get cartridge(): Cartridge | undefined {
+		return this.#cartridge;
+	}
+	set cartridge(cart: Cartridge | undefined) {
+		this.#setCartridge(cart);
+	}
+
 	// Internal components
 	readonly cpu: Sfotty;
 	readonly anticGtia: AnticGtia;
@@ -150,7 +151,7 @@ export class Atari implements Memory {
 	phase: number = PHASE.IDLE;
 
 	constructor(config: MachineConfig) {
-		const { os, basic, game, cartridge, log } = config;
+		const { os, basic, game, log } = config;
 		const xl = config.xl ?? false;
 		this.#xl = xl;
 
@@ -180,13 +181,9 @@ export class Atari implements Memory {
 			separateAnticAccess: config.separateAnticAccess ?? false,
 			osRom: os,
 			// XL/XE: built-in BASIC and game, banked in via PORTB - each accepts a
-			// raw 8K ROM or a standard-8K `.car` (unwrapped here). 400/800: BASIC is
-			// an $A000 cart (Cartridge parses raw or `.car`) - displaced when a game
-			// cartridge is in the slot.
+			// raw 8K ROM or a standard-8K `.car` (unwrapped here).
 			basicRom: xl && basic ? builtinSlotRom(basic) : undefined,
 			gameRom: game ? builtinSlotRom(game) : undefined,
-			cartridge:
-				cartridge ?? (!xl && basic ? createCartridge(basic) : undefined),
 			gtia: this.anticGtia,
 			pokey: this.pokey,
 			pia: this.pia,
@@ -197,16 +194,11 @@ export class Atari implements Memory {
 		this.joysticks = this.#connectJoystickConnectors();
 		this.console = this.#connectConsoleConnector();
 
-		// On XL/XE, TRIG3 ($D013) senses the cartridge line (RD5): 1 = a
-		// cartridge is in the slot, 0 = empty. The OS reads it (against the
-		// stored GINTLK) to cold-start on a hot swap, and to skip the
-		// cartridge checksum entirely when the slot is empty - without this
-		// (TRIG3 stuck at 1) every Reset runs that checksum, which then fails
-		// on the BASIC/RAM banking and forces a cold start. On the 800 TRIG3
-		// is joystick 4's trigger and stays as-is.
-		if (xl) {
-			this.anticGtia.trig3 = cartridge ? 1 : 0;
-		}
+		// The slot starts empty, via the accessor: on XL/XE that drives the
+		// cartridge sense (TRIG3) low, which GTIA's own power-on default
+		// leaves high. Hosts attach cartridges - BASIC included, on the
+		// 400/800 - through the same accessor.
+		this.#setCartridge(undefined);
 
 		// The machine is its own bus (it implements Memory), so the CPU reads and
 		// writes through the trap-aware Mmu. Constructed last, once the MMU is
@@ -599,5 +591,41 @@ export class Atari implements Memory {
 	 */
 	ejectDisk(): void {
 		this.#disk = undefined;
+	}
+
+	#cartridge: Cartridge | undefined;
+	#unwatchCartMapping: (() => void) | undefined;
+
+	/**
+	 * Insert, remove, or replace the cartridge - the electrical swap only,
+	 * exactly like pushing a cart into a running machine: nothing is reset.
+	 * Hosts should power-cycle after swapping for now; the OS's own hot-swap
+	 * reaction (the GINTLK interlock forcing a cold start) is what a real
+	 * machine does, but a8 hosts don't rely on it yet.
+	 */
+	#setCartridge(cartridge: Cartridge | undefined) {
+		this.#unwatchCartMapping?.();
+		this.#unwatchCartMapping = undefined;
+		this.#cartridge = cartridge;
+		this.mmu.setCartridge(cartridge ?? null);
+
+		// On XL/XE, TRIG3 ($D013) senses the cartridge line (RD5) live: 1 =
+		// cartridge ROM present at $A000-$BFFF, 0 = absent - including a
+		// cartridge that banks itself out via CCTL. The OS reads it (against
+		// the stored GINTLK) to cold-start on a hot swap, and to skip the
+		// cartridge checksum entirely when the slot is empty - without this
+		// (TRIG3 stuck at 1) every Reset runs that checksum, which then fails
+		// on the BASIC/RAM banking and forces a cold start. On the 800 TRIG3
+		// is joystick 4's trigger and stays as-is.
+		if (this.#xl) {
+			this.#updateCartridgeSense();
+			this.#unwatchCartMapping = cartridge?.mappingChanged.watch(() =>
+				this.#updateCartridgeSense(),
+			);
+		}
+	}
+
+	#updateCartridgeSense(): void {
+		this.anticGtia.trig3 = this.#cartridge?.hasA000ToBfff ? 1 : 0;
 	}
 }

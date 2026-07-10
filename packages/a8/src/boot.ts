@@ -75,11 +75,16 @@ const machine = new Atari({
 	xl: xl || xe,
 	...(xe ? { xeBankCount: 4, separateAnticAccess: true } : {}),
 	os: loadRom(osPath, "--os"),
-	...(xl || !filePath ? { basic: loadRom(basicPath, "--basic") } : {}),
-	...(cartridge ? { cartridge } : {}),
+	...(xl ? { basic: loadRom(basicPath, "--basic") } : {}),
 	...(pal ? { tvSystem: "pal" as const } : {}),
 });
 
+// On the 400/800 BASIC is an ordinary $A000 cartridge; boot it when no
+// file (and no cartridge) takes the slot.
+if (!xl && !cartridge && !filePath) {
+	cartridge = createCartridge(loadRom(basicPath, "--basic"));
+}
+if (cartridge) machine.cartridge = cartridge;
 if (disk) machine.insertDisk(disk);
 
 const peek = (address: number) => machine.read(address, ReadOptions.PEEK);

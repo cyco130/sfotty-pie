@@ -26,8 +26,8 @@ test("Atarimax 1MB (42): the written address selects the bank, through the machi
 	const machine = new Atari({
 		xl: true,
 		os: new Uint8Array(16384),
-		cartridge: createCartridge(stamp8k(car(42, 1024)), "test.car"),
 	});
+	machine.cartridge = createCartridge(stamp8k(car(42, 1024)), "test.car");
 
 	// Powers up with bank 127 mapped.
 	expect(machine.read(0xa000, NONE)).toBe(127);
@@ -183,8 +183,8 @@ test("Bounty Bob (18): in-window triggers switch banks, PEEK doesn't", () => {
 	const machine = new Atari({
 		xl: true,
 		os: new Uint8Array(16384),
-		cartridge: createCartridge(image, "test.car"),
 	});
+	machine.cartridge = createCartridge(image, "test.car");
 
 	// Power-on: banks 0 and 4, fixed tail.
 	expect(machine.read(0x8000, NONE)).toBe(0x40);
@@ -208,4 +208,29 @@ test("Bounty Bob (18): in-window triggers switch banks, PEEK doesn't", () => {
 	// A PEEK of a trigger address must not switch.
 	machine.read(0x9ff6, ReadOptions.PEEK);
 	expect(machine.read(0x9000, NONE)).toBe(0x46);
+});
+
+test("XL TRIG3 follows the cartridge sense (RD5) live", () => {
+	const machine = new Atari({
+		xl: true,
+		os: new Uint8Array(16384),
+	});
+	machine.cartridge = createCartridge(stamp8k(car(42, 1024)), "test.car");
+	const TRIG3 = 0xd013;
+	expect(machine.read(TRIG3, NONE)).toBe(1);
+
+	// Banking the cartridge out via CCTL drops RD5 - and TRIG3 with it.
+	machine.write(0xd580, 0, NONE);
+	expect(machine.read(TRIG3, NONE)).toBe(0);
+	machine.write(0xd503, 0, NONE);
+	expect(machine.read(TRIG3, NONE)).toBe(1);
+
+	// Pulling the cartridge reads 0; the accessor is the physical swap, so
+	// re-inserting the same cart keeps its bank state (still bank 3).
+	const cart = machine.cartridge;
+	machine.cartridge = undefined;
+	expect(machine.read(TRIG3, NONE)).toBe(0);
+	machine.cartridge = cart;
+	expect(machine.read(TRIG3, NONE)).toBe(1);
+	expect(machine.read(0xa000, NONE)).toBe(3);
 });

@@ -8,6 +8,7 @@ import {
 	NTSC_CYCLES_PER_SECOND,
 	PAL_CYCLES_PER_SECOND,
 	type AtrImage,
+	type Cartridge,
 	type MachineConfig,
 } from "@sfotty-pie/a8";
 import { ReadOptions, traceLine, type Sfotty } from "@sfotty-pie/sfotty";
@@ -44,6 +45,9 @@ const YIELD_INTERVAL = 257;
 const MAX_LAG_MS = 100;
 
 export interface EmulatorConfig extends MachineConfig {
+	/** Cartridge in the (left) slot - inserted via the machine's cartridge
+	 *  accessor after construction. */
+	cartridge?: Cartridge;
 	/** Disk in drive D1: (read-only; served by the trap-based SIO). */
 	disk?: AtrImage;
 	/** Audio sink. When its context runs, the audio clock paces emulation. */
@@ -209,6 +213,7 @@ export class Emulator {
 		];
 		this.frame = this.#frames[1];
 
+		if (config.cartridge) this.machine.cartridge = config.cartridge;
 		if (config.disk) this.machine.insertDisk(config.disk);
 
 		this.#holdOption = config.holdOption ?? false;

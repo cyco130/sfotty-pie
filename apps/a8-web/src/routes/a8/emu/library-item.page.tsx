@@ -69,6 +69,7 @@ function detailRows(entry: ImageEntry): { label: string; value: string }[] {
 				{ label: f.sectorSize, value: `${k.sectorSize} B` },
 			];
 		case "xex":
+		case "unknown-rom":
 			return [];
 	}
 }

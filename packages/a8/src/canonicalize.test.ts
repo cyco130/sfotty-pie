@@ -172,3 +172,28 @@ describe("builtinSlotRom", () => {
 		expect(() => builtinSlotRom(car16)).toThrow(/standard-8K/);
 	});
 });
+
+describe("unknown-rom canonicalization", () => {
+	it("keeps a size-matching undetectable dump raw as unknown-rom", () => {
+		// 32K of noise: no trailer anywhere, so no raw-cart detector fires,
+		// but plenty of CART types are 32K.
+		const source = new Uint8Array(32768).fill(0x55);
+		const pieces = canonicalize(source, "mystery.rom");
+		expect(pieces).toHaveLength(1);
+		expect(pieces[0]!.kind).toEqual({ type: "unknown-rom" });
+		expect(pieces[0]!.header.length).toBe(0);
+		expect(pieces[0]!.bytes).toBe(source);
+	});
+
+	it("rejects sizes matching no CART type", () => {
+		expect(() => canonicalize(new Uint8Array(12 * 1024), "odd.rom")).toThrow(
+			"Unrecognized image format",
+		);
+	});
+
+	it("rejects non-ROM extensions", () => {
+		expect(() => canonicalize(new Uint8Array(32768), "movie.mp4")).toThrow(
+			"Unrecognized image format",
+		);
+	});
+});

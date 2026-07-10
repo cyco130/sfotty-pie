@@ -40,6 +40,15 @@ export function hasKnownExtension(name: string): boolean {
 	return KNOWN_RE.test(name);
 }
 
+/**
+ * Whether a filename has a raw-ROM-dump extension (`.rom`/`.bin`/`.raw`).
+ * Used by canonicalize to decide that an undetected file may still be a
+ * cartridge dump of unknown type.
+ */
+export function hasRawRomExtension(name: string): boolean {
+	return RAW_ROM_RE.test(name);
+}
+
 export function detectFileFormat(
 	contents: Uint8Array,
 	name?: string,

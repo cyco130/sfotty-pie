@@ -24,6 +24,7 @@ export type ImageType = ImageKind["type"];
  *  `.rom`, a disk an `.atr`, an executable a `.xex`. Stored names carry none;
  *  this is added on download / library export. */
 export const CANON_EXT: Record<ImageType, string> = {
+	"unknown-rom": "rom",
 	os: "rom",
 	cart: "car",
 	disk: "atr",

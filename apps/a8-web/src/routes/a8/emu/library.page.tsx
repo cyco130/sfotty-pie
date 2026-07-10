@@ -28,7 +28,13 @@ import { PanelFrame } from "./panel-frame.tsx";
 
 const PAGE_SIZE = 100;
 
-const TYPE_VALUES: readonly ImageType[] = ["os", "cart", "disk", "xex"];
+const TYPE_VALUES: readonly ImageType[] = [
+	"os",
+	"cart",
+	"disk",
+	"xex",
+	"unknown-rom",
+];
 
 // An OS ROM's target machine family: the stored size class (10K -> 400/800,
 // 16K -> the XL/XE class) maps to a URL-clean slug and a display label, so the
@@ -146,6 +152,7 @@ function detailCols(type: ImageType): DetailCol[] {
 				},
 			];
 		case "xex":
+		case "unknown-rom":
 			return [];
 	}
 }

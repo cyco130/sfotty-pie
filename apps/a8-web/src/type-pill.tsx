@@ -9,6 +9,7 @@ const TYPE_PILL: Record<ImageType, { code: string; tint: string }> = {
 	cart: { code: "car", tint: "bg-amber-100 text-amber-700" },
 	xex: { code: "xex", tint: "bg-emerald-100 text-emerald-700" },
 	os: { code: "rom", tint: "bg-violet-100 text-violet-700" },
+	"unknown-rom": { code: "rom", tint: "bg-neutral-100 text-neutral-600" },
 };
 
 /** A colour-coded type pill (format code); the full type name is its tooltip. */

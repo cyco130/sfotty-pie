@@ -382,6 +382,7 @@ export const messages = {
 			cart: "Cartridge",
 			disk: "Disk",
 			xex: "Executable",
+			"unknown-rom": "Unknown ROM",
 		},
 		range: (from: number, to: number, total: number): string =>
 			`${from}-${to} of ${total}`,

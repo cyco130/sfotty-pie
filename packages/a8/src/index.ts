@@ -9,9 +9,13 @@ export {
 export {
 	RomCartridge,
 	createCartridge,
+	cartTypesForSize,
+	isCartTypeSupported,
+	suggestCartType,
 	CART_TYPES,
 	type Cartridge,
 	type CartType,
+	type CartTypeOption,
 } from "./cartridge.ts";
 export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
 export { buildBootDisk } from "./xex-boot.ts";

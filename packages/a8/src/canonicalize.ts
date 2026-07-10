@@ -1,6 +1,8 @@
+import { cartTypesForSize } from "./cartridge.ts";
 import {
 	type AtariFileFormat,
 	detectFileFormat,
+	hasRawRomExtension,
 } from "./detect-file-format.ts";
 
 // Canonicalization: turn an arbitrary image file into one or more canonical
@@ -24,7 +26,11 @@ export type ImageKind =
 	| { type: "os"; sizeClass: 10 | 16 }
 	| { type: "cart"; cartType: number } // the CART-table number = mapper/subtype
 	| { type: "disk"; sectorSize: 128 | 256; sectors: number }
-	| { type: "xex" };
+	| { type: "xex" }
+	// A raw cartridge dump whose mapper couldn't be detected (its size matches
+	// at least one CART type). Stored raw; picking a type later completes the
+	// canonicalization by writing the CART header.
+	| { type: "unknown-rom" };
 
 /** One canonical image produced from a source file. */
 export interface CanonicalPiece {
@@ -200,6 +206,26 @@ export function canonicalize(
 				osPiece(source, 16, XEGS_BASIC_END, XEGS_OS_END, "os"),
 			];
 		case null:
+			// A raw-ROM-named (or nameless) dump whose size matches at least one
+			// CART type is a cartridge of unknown mapper - kept raw until the
+			// user picks a type, which writes the header and completes the
+			// canonicalization.
+			if (
+				(!fileName || hasRawRomExtension(fileName)) &&
+				source.length >= 2048 &&
+				source.length % 1024 === 0 &&
+				cartTypesForSize(source.length / 1024).length > 0
+			) {
+				return [
+					{
+						from: 0,
+						to: source.length,
+						header: EMPTY,
+						bytes: source,
+						kind: { type: "unknown-rom" },
+					},
+				];
+			}
 			throw new Error("Unrecognized image format");
 	}
 }

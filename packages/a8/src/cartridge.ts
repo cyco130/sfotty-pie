@@ -1095,6 +1095,158 @@ export const CART_TYPES: Record<number, CartType> = {
 	}),
 };
 
+/** Whether {@link RomCartridge} can run CART type `cartType`: its scheme is
+ *  implemented and it isn't 5200-only. Unsupported types can still be
+ *  recorded in a `.car` header - they just can't boot or attach. */
+export function isCartTypeSupported(cartType: number): boolean {
+	const type = CART_TYPES[cartType];
+	return !!type?.initialMapping && type.machine !== "5200";
+}
+
+/** One choice in a cartridge-type picker. */
+export interface CartTypeOption {
+	cartType: number;
+	name: string;
+	machine: CartType["machine"];
+	/** See {@link isCartTypeSupported}. */
+	supported: boolean;
+}
+
+/**
+ * Every CART type whose ROM size matches `sizeKB`, for a type picker:
+ * supported types first, then by type number. Unsupported entries
+ * (unimplemented schemes, 5200 carts) are listed so a known type can still
+ * be recorded; the UI marks them and refuses to boot them.
+ */
+export function cartTypesForSize(sizeKB: number): CartTypeOption[] {
+	const options: CartTypeOption[] = [];
+	for (const [key, type] of Object.entries(CART_TYPES)) {
+		if (type.size !== sizeKB) continue;
+		options.push({
+			cartType: Number(key),
+			name: type.name,
+			machine: type.machine,
+			supported: isCartTypeSupported(Number(key)),
+		});
+	}
+	options.sort(
+		(a, b) =>
+			Number(b.supported) - Number(a.supported) || a.cartType - b.cartType,
+	);
+	return options;
+}
+
+// A plausible boot trailer at the end of an 8K bank slice: the mandatory
+// zero byte at the $BFFC position and an init vector inside the cartridge
+// space (or the $FFxx "no init" form).
+function hasPlausibleTrailer(bank: Uint8Array): boolean {
+	if (bank.length !== 8192 || bank[8188] !== 0) return false;
+	const init = bank[8190]! | (bank[8191]! << 8);
+	return (init & 0xff00) === 0xff00 || (init >= 0x8000 && init < 0xc000);
+}
+
+/**
+ * Best-guess CART type for a raw dump, or null when no heuristic applies.
+ * Size-unique types are certain. Otherwise the *position* of a plausible
+ * boot trailer (the $BFFA-$BFFF vectors of whichever bank boots at $A000)
+ * picks the scheme family, and prevalence picks the member:
+ *
+ * - trailer at the end of the image: the XEGS shape (last bank fixed at
+ *   $A000); at 1MB, Atarimax-old boots bank 127 and far outnumbers XEGS 1MB.
+ * - trailer at the end of the first 8K: the 8K-window-at-$A000 shape
+ *   (Williams, Atarimax).
+ * - trailer at the end of the first 16K's upper half: the 16K-window shape
+ *   (MegaCart).
+ * - a 64/128K image with no plausible trailer may be a scrambled Atrax
+ *   dump: descramble and re-check bank 0.
+ */
+export function suggestCartType(bytes: Uint8Array): number | null {
+	if (bytes.length < 2048 || bytes.length % 1024 !== 0) return null;
+	const sizeKB = bytes.length / 1024;
+
+	const bySize: Record<number, number> = {
+		2: 57,
+		4: 58, // three candidates, but the standard 4K dwarfs the others
+		4096: 63,
+		32768: 65,
+		65536: 66,
+		131072: 62,
+	};
+	const unique = bySize[sizeKB];
+	if (unique !== undefined) return unique;
+
+	const endTrailer: Record<number, number> = {
+		32: 12,
+		64: 13,
+		128: 14,
+		256: 23,
+		512: 24,
+		1024: 42,
+	};
+	const firstBankTrailer: Record<number, number> = {
+		32: 22,
+		64: 8,
+		128: 41,
+		1024: 75,
+	};
+	const megacartTrailer: Record<number, number> = {
+		32: 27,
+		64: 28,
+		128: 29,
+		256: 30,
+		512: 31,
+		1024: 32,
+		2048: 64,
+	};
+
+	if (hasPlausibleTrailer(bytes.subarray(bytes.length - 8192))) {
+		const type = endTrailer[sizeKB];
+		if (type !== undefined) return type;
+	}
+	if (hasPlausibleTrailer(bytes.subarray(0, 8192))) {
+		const type = firstBankTrailer[sizeKB];
+		if (type !== undefined) return type;
+	}
+	if (
+		bytes.length >= 16384 &&
+		hasPlausibleTrailer(bytes.subarray(8192, 16384))
+	) {
+		const type = megacartTrailer[sizeKB];
+		if (type !== undefined) return type;
+	}
+
+	// Scrambled Atrax dumps boot bank 0; descramble and look for its trailer.
+	if (sizeKB === 128) {
+		if (
+			hasPlausibleTrailer(
+				descramble(bytes, ATRAX_ADDR, ATRAX_DATA).subarray(0, 8192),
+			)
+		) {
+			return 68;
+		}
+		if (
+			hasPlausibleTrailer(
+				descramble(bytes, [...ATRAX_SDX_ADDR, 16], ATRAX_SDX_DATA).subarray(
+					0,
+					8192,
+				),
+			)
+		) {
+			return 49;
+		}
+	}
+	if (
+		sizeKB === 64 &&
+		hasPlausibleTrailer(
+			descramble(bytes, ATRAX_SDX_ADDR, ATRAX_SDX_DATA).subarray(0, 8192),
+		)
+	) {
+		return 48;
+	}
+
+	return null;
+}
+
 /**
  * What the machine needs from whatever is plugged into the cartridge slot.
  * {@link RomCartridge} - a plain `.car`/raw ROM image - is the shipped

@@ -479,7 +479,11 @@ export class AnticGtia implements Memory {
 	read(address: number): number {
 		const high = address >> 8;
 
-		if (high === 0xd0) {
+		// ANTIC has no chip select pins: it watches the full address bus and
+		// claims $D4xx by itself. GTIA does have chip selects, so any other
+		// page routed here is the MMU selecting GTIA ($D0xx on the computers,
+		// $C0xx on the 5200).
+		if (high !== 0xd4) {
 			// GTIA
 			address &= 0x1f;
 			switch (address) {
@@ -578,7 +582,9 @@ export class AnticGtia implements Memory {
 	write(address: number, value: number): void {
 		const high = address >> 8;
 
-		if (high === 0xd0) {
+		// Same decode rule as read(): ANTIC self-decodes $D4xx, every other
+		// page is a GTIA chip select.
+		if (high !== 0xd4) {
 			// GTIA
 			address &= 0x1f;
 			switch (address) {

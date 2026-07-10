@@ -1,6 +1,7 @@
 export { AnticGtia, type TvAdapter } from "./antic-gtia.ts";
 export type { AtariMemory } from "./atari-memory.ts";
 export { AtrImage } from "./atr.ts";
+export { BountyBobCartridge } from "./bounty-bob-cartridge.ts";
 export {
 	canonicalize,
 	withCartType,

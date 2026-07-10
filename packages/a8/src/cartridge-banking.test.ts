@@ -172,3 +172,40 @@ test("Atrax 128 (68): the scrambled dump decodes to the type-17 layout", () => {
 	cart.write(0xd500, 5, NONE);
 	expect(cart.read(0xa000, NONE)).toBe(decodedByte(5 * 8192));
 });
+
+test("Bounty Bob (18): in-window triggers switch banks, PEEK doesn't", () => {
+	// Eight 4K banks + a fixed 8K tail; stamp each 4K bank's first byte.
+	const image = car(18, 40);
+	for (let bank = 0; bank < 8; bank++) {
+		image[16 + bank * 4096] = 0x40 + bank;
+	}
+	image[16 + 32768] = 0x77; // the fixed $A000 8K
+	const machine = new Atari({
+		xl: true,
+		os: new Uint8Array(16384),
+		cartridge: createCartridge(image, "test.car"),
+	});
+
+	// Power-on: banks 0 and 4, fixed tail.
+	expect(machine.read(0x8000, NONE)).toBe(0x40);
+	expect(machine.read(0x9000, NONE)).toBe(0x44);
+	expect(machine.read(0xa000, NONE)).toBe(0x77);
+
+	// Reading $8FF7 switches the low window to bank 1 (and returns the
+	// outgoing bank's byte); the fast page tables must follow.
+	machine.read(0x8ff7, NONE);
+	expect(machine.read(0x8000, NONE)).toBe(0x41);
+	expect(machine.read(0x8000, ReadOptions.DMA)).toBe(0x41);
+
+	// $9FF8 switches the high window to image bank 6.
+	machine.read(0x9ff8, NONE);
+	expect(machine.read(0x9000, NONE)).toBe(0x46);
+
+	// A write access triggers too.
+	machine.write(0x8ff9, 0, NONE);
+	expect(machine.read(0x8000, NONE)).toBe(0x43);
+
+	// A PEEK of a trigger address must not switch.
+	machine.read(0x9ff6, ReadOptions.PEEK);
+	expect(machine.read(0x9000, NONE)).toBe(0x46);
+});

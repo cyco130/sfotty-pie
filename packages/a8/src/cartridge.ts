@@ -1,5 +1,6 @@
 import { ReadOptions } from "@sfotty-pie/sfotty";
 import type { AtariMemory } from "./atari-memory.ts";
+import { BountyBobCartridge } from "./bounty-bob-cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 
 export type BankMapping = null | number;
@@ -37,6 +38,15 @@ export interface CartType {
 	 * AST's mirror block) that mappings can then reference by bank number.
 	 */
 	prepare?(rom: Uint8Array): Uint8Array;
+
+	/**
+	 * Custom implementation hook, for hardware that doesn't fit the
+	 * declarative mapping model (in-window bank triggers, onboard RAM):
+	 * build the type's own {@link Cartridge} from the (headerless) ROM.
+	 * `createCartridge` dispatches here; `initialMapping`/`control` are
+	 * unused when present.
+	 */
+	create?(rom: Uint8Array): Cartridge;
 
 	/**
 	 * The $D500-$D5FF control decode: given the accessed address, the
@@ -463,9 +473,9 @@ function jrc64(name: string, prepare?: CartType["prepare"]): CartType {
 // (a copy is kept in external.local). Last modified on Oct 18, 2024 (commit
 // e87b0ca553bb2731f1fa9b6d54a4a45b6f8df166). 5200 types and types needing
 // writable cartridge memory (RAM/EEPROM/flash programming) are not
-// implemented; neither are Bounty Bob (18: in-window bank triggers), MDDOS
-// (81: bank order unverified upstream), and COS32 (82: a time-limited
-// mapping needs a cycle clock).
+// implemented; neither are MDDOS (81: bank order unverified upstream) and
+// COS32 (82: a time-limited mapping needs a cycle clock). Bounty Bob (18)
+// has a custom implementation (see bounty-bob-cartridge.ts).
 export const CART_TYPES: Record<number, CartType> = {
 	1: {
 		name: "Standard 8 KB cartridge",
@@ -598,9 +608,9 @@ export const CART_TYPES: Record<number, CartType> = {
 		name: "Bounty Bob Strikes Back 40 KB cartridge",
 		machine: A8,
 		size: 40,
-		// Not implemented: banks switch on accesses to $8FF6-9/$9FF6-9,
-		// *inside* the ROM windows - needs read-sensitive pages (pageView
-		// returning undefined) and a window-access hook.
+		// Banks switch on accesses *inside* the ROM windows ($8FF6-9/$9FF6-9),
+		// which the mapping model can't express - a custom implementation.
+		create: (rom) => new BountyBobCartridge(rom),
 	},
 	19: {
 		name: "Standard 8 KB 5200 cartridge",
@@ -1095,12 +1105,17 @@ export const CART_TYPES: Record<number, CartType> = {
 	}),
 };
 
-/** Whether {@link RomCartridge} can run CART type `cartType`: its scheme is
- *  implemented and it isn't 5200-only. Unsupported types can still be
- *  recorded in a `.car` header - they just can't boot or attach. */
+/** Whether CART type `cartType` can run: its scheme is implemented (a
+ *  RomCartridge mapping or a custom implementation) and it isn't 5200-only.
+ *  Unsupported types can still be recorded in a `.car` header - they just
+ *  can't boot or attach. */
 export function isCartTypeSupported(cartType: number): boolean {
 	const type = CART_TYPES[cartType];
-	return !!type?.initialMapping && type.machine !== "5200";
+	return (
+		!!type &&
+		(!!type.initialMapping || !!type.create) &&
+		type.machine !== "5200"
+	);
 }
 
 /** One choice in a cartridge-type picker. */
@@ -1212,6 +1227,7 @@ export function suggestCartType(bytes: Uint8Array): number | null {
 	const bySize: Record<number, number> = {
 		2: 57,
 		4: 58, // three candidates, but the standard 4K dwarfs the others
+		40: 18, // Bounty Bob is the only 40K cart
 		4096: 63,
 		32768: 65,
 		65536: 66,
@@ -1355,15 +1371,37 @@ export function builtinSlotRom(bytes: Uint8Array): Uint8Array {
 
 /**
  * Create a cartridge from an image file (raw ROM or `.car`). The chokepoint
- * for cartridge construction: today every supported image is a
- * {@link RomCartridge}, but types that need their own implementation
- * (passthrough SDX, RAM and flash carts) will be dispatched from here
- * without callers changing.
+ * for cartridge construction: types with a custom implementation (a
+ * {@link CartType.create} hook - Bounty Bob today; passthrough SDX and
+ * RAM/flash carts eventually) dispatch to it, everything else is a
+ * {@link RomCartridge}.
  */
 export function createCartridge(
 	fileContents: Uint8Array,
 	fileName?: string,
 ): Cartridge {
+	const isCar =
+		fileContents[0] === 0x43 && // 'C'
+		fileContents[1] === 0x41 && // 'A'
+		fileContents[2] === 0x52 && // 'R'
+		fileContents[3] === 0x54; // 'T'
+	if (isCar) {
+		const typeNo =
+			(((fileContents[4] ?? 0) << 24) |
+				((fileContents[5] ?? 0) << 16) |
+				((fileContents[6] ?? 0) << 8) |
+				(fileContents[7] ?? 0)) >>>
+			0;
+		const type = CART_TYPES[typeNo];
+		if (type?.create) {
+			if (type.size * 1024 !== fileContents.length - 16) {
+				throw new Error(
+					`Wrong cartridge size (expected ${type.size * 1024 + 16} found ${fileContents.length})`,
+				);
+			}
+			return type.create(fileContents.subarray(16));
+		}
+	}
 	return new RomCartridge(fileContents, fileName);
 }
 

@@ -17,6 +17,7 @@ import {
 	createCartridge,
 	type Cartridge,
 } from "./cartridge.ts";
+import { ConsoleConnector } from "./console-connector.ts";
 import { JoystickConnector } from "./joystick-connector.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
@@ -117,6 +118,7 @@ export interface MachineConfig {
 export class Atari implements Memory {
 	// Connectors - the supported host surface; devices plug in here.
 	readonly joysticks: readonly JoystickConnector[];
+	readonly console: ConsoleConnector;
 
 	// Internal components
 	readonly cpu: Sfotty;
@@ -186,6 +188,7 @@ export class Atari implements Memory {
 		});
 
 		this.joysticks = this.#connectJoystickConnectors();
+		this.console = this.#connectConsoleConnector();
 
 		// On XL/XE, TRIG3 ($D013) senses the cartridge line (RD5): 1 = a
 		// cartridge is in the slot, 0 = empty. The OS reads it (against the
@@ -278,6 +281,85 @@ export class Atari implements Memory {
 		});
 
 		return [joystick0, joystick1, joystick2, joystick3];
+	}
+
+	// Create and wire the console connector - the wires between the console
+	// shell and the components. Connector signals are wire levels; this is
+	// the only place that knows which chip pins the console wires land on.
+	#connectConsoleConnector(): ConsoleConnector {
+		const connector = new ConsoleConnector();
+		const gtia = this.anticGtia;
+		const pia = this.pia;
+
+		// The power switch cold-resets every component, the CPU included.
+		connector.power.watch(() => {
+			this.reset(true);
+			this.cpu.reset(true);
+		});
+
+		// The Reset key. XL/XE: the system reset line soft-resets the
+		// components immediately and holds the CPU's RES until released (see
+		// resetAsserted). 400/800: it drives ANTIC's RNMI instead - a
+		// software warmstart, nothing is hardware-reset.
+		connector.reset.watch((source) => {
+			if (this.#xl) {
+				if (source.value) {
+					this.reset(false);
+					this.#resetHeld = true;
+				} else {
+					this.#resetHeld = false;
+				}
+			} else {
+				gtia.rnmi = source.value;
+			}
+		});
+
+		// Start/Select/Option buttons and the speaker drive GTIA's switch
+		// lines S0-S3; the resolved levels come back out.
+		connector.startIn.watch((source) => {
+			gtia.switchesIn.value =
+				(gtia.switchesIn.value & ~0x01) | (source.value ? 0x01 : 0);
+		});
+		connector.selectIn.watch((source) => {
+			gtia.switchesIn.value =
+				(gtia.switchesIn.value & ~0x02) | (source.value ? 0x02 : 0);
+		});
+		connector.optionIn.watch((source) => {
+			gtia.switchesIn.value =
+				(gtia.switchesIn.value & ~0x04) | (source.value ? 0x04 : 0);
+		});
+		connector.speakerIn.watch((source) => {
+			gtia.switchesIn.value =
+				(gtia.switchesIn.value & ~0x08) | (source.value ? 0x08 : 0);
+		});
+		gtia.switchesOut.watch((source) => {
+			connector.startOut.value = !!(source.value & 0x01);
+			connector.selectOut.value = !!(source.value & 0x02);
+			connector.optionOut.value = !!(source.value & 0x04);
+			connector.speakerOut.value = !!(source.value & 0x08);
+		});
+
+		// The LED lines sit on PIA PB2/PB3 (low = lit). Physically a 1200XL
+		// feature, but the wires are ordinary port pins, so every XL/XE gets
+		// them; on the 400/800 port B belongs to joysticks 2/3 instead.
+		if (this.#xl) {
+			connector.led1In.watch((source) => {
+				pia.portbIn.value = source.value
+					? pia.portbIn.value | 0x04
+					: pia.portbIn.value & ~0x04;
+			});
+			connector.led2In.watch((source) => {
+				pia.portbIn.value = source.value
+					? pia.portbIn.value | 0x08
+					: pia.portbIn.value & ~0x08;
+			});
+			pia.portbOut.watch((source) => {
+				connector.led1Out.value = !!(source.value & 0x04);
+				connector.led2Out.value = !!(source.value & 0x08);
+			});
+		}
+
+		return connector;
 	}
 
 	/** The last value driven on the data bus (see {@link Mmu.busData}). */
@@ -456,12 +538,16 @@ export class Atari implements Memory {
 	 * is active low; the mask here is "1 = press").
 	 */
 	consoleKeyDown(mask: number): void {
-		this.anticGtia.console &= ~mask;
+		if (mask & 0x01) this.console.startIn.value = false;
+		if (mask & 0x02) this.console.selectIn.value = false;
+		if (mask & 0x04) this.console.optionIn.value = false;
 	}
 
 	/** Release console keys. Takes the same mask as {@link consoleKeyDown}. */
 	consoleKeyUp(mask: number): void {
-		this.anticGtia.console |= mask & 0x07;
+		if (mask & 0x01) this.console.startIn.value = true;
+		if (mask & 0x02) this.console.selectIn.value = true;
+		if (mask & 0x04) this.console.optionIn.value = true;
 	}
 
 	/**
@@ -553,17 +639,11 @@ export class Atari implements Memory {
 	 * {@link resetButtonUp} so the host holds the CPU's RES line.
 	 */
 	resetButtonDown(): void {
-		if (this.#xl) {
-			this.reset(false);
-			this.#resetHeld = true;
-		} else {
-			this.anticGtia.rnmi = true;
-		}
+		this.console.reset.value = true;
 	}
 
 	/** Release the Reset key/button. */
 	resetButtonUp(): void {
-		this.#resetHeld = false;
-		this.anticGtia.rnmi = false;
+		this.console.reset.value = false;
 	}
 }

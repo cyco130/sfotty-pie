@@ -1,5 +1,6 @@
 import type { Memory } from "@sfotty-pie/sfotty";
 import { DelayLine } from "./delay-line.ts";
+import { Signal } from "./signal.ts";
 import {
 	NTSC_LINES_PER_FRAME,
 	PAL_LINES_PER_FRAME,
@@ -259,8 +260,23 @@ export class AnticGtia implements Memory {
 	enablePlayers = false;
 	enableMissiles = false;
 
-	// Console keys
-	console = 7;
+	// The console switch lines S0-S3 (S0 = Start, S1 = Select, S2 = Option,
+	// S3 = speaker), as wire levels. switchesIn is the external drive (a
+	// pressed button pulls its bit low); switchesOut is the resolved line
+	// levels, recomputed by #updateSwitchesOut.
+	readonly switchesIn = new Signal(0x0f);
+	readonly switchesOut = new Signal(0x08);
+
+	/** The console button levels (switchesIn bits 0-2) as a plain mask - the
+	 *  pre-connector accessor. */
+	get console(): number {
+		return this.switchesIn.value & 0x07;
+	}
+
+	set console(value: number) {
+		this.switchesIn.value = (this.switchesIn.value & 0x08) | (value & 0x07);
+	}
+
 	forceConsole: number | null = null; // Option
 	consoleSpeaker = 0;
 	// The written CONSOL latch: bits 0-2 actively pull the (open-collector)
@@ -293,6 +309,8 @@ export class AnticGtia implements Memory {
 				: NTSC_LINES_PER_FRAME;
 		this.#gtiaPal = initialOptions.gtiaTvSystem === "pal" ? 0x1 : 0xf;
 		this.#gtiaModes = initialOptions.tvAdapter !== "ctia";
+
+		this.switchesIn.watch(() => this.#updateSwitchesOut());
 	}
 
 	setOptions(options: AnticGtiaOptions) {
@@ -311,6 +329,15 @@ export class AnticGtia implements Memory {
 		if (cold) {
 			this.#resetGtia();
 		}
+	}
+
+	// The resolved S0-S3 line levels: the written CONSOL latch pulls bits 0-2
+	// low (open collector), the speaker drive pulls S3 low.
+	#updateSwitchesOut(): void {
+		const inLevels = this.switchesIn.value;
+		this.switchesOut.value =
+			(inLevels & ~this.consolWritten & 0x07) |
+			(this.consoleSpeaker ? 0 : inLevels & 0x08);
 	}
 
 	// Keep the assignments in sync with the field initializers.
@@ -431,6 +458,7 @@ export class AnticGtia implements Memory {
 
 		this.consoleSpeaker = 0;
 		this.consolWritten = 0x07;
+		this.#updateSwitchesOut();
 
 		this.#sizeP0 = 1;
 		this.#sizeP0Counter = 0;
@@ -627,6 +655,7 @@ export class AnticGtia implements Memory {
 					} else {
 						this.consoleSpeaker = 1;
 					}
+					this.#updateSwitchesOut();
 					break;
 				default:
 					// Every other register feeds the paint logic and takes

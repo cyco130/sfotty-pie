@@ -392,11 +392,15 @@ export class Atari implements Memory {
 	}
 
 	/**
-	 * POKEY's audio output level (0-60) as of the last cycle - a re-export of
-	 * {@link Pokey.audio} for the host's per-cycle sampling.
+	 * The audio level as summed on the board, as of the last cycle: POKEY's
+	 * output ({@link Pokey.audio}, normalized to 0-1) plus the console
+	 * speaker line (0 or 1), so the range is 0-2 with one unit per source.
+	 * The host samples this after each cycle and applies its own gain. Equal
+	 * source weighting is provisional until the analog audio path (amplifier
+	 * stages, saturation) is modeled.
 	 */
 	get audio(): number {
-		return this.pokey.audio;
+		return this.pokey.audio / 60 + this.anticGtia.consoleSpeaker;
 	}
 
 	/**

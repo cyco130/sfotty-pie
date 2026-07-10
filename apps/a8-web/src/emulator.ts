@@ -182,7 +182,7 @@ export class Emulator {
 	// Wall-clock pacing is per-TV-standard (NTSC ~1.79MHz, PAL ~1.77MHz).
 	readonly #msPerScanline: number;
 
-	// The audio pipeline: per-cycle POKEY+speaker level -> anti-alias filter
+	// The audio pipeline: the machine's per-cycle audio level -> anti-alias filter
 	// -> nearest-neighbor decimation -> DC blocker -> fixed-size chunks.
 	#audio: AudioOutput | null;
 	#filter = new AntiAliasFilter();
@@ -379,7 +379,7 @@ export class Emulator {
 			// Instructions are recorded via onInstruction (see #recordTrace).
 			// a8-web installs no suspending traps, so cycle() never throws.
 			machine.cycle();
-			this.#collectAudio(machine.audio, ag.consoleSpeaker);
+			this.#collectAudio(machine.audio);
 		}
 
 		// vcount wraps to 0 while the last line of the frame is run: present the
@@ -406,10 +406,11 @@ export class Emulator {
 		}
 	}
 
-	// Per machine cycle: mix POKEY (0-60) with the console speaker, filter at
-	// the machine rate, then pick one sample per audio frame (the filter has
-	// already removed everything above ~18kHz) and DC-block it.
-	#collectAudio(pokeyLevel: number, speaker: number): void {
+	// Per machine cycle: take the machine's summed audio level (0-2, one unit
+	// per source), apply the master gain, filter at the machine rate, then
+	// pick one sample per audio frame (the filter has already removed
+	// everything above ~18kHz) and DC-block it.
+	#collectAudio(level: number): void {
 		const audio = this.#audio;
 		if (!audio?.running) return;
 		// In turbo we generate samples far faster than real-time playback;
@@ -417,9 +418,7 @@ export class Emulator {
 		// and let the context underrun to silence until turbo ends.
 		if (this.#turboMode) return;
 
-		const filtered = this.#filter.apply(
-			(pokeyLevel / 60) * 0.2 + speaker * 0.2,
-		);
+		const filtered = this.#filter.apply(level * 0.2);
 
 		if (++this.#phase < this.#cyclesPerSample) return;
 		this.#phase -= this.#cyclesPerSample;

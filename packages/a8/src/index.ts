@@ -37,7 +37,14 @@ export {
 	preferredBasicKeys,
 	type FirmwareContext,
 } from "./firmware-preferences.ts";
+export { JoystickConnector } from "./joystick-connector.ts";
 export { Atari, type AtariModel, type MachineConfig } from "./machine.ts";
+export {
+	Pulse,
+	Signal,
+	type PulseCallback,
+	type SignalChangeCallback,
+} from "./signal.ts";
 export {
 	buildNtscPalette,
 	buildPalPalette,

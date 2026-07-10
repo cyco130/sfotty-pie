@@ -17,6 +17,7 @@ import {
 	createCartridge,
 	type Cartridge,
 } from "./cartridge.ts";
+import { JoystickConnector } from "./joystick-connector.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
@@ -113,6 +114,9 @@ export interface MachineConfig {
  * business.
  */
 export class Atari implements Memory {
+	// Connectors - the supported host surface; devices plug in here.
+	readonly joysticks: readonly JoystickConnector[];
+
 	// Internal components
 	readonly cpu: Sfotty;
 	readonly anticGtia: AnticGtia;
@@ -180,6 +184,8 @@ export class Atari implements Memory {
 			pbi: new Pbi(),
 		});
 
+		this.joysticks = this.#connectJoystickConnectors();
+
 		// On XL/XE, TRIG3 ($D013) senses the cartridge line (RD5): 1 = a
 		// cartridge is in the slot, 0 = empty. The OS reads it (against the
 		// stored GINTLK) to cold-start on a hot swap, and to skip the
@@ -210,6 +216,67 @@ export class Atari implements Memory {
 		this.interceptExecute(SIOV, (address) =>
 			this.mmu.isOsRomMapped ? sioHandler(address) : undefined,
 		);
+	}
+
+	// Create and wire the joystick connectors: two jacks on the XL/XE, four
+	// on the 400/800 (ports 2/3 live on PIA port B). Connector signals are
+	// wire levels; this is the only place that knows which chip pins a port
+	// lands on. potAIn/potBIn are not wired: POKEY does not scan pots yet.
+	#connectJoystickConnectors(): JoystickConnector[] {
+		const pia = this.pia;
+		const gtia = this.anticGtia;
+
+		const joystick0 = new JoystickConnector();
+		joystick0.directionIn.watch((source) => {
+			pia.portaIn.value = (pia.portaIn.value & 0xf0) | (source.value & 0x0f);
+		});
+		pia.portaOut.watch((source) => {
+			joystick0.directionOut.value = source.value & 0x0f;
+		});
+		joystick0.triggerIn.watch((source) => {
+			gtia.trig0 = source.value ? 1 : 0;
+		});
+
+		const joystick1 = new JoystickConnector();
+		joystick1.directionIn.watch((source) => {
+			pia.portaIn.value =
+				(pia.portaIn.value & 0x0f) | ((source.value & 0x0f) << 4);
+		});
+		pia.portaOut.watch((source) => {
+			joystick1.directionOut.value = (source.value >> 4) & 0x0f;
+		});
+		joystick1.triggerIn.watch((source) => {
+			gtia.trig1 = source.value ? 1 : 0;
+		});
+
+		if (this.#xl) {
+			return [joystick0, joystick1];
+		}
+
+		const joystick2 = new JoystickConnector();
+		joystick2.directionIn.watch((source) => {
+			pia.portbIn.value = (pia.portbIn.value & 0xf0) | (source.value & 0x0f);
+		});
+		pia.portbOut.watch((source) => {
+			joystick2.directionOut.value = source.value & 0x0f;
+		});
+		joystick2.triggerIn.watch((source) => {
+			gtia.trig2 = source.value ? 1 : 0;
+		});
+
+		const joystick3 = new JoystickConnector();
+		joystick3.directionIn.watch((source) => {
+			pia.portbIn.value =
+				(pia.portbIn.value & 0x0f) | ((source.value & 0x0f) << 4);
+		});
+		pia.portbOut.watch((source) => {
+			joystick3.directionOut.value = (source.value >> 4) & 0x0f;
+		});
+		joystick3.triggerIn.watch((source) => {
+			gtia.trig3 = source.value ? 1 : 0;
+		});
+
+		return [joystick0, joystick1, joystick2, joystick3];
 	}
 
 	/** The last value driven on the data bus (see {@link Mmu.busData}). */
@@ -481,60 +548,29 @@ export class Atari implements Memory {
 	 * directions being pressed at once; avoiding them is the host's call.
 	 */
 	joystickDown(port: number, mask: number): void {
-		if (!this.#hasJoystickPort(port)) return;
-		this.#moveStick(port, this.#sticks[port]! | (mask & 0x0f));
+		const connector = this.joysticks[port];
+		if (!connector) return;
+		connector.directionIn.value = connector.directionIn.value & ~mask & 0x0f;
 	}
 
 	/** Release joystick directions. Takes the same mask as
 	 * {@link joystickDown}. */
 	joystickUp(port: number, mask: number): void {
-		if (!this.#hasJoystickPort(port)) return;
-		this.#moveStick(port, this.#sticks[port]! & ~mask);
+		const connector = this.joysticks[port];
+		if (!connector) return;
+		connector.directionIn.value = (connector.directionIn.value | mask) & 0x0f;
 	}
 
 	/** Press the joystick trigger on `port` (drives the GTIA TRIG line low). */
 	joystickTriggerDown(port: number): void {
-		this.#setTrigger(port, 0);
+		const connector = this.joysticks[port];
+		if (connector) connector.triggerIn.value = false;
 	}
 
 	/** Release the joystick trigger on `port`. */
 	joystickTriggerUp(port: number): void {
-		this.#setTrigger(port, 1);
-	}
-
-	// Pressed-direction masks per port; the inverse of the PIA nibbles.
-	readonly #sticks = [0, 0, 0, 0];
-
-	#hasJoystickPort(port: number): boolean {
-		return port >= 0 && port < (this.#xl ? 2 : 4);
-	}
-
-	#moveStick(port: number, mask: number): void {
-		this.#sticks[port] = mask;
-		if (port < 2) {
-			this.pia.portaIn.value =
-				~((this.#sticks[1]! << 4) | this.#sticks[0]!) & 0xff;
-		} else {
-			this.pia.portbIn.value =
-				~((this.#sticks[3]! << 4) | this.#sticks[2]!) & 0xff;
-		}
-	}
-
-	#setTrigger(port: number, value: number): void {
-		if (!this.#hasJoystickPort(port)) return;
-		switch (port) {
-			case 0:
-				this.anticGtia.trig0 = value;
-				break;
-			case 1:
-				this.anticGtia.trig1 = value;
-				break;
-			case 2:
-				this.anticGtia.trig2 = value;
-				break;
-			default:
-				this.anticGtia.trig3 = value;
-		}
+		const connector = this.joysticks[port];
+		if (connector) connector.triggerIn.value = true;
 	}
 
 	/**

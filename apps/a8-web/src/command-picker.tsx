@@ -14,7 +14,7 @@ import { messages } from "./messages.ts";
 
 export interface FuzzyMatch {
 	score: number;
-	/** Indices in the target that matched, ascending — for highlighting. */
+	/** Indices in the target that matched, ascending - for highlighting. */
 	positions: number[];
 }
 
@@ -72,7 +72,7 @@ function fuzzyMatch(query: string, target: string): FuzzyMatch | null {
 					score: charBonus(target, ti, consecutive) + rest.score,
 					positions: [ti, ...rest.positions],
 				};
-				// Prefer matching on ties — it keeps the run tighter.
+				// Prefer matching on ties - it keeps the run tighter.
 				if (!result || matched.score >= result.score) result = matched;
 			}
 		}

@@ -1,7 +1,13 @@
 #!/usr/bin/env node
-import { DECODE, Sfotty, traceLine } from "@sfotty-pie/sfotty";
+import {
+	ReadOptions,
+	Sfotty,
+	traceLine,
+	type Memory,
+} from "@sfotty-pie/sfotty";
 import fs from "node:fs";
 import readline from "node:readline";
+import { crashDump } from "./crash-dump.ts";
 
 async function main() {
 	const args = process.argv.slice(2);
@@ -43,37 +49,53 @@ async function main() {
 			.slice(0, 254) + "\0\0";
 	ram.set(Buffer.from(userArgs), 0x0300);
 
-	const rl = readline.createInterface({
-		input: process.stdin,
-		output: process.stdout,
-	});
-
-	// Standard input is consumed line by line as readline emits it. The CPU
-	// pulls bytes out of this buffer; when it runs dry it throws BufferEmptyError
-	// and we wait for the next line (or EOF) before retrying the cycle.
+	// The CPU pulls bytes out of this buffer; when it runs dry it throws
+	// BufferEmptyError and we wait for more input (or EOF) before retrying the
+	// cycle.
 	let stdinBuffer = Buffer.alloc(0);
 	let stdinOffset = 0;
 	let stdinClosed = false;
 	let onStdin: (() => void) | null = null;
 
-	rl.on("line", (line) => {
-		stdinBuffer = Buffer.concat([
-			stdinBuffer.subarray(stdinOffset),
-			Buffer.from(line + "\n"),
-		]);
+	function pushStdin(chunk: Buffer) {
+		stdinBuffer = Buffer.concat([stdinBuffer.subarray(stdinOffset), chunk]);
 		stdinOffset = 0;
 		onStdin?.();
 		onStdin = null;
-	});
+	}
 
-	rl.on("close", () => {
+	function endStdin() {
 		stdinClosed = true;
 		onStdin?.();
 		onStdin = null;
-	});
+	}
 
-	const sfotty = new Sfotty({
-		read(address, decode): number {
+	if (process.stdin.isTTY) {
+		// Interactive: readline provides echo and line editing; input reaches
+		// the guest a line at a time.
+		const rl = readline.createInterface({
+			input: process.stdin,
+			output: process.stdout,
+		});
+		rl.on("line", (line) => pushStdin(Buffer.from(line + "\n")));
+		rl.on("close", endStdin);
+	} else {
+		// Redirected: consume the stream byte-for-byte. No line mangling (CR
+		// preservation, no invented trailing newline) and no readline, which
+		// would echo piped input into a TTY stdout.
+		process.stdin.on("data", pushStdin);
+		process.stdin.on("end", endStdin);
+	}
+
+	const bus: Memory = {
+		read(address, options): number {
+			// A PEEK read (disassembler, debugger, crash dump) is side-effect-free:
+			// it sees plain RAM everywhere, including under the I/O page, and never
+			// triggers a break.
+			if (options & ReadOptions.PEEK) {
+				return ram[address]!;
+			}
+
 			if (address >= 0x0200 && address < 0x0300) {
 				switch (address) {
 					case 0x0201:
@@ -89,17 +111,29 @@ async function main() {
 						return (Math.random() * 256) | 0;
 
 					case 0x0241:
-						return stdinClosed && stdinOffset >= stdinBuffer.length
-							? 0x80
-							: 0x00;
+						// Block while the status is undecided (buffer empty but the
+						// stream not yet ended); otherwise a check-FSTIN-then-read-STDIN
+						// sequence could see "not EOF" and still read the EOF zero.
+						if (stdinOffset >= stdinBuffer.length && !stdinClosed) {
+							throw new BufferEmptyError();
+						}
+						return stdinOffset < stdinBuffer.length ? 0x00 : 0x80;
 
 					default:
 						console.error(`Unhandled read from ${address.toString(16)}`);
+						dump();
 						process.exit(2);
 				}
 			} else {
 				const value = ram[address]!;
-				if (decode && value === 0) {
+				// Break on a committed fetch (SYNC and not DUMMY) of a zero opcode.
+				// Dummy reads (reset's fake stack reads, CIM's jam reads) also see
+				// zero bytes and must pass through untouched.
+				if (
+					value === 0 &&
+					options & ReadOptions.SYNC &&
+					!(options & ReadOptions.DUMMY)
+				) {
 					throw new BreakError();
 				}
 				return value;
@@ -123,13 +157,16 @@ async function main() {
 
 					default:
 						console.error(`Unhandled write to address ${address.toString(16)}`);
+						dump();
 						process.exit(2);
 				}
 			} else {
 				ram[address] = value;
 			}
 		},
-	});
+	};
+
+	const sfotty = new Sfotty(bus);
 
 	let maxCycles = Infinity;
 	let trace = false;
@@ -146,16 +183,38 @@ async function main() {
 		}
 	}
 
-	// Side-effect-free reader for the disassembler (RAM only, no I/O triggers).
-	const peek = (address: number) => ram[address & 0xffff]!;
+	// Side-effect-free reader for the disassembler and the crash dump.
+	const peek = (address: number) =>
+		bus.read(address & 0xffff, ReadOptions.PEEK);
 
-	// The new core doesn't run a reset sequence yet, so jump to the reset vector.
-	sfotty.PC = ram[0xfffc]! | (ram[0xfffd]! << 8);
-
-	while (!sfotty.crashed && maxCycles--) {
-		if (trace && sfotty.state === DECODE) {
-			process.stderr.write(traceLine(sfotty, peek) + "\n");
+	// onFetch fires once per committed instruction: record the address in a
+	// ring buffer for the crash dump (`head` points at the oldest entry once
+	// the buffer is full) and emit the trace line when tracing.
+	const RECENT_INSTRUCTIONS = 16;
+	const recentPCs: number[] = [];
+	let recentHead = 0;
+	sfotty.onFetch = (pc) => {
+		recentPCs[recentHead] = pc;
+		recentHead = (recentHead + 1) % RECENT_INSTRUCTIONS;
+		if (trace) {
+			process.stderr.write(traceLine(sfotty, peek, pc) + "\n");
 		}
+	};
+
+	// Post-mortem dump to stderr, shared by the CIM-crash path and the
+	// unhandled-I/O exits in the bus handlers above.
+	function dump() {
+		console.error(
+			crashDump(sfotty, peek, [
+				...recentPCs.slice(recentHead),
+				...recentPCs.slice(0, recentHead),
+			]),
+		);
+	}
+
+	// Construction arms the cold-reset sequence; the first seven cycles run it
+	// and load PC from the reset vector already copied into RAM.
+	while (!sfotty.crashed && maxCycles--) {
 		try {
 			sfotty.run();
 		} catch (error) {
@@ -169,16 +228,12 @@ async function main() {
 			} else {
 				throw error;
 			}
-
-			// Not needed on the new core: a thrown bus access leaves CPU state
-			// untouched, so the next run() retries the same cycle.
-			// sfotty.cycleCounter--;
 		}
 	}
 
 	if (sfotty.crashed) {
 		console.error("Program crashed");
-		// console.log(sfotty.print()); // TODO: print() not on the new core
+		dump();
 		process.exit(2);
 	}
 }

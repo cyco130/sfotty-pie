@@ -39,15 +39,15 @@ console.log(cpu.A); // 42
 console.log(ram[0x00]); // 42
 ```
 
-Both bus methods receive `ReadOptions` bit flags that classify the access (side-effect-free peek, opcode fetch, dummy cycle, DMA), so read- and write-sensitive I/O registers can react correctly — as in the example, an implementation that doesn't care may just omit the parameter.
+Both bus methods receive `ReadOptions` bit flags that classify the access (side-effect-free peek, opcode fetch, dummy cycle, DMA), so read- and write-sensitive I/O registers can react correctly - as in the example, an implementation that doesn't care may just omit the parameter.
 
-Beyond `run()`, the CPU exposes the registers and flags, the `RDY`/`IRQ`/`NMI` input lines, `reset()`, hardware-variant construction options, and a small disassembler ships in the same package — see the JSDoc comments on the exported types for the full surface.
+Beyond `run()`, the CPU exposes the registers and flags, the `RDY`/`IRQ`/`NMI` input lines, `reset()`, hardware-variant construction options, and a small disassembler ships in the same package - see the JSDoc comments on the exported types for the full surface.
 
 ### Traps and asynchronous behavior
 
-`run()` is synchronous, so the bus can't return a promise — but it can **throw**. Throwing from `read` or `write` is the supported way to suspend the CPU for anything that can't be answered inline: asynchronous I/O behind a memory-mapped register, a debugger pausing on a breakpoint or watchpoint, an execute trap on a magic address, and so on.
+`run()` is synchronous, so the bus can't return a promise - but it can **throw**. Throwing from `read` or `write` is the supported way to suspend the CPU for anything that can't be answered inline: asynchronous I/O behind a memory-mapped register, a debugger pausing on a breakpoint or watchpoint, an execute trap on a magic address, and so on.
 
-This is safe because the first thing every cycle does is its single bus access — no register or internal state is touched before it. A throw therefore unwinds with the CPU in its exact pre-cycle state, and once the host has reacted it calls `run()` again to retry the same cycle from scratch.
+This is safe because the first thing every cycle does is its single bus access - no register or internal state is touched before it. A throw therefore unwinds with the CPU in its exact pre-cycle state, and once the host has reacted it calls `run()` again to retry the same cycle from scratch.
 
 ```ts
 const TRAP = Symbol("trap");

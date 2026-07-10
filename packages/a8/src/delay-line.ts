@@ -1,16 +1,16 @@
 /**
- * A serializable delay line for chip pipeline timing — "this takes effect N
- * cycles from now" — as a power-of-two ring of integer slots.
+ * A serializable delay line for chip pipeline timing - "this takes effect N
+ * cycles from now" - as a power-of-two ring of integer slots.
  *
  * Two write modes with different collision semantics:
  *
- * - {@link schedule} ORs bits in: for *events* (op masks). Idempotent —
- *   re-scheduling the same op onto the same cycle is one event — and
+ * - {@link schedule} ORs bits in: for *events* (op masks). Idempotent -
+ *   re-scheduling the same op onto the same cycle is one event - and
  *   cancellable with {@link cancel}.
  * - {@link scheduleValue} overwrites: for *payloads* (register bytes in
  *   flight). The later bus write wins a slot collision, matching hardware.
  *
- * Ops carry no payload of their own — they're signals; handlers read chip
+ * Ops carry no payload of their own - they're signals; handlers read chip
  * state at execution time. Value-dependent latency (e.g. an enable taking
  * effect a cycle before a disable) is resolved at schedule time by picking
  * the slot, keeping the line itself dumb. Same-cycle races against CPU

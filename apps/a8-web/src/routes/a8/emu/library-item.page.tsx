@@ -1,7 +1,11 @@
 import {
 	canonicalize,
 	CART_TYPES,
+	cartTypesForSize,
 	detectFirmware,
+	isCartTypeSupported,
+	suggestCartType,
+	type CartTypeOption,
 	type FirmwareInfo,
 } from "@sfotty-pie/a8";
 import { useEffect, useState } from "preact/hooks";
@@ -12,6 +16,7 @@ import {
 	getImageBytes,
 	readyLibrary,
 	removeImage,
+	retypeImage,
 	updateUserMeta,
 } from "../../../images/library.ts";
 import { CANON_EXT } from "../../../images/metadata.ts";
@@ -21,7 +26,7 @@ import { navigate } from "../../../navigate.ts";
 import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
-// /a8/emu/library/:id — one image's details and actions. Built-in or user;
+// /a8/emu/library/:id - one image's details and actions. Built-in or user;
 // boot/attach run through the host, delete is user-only and returns to the list.
 
 const LIBRARY = "/a8/emu/library";
@@ -69,6 +74,7 @@ function detailRows(entry: ImageEntry): { label: string; value: string }[] {
 				{ label: f.sectorSize, value: `${k.sectorSize} B` },
 			];
 		case "xex":
+		case "unknown-rom":
 			return [];
 	}
 }
@@ -97,7 +103,7 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 // Editable name with an explicit Save (shown only once the text differs), plus a
-// confirming toast — so a rename never happens silently. Keyed by id by the
+// confirming toast - so a rename never happens silently. Keyed by id by the
 // caller so the draft resets when switching images.
 function NameEditor({
 	entry,
@@ -213,16 +219,24 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 		/* keep the raw id if it isn't valid percent-encoding */
 	}
 
-	// Detect well-known firmware from the bytes — only OS/cartridge images can
-	// be one, so other types skip the (potentially large) read.
+	// Detect well-known firmware from the bytes - only OS/cartridge images can
+	// be one, so other types skip the (potentially large) read. The same read
+	// feeds the type-suggestion heuristic for unknown ROMs.
 	const [firmware, setFirmware] = useState<FirmwareInfo | null>(null);
+	const [suggested, setSuggested] = useState<number | null>(null);
 	useEffect(() => {
 		let cancelled = false;
 		void (async () => {
 			try {
 				await readyLibrary();
 				const e = getImage(id);
-				if (e?.derived.type !== "os" && e?.derived.type !== "cart") {
+				const kind = e?.derived.type;
+				if (kind === "unknown-rom") {
+					const bytes = await getImageBytes(id);
+					if (!cancelled) setSuggested(suggestCartType(bytes));
+					return;
+				}
+				if (kind !== "os" && kind !== "cart") {
 					if (!cancelled) setFirmware(null);
 					return;
 				}
@@ -254,9 +268,57 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	}
 
 	const type = entry.derived.type;
-	const canBoot = type === "cart" || type === "disk" || type === "xex";
+	// A typed cart may still not be runnable (an unimplemented scheme, a 5200
+	// cart); an unknown ROM isn't runnable until a type is picked.
+	const cartBlocked =
+		entry.derived.type === "cart" &&
+		!isCartTypeSupported(entry.derived.cartType);
+	const canBoot =
+		type === "disk" || type === "xex" || (type === "cart" && !cartBlocked);
 
-	// Slot flags apply to standard-8K carts (CART type 1) — the kind the BASIC
+	// The type picker: user cart / unknown-ROM entries can (re)pick their CART
+	// type - it rewrites the header, so it's for user entries only. The option
+	// list matches the ROM size (the stored canonical cart carries a 16-byte
+	// header).
+	const romSizeKB = (entry.size - (type === "cart" ? 16 : 0)) / 1024;
+	// Ordered by likelihood (the package's prevalence ranking); the per-image
+	// suggestion, when there is one, is the strongest evidence and goes first.
+	const typeOptions: CartTypeOption[] = (
+		entry.source === "user" && (type === "cart" || type === "unknown-rom")
+			? cartTypesForSize(romSizeKB)
+			: []
+	).sort(
+		(a, b) =>
+			Number(b.cartType === suggested) - Number(a.cartType === suggested),
+	);
+	const typeOptionLabel = (option: CartTypeOption): string => {
+		let label = option.name;
+		if (option.cartType === suggested) {
+			label += messages.library.suggestedSuffix;
+		}
+		if (!option.supported) {
+			label +=
+				option.machine === "5200"
+					? messages.library.is5200Suffix
+					: messages.library.notEmulatedSuffix;
+		}
+		return label;
+	};
+	const pickType = (value: string): void => {
+		const cartType = Number(value);
+		if (!Number.isInteger(cartType)) return;
+		void retypeImage(entry.id, cartType).then((ok) => {
+			if (ok) {
+				host.toast(
+					messages.toasts.cartTypeSet(
+						CART_TYPES[cartType]?.name ?? `#${cartType}`,
+					),
+				);
+			}
+		});
+	};
+
+	// Slot flags apply to standard-8K carts (CART type 1) - the kind the BASIC
 	// and built-in-game ROM slots accept.
 	const isStdCart =
 		entry.derived.type === "cart" && entry.derived.cartType === 1;
@@ -287,7 +349,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 
 	const download = async (): Promise<void> => {
 		const served = await getImageBytes(entry.id);
-		// Download the canonical form — a raw built-in cart becomes a real `.car`.
+		// Download the canonical form - a raw built-in cart becomes a real `.car`.
 		let bytes = served;
 		try {
 			const piece = canonicalize(served)[0];
@@ -319,6 +381,20 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 				/>
 				<TagEditor key={`tags-${entry.id}`} entry={entry} />
 
+				{type === "unknown-rom" && (
+					<div class="rounded-sm border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+						{messages.library.cartTypeUnknown}
+					</div>
+				)}
+				{cartBlocked && (
+					<div class="rounded-sm border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+						{entry.derived.type === "cart" &&
+						CART_TYPES[entry.derived.cartType]?.machine === "5200"
+							? messages.errors.cart5200
+							: messages.errors.cartTypeUnsupported}
+					</div>
+				)}
+
 				<div class="flex flex-col gap-1.5">
 					<Detail
 						label={messages.library.columns.source}
@@ -332,9 +408,43 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 						label={messages.library.columns.type}
 						value={messages.library.typeName[entry.derived.type]}
 					/>
-					{detailRows(entry).map((d) => (
-						<Detail key={d.label} label={d.label} value={d.value} />
-					))}
+					{typeOptions.length > 0 && (
+						<div class="flex items-baseline justify-between gap-2 text-sm">
+							<span class="shrink-0 text-neutral-500">
+								{messages.library.fields.cartType}
+							</span>
+							<select
+								aria-label={messages.library.fields.cartType}
+								class="min-w-0 flex-1 rounded-sm border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-800"
+								value={
+									entry.derived.type === "cart"
+										? String(entry.derived.cartType)
+										: ""
+								}
+								onChange={(event) => pickType(event.currentTarget.value)}
+							>
+								{type === "unknown-rom" && (
+									<option value="" disabled>
+										{messages.library.pickCartType}
+									</option>
+								)}
+								{typeOptions.map((option) => (
+									<option key={option.cartType} value={option.cartType}>
+										{typeOptionLabel(option)}
+									</option>
+								))}
+							</select>
+						</div>
+					)}
+					{detailRows(entry)
+						.filter(
+							(d) =>
+								typeOptions.length === 0 ||
+								d.label !== messages.library.fields.cartType,
+						)
+						.map((d) => (
+							<Detail key={d.label} label={d.label} value={d.value} />
+						))}
 					<Detail
 						label={messages.library.columns.size}
 						value={sizeLabel(entry.size)}
@@ -346,7 +456,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 						<button
 							type="button"
 							class="truncate font-mono text-xs text-neutral-700 hover:underline"
-							title={`${entry.hash} — ${messages.library.copyHash}`}
+							title={`${entry.hash} - ${messages.library.copyHash}`}
 							onClick={copyHash}
 						>
 							{entry.hash.slice(0, 16)}…
@@ -401,7 +511,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 							{messages.library.actions.attachDisk}
 						</button>
 					)}
-					{type === "cart" && (
+					{type === "cart" && !cartBlocked && (
 						<button
 							type="button"
 							class="w-full rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"

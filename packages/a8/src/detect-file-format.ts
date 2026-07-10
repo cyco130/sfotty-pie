@@ -31,13 +31,22 @@ const CAR_RE = extMatcher(CAR);
 const KNOWN_RE = extMatcher([...new Set([...ATR, ...XEX, ...RAW_ROM, ...CAR])]);
 
 /**
- * Whether a filename's extension is one any detector accepts — a cheap,
+ * Whether a filename's extension is one any detector accepts - a cheap,
  * name-only pre-filter (the content check still confirms the actual format). Use
  * it to skip clearly-irrelevant files (e.g. the PNGs in a ROM archive) before
  * reading them when bulk-importing a directory.
  */
 export function hasKnownExtension(name: string): boolean {
 	return KNOWN_RE.test(name);
+}
+
+/**
+ * Whether a filename has a raw-ROM-dump extension (`.rom`/`.bin`/`.raw`).
+ * Used by canonicalize to decide that an undetected file may still be a
+ * cartridge dump of unknown type.
+ */
+export function hasRawRomExtension(name: string): boolean {
+	return RAW_ROM_RE.test(name);
 }
 
 export function detectFileFormat(
@@ -149,8 +158,8 @@ function getRawCartType(
 			return null;
 		}
 
-		// Otherwise the init address picks the space, and the start address —
-		// when used — must agree with it.
+		// Otherwise the init address picks the space, and the start address -
+		// when used - must agree with it.
 		if (initAddress < 0xa000) {
 			if (
 				!isStartAddressUsed ||

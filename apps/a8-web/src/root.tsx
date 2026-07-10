@@ -48,8 +48,8 @@ function NavigationBridge() {
 	return null;
 }
 
-// /a8/emu/* — the emulator layout wrapping a nested router of panel routes. As a
-// nesting `/*` parent it also matches the bare /a8/emu (empty remainder → the
+// /a8/emu/* - the emulator layout wrapping a nested router of panel routes. As a
+// nesting `/*` parent it also matches the bare /a8/emu (empty remainder -> the
 // nested "/" route). The layout renders the matched panel into its sidebar slot.
 function EmuSection() {
 	return (
@@ -74,7 +74,7 @@ function EmuSection() {
 	);
 }
 
-// /a8/docs/* — the docs shell wrapping a nested router of MDX pages, mirroring
+// /a8/docs/* - the docs shell wrapping a nested router of MDX pages, mirroring
 // EmuSection. Same two-route (`/a8/docs` + `/a8/docs/*`) trick so the bare
 // /a8/docs hits the nested "/" page without remounting the layout when
 // navigating between docs.
@@ -91,7 +91,7 @@ function DocsSection() {
 
 /**
  * The SPA shell: one <Router> for the whole app. Unmatched URLs render the
- * not-found page (status 200 in pure-SPA mode — see notes.local/routing.md).
+ * not-found page (status 200 in pure-SPA mode - see notes.local/routing.md).
  */
 export function Root() {
 	return (
@@ -102,7 +102,7 @@ export function Root() {
 				<Route path="/a8" component={AtariIndex} />
 				{/* Two routes, one component: preact-iso's `/*` splat needs >=1
 				    segment so it won't match the bare /a8/emu. The exact route
-				    covers the index (nested rest="" → the "/" panel route); the
+				    covers the index (nested rest="" -> the "/" panel route); the
 				    splat covers /a8/emu/menu etc. Same `component`, so the Router
 				    doesn't remount EmuSection (the machine) when switching. */}
 				<Route path="/a8/emu" component={EmuSection} />

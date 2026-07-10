@@ -22,7 +22,7 @@ interface Section {
 
 /**
  * The couch game picker: a full-screen, gamepad-first overlay over the paused
- * machine — recently played on top, then the starred favorites. It reads the
+ * machine - recently played on top, then the starred favorites. It reads the
  * pads itself (through the normalization layer, so remapped pads navigate
  * with whatever they mapped): D-pad/left stick moves with key-style repeat,
  * fire/A boots, B (or the button that opened it) backs out. Arrow keys, Enter
@@ -30,7 +30,7 @@ interface Section {
  * to desk use. Opened via the OPEN_FAVORITES command (default: R3).
  */
 export function FavoritesMenu({ host }: { host: EmulatorHost }) {
-	// MRU only (no built-in seeds — the picker is a shelf, not a catalog).
+	// MRU only (no built-in seeds - the picker is a shelf, not a catalog).
 	const recents = recentsView.value
 		.filter((item) => item.recent)
 		.slice(0, RECENTS_SHOWN)
@@ -51,7 +51,7 @@ export function FavoritesMenu({ host }: { host: EmulatorHost }) {
 	const flatRef = useRef(flat);
 	flatRef.current = flat;
 
-	// Stable (they read only refs), so the input effects below never restart —
+	// Stable (they read only refs), so the input effects below never restart -
 	// a restart would reset the held-direction repeat state mid-hold.
 	const move = useCallback(
 		(dir: -1 | 1) =>

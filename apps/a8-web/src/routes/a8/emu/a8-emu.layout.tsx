@@ -9,10 +9,10 @@ import { EmulatorHost, type SidebarPanel } from "../../../host.ts";
 import { messages } from "../../../messages.ts";
 import { EmuContext } from "./emu-context.ts";
 
-// The audio sink is a page-level singleton — created once and reused across
+// The audio sink is a page-level singleton - created once and reused across
 // emulator mounts (the machine reboots on re-entry, but the sink doesn't),
 // lazily on first entry to /a8/emu so content pages never pay for it. The host
-// resolves firmware through the image library (built-ins ∪ user uploads) and
+// resolves firmware through the image library (built-ins + user uploads) and
 // fetches only the ROMs it picks, which the browser caches.
 
 interface Audio {
@@ -22,7 +22,7 @@ interface Audio {
 let audioOnce: Promise<Audio> | null = null;
 function getAudio(): Promise<Audio> {
 	// One audio sink for the page; setup can fail (e.g. iOS worklet/gesture
-	// restrictions) — keep the reason so the host can surface it.
+	// restrictions) - keep the reason so the host can surface it.
 	return (audioOnce ??= AudioOutput.create().then(
 		(audio) => ({ audio, audioError: null }),
 		(error: unknown) => ({ audio: null, audioError: String(error) }),
@@ -132,7 +132,7 @@ function EmuShell({
 	}, [host, path]);
 
 	// The global palette chord (Cmd+K / Alt+K) is now a `scope: "global"` binding
-	// (OPEN_PALETTE), resolved by the keyboard's window-level handler — no longer
+	// (OPEN_PALETTE), resolved by the keyboard's window-level handler - no longer
 	// special-cased here.
 
 	// Esc closes whatever panel is open. Capture-phase + stopPropagation so the

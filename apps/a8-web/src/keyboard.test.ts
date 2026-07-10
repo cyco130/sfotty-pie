@@ -20,7 +20,7 @@ const cmd = (partial: Partial<KeyEventLike>) =>
 	characterModeCommand(set, ev(partial));
 
 test("typed ATASCII characters win over the positional binding", () => {
-	// AZERTY: the key at the QWERTY-A position produces "q" → type Q, shadowing the
+	// AZERTY: the key at the QWERTY-A position produces "q" -> type Q, shadowing the
 	// positional A binding. Layout-aware, by produced character.
 	expect(cmd({ code: "KeyA", key: "q" })).toBe("PRESS_Q");
 	expect(cmd({ code: "KeyA", key: "Q", shift: true })).toBe("PRESS_SHIFT_Q");
@@ -42,10 +42,10 @@ test("Ctrl/Alt/Cmd combos and named keys fall through to the bindings", () => {
 
 test("a non-ATASCII key falls through to its positional binding", () => {
 	// Turkish ş has no ATASCII equivalent; at the Semicolon position it gives the
-	// Atari ; there — and a user binding could still claim it.
+	// Atari ; there - and a user binding could still claim it.
 	expect(cmd({ code: "Semicolon", key: "ş" })).toBe("PRESS_SEMICOLON");
 });
 
-test("dead keys yield nothing — composition delivers the glyph", () => {
+test("dead keys yield nothing - composition delivers the glyph", () => {
 	expect(cmd({ code: "BracketLeft", key: "Dead" })).toBeUndefined();
 });

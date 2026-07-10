@@ -38,7 +38,7 @@ const OP_TWOTONE_RESYNC = 0x80;
  * free-running slow clocks; the serial transmitter (SEROUT, the 10-bit
  * shifter clocked by the SKCTL-selected timer, the SEROR latch and SEROC
  * level IRQs, byte delivery via {@link serialOutByte}); and the
- * keyboard-facing registers — KBCODE, the keyboard/Break bits of
+ * keyboard-facing registers - KBCODE, the keyboard/Break bits of
  * IRQEN/IRQST, and the key/Shift sense bits of SKSTAT.
  *
  * The host clocks the chip by calling {@link cycle} once per machine cycle;
@@ -99,8 +99,8 @@ export class Pokey implements Memory {
 
 	// The timer fire pipelines, as delay-line events. Fast (1.79MHz)
 	// unlinked channels: underflow, then 3 cycles later the counter reloads
-	// (from the live AUDF — that's the write deadline), and the flip/IRQ
-	// lands one cycle after that — deriving the N+4 period, the fire-2 AUDF
+	// (from the live AUDF - that's the write deadline), and the flip/IRQ
+	// lands one cycle after that - deriving the N+4 period, the fire-2 AUDF
 	// deadline, and the STIMER preemption boundary, all per Acid800. In
 	// 16-bit linked mode the high half fires (and reloads, late) 3 cycles
 	// after the underflow.
@@ -144,7 +144,7 @@ export class Pokey implements Memory {
 
 	// Serial output. A byte written to SEROUT waits in the holding register
 	// until the 10-bit shifter (start + 8 data + stop, LSB first) is empty,
-	// then transfers on a transmit-clock edge — raising the SEROR IRQ. The
+	// then transfers on a transmit-clock edge - raising the SEROR IRQ. The
 	// transmit clock is the selected timer's fire, two fires per bit (the
 	// output square wave's two edges). Init mode halts the shifter but
 	// does not clear it (Acid800 timertiming relies on pushing a byte
@@ -163,7 +163,7 @@ export class Pokey implements Memory {
 	serialOutByte: ((byte: number) => void) | null = null;
 
 	// Two-tone mode (SKCTL bit 3): the serial output line carries an FSK
-	// square wave instead of data levels — timer 1's tone for a 1 bit,
+	// square wave instead of data levels - timer 1's tone for a 1 bit,
 	// timer 2's for a 0. A "used" timer fire (timer 2 always; timer 1
 	// only while the output data bit is 1 and force break is off) toggles
 	// the output flip-flop and resyncs both timers two cycles after the
@@ -182,8 +182,8 @@ export class Pokey implements Memory {
 	// "not shifting" regardless of IRQEN (the enable only gates the IRQ
 	// line), and can't be acknowledged while the condition holds (Acid800
 	// pokey_seroc pins both the enabled and disabled reads). A byte
-	// waiting in the holding register doesn't count — complete stays
-	// active until shifting actually starts — and a shifter frozen by a
+	// waiting in the holding register doesn't count - complete stays
+	// active until shifting actually starts - and a shifter frozen by a
 	// stopped transmit clock or init mode also reads complete (Acid800
 	// serclock's external-clock check).
 	#serocLevel(irqst: number): number {
@@ -322,7 +322,7 @@ export class Pokey implements Memory {
 	}
 
 	// The transmit clock source per SKCTL bits 4-6: %11x = timer 2,
-	// %01x/%10x = timer 4, %00x = external (no clock — the shifter never
+	// %01x/%10x = timer 4, %00x = external (no clock - the shifter never
 	// advances; Acid800 serclock pins all three).
 	get #transmitClock(): 0 | 2 | 4 {
 		const mode = (this.#skctl >> 4) & 0x07;
@@ -332,7 +332,7 @@ export class Pokey implements Memory {
 	}
 
 	// A "used" two-tone timer fired: toggle the FSK flip-flop and schedule
-	// the timer 1+2 resync — two cycles after the triggering timer's
+	// the timer 1+2 resync - two cycles after the triggering timer's
 	// reload, which is fire+1 for the 1.79MHz pipeline and fire+2 for the
 	// slow clocks (where the delay is absorbed into the next tick anyway).
 	#twoToneFire(fast: boolean): void {
@@ -346,7 +346,7 @@ export class Pokey implements Memory {
 	}
 
 	// One transmit-clock edge (the selected timer fired). Two edges per
-	// bit cell — the output square wave's halves; the bit-cell phase
+	// bit cell - the output square wave's halves; the bit-cell phase
 	// restarts at each load, which happens on the first edge with the
 	// shifter empty and a byte waiting (Acid800 sertiming pins the load
 	// to the first clock edge after the SEROUT write).
@@ -369,7 +369,7 @@ export class Pokey implements Memory {
 		}
 
 		if (this.#shiftBitsLeft === 0 && this.#serout !== null) {
-			// Load: holding register → shifter. The start bit (0) goes out
+			// Load: holding register -> shifter. The start bit (0) goes out
 			// now; SEROR reports the holding register free.
 			this.#lastShiftedByte = this.#serout;
 			this.#shiftData = this.#serout | 0x100; // data LSB first, stop high
@@ -419,7 +419,7 @@ export class Pokey implements Memory {
 	 */
 	cycle(): number {
 		// Init mode holds the polynomial counters and both slow clocks in
-		// reset. The 1.79MHz channels run on — that's the machine clock.
+		// reset. The 1.79MHz channels run on - that's the machine clock.
 		let slowTick = false;
 		if (this.#initMode) {
 			if (this.#initFillDelay) {
@@ -453,7 +453,7 @@ export class Pokey implements Memory {
 		if (due) {
 			// The two-tone resync goes first: it preempts a timer 1 fire
 			// landing on the resync cycle itself (a fire one cycle earlier
-			// survives — Acid800's cancellation tests and the AHRM's
+			// survives - Acid800's cancellation tests and the AHRM's
 			// "up to one cycle later" rule agree).
 			if (due & OP_TWOTONE_RESYNC) {
 				due &= ~(OP_COMMIT1 | OP_FIRE1);
@@ -466,7 +466,7 @@ export class Pokey implements Memory {
 					this.#inFlight2 = false;
 					this.#counter2 = this.#reload12() - 1;
 				} else {
-					// Like a timer commit, the resync reads the live AUDF —
+					// Like a timer commit, the resync reads the live AUDF -
 					// timertiming pins the same write deadline for both. +1
 					// on the fast path because the channel logic below
 					// decrements the fresh counter this same cycle.
@@ -474,7 +474,7 @@ export class Pokey implements Memory {
 					this.#counter2 = this.#audf2 + 1;
 				}
 			}
-			// Commits read the *live* AUDF — that's the write deadline.
+			// Commits read the *live* AUDF - that's the write deadline.
 			if (due & OP_COMMIT1) {
 				this.#counter1 = this.#audf1 + 1;
 			}
@@ -493,7 +493,7 @@ export class Pokey implements Memory {
 				this.#inFlight3 = false;
 				this.#out3 = this.#flip(this.#out3, this.#audc3, 0x80 >> 3);
 			}
-			// The linked high halves fire and reload together — the late
+			// The linked high halves fire and reload together - the late
 			// reload is why an AUDF write landing just after the underflow
 			// still affects the next period ("the late reset from channel
 			// 2"). -3 for the late commit, +1 because the channel logic
@@ -526,7 +526,7 @@ export class Pokey implements Memory {
 			// 16-bit: one counter with period N+7 (1.79MHz). The timer 1 IRQ
 			// fires on the 16-bit underflow; timer 2 (and the channel 2
 			// output) trails it by 3 cycles. Channel 1's own audio output is
-			// forced low. Pinned by Acid800's timer-timing asserts — its
+			// forced low. Pinned by Acid800's timer-timing asserts - its
 			// comment table disagrees with its own asserts here.
 			this.#out1 = 0;
 			if (!this.#inFlight2 && (this.#fastClock1 || slowTick)) {
@@ -684,11 +684,11 @@ export class Pokey implements Memory {
 			case 0x09: {
 				// STIMER: reload all timers from AUDF. On 1.79MHz channels
 				// the first fire lands 4 cycles later than the steady N+4
-				// period — Acid800's timing table puts it at N+8 after the
+				// period - Acid800's timing table puts it at N+8 after the
 				// STIMER write. The output flip-flops reset too: channels
 				// 1/2 low, 3/4 high.
 				// First fires land at N+8 (8-bit) / N+8 (16-bit) on 1.79MHz
-				// channels — one reload-pipeline beat past the steady
+				// channels - one reload-pipeline beat past the steady
 				// N+4/N+7 periods.
 				this.#counter1 = this.#fastClock1 ? this.#audf1 + 4 : this.#reload1();
 				this.#counter2 = this.#link12
@@ -729,7 +729,7 @@ export class Pokey implements Memory {
 				// slow clocks and polynomial counters are held in reset
 				// (RANDOM locks at $FF). Timers, IRQ state, KBCODE, the
 				// audio registers, and the outputs are NOT reset. Leaving
-				// init restarts the clocks at fixed offsets — the hardware
+				// init restarts the clocks at fixed offsets - the hardware
 				// fires a period-0 timer IRQ 24 (64KHz) / 83 (15KHz)
 				// cycles after this write; our offsets carry one extra
 				// cycle for the write-to-tick ordering (Acid800
@@ -741,7 +741,7 @@ export class Pokey implements Memory {
 				this.#twoTone = (value & 0x08) !== 0;
 				this.#forceBreak = (value & 0x80) !== 0;
 				if (this.#initMode) {
-					// The 9/17-bit counter is not reset here — it fills
+					// The 9/17-bit counter is not reset here - it fills
 					// gradually, one fillCycle() per machine cycle,
 					// starting the cycle after this write. The serial
 					// shifter is halted but keeps its contents; only the
@@ -763,12 +763,12 @@ export class Pokey implements Memory {
 
 /**
  * The 9/17-bit polynomial counter: a right-shifting Fibonacci LFSR with XOR
- * feedback from bit 0 and one tap (bit 5 in both widths — the 17-bit poly
+ * feedback from bit 0 and one tap (bit 5 in both widths - the 17-bit poly
  * is x^17+x^12+1, the 9-bit x^9+x^4+1; both maximal). RANDOM reads the top
  * eight bits uninverted, matching the Altirra Hardware Reference's
  * published 9-bit progression. SKCTL init fills the register with ones
- * from the top (see fillCycle), saturating at all-ones except bit 0 — the
- * all-ones state's predecessor — which both locks RANDOM at $FF and lands
+ * from the top (see fillCycle), saturating at all-ones except bit 0 - the
+ * all-ones state's predecessor - which both locks RANDOM at $FF and lands
  * Acid800 pokey_noise's post-init samples ($95 and $08) on our
  * exit-write-to-read cycle count.
  */
@@ -797,7 +797,7 @@ class PolyCounter {
 	 * One init-mode cycle: ones shift in from the top with bit 0 held low,
 	 * saturating at the reset state after `width` cycles. Acid800
 	 * pokey_noise's hot-stop samples ($E9/$F0 three cycles into init) pin
-	 * this gradual fill — re-entering init does not snap RANDOM to $FF.
+	 * this gradual fill - re-entering init does not snap RANDOM to $FF.
 	 */
 	fillCycle(): void {
 		this.state = ((this.state >> 1) | (1 << this.#top)) & ~1;
@@ -825,7 +825,7 @@ class LinearFeedbackShiftRegister {
 	// Internal counter state.
 	#state = 0x1;
 
-	/** The output stream's last 8 bits — what the channels sample. */
+	/** The output stream's last 8 bits - what the channels sample. */
 	register = 0;
 
 	constructor(mask: number) {

@@ -7,7 +7,7 @@ export { type SfottyOptions };
  * A cycle-exact NMOS 6502 CPU.
  *
  * This is a thin facade over the internal core: it exposes the host-facing
- * contract — registers, flags, input lines, `run()`/`reset()` — and nothing
+ * contract - registers, flags, input lines, `run()`/`reset()` - and nothing
  * else. The micro-op machinery the generated microcode calls into lives on
  * the core, which is unreachable from here, so inspecting a `Sfotty` (in a
  * debugger, or from a browser console) shows only real 6502 state.
@@ -43,7 +43,7 @@ export class Sfotty {
 		this.#core.Y = value;
 	}
 
-	/** The stack pointer (the low byte; the stack lives at $0100–$01FF). */
+	/** The stack pointer (the low byte; the stack lives at $0100-$01FF). */
 	get S(): number {
 		return this.#core.S;
 	}
@@ -108,7 +108,7 @@ export class Sfotty {
 	}
 
 	/**
-	 * The B flag. Not a real register bit — it only exists in the status byte
+	 * The B flag. Not a real register bit - it only exists in the status byte
 	 * pushed to the stack: 1 for a software push (BRK/PHP), 0 for a hardware
 	 * interrupt. Read back via {@link getP}; {@link setP} ignores it.
 	 */
@@ -146,7 +146,7 @@ export class Sfotty {
 	 * The RDY input line. When the host pulls it false before a read cycle, that
 	 * cycle still issues its bus read but then stalls: nothing is mutated and
 	 * the next `run()` repeats the same read until RDY is true again. NMOS
-	 * quirk: only read cycles honor RDY — write cycles complete regardless.
+	 * quirk: only read cycles honor RDY - write cycles complete regardless.
 	 */
 	get RDY(): boolean {
 		return this.#core.RDY;
@@ -157,7 +157,7 @@ export class Sfotty {
 
 	/**
 	 * The IRQ input line (positive logic here: `true` = asserted). Level-sensitive
-	 * — while it is asserted and the I flag is clear, an IRQ is recognized at an
+	 * - while it is asserted and the I flag is clear, an IRQ is recognized at an
 	 * instruction boundary. The host must wired-OR all its IRQ sources into this
 	 * single boolean.
 	 */
@@ -170,7 +170,7 @@ export class Sfotty {
 
 	/**
 	 * The NMI input line (positive logic here: `true` = asserted). Edge-triggered
-	 * — a false→true transition latches a pending NMI, serviced at the next
+	 * - a false->true transition latches a pending NMI, serviced at the next
 	 * instruction boundary regardless of the I flag. The host must wired-OR all
 	 * its NMI sources into this single boolean, and must hold the line asserted
 	 * for several cycles until the CPU acknowledges it.

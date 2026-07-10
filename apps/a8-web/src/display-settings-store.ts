@@ -12,7 +12,7 @@ import { loadPersisted, savePersisted } from "./persist.ts";
 
 // The persisted per-standard display settings (see display-settings.ts).
 // Unknown/malformed fields fall back to the defaults per field, and values
-// are re-sanitized on load — so a hand-edited or outdated store degrades
+// are re-sanitized on load - so a hand-edited or outdated store degrades
 // gracefully instead of resetting wholesale.
 export const DISPLAY_SETTINGS_KEY = "display-settings";
 const VERSION = 1;

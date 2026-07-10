@@ -19,12 +19,12 @@ function readOverride(): "mac" | "win" | null {
 		const stored = sessionStorage.getItem(OVERRIDE_KEY);
 		return stored === "mac" || stored === "win" ? stored : null;
 	} catch {
-		return null; // no storage / non-browser context → fall back to detection
+		return null; // no storage / non-browser context -> fall back to detection
 	}
 }
 
 /**
- * True on macOS — for platform-specific shortcut labels (⌘ vs Ctrl+) and the
+ * True on macOS - for platform-specific shortcut labels (⌘ vs Ctrl+) and the
  * platform default bindings. A `?os=win` / `?os=mac` query param overrides the
  * real userAgent (per-tab; `?os=auto` or closing the tab clears it) so the other
  * platform's labels can be seen while developing.

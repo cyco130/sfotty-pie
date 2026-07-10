@@ -7,6 +7,7 @@ import {
 	libraryEntries,
 	readyLibrary,
 	removeImage,
+	retypeImage,
 } from "./library.ts";
 
 // An 8K cartridge that canonicalizes to a type-1 .car; `fill` varies the bytes
@@ -14,7 +15,7 @@ import {
 function rawCart8k(fill: number): Uint8Array {
 	const cart = new Uint8Array(8192).fill(fill);
 	// Leave a valid CART trailer regardless of `fill`: the byte at length-4 must
-	// be 0, start address unused, init = $A000 → raw-cart-8k-a000-bfff.
+	// be 0, start address unused, init = $A000 -> raw-cart-8k-a000-bfff.
 	cart[8188] = 0x00;
 	cart[8189] = 0x00;
 	cart[8190] = 0x00;
@@ -45,7 +46,7 @@ describe("image library", () => {
 		expect(libraryEntries.value.length).toBe(before + 1);
 		expect(getImage(entry.id)).toBeDefined();
 
-		// getImageBytes returns the stored canonical bytes — they hash to `hash`.
+		// getImageBytes returns the stored canonical bytes - they hash to `hash`.
 		const bytes = await getImageBytes(entry.id);
 		expect(await sha256Hex(bytes)).toBe(entry.hash);
 	});
@@ -76,5 +77,38 @@ describe("image library", () => {
 		await expect(
 			addImage(new Uint8Array([1, 2, 3]), "junk.bin"),
 		).rejects.toThrow(/Unrecognized/);
+	});
+});
+
+describe("retypeImage", () => {
+	it("types an unknown ROM by writing the header, keeping the entry id", async () => {
+		// 32K of patterned noise, no trailer: canonicalizes to unknown-rom.
+		const raw = new Uint8Array(32768);
+		for (let i = 0; i < raw.length; i++) raw[i] = (i * 13 + 7) & 0xff;
+		const { added } = await addImage(raw, "mystery.rom");
+		const entry = added[0]!;
+		expect(entry.derived).toEqual({ type: "unknown-rom" });
+		const oldHash = entry.hash;
+
+		// Pick XEGS 32 (type 12): header written, kind derived, id stable.
+		expect(await retypeImage(entry.id, 12)).toBe(true);
+		const typed = getImage(entry.id)!;
+		expect(typed.derived).toEqual({ type: "cart", cartType: 12 });
+		expect(typed.hash).not.toBe(oldHash);
+		const bytes = await getImageBytes(entry.id);
+		expect(bytes.length).toBe(32768 + 16);
+		expect([...bytes.subarray(0, 8)]).toEqual([
+			0x43, 0x41, 0x52, 0x54, 0, 0, 0, 12,
+		]);
+
+		// Re-typing a typed cart swaps the header in place (trial and error).
+		expect(await retypeImage(entry.id, 33)).toBe(true);
+		const retyped = await getImageBytes(entry.id);
+		expect(retyped.length).toBe(32768 + 16);
+		expect(retyped[7]).toBe(33);
+		// A size-mismatched or unknown type is refused.
+		expect(await retypeImage(entry.id, 1)).toBe(false); // 8K type
+		expect(await retypeImage(entry.id, 9999)).toBe(false);
+		expect((await getImageBytes(entry.id))[7]).toBe(33); // unchanged
 	});
 });

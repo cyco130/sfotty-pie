@@ -3,7 +3,7 @@ import fs from "node:fs";
 import readline from "node:readline";
 import { basename } from "node:path";
 import { AtrImage } from "./atr.ts";
-import { Cartridge } from "./cartridge.ts";
+import { createCartridge, type Cartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 import { Headless, type InputSource } from "./headless.ts";
 import { Atari } from "./machine.ts";
@@ -12,7 +12,7 @@ import { buildBootDisk } from "./xex-boot.ts";
 // Usage: boot.ts --os <file> [--basic <file>] [--xl | --xe] [--pal] [--trace] [--dump-frame] [file]
 // `--os`/`--basic` are paths to the OS and BASIC ROM images. `file` is an XEX,
 // ATR, or cartridge image; like the web emulator's Load, booting a file is
-// boot-image semantics — the 800's BASIC cart comes out. This is a thin CLI over
+// boot-image semantics - the 800's BASIC cart comes out. This is a thin CLI over
 // the headless host (machine + OS-ROM HLE traps + run loop); console I/O is wired
 // to stdin/stdout here, and the run loop lives in Headless.
 const argv = process.argv.slice(2);
@@ -63,7 +63,7 @@ if (filePath) {
 		case "raw-cart-8k-8000-9fff":
 		case "raw-cart-8k-a000-bfff":
 		case "raw-cart-16k":
-			cartridge = new Cartridge(contents, basename(filePath));
+			cartridge = createCartridge(contents, basename(filePath));
 			break;
 		default:
 			process.stderr.write(`${filePath}: not a loadable file format\n`);
@@ -88,7 +88,7 @@ function hex(value: number, width: number): string {
 	return value.toString(16).toUpperCase().padStart(width, "0");
 }
 
-// --- Console input via readline (line-buffered stdin) — good enough for BASIC.
+// --- Console input via readline (line-buffered stdin) - good enough for BASIC.
 // Exposed to the host as an InputSource: read() pops the next buffered byte;
 // wait() resolves when a line arrives, or false when stdin closes. ---
 const rl = readline.createInterface({
@@ -184,7 +184,7 @@ if (machine.cpu.crashed) {
 	dumpRegisters();
 } else if (result.reachedLimit) {
 	process.stderr.write(
-		`\nReached LIMIT (${result.cycles} cycles) — likely stuck; re-run with --trace.\n`,
+		`\nReached LIMIT (${result.cycles} cycles) - likely stuck; re-run with --trace.\n`,
 	);
 	dumpRegisters();
 }

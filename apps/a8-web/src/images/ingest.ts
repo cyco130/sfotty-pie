@@ -1,6 +1,6 @@
 // The signal-free ingest core: turn file bytes into stored library entries
-// (canonicalize → hash → blob + metadata write). Kept apart from the reactive
-// library facade so it can run unchanged inside the import worker — it touches
+// (canonicalize -> hash -> blob + metadata write). Kept apart from the reactive
+// library facade so it can run unchanged inside the import worker - it touches
 // only IndexedDB, crypto, and CompressionStream, all available off the main
 // thread. Each JS context (main thread, worker) opens its own blob handle to the
 // same database.
@@ -18,7 +18,7 @@ import { putEntry } from "./store.ts";
 
 export const blobs = idbBlobStore();
 
-/** Prime the slot pickers from a firmware type — standard-8K carts only. */
+/** Prime the slot pickers from a firmware type - standard-8K carts only. */
 export function primeSlots(
 	type: FirmwareType | null,
 	kind: ImageKind,
@@ -30,7 +30,7 @@ export function primeSlots(
 }
 
 // Ingest one file's canonical pieces into `into`, deduping against `seen` (a set
-// of hashes it updates — including earlier pieces in the same batch). Does the
+// of hashes it updates - including earlier pieces in the same batch). Does the
 // blob + metadata writes. Throws if the file isn't a recognized image. A
 // built-in match is never a reason to skip storing (a later deploy may drop the
 // built-in), so `seen` holds only user hashes.

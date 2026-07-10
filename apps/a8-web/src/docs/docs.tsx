@@ -22,7 +22,7 @@ export function Docs() {
 				</section>
 				<section>
 					<h2 class="mb-3 text-lg font-semibold text-neutral-100">
-						ATASCII / ANTIC ($00–$7F)
+						ATASCII / ANTIC ($00-$7F)
 					</h2>
 					<p class="mb-4 text-sm text-neutral-500">
 						Printable glyphs (with the international character-set alternate),
@@ -41,7 +41,7 @@ export function Docs() {
 					<p class="mb-4 text-sm text-neutral-500">
 						POKEY scan code for each matrix key, plus the KBCODE for each
 						modifier combination; unmapped codes show as None and the
-						non-scannable Shift+Ctrl codes ($C0–$C7, $D0–$D7) are grayed out.
+						non-scannable Shift+Ctrl codes ($C0-$C7, $D0-$D7) are grayed out.
 						Ordered as digits, letters, punctuation, then other keys; click a
 						header to sort by code or label.
 					</p>
@@ -56,7 +56,7 @@ export function Docs() {
 					<p class="mb-4 text-sm text-neutral-500">
 						The 64 POKEY scan codes as the 8×8 matrix (row = high 3 bits, column
 						= low 3 bits). Control, Shift, and Break have no scan code of their
-						own — the hardware reads each on the same scan as $00, $10, and $30.
+						own - the hardware reads each on the same scan as $00, $10, and $30.
 					</p>
 					<KeyboardMatrix />
 				</section>

@@ -31,14 +31,14 @@ Sfotty Pie is MIT-licensed.
 
 The web app [a8-web](apps/a8-web) bundles open replacement OS and BASIC ROMs. These keep their own licenses and don't affect Sfotty Pie's MIT license (they're data the emulator loads, not part of its code):
 
-- **AltirraOS** and **Altirra BASIC** by Avery Lee — FSF all-permissive license, from the [Altirra emulator](https://www.virtualdub.org/altirra.html).
-- **Atari++ OS (os++)** and **Atari++ BASIC (Basic++)** by Thomas Richter / THOR Software — [Thor Public License](apps/a8-web/public/legal/atari++/THOR-Public-License.txt) (a Mozilla Public License 1.1 variant); the corresponding source is bundled alongside it.
+- **AltirraOS** and **Altirra BASIC** by Avery Lee - FSF all-permissive license, from the [Altirra emulator](https://www.virtualdub.org/altirra.html).
+- **Atari++ OS (os++)** and **Atari++ BASIC (Basic++)** by Thomas Richter / THOR Software - [Thor Public License](apps/a8-web/public/legal/atari++/THOR-Public-License.txt) (a Mozilla Public License 1.1 variant); the corresponding source is bundled alongside it.
 
 Full notices and bundled source: [THIRD-PARTY-LICENSES](apps/a8-web/public/legal/THIRD-PARTY-LICENSES.md).
 
 ### Third-party test suites
 
-The [`@sfotty-pie/a8`](packages/a8/readme.md) repository sources include the **Altirra Acid800** hardware-conformance test suite by Avery Lee (separately MIT-licensed) to drive CI conformance tests — see [packages/a8/test/acid800/LICENSE](packages/a8/test/acid800/LICENSE). It is not shipped in the published npm package.
+The [`@sfotty-pie/a8`](packages/a8/readme.md) repository sources include the **Altirra Acid800** hardware-conformance test suite by Avery Lee (separately MIT-licensed) to drive CI conformance tests - see [packages/a8/test/acid800/LICENSE](packages/a8/test/acid800/LICENSE). It is not shipped in the published npm package.
 
 ### Not affiliated
 

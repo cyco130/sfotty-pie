@@ -20,7 +20,7 @@ export const STORE_OVERRIDES = "overrides";
 
 /** A content-addressed blob row in the `blobs` store. */
 export interface BlobRecord {
-	/** The content hash — the store's key, and the locator's `ref`. */
+	/** The content hash - the store's key, and the locator's `ref`. */
 	ref: string;
 	bytes: ArrayBuffer;
 	encoding: BlobEncoding;

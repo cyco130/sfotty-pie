@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
-import { Cartridge } from "./cartridge.ts";
+import { createCartridge, type Cartridge } from "./cartridge.ts";
 import { Atari } from "./machine.ts";
 
 // A standard 8K $A000 cartridge: init address $A000, start unused.
@@ -8,7 +8,7 @@ function makeCart(marker: number) {
 	const rom = new Uint8Array(8192);
 	rom[0] = marker;
 	rom[8191] = 0xa0;
-	return new Cartridge(rom);
+	return createCartridge(rom);
 }
 
 function makeMachine(model: "800" | "800XL" | "130XE", cartridge?: Cartridge) {
@@ -41,7 +41,7 @@ test("the 800's cartridge slot can be left empty", () => {
 test("a cartridge shadows the XL's built-in BASIC", () => {
 	const machine = makeMachine("800XL", makeCart(0x42));
 
-	// Bank BASIC in like the OS does (DDRB all outputs, PORTB bit 1 low) —
+	// Bank BASIC in like the OS does (DDRB all outputs, PORTB bit 1 low) -
 	// the cartridge still wins at $A000.
 	machine.write(0xd303, 0x00, ReadOptions.NONE);
 	machine.write(0xd301, 0xff, ReadOptions.NONE);

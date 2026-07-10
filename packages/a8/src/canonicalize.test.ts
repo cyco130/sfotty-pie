@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canonicalize } from "./canonicalize.ts";
-import { builtinSlotRom, Cartridge } from "./cartridge.ts";
+import { canonicalize, withCartType } from "./canonicalize.ts";
+import { builtinSlotRom, createCartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 
 // Minimal synthetic fixtures that satisfy the structural detectors.
@@ -9,7 +9,7 @@ import { detectFileFormat } from "./detect-file-format.ts";
 function rawCart8kA000(): Uint8Array {
 	const cart = new Uint8Array(8192);
 	cart[8190] = 0x00; // init address low
-	cart[8191] = 0xa0; // init address high → $A000
+	cart[8191] = 0xa0; // init address high -> $A000
 	return cart;
 }
 
@@ -37,11 +37,11 @@ function fakeOsRom16k(): Uint8Array {
 		const offset = address - base;
 		rom[offset] = 0x4c; // JMP
 		rom[offset + 1] = 0x00;
-		rom[offset + 2] = 0xe0; // → $E000
+		rom[offset + 2] = 0xe0; // -> $E000
 	}
 	for (const tail of [6, 4, 2]) {
 		rom[16384 - tail] = 0x00;
-		rom[16384 - tail + 1] = 0xe0; // interrupt vector → $E000
+		rom[16384 - tail + 1] = 0xe0; // interrupt vector -> $E000
 	}
 	return rom;
 }
@@ -83,10 +83,10 @@ describe("canonicalize", () => {
 		expect(piece!.bytes).toHaveLength(8192 + 16);
 		// Round-trips through the detector and the emulator's cartridge loader.
 		expect(detectFileFormat(piece!.bytes)).toBe("cart");
-		expect(() => new Cartridge(piece!.bytes)).not.toThrow();
+		expect(() => createCartridge(piece!.bytes)).not.toThrow();
 	});
 
-	it("maps raw 8K $8000 → type 21 and raw 16K → type 2", () => {
+	it("maps raw 8K $8000 -> type 21 and raw 16K -> type 2", () => {
 		expect(canonicalize(rawCart8k8000())[0]!.kind).toEqual({
 			type: "cart",
 			cartType: 21,
@@ -170,5 +170,56 @@ describe("builtinSlotRom", () => {
 	it("rejects a non-standard .car for a built-in 8K slot", () => {
 		const car16 = canonicalize(rawCart16k())[0]!.bytes; // CART type 2 (16K)
 		expect(() => builtinSlotRom(car16)).toThrow(/standard-8K/);
+	});
+});
+
+describe("unknown-rom canonicalization", () => {
+	it("keeps a size-matching undetectable dump raw as unknown-rom", () => {
+		// 32K of noise: no trailer anywhere, so no raw-cart detector fires,
+		// but plenty of CART types are 32K.
+		const source = new Uint8Array(32768).fill(0x55);
+		const pieces = canonicalize(source, "mystery.rom");
+		expect(pieces).toHaveLength(1);
+		expect(pieces[0]!.kind).toEqual({ type: "unknown-rom" });
+		expect(pieces[0]!.header.length).toBe(0);
+		expect(pieces[0]!.bytes).toBe(source);
+	});
+
+	it("rejects sizes matching no CART type", () => {
+		expect(() => canonicalize(new Uint8Array(12 * 1024), "odd.rom")).toThrow(
+			"Unrecognized image format",
+		);
+	});
+
+	it("rejects non-ROM extensions", () => {
+		expect(() => canonicalize(new Uint8Array(32768), "movie.mp4")).toThrow(
+			"Unrecognized image format",
+		);
+	});
+});
+
+describe("withCartType", () => {
+	it("wraps a raw dump and rebuilds an existing header", () => {
+		const rom = new Uint8Array(32768).fill(3);
+		const typed = withCartType(rom, 12);
+		expect(typed.length).toBe(32768 + 16);
+		expect(typed[7]).toBe(12);
+		// Checksum = 32-bit sum of the ROM bytes, MSB-first at offset 8.
+		const sum = 3 * 32768;
+		expect(typed[10]).toBe((sum >>> 8) & 0xff);
+		expect(typed[11]).toBe(sum & 0xff);
+
+		// Re-typing a .car swaps the header, not the ROM.
+		const retyped = withCartType(typed, 33);
+		expect(retyped[7]).toBe(33);
+		expect(retyped.length).toBe(typed.length);
+		expect(retyped[16]).toBe(3);
+	});
+
+	it("throws on unknown types and size mismatches", () => {
+		expect(() => withCartType(new Uint8Array(32768), 9999)).toThrow(
+			"Unknown cartridge type",
+		);
+		expect(() => withCartType(new Uint8Array(16384), 12)).toThrow("needs 32K");
 	});
 });

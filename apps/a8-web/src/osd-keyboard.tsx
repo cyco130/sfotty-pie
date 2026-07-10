@@ -3,12 +3,12 @@ import { commands, type Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 
 /**
- * The on-screen keyboard view — a phone-style layout tuned for typing Atari
+ * The on-screen keyboard view - a phone-style layout tuned for typing Atari
  * BASIC. Two layers (letters and numbers/symbols) plus a slim function strip
  * for the Atari-specific keys and a cursor cluster. Sticky Shift/Control
  * modifiers compose the right matrix command via the `PRESS_[CONTROL_][SHIFT_]
  * <BASE>` naming the command table already uses, so no new emulator input path
- * is needed — every key is the same momentary POKEY press the console buttons
+ * is needed - every key is the same momentary POKEY press the console buttons
  * already do.
  */
 
@@ -20,7 +20,7 @@ interface KeyBase {
 	/** Flex weight within its row; defaults to 1. */
 	flex?: number;
 	/**
-	 * Secondary legends shown while Shift / Control is armed — the Atari editing
+	 * Secondary legends shown while Shift / Control is armed - the Atari editing
 	 * functions a key gains under those modifiers (e.g. `<` becomes Clear). The
 	 * matrix command is composed from the modifiers regardless; these just label
 	 * it.
@@ -76,7 +76,7 @@ const FN_ROW_B: Key[] = [
 
 // The Atari shifted glyph for each digit, shown as a corner legend so it's
 // discoverable. Only digits whose shifted symbol has no one-tap key of its own
-// appear here — `"$()` live on the symbol row, so 2/4/9/0 are left blank to
+// appear here - `"$()` live on the symbol row, so 2/4/9/0 are left blank to
 // avoid showing the same glyph twice.
 const DIGIT_SHIFT: Record<string, string> = {
 	"1": "!",
@@ -293,7 +293,7 @@ function KeyButton({
 		(controlOn && k.controlLabel) || (shiftOn && k.shiftLabel) || k.label;
 
 	// A single-character shifted glyph (e.g. `!` on the `1` key) is shown dim in
-	// the corner so it's discoverable — but not while it's already the main
+	// the corner so it's discoverable - but not while it's already the main
 	// label under an armed modifier, and not for word legends like "Clr".
 	const corner =
 		!shiftOn && !controlOn && k.shiftLabel?.length === 1 ? k.shiftLabel : null;

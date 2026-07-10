@@ -1,4 +1,4 @@
-// The image library's metadata model — the type layer shared across both
+// The image library's metadata model - the type layer shared across both
 // built-in images (the build manifest) and user images (IndexedDB).
 //
 // Identity is decoupled from content: an entry's `id` is a filename-derived
@@ -11,19 +11,20 @@
 import type { FirmwareKey, ImageKind } from "@sfotty-pie/a8";
 
 /**
- * Content-derived facts, recomputed from the bytes — the package's
- * canonicalization result reused verbatim (`os`→`sizeClass`, `cart`→`cartType`,
- * `disk`→`sectorSize`/`sectors`, `xex`).
+ * Content-derived facts, recomputed from the bytes - the package's
+ * canonicalization result reused verbatim (`os`->`sizeClass`, `cart`->`cartType`,
+ * `disk`->`sectorSize`/`sectors`, `xex`).
  */
 export type DerivedMeta = ImageKind;
 
-/** The coarse, canonical kind of an image — what it intrinsically is. */
+/** The coarse, canonical kind of an image - what it intrinsically is. */
 export type ImageType = ImageKind["type"];
 
-/** Canonical file extension per type — a cartridge is a `.car`, an OS a raw
+/** Canonical file extension per type - a cartridge is a `.car`, an OS a raw
  *  `.rom`, a disk an `.atr`, an executable a `.xex`. Stored names carry none;
  *  this is added on download / library export. */
 export const CANON_EXT: Record<ImageType, string> = {
+	"unknown-rom": "rom",
 	os: "rom",
 	cart: "car",
 	disk: "atr",
@@ -49,7 +50,7 @@ export type BlobEncoding = "raw" | "deflate-raw";
 export type BlobBackend = "idb"; // opfs / fsa later
 
 /**
- * Where an entry's bytes come from — the one thing `getBytes` switches on. The
+ * Where an entry's bytes come from - the one thing `getBytes` switches on. The
  * blob store self-describes its encoding, so the user locator carries only the
  * backend + ref (no encoding here).
  */
@@ -61,19 +62,19 @@ export type BlobLocator =
 	  }
 	| { kind: "user"; backend: BlobBackend; ref: string };
 
-/** A library image — built-in or user — as the merged library presents it. */
+/** A library image - built-in or user - as the merged library presents it. */
 export interface ImageEntry {
 	/** Stable identity: a filename slug for built-ins, a UUID for user images. */
 	id: string;
-	/** SHA-256 of the canonical payload (hex) — a content attribute, non-unique. */
+	/** SHA-256 of the canonical payload (hex) - a content attribute, non-unique. */
 	hash: string;
 	source: "builtin" | "user";
 	/** Total canonical file size in bytes. */
 	size: number;
-	/** Auto-added by booting/attaching a file (not deliberately imported) — hidden
+	/** Auto-added by booting/attaching a file (not deliberately imported) - hidden
 	 *  from the curated list until "kept". */
 	transient?: boolean;
-	/** Detected known-firmware identity, if any — drives the ROM-slot ranking
+	/** Detected known-firmware identity, if any - drives the ROM-slot ranking
 	 *  (a built-in's id is also its key; an upload records it here). */
 	firmwareKey?: FirmwareKey;
 	locator: BlobLocator;

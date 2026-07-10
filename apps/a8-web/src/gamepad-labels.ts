@@ -1,6 +1,6 @@
 import type { GamepadInput } from "./gamepad.ts";
 
-// Standard Gamepad layout names by index — hardware tokens, so inline (not
+// Standard Gamepad layout names by index - hardware tokens, so inline (not
 // translated). Used for the monitor cells and the binding chips when a pad
 // reports the Standard mapping; a non-standard pad falls back to raw indices.
 export const STANDARD_BUTTONS = [

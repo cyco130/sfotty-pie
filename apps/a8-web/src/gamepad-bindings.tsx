@@ -7,7 +7,7 @@ import { normalize, type PadView } from "./gamepad-normalize.ts";
 import type { EmulatorHost } from "./host.ts";
 import { messages } from "./messages.ts";
 
-// A firm push to capture an axis — higher than the play threshold so a light
+// A firm push to capture an axis - higher than the play threshold so a light
 // wobble on a resting stick doesn't register as a binding.
 const CAPTURE_AXIS = 0.7;
 

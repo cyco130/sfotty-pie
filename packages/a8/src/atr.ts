@@ -3,16 +3,16 @@
  *
  * Layout: a 16-byte header ($96 $02 magic, image size in 16-byte paragraphs,
  * sector size) followed by raw sector data. On double-density (256-byte
- * sector) images the first three sectors — the boot sectors, which the drive
- * always transfers as 128 bytes — are usually stored as 128 bytes, but some
+ * sector) images the first three sectors - the boot sectors, which the drive
+ * always transfers as 128 bytes - are usually stored as 128 bytes, but some
  * tools store them as full 256-byte slots; both layouts are detected by the
  * data length's remainder.
  *
  * Sectors are mutable ({@link writeSector}); writes land in the same backing
  * buffer {@link toBytes} hands back, so a modified image round-trips to a
  * fresh `.atr` byte-for-byte (header included). `writeProtected` models the
- * disk's write-protect notch — a property of the medium; a protected image
- * rejects writes. (For a synthetic disk this is policy, not a real notch —
+ * disk's write-protect notch - a property of the medium; a protected image
+ * rejects writes. (For a synthetic disk this is policy, not a real notch -
  * see {@link ./xex-boot.ts}.)
  */
 export class AtrImage {

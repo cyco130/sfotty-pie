@@ -68,7 +68,7 @@ const hex = (n: number) => `0x${n.toString(16).toUpperCase().padStart(2, "0")}`;
 const entries = [...table.keys()].sort().map((mnemonic) => {
 	const modes = table.get(mnemonic)!;
 	// Emit each entry already broken (newline after `{`) so prettier keeps every
-	// entry multiline — short ones included — rather than collapsing them inline.
+	// entry multiline - short ones included - rather than collapsing them inline.
 	const lines = MODE_ORDER.filter((m) => modes.has(m)).map(
 		(m) => `\t\t${m}: ${hex(modes.get(m)!)},`,
 	);
@@ -76,7 +76,7 @@ const entries = [...table.keys()].sort().map((mnemonic) => {
 });
 
 const output = `// Generated from @sfotty-pie/sfotty's NMOS_OPCODES by generate-opcodes.ts.
-// Do not edit by hand — run \`pnpm generate:opcodes\` to regenerate.
+// Do not edit by hand - run \`pnpm generate:opcodes\` to regenerate.
 // Documented NMOS 6502 opcodes only; undocumented opcodes are excluded for now.
 
 export type Mode =

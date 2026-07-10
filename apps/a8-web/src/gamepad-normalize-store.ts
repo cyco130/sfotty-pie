@@ -2,7 +2,7 @@ import type { NormalizeProfile } from "./gamepad-normalize.ts";
 import { loadPersisted, savePersisted } from "./persist.ts";
 
 // The per-device normalization profiles, keyed by `gamepad.id`. Identical
-// pads are indistinguishable and share a profile — fine, they're identical
+// pads are indistinguishable and share a profile - fine, they're identical
 // hardware. This is the device-dependent layer only; the device-independent
 // bindings live in gamepad-bindings-store.ts. Bump VERSION to invalidate.
 export const GAMEPAD_NORMALIZE_KEY = "gamepad-normalize";

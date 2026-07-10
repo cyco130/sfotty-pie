@@ -101,7 +101,7 @@ test("linking 1+2 silences channel 1's own output", () => {
 	for (let i = 0; i < 50; i++) sawOutput ||= pokey.cycle() === 8;
 	expect(sawOutput).toBe(true);
 
-	// In 16-bit linked mode channel 1 only clocks channel 2 — its own
+	// In 16-bit linked mode channel 1 only clocks channel 2 - its own
 	// output is forced low (and must stay there: the ghost-output bug).
 	pokey.write(AUDCTL, 0x50);
 	pokey.cycle();
@@ -126,7 +126,7 @@ test("init mode locks RANDOM at $FF and freezes the slow clocks", () => {
 	for (let i = 0; i < 50; i++) pokey.cycle();
 	expect(pokey.read(RANDOM)).toBe(0xff);
 
-	// A slow timer mid-count freezes during init and resumes after —
+	// A slow timer mid-count freezes during init and resumes after -
 	// init does not reset the timer counters themselves.
 	pokey.write(SKCTL, 0x03);
 	pokey.write(AUDF1, 1); // 64KHz, period (1+1)*28 = 56 cycles
@@ -162,7 +162,7 @@ test("SEROC is a level, not a latch", () => {
 	const pokey = new Pokey();
 
 	// With the transmitter idle, the IRQST bit reads pending even with the
-	// IRQ disabled — the enable only gates the IRQ line.
+	// IRQ disabled - the enable only gates the IRQ line.
 	expect(pokey.read(IRQEN_IRQST) & 0x08).toBe(0);
 	expect(pokey.irq).toBe(false);
 
@@ -234,7 +234,7 @@ test("init mode does not touch IRQ state or fast channels", () => {
 	expect(pokey.read(IRQEN_IRQST)).toBe(0xb7); // the latch survives
 	expect(pokey.irq).toBe(true);
 
-	// A 1.79MHz channel keeps counting — it runs on the machine clock.
+	// A 1.79MHz channel keeps counting - it runs on the machine clock.
 	pokey.write(AUDCTL, 0x40);
 	pokey.write(AUDF1, 0);
 	pokey.write(AUDC1, 0xaf);

@@ -3,7 +3,10 @@ import {
 	buildBootDisk,
 	buildNtscPalette,
 	buildPalPalette,
-	Cartridge,
+	CART_TYPES,
+	createCartridge,
+	isCartTypeSupported,
+	type Cartridge,
 	detectFileFormat,
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
@@ -136,7 +139,7 @@ export type { MachineSettings } from "./machine-config.ts";
 
 /**
  * In-memory firmware overrides; an explicit pick beats the ranking. Values are
- * library image ids — a built-in's firmware key, or a user upload's UUID.
+ * library image ids - a built-in's firmware key, or a user upload's UUID.
  */
 export interface RomOverrides {
 	os: Partial<Record<OsSlot, string>>;
@@ -146,16 +149,16 @@ export interface RomOverrides {
 
 const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
 
-// Persisted-state keys (namespaced by storageName) — see persist.ts.
+// Persisted-state keys (namespaced by storageName) - see persist.ts.
 const CONFIG_KEY = "config";
 const ROMS_KEY = "roms";
 const KBMODE_KEY = "keyboard-mode";
 
 // How long a momentary trigger (palette, click) holds a control before its
-// auto-release — long enough for the OS to sense the key/button. Counted in
+// auto-release - long enough for the OS to sense the key/button. Counted in
 // emulated frames so it's two frames whether real-time or in turbo.
 const PULSE_FRAMES = 2;
-// The mounted media is per-tab (sessionStorage only) — a fresh tab starts empty
+// The mounted media is per-tab (sessionStorage only) - a fresh tab starts empty
 // rather than auto-booting the last session's image.
 const MEDIA_KEY = "media";
 
@@ -218,9 +221,9 @@ function unsupportedMessage(format: AtariFileFormat | null): string | null {
 }
 
 /**
- * Owns the emulator's imperative lifetime — the live {@link Emulator}
+ * Owns the emulator's imperative lifetime - the live {@link Emulator}
  * instance (swapped on Load), the real-time present loop, audio, and the
- * keyboard — so the Preact chrome stays a thin view. Reactive UI state is
+ * keyboard - so the Preact chrome stays a thin view. Reactive UI state is
  * exposed as signals; the canvas and keystroke loops are wired up via the
  * `attach*` methods (called from the component's mount effect) and never
  * touch Preact's render path.
@@ -255,7 +258,7 @@ export class EmulatorHost {
 		basicDisabled: false,
 	});
 
-	/** The menu's working copy — applied (with a reboot) on demand. */
+	/** The menu's working copy - applied (with a reboot) on demand. */
 	readonly staged = signal<MachineSettings>(this.config.peek());
 
 	/** True while the staged config differs from the running machine. */
@@ -291,7 +294,7 @@ export class EmulatorHost {
 	 *  device-independent layer, persisted via the gamepad-bindings store. */
 	readonly gamepadBindings = signal<GamepadBindings>(loadGamepadBindings());
 
-	/** Per-device normalization profiles by gamepad id — the device-dependent
+	/** Per-device normalization profiles by gamepad id - the device-dependent
 	 *  layer ahead of the bindings, persisted via the gamepad-normalize store.
 	 *  Capture/monitor surfaces read pads through these (see normalize()). */
 	readonly gamepadNormalize = signal<NormalizeProfiles>(
@@ -312,8 +315,8 @@ export class EmulatorHost {
 	// Whether the machine was running when the picker opened (resume on close).
 	#favoritesWasRunning = false;
 
-	/** The layout snapshot the bindings were baked from (`code` → legend), used to
-	 *  label the editor's live preview — existing chords carry their own baked
+	/** The layout snapshot the bindings were baked from (`code` -> legend), used to
+	 *  label the editor's live preview - existing chords carry their own baked
 	 *  labels. Persisted, so stable across refresh; refreshed on reset. */
 	readonly layoutLabels = signal<Map<string, string>>(new Map());
 
@@ -327,12 +330,12 @@ export class EmulatorHost {
 	/**
 	 * Which sidebar panel is showing, or null when closed. The sidebar is a
 	 * single docked surface that hosts the menu, the command palette, and (in
-	 * future) other dialogs — one at a time, always pushing the screen aside
+	 * future) other dialogs - one at a time, always pushing the screen aside
 	 * rather than covering it.
 	 */
 	readonly sidebar = signal<SidebarPanel | null>(null);
 
-	// Fetched ROM bytes, keyed by the resolved image's id — populated lazily
+	// Fetched ROM bytes, keyed by the resolved image's id - populated lazily
 	// before each (re)build so #makeEmulator can read them synchronously.
 	readonly #bytes = new Map<string, Uint8Array>();
 	// The firmware picks per slot, persisted. appliedRoms is what the running
@@ -362,12 +365,12 @@ export class EmulatorHost {
 	readonly #gamepads: Gamepads;
 	readonly #isMac = isMac();
 	// Whether key bindings were loaded from storage; if not, create() generates
-	// and persists the platform defaults (async — it resolves layout labels).
+	// and persists the platform defaults (async - it resolves layout labels).
 	readonly #bindingsStored: boolean;
 	// The model a brand-new install starts from (and resets fall back to).
 	readonly #defaultModel: AtariModel;
 
-	// Assigned by create() before the host is handed out — the constructor can't
+	// Assigned by create() before the host is handed out - the constructor can't
 	// await the initial firmware fetch.
 	#emulator!: Emulator;
 	// Bumped per reboot so a slow firmware fetch can't clobber a newer config.
@@ -383,7 +386,7 @@ export class EmulatorHost {
 	// What's mounted, kept across reboots and re-applied by #makeEmulator. The
 	// cartridge slot and the disk drives are independent (a cart and a disk can
 	// coexist); #drives is indexed by drive number (0 = D1:), one slot for now.
-	// `sourceId` is the library entry the cart/disk came from, if any — used to
+	// `sourceId` is the library entry the cart/disk came from, if any - used to
 	// persist what's mounted (and, for a disk, what `saveD1ToLibrary` writes back).
 	#cartridge: { cart: Cartridge; name: string; sourceId?: string } | null =
 		null;
@@ -405,7 +408,7 @@ export class EmulatorHost {
 		await host.#restoreMedia();
 		// First run (or a cleared store): generate + persist the default bindings
 		// from the layout snapshot. Otherwise load the stored snapshot (only used to
-		// label the editor's live preview now — existing chords carry baked labels).
+		// label the editor's live preview now - existing chords carry baked labels).
 		// The keyboard isn't attached until the UI mounts, so the brief empty-binding
 		// window is never live.
 		if (!host.#bindingsStored) {
@@ -496,7 +499,7 @@ export class EmulatorHost {
 			this.#refreshAudioState();
 		}
 
-		// Keep the status-bar attachment labels in sync with the config — the
+		// Keep the status-bar attachment labels in sync with the config - the
 		// 400/800 BASIC slot depends on the model and whether BASIC is enabled.
 		// (Runs immediately, seeding the initial labels.)
 		this.config.subscribe(() => this.#refreshAttachments());
@@ -524,7 +527,7 @@ export class EmulatorHost {
 	// Persist this tab's mounted media (the library ids in each slot) plus the
 	// live BASIC state, so reloading the tab resumes the running machine. Only
 	// slots backed by a library entry persist; an id-less mount is dropped (it
-	// can't be reconstructed). Session-only — a fresh tab starts empty.
+	// can't be reconstructed). Session-only - a fresh tab starts empty.
 	#saveMedia(): void {
 		saveSession(MEDIA_KEY, {
 			cart: this.#cartridge?.sourceId ?? null,
@@ -534,7 +537,7 @@ export class EmulatorHost {
 	}
 
 	// Record a just-booted/attached library image in the recents history, then
-	// sweep transient (auto-added) images that have fallen off it — keeping any
+	// sweep transient (auto-added) images that have fallen off it - keeping any
 	// still mounted, so a resume never loses its backing blob.
 	#noteUsed(sourceId: string | undefined): void {
 		if (!sourceId) return;
@@ -574,7 +577,7 @@ export class EmulatorHost {
 					};
 				}
 			} catch {
-				// corrupt or missing blob — leave D1: empty
+				// corrupt or missing blob - leave D1: empty
 			}
 		}
 		if (media.cart) {
@@ -583,13 +586,13 @@ export class EmulatorHost {
 				if (entry) {
 					const bytes = await getImageBytes(media.cart);
 					this.#cartridge = {
-						cart: new Cartridge(bytes),
+						cart: createCartridge(bytes),
 						name: entry.user.displayName,
 						sourceId: media.cart,
 					};
 				}
 			} catch {
-				// corrupt or missing blob — leave the cart slot empty
+				// corrupt or missing blob - leave the cart slot empty
 			}
 		}
 		this.#refreshAttachments();
@@ -600,7 +603,7 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Activate a command from a momentary trigger (the palette, a click) — no
+	 * Activate a command from a momentary trigger (the palette, a click) - no
 	 * release event follows, so a control auto-releases after a short pulse;
 	 * app verbs (no release half) just run.
 	 */
@@ -626,7 +629,7 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Release the POKEY keyboard matrix — one shared register, so every matrix
+	 * Release the POKEY keyboard matrix - one shared register, so every matrix
 	 * key releases the same way. The keyboard/OSD call this when the last held
 	 * matrix key goes up.
 	 */
@@ -635,7 +638,7 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Set joystick 0 to an absolute direction — for the analog OSD stick,
+	 * Set joystick 0 to an absolute direction - for the analog OSD stick,
 	 * which (unlike the keyboard's per-direction press/release) reports a
 	 * whole position at once. `mask` bits: 1 = up, 2 = down, 4 = left,
 	 * 8 = right; 0 = centred. Release-then-press is atomic between frames.
@@ -647,12 +650,12 @@ export class EmulatorHost {
 	}
 
 	/** Assign a connected gamepad (by its `gamepad.index`) to an Atari port (0-3)
-	 *  or `null` for off — the controllers panel's port selector. */
+	 *  or `null` for off - the controllers panel's port selector. */
 	setGamepadPort(index: number, port: number | null): void {
 		this.#gamepads.setPort(index, port);
 	}
 
-	/** Replace the gamepad bindings — apply them live, persist, and mirror onto the
+	/** Replace the gamepad bindings - apply them live, persist, and mirror onto the
 	 *  signal the editor reads. */
 	setGamepadBindings(bindings: GamepadBindings): void {
 		this.gamepadBindings.value = bindings;
@@ -665,7 +668,7 @@ export class EmulatorHost {
 		this.setGamepadBindings(defaultGamepadBindings());
 	}
 
-	/** Set one standard's overscan (sanitized) — applies live via the screen's
+	/** Set one standard's overscan (sanitized) - applies live via the screen's
 	 *  subscription, persists (the settings page / dev console's path). */
 	setOverscan(tv: TvStandard, overscan: OverscanSettings): void {
 		const current = this.displaySettings.peek();
@@ -692,7 +695,7 @@ export class EmulatorHost {
 		saveDisplaySettings(next);
 	}
 
-	/** Set one standard's palette generation parameters (sanitized; partial —
+	/** Set one standard's palette generation parameters (sanitized; partial -
 	 *  unmentioned parameters keep their value). Applies live, persists. */
 	setPalette(tv: TvStandard, palette: Partial<PaletteSettings>): void {
 		const current = this.displaySettings.peek();
@@ -708,7 +711,7 @@ export class EmulatorHost {
 	}
 
 	/** Open the game picker (see favorites-menu.tsx): pause the machine and
-	 *  suspend pad → command polling — the picker reads the pad itself. */
+	 *  suspend pad -> command polling - the picker reads the pad itself. */
 	openFavorites(): void {
 		if (this.favoritesOpen.value) return;
 		this.#favoritesWasRunning = this.running.value;
@@ -732,7 +735,7 @@ export class EmulatorHost {
 		}
 	}
 
-	/** Set or clear (null) a device's normalization profile — apply it live,
+	/** Set or clear (null) a device's normalization profile - apply it live,
 	 *  persist, and mirror onto the signal (the calibration flow's save path). */
 	setGamepadProfile(id: string, profile: NormalizeProfile | null): void {
 		const next = { ...this.gamepadNormalize.peek() };
@@ -746,7 +749,7 @@ export class EmulatorHost {
 	// The best-ranked built-in firmware present in the library for a list of
 	// keys (a built-in's image id is its firmware key).
 	// Resolve the best available firmware by rank, matching on the detected
-	// firmware identity — so an uploaded copy of a known ROM is picked just like
+	// firmware identity - so an uploaded copy of a known ROM is picked just like
 	// the built-in one (a built-in's id is also its key).
 	#pick(keys: readonly FirmwareKey[]): ImageEntry | null {
 		for (const key of keys) {
@@ -768,15 +771,15 @@ export class EmulatorHost {
 	}
 
 	// Resolve OS/BASIC/game for the running config under a given override set; an
-	// override wins over the ranking when its image is present (a missing one —
-	// e.g. a built-in dropped by a deploy — falls back to the ranking).
+	// override wins over the ranking when its image is present (a missing one -
+	// e.g. a built-in dropped by a deploy - falls back to the ranking).
 	#resolveWith(roms: RomOverrides): {
 		os: ImageEntry | null;
 		basic: ImageEntry | null;
 		game: ImageEntry | null;
 	} {
 		const { model, tv, basicDisabled } = this.config.value;
-		// Built-in BASIC (xl/xe, xegs) is always loaded — its "disable" is the
+		// Built-in BASIC (xl/xe, xegs) is always loaded - its "disable" is the
 		// OPTION-hold. Cart BASIC (400/800, 1200xl) loads only when it takes the
 		// slot: enabled and no cartridge mounted.
 		const needBasic =
@@ -794,13 +797,13 @@ export class EmulatorHost {
 		};
 	}
 
-	// Resolve an override to its library image — null when it doesn't resolve
+	// Resolve an override to its library image - null when it doesn't resolve
 	// (no override, or one pointing at an image the library no longer has).
 	#fromId(id: string | null | undefined): ImageEntry | null {
 		return id ? (getImage(id) ?? null) : null;
 	}
 
-	// The XEGS game-slot image — any library image flagged for the game slot
+	// The XEGS game-slot image - any library image flagged for the game slot
 	// (the bundled one, or an upload the user has tagged).
 	#pickGame(): ImageEntry | null {
 		return (
@@ -811,7 +814,7 @@ export class EmulatorHost {
 	// Pin the resolved firmware per slot into the (persisted) prefs, so a later
 	// library change can't silently re-rank a slot that's already settled. A slot
 	// is (re)picked by rank only when its pref is empty or points at an image the
-	// library no longer has — "fill an empty slot, or replace a vanished one";
+	// library no longer has - "fill an empty slot, or replace a vanished one";
 	// importing a better ROM leaves a settled slot alone (pick it by hand instead).
 	#ensurePins(): void {
 		// Every OS slot (not just the running model's) gets pinned, so a slot the
@@ -907,7 +910,7 @@ export class EmulatorHost {
 		const cartridge =
 			this.#cartridge?.cart ??
 			(!builtinBasic && !basicDisabled && basicBytes
-				? new Cartridge(basicBytes)
+				? createCartridge(basicBytes)
 				: undefined);
 
 		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
@@ -936,12 +939,12 @@ export class EmulatorHost {
 		emulator.setTrace(this.#cpuTrace);
 		emulator.setTurboMode(this.#turboMode);
 		// Sample the gamepad on every emulation-loop yield (see Emulator.afterYield)
-		// — the freshest read, right before the next scanlines poll the pins.
+		// - the freshest read, right before the next scanlines poll the pins.
 		emulator.afterYield = () => this.#gamepads.poll();
 		return emulator;
 	}
 
-	/** The live emulator (swaps on reboot) — for the dev console. */
+	/** The live emulator (swaps on reboot) - for the dev console. */
 	get emulator(): Emulator {
 		return this.#emulator;
 	}
@@ -996,7 +999,7 @@ export class EmulatorHost {
 	}
 
 	// Fetch whatever firmware the new config needs, then power-cycle into it.
-	// Async (the fetch), but the rebuild itself stays synchronous — so the old
+	// Async (the fetch), but the rebuild itself stays synchronous - so the old
 	// machine keeps running until the ROM is ready. Bails if a newer reboot
 	// superseded this one mid-fetch, and keeps the old machine on a fetch error.
 	async #reboot(): Promise<void> {
@@ -1059,14 +1062,14 @@ export class EmulatorHost {
 		);
 	}
 
-	/** Whether this host runs on macOS — for platform-specific shortcut labels. */
+	/** Whether this host runs on macOS - for platform-specific shortcut labels. */
 	get isMac(): boolean {
 		return this.#isMac;
 	}
 
 	/** Regenerate the platform default key bindings from a freshly re-read layout
 	 *  (so this doubles as the layout-switch refresh), persist them, and apply them
-	 *  live — discarding any customization. */
+	 *  live - discarding any customization. */
 	async resetKeyBindings(): Promise<void> {
 		if (!window.confirm(messages.shortcuts.confirmReset)) return;
 		const { bindings, layout } = await freshBindings(this.#isMac);
@@ -1076,7 +1079,7 @@ export class EmulatorHost {
 	}
 
 	/** Set the keyboard-layout preference ("auto" or a `KEYBOARD_LAYOUTS` id) and
-	 *  regenerate the default bindings from it — discarding customization (a no-op
+	 *  regenerate the default bindings from it - discarding customization (a no-op
 	 *  if it's already the current pick). */
 	async setLayoutPreference(pref: string): Promise<void> {
 		if (pref === this.layoutPref.value) return;
@@ -1089,14 +1092,14 @@ export class EmulatorHost {
 		this.toast(messages.toasts.keyBindingsReset);
 	}
 
-	// Make a flat binding set the active one — both the keyboard (resolution) and
+	// Make a flat binding set the active one - both the keyboard (resolution) and
 	// the signal (UI shortcut display).
 	#applyBindings(bindings: Binding[]): void {
 		this.keyBindings.value = bindings;
 		this.#keyboard.setBindings(bindings);
 	}
 
-	/** Replace the binding set from an edit — persist it and apply it live. */
+	/** Replace the binding set from an edit - persist it and apply it live. */
 	updateBindings(bindings: Binding[]): void {
 		saveBindings(bindings);
 		this.#applyBindings(bindings);
@@ -1115,7 +1118,7 @@ export class EmulatorHost {
 	toggleAudio(): void {
 		const audio = this.#audio;
 		if (!audio) {
-			// No audio sink — surface why (it's the only feedback the user gets).
+			// No audio sink - surface why (it's the only feedback the user gets).
 			if (this.#audioError) {
 				this.toast(
 					messages.errors.audioUnavailableReason(this.#audioError),
@@ -1175,7 +1178,7 @@ export class EmulatorHost {
 		this.notices.value = this.notices.value.filter((t) => t.id !== id);
 	}
 
-	// Announce the config fields that changed between two settings, as toasts —
+	// Announce the config fields that changed between two settings, as toasts -
 	// so the palette's one-shot commands and the menu's batched apply both give
 	// the same feedback.
 	#announceConfigChange(prev: MachineSettings, next: MachineSettings): void {
@@ -1241,8 +1244,8 @@ export class EmulatorHost {
 	/**
 	 * Enter or leave full screen. Targets the whole document so the toolbar and
 	 * the on-screen OSD controls stay in view (the canvas refits via its
-	 * ResizeObserver). Where the Fullscreen API is unavailable — notably iPhone
-	 * Safari, which only fullscreens video — say so rather than silently fail.
+	 * ResizeObserver). Where the Fullscreen API is unavailable - notably iPhone
+	 * Safari, which only fullscreens video - say so rather than silently fail.
 	 */
 	toggleFullscreen(): void {
 		if (document.fullscreenElement) {
@@ -1309,8 +1312,8 @@ export class EmulatorHost {
 		this.closePanel();
 	}
 
-	// Apply a single config change to the running machine and reboot into it —
-	// the palette's "… (reboots)" commands. A no-op change is ignored so it
+	// Apply a single config change to the running machine and reboot into it -
+	// the palette's "... (reboots)" commands. A no-op change is ignored so it
 	// doesn't cost a pointless cold boot. The staged copy follows so the menu
 	// opens clean.
 	#applyConfigChange(change: Partial<MachineSettings>): void {
@@ -1341,7 +1344,7 @@ export class EmulatorHost {
 		this.stagedRoms.value = this.appliedRoms.value;
 	}
 
-	// `null` clears the override (back to the automatic ranking) — so picking the
+	// `null` clears the override (back to the automatic ranking) - so picking the
 	// default value doesn't register as a staged change. `id` is a library image
 	// id (a built-in's firmware key, or a user upload's UUID).
 	stageOsRom(slot: OsSlot, id: string | null): void {
@@ -1402,9 +1405,9 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Boot a user-supplied file (the "Boot image…" picker / drag-and-drop). The
-	 * file is auto-added to the library (transient) so it has an id — for resume
-	 * and save — and booted through it; unrecognized bytes still warn directly.
+	 * Boot a user-supplied file (the "Boot image..." picker / drag-and-drop). The
+	 * file is auto-added to the library (transient) so it has an id - for resume
+	 * and save - and booted through it; unrecognized bytes still warn directly.
 	 */
 	async loadFile(file: File): Promise<void> {
 		const bytes = new Uint8Array(await file.arrayBuffer());
@@ -1417,11 +1420,41 @@ export class EmulatorHost {
 	// points fetch the bytes through the facade and reuse the boot/attach cores
 	// below. ---
 
+	/**
+	 * An unknown-ROM can't boot until its cartridge type is picked: send the
+	 * user to its library page, where the picker lives. A typed cart whose
+	 * type isn't runnable (unimplemented scheme, a 5200 cart) explains
+	 * itself; the picker on its page allows trying another type.
+	 */
+	#interceptUnresolvedCart(entry: ImageEntry): boolean {
+		if (entry.derived.type === "unknown-rom") {
+			this.toast(
+				messages.library.cartTypeUnknownToast(entry.user.displayName),
+				"warning",
+			);
+			navigate(`/a8/emu/library/${encodeURIComponent(entry.id)}`);
+			return true;
+		}
+		if (
+			entry.derived.type === "cart" &&
+			!isCartTypeSupported(entry.derived.cartType)
+		) {
+			const message =
+				CART_TYPES[entry.derived.cartType]?.machine === "5200"
+					? messages.errors.cart5200
+					: messages.errors.cartTypeUnsupported;
+			this.toast(`${entry.user.displayName}: ${message}`, "warning");
+			return true;
+		}
+		return false;
+	}
+
 	/** Boot a library image as a fresh machine. */
 	async bootImage(id: string): Promise<void> {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
+		if (this.#interceptUnresolvedCart(entry)) return;
 		this.#bootImage(await getImageBytes(id), entry.user.displayName, id);
 	}
 
@@ -1438,6 +1471,7 @@ export class EmulatorHost {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
+		if (this.#interceptUnresolvedCart(entry)) return;
 		this.#attachCartridgeBytes(
 			await getImageBytes(id),
 			entry.user.displayName,
@@ -1542,7 +1576,7 @@ export class EmulatorHost {
 	}
 
 	// Set config + applied/staged ROM picks, then re-pin (a reset clears the picks,
-	// so this fills + persists them afresh — without it a settled slot would read
+	// so this fills + persists them afresh - without it a settled slot would read
 	// as empty until the next boot and re-rank on import).
 	#setConfigAndRoms(config: MachineSettings, roms: RomOverrides): void {
 		this.config.value = config;
@@ -1595,7 +1629,7 @@ export class EmulatorHost {
 		// magic/heuristics, and library images may have no meaningful extension.
 		const format = detectFileFormat(contents);
 
-		// An unrecognized/unloadable file changes nothing — just warn.
+		// An unrecognized/unloadable file changes nothing - just warn.
 		const unsupported = unsupportedMessage(format);
 		if (unsupported) {
 			this.toast(`${name}: ${unsupported}`, "warning");
@@ -1613,10 +1647,10 @@ export class EmulatorHost {
 			} else if (format === "xex") {
 				// XEX boots from a generated in-memory disk (its loader). The source
 				// id is kept so the boot can be resumed (re-built from the XEX), but
-				// saveD1ToLibrary refuses it — its synthetic disk isn't the XEX.
+				// saveD1ToLibrary refuses it - its synthetic disk isn't the XEX.
 				disk = { disk: buildBootDisk(contents), name, sourceId };
 			} else {
-				cartridge = { cart: new Cartridge(contents), name, sourceId };
+				cartridge = { cart: createCartridge(contents), name, sourceId };
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -1625,7 +1659,7 @@ export class EmulatorHost {
 		}
 
 		// Announce the teardown of every boot source it clears, then the boot
-		// itself — so the silent multi-action is legible.
+		// itself - so the silent multi-action is legible.
 		this.#announceBootTeardown();
 		this.toast(
 			cartridge
@@ -1668,7 +1702,7 @@ export class EmulatorHost {
 	/**
 	 * Save the disk mounted in D1: as an `.atr`, including any sectors the
 	 * running machine has written this session (writes live only in memory, so
-	 * this is how you keep them). Writable disks only — the synthetic XEX boot
+	 * this is how you keep them). Writable disks only - the synthetic XEX boot
 	 * disk is write-protected and isn't a real disk worth saving.
 	 */
 	downloadDisk(): void {
@@ -1693,10 +1727,10 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Save the D1: disk back to the library item it was attached from — keeping
+	 * Save the D1: disk back to the library item it was attached from - keeping
 	 * any sectors written this session. Only a disk attached from one of your
 	 * library uploads can be saved (built-ins are read-only; a file-loaded disk
-	 * has no library item — use Download D1: to export those).
+	 * has no library item - use Download D1: to export those).
 	 */
 	async saveD1ToLibrary(): Promise<void> {
 		const drive = this.#drives[0];
@@ -1704,7 +1738,7 @@ export class EmulatorHost {
 			this.toast(messages.errors.noDiskToSave, "warning");
 			return;
 		}
-		// Only a real disk entry can be overwritten — not a XEX (its D1: is a
+		// Only a real disk entry can be overwritten - not a XEX (its D1: is a
 		// synthetic boot disk), nor a built-in or since-deleted source.
 		const source = drive.sourceId ? getImage(drive.sourceId) : undefined;
 		if (
@@ -1719,7 +1753,7 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Attach an ATR to D1: of the running machine — live, no reboot, BASIC
+	 * Attach an ATR to D1: of the running machine - live, no reboot, BASIC
 	 * untouched (unlike Boot image, which power-cycles into the image). The
 	 * disk also becomes D1: for the next cold start and is what Download D1:
 	 * saves.
@@ -1731,7 +1765,7 @@ export class EmulatorHost {
 		else this.#attachDiskBytes(bytes, file.name);
 	}
 
-	// Attach an ATR's bytes to D1: live — shared by the file picker and the
+	// Attach an ATR's bytes to D1: live - shared by the file picker and the
 	// library's `attachDisk(id)` (which passes the source entry for saving back).
 	#attachDiskBytes(
 		contents: Uint8Array,
@@ -1784,7 +1818,7 @@ export class EmulatorHost {
 		else this.#attachCartridgeBytes(bytes, file.name);
 	}
 
-	// Attach a cartridge's bytes (cold boots) — shared by the file picker and the
+	// Attach a cartridge's bytes (cold boots) - shared by the file picker and the
 	// library's `attachCartridge(id)`. Content-based detection so canonical `.car`
 	// and raw built-in bytes both load without a filename hint.
 	#attachCartridgeBytes(
@@ -1805,7 +1839,7 @@ export class EmulatorHost {
 
 		let cart: Cartridge;
 		try {
-			cart = new Cartridge(contents);
+			cart = createCartridge(contents);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.toast(`${name}: ${message}`, "error");
@@ -1836,7 +1870,7 @@ export class EmulatorHost {
 	 * Clear the cartridge slot and cold boot (other media stays in place). With
 	 * an explicit cart in it, detach the cart. Otherwise, only on the 400/800
 	 * where an enabled BASIC fills the slot, disable BASIC instead (it reboots
-	 * too) — what the user means by "detach." Anything else (XL/XE, or the slot
+	 * too) - what the user means by "detach." Anything else (XL/XE, or the slot
 	 * already empty) has nothing to remove, so it reports that. (A confirmation
 	 * step can come later.)
 	 */
@@ -1852,7 +1886,7 @@ export class EmulatorHost {
 		}
 		const { model, basicDisabled } = this.config.value;
 		if (!hasBuiltinBasic(model) && !basicDisabled) {
-			this.applyBasicDisabled(true); // toasts "Detaching cartridge (BASIC…)"
+			this.applyBasicDisabled(true); // toasts "Detaching cartridge (BASIC...)"
 			return;
 		}
 		this.toast(messages.errors.noCartridge, "warning");
@@ -1865,7 +1899,7 @@ export class EmulatorHost {
 	 * a teardown function.
 	 */
 	attachScreen(canvas: HTMLCanvasElement): () => void {
-		// Wide gamut when both the display and the canvas API support it —
+		// Wide gamut when both the display and the canvas API support it -
 		// deliberately no UI: sRGB-defined palettes are converted so they look
 		// identical, while corrected wide primaries (NTSC 1953) keep saturation
 		// an sRGB canvas would clamp. Decided once here; a context's color
@@ -1887,7 +1921,7 @@ export class EmulatorHost {
 		const stage = canvas.parentElement;
 		if (!context || !stage) return () => {};
 
-		// The visible crop of the rendered frame — the running standard's
+		// The visible crop of the rendered frame - the running standard's
 		// overscan setting (see display-settings.ts). The canvas backing store
 		// is the crop, so the blit clips and the fit letterboxes exactly what's
 		// shown. Updated by the subscriptions below.
@@ -1895,7 +1929,7 @@ export class EmulatorHost {
 			this.displaySettings.value[this.config.value.tv].overscan,
 		);
 
-		// Fit the canvas into its parent, preserving the display aspect — which
+		// Fit the canvas into its parent, preserving the display aspect - which
 		// depends on the crop and the TV standard's pixel aspect ratio, so it's
 		// re-run when either changes (the stage may not).
 		const fit = () => {
@@ -1925,13 +1959,13 @@ export class EmulatorHost {
 		);
 		const pixels = new Uint32Array(imageData.data.buffer);
 
-		// The frameCount of the frame currently on the canvas; −1 forces a
+		// The frameCount of the frame currently on the canvas; -1 forces a
 		// redraw on the next present.
 		let presented = -1;
 
 		// Size the canvas backing store to the crop and force a redraw (resizing
 		// clears the canvas, and the present loop otherwise skips unchanged
-		// frames — noticeable while paused).
+		// frames - noticeable while paused).
 		const applyCrop = () => {
 			crop = overscanCrop(
 				this.displaySettings.value[this.config.value.tv].overscan,
@@ -1960,10 +1994,10 @@ export class EmulatorHost {
 		const unsubscribeConfig = this.config.subscribe(apply);
 		const unsubscribeDisplay = this.displaySettings.subscribe(apply);
 
-		// Frame blending mixes in *linear light* — flicker fusion happens in
+		// Frame blending mixes in *linear light* - flicker fusion happens in
 		// light, not signal, and gamma-space blending underweights the bright
 		// phase of a flicker pair (see the analog-video appendix's averaging
-		// note). LUTs stand in for per-pixel pow: byte → linear in, linear →
+		// note). LUTs stand in for per-pixel pow: byte -> linear in, linear ->
 		// byte out.
 		const LINEAR = new Float32Array(256);
 		for (let i = 0; i < 256; i++) LINEAR[i] = Math.pow(i / 255, 2.2);
@@ -1985,7 +2019,7 @@ export class EmulatorHost {
 		const present = () => {
 			// Keepalive poll on the display cadence: the emulation loop's afterYield
 			// poll stops when paused, so this keeps the meta buttons (notably
-			// Pause→Resume) live. Harmless while running — edge detection dedupes it
+			// Pause->Resume) live. Harmless while running - edge detection dedupes it
 			// against the fresher afterYield samples, and it no-ops with no pad.
 			this.#gamepads.poll();
 
@@ -2035,7 +2069,7 @@ export class EmulatorHost {
 			this.crashed.value = this.#emulator.crashed; // dedup'd by the signal
 			// Sample the emulated frame rate about once a second. Measure the
 			// emulator's own frameCount delta over the elapsed wall clock, not
-			// how many distinct frames this RAF loop happened to observe — RAF
+			// how many distinct frames this RAF loop happened to observe - RAF
 			// coalesces under main-thread load and would undercount frames the
 			// emulator actually produced.
 			const now = performance.now();
@@ -2043,7 +2077,7 @@ export class EmulatorHost {
 			const frameCount = this.#emulator.frameCount;
 			if (frameCount < framesAtSecondStart) {
 				// The emulator was swapped (reboot/config change) and its
-				// frameCount reset — rebase the window rather than report a
+				// frameCount reset - rebase the window rather than report a
 				// negative delta.
 				framesAtSecondStart = frameCount;
 				secondStart = now;
@@ -2094,7 +2128,7 @@ export class EmulatorHost {
 	/**
 	 * Resume the audio context on the first user gesture anywhere. iOS Safari
 	 * only unlocks audio on a *completed* gesture (pointerup/touchend/click),
-	 * not pointerdown — so listen on pointerup and keydown.
+	 * not pointerdown - so listen on pointerup and keydown.
 	 */
 	enableAudioResume(): () => void {
 		const audio = this.#audio;

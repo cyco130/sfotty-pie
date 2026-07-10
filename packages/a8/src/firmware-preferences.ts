@@ -8,13 +8,13 @@ export interface FirmwareContext {
 }
 
 // OS firmware, best-first. The emulated machines (800 NTSC/PAL, and 800XL/130XE
-// → the shared XL/XE list) and the not-yet-emulated 1200XL/XEGS each rank toward
+// -> the shared XL/XE list) and the not-yet-emulated 1200XL/XEGS each rank toward
 // their own native ROMs first, then the rest of the XL/XE-class OSes (which all
 // run with some missing functionality).
 //
 // `os-b-ntsc-xformer` is a 10K patch that also runs on XL/XE-class hardware, so
 // it trails every XL/XE-class list as a last resort. (Whether the bus manager
-// maps a 10K OS on an XL/XE machine is untested — to be fixed later.)
+// maps a 10K OS on an XL/XE machine is untested - to be fixed later.)
 const OS_800_NTSC: readonly FirmwareKey[] = [
 	"os-b-ntsc",
 	"os-b-ntsc-xformer",

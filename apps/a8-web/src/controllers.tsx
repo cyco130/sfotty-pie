@@ -33,7 +33,7 @@ function snapshot(): PadSnapshot[] {
 }
 
 // Mirror the live pad state on animation frames while mounted. Independent of the
-// emulator's own poll — this view just reflects raw input for diagnosis (and,
+// emulator's own poll - this view just reflects raw input for diagnosis (and,
 // later, binding capture).
 function useLivePads(): PadSnapshot[] {
 	const [pads, setPads] = useState<PadSnapshot[]>(snapshot);
@@ -47,9 +47,9 @@ function useLivePads(): PadSnapshot[] {
 	return pads;
 }
 
-// One axis as a centre-anchored bar (−1 left, +1 right) plus its value.
+// One axis as a centre-anchored bar (-1 left, +1 right) plus its value.
 function AxisBar({ label, value }: { label: string; value: number }) {
-	const pct = (value / 2) * 100; // −50…50, measured from the centre
+	const pct = (value / 2) * 100; // -50...50, measured from the centre
 	return (
 		<div class="flex items-center gap-2 text-xs">
 			<span class="w-8 shrink-0 text-neutral-500">{label}</span>
@@ -112,8 +112,8 @@ function PadCard({
 }) {
 	const remapped = profile !== undefined;
 	const [mapping, setMapping] = useState(false);
-	// The monitor shows the pad as the emulator sees it — through the mapping
-	// when one exists — so "is my mapping applied" is visible at a glance.
+	// The monitor shows the pad as the emulator sees it - through the mapping
+	// when one exists - so "is my mapping applied" is visible at a glance.
 	// While the mapping editor is open it shows the raw pad instead, matching
 	// the editor's raw indices. Standard labels apply to natively-standard
 	// and remapped pads alike.
@@ -208,8 +208,8 @@ function PadCard({
 }
 
 /**
- * The controllers panel body: a live monitor of every connected gamepad — button
- * grid (lit when pressed) and axis bars — for diagnosing what a pad reports.
+ * The controllers panel body: a live monitor of every connected gamepad - button
+ * grid (lit when pressed) and axis bars - for diagnosing what a pad reports.
  * Read-only for now; port assignment, binding, and calibration build on top.
  */
 export function ControllersView({ host }: { host: EmulatorHost }) {

@@ -4,7 +4,7 @@ import type { Pia } from "./pia.ts";
 
 // Trap callbacks. Interceptors run *before* the access and may short-circuit it
 // (a read interceptor returns a substitute value; a write interceptor returns
-// true to suppress the store) — return undefined/void to fall through.
+// true to suppress the store) - return undefined/void to fall through.
 // Observers run *after* and only watch. Both phases are additive and run
 // last-registered-first (LIFO), so a newly installed hook takes precedence; for
 // interceptors the first non-undefined return wins. `address` is passed for
@@ -39,7 +39,7 @@ export type ExecuteObserver = (address: number) => void;
 /**
  * Which accesses a trap fires on, by flag. `true` = the flag must be set,
  * `false` = it must be clear, omitted = don't care. The default when no mask is
- * given is `{ dummy: false }` — fire on committing accesses only. An execute
+ * given is `{ dummy: false }` - fire on committing accesses only. An execute
  * trap is `{ sync: true, dummy: false }` (a committed opcode fetch).
  */
 export interface TrapMask {
@@ -85,37 +85,62 @@ interface TrapEntry<F> {
 	fn: F;
 }
 
-/** Remove an entry from a registry list, dropping the address key if empty. */
+/**
+ * Remove an entry from a registry list, dropping the address key if empty.
+ * Returns whether the entry was still registered (guards double removal:
+ * a once-trap firing and its handle's remove() may both call this).
+ */
 function removeEntry<F>(
 	map: Map<number, TrapEntry<F>[]>,
 	address: number,
 	entry: TrapEntry<F>,
-): void {
+): boolean {
 	const list = map.get(address);
-	if (!list) return;
+	if (!list) return false;
 	const index = list.indexOf(entry);
-	if (index >= 0) list.splice(index, 1);
+	if (index < 0) return false;
+	list.splice(index, 1);
 	if (list.length === 0) map.delete(address);
+	return true;
 }
+
+/**
+ * A shared read-only 256-byte page of $FF - what an undriven or absent region
+ * reads on XL/XE (the bus pull-ups). Wired into the fast page tables for
+ * unmapped pages; never written (unmapped pages have no fast write entry).
+ * TODO(floating-bus): 400/800 and some XE read the last bus value instead.
+ */
+const FF_PAGE = new Uint8Array(256).fill(0xff);
 
 export class Ram implements Memory {
 	#memory: Uint8Array;
 	#base: number;
+	#views: Uint8Array[] = [];
 
 	constructor(size: number, base = 0) {
 		this.#memory = new Uint8Array(size);
 		this.#base = base;
+		for (let offset = 0; offset < size; offset += 0x100) {
+			this.#views.push(this.#memory.subarray(offset, offset + 0x100));
+		}
+	}
+
+	/**
+	 * 256-byte views of the backing store, one per page; index 0 is the page
+	 * at `base`. The MMU wires these into its fast page tables, so the
+	 * read/write methods below only serve trapped pages - the tables never
+	 * route an out-of-range address here, hence no bounds handling.
+	 */
+	get pageViews(): readonly Uint8Array[] {
+		return this.#views;
 	}
 
 	read(address: number): number {
-		// TODO(floating-bus): out-of-range = undriven; $FF is the XL/XE pull-up.
-		return this.#memory[address - this.#base] ?? 0xff;
+		return this.#memory[address - this.#base]!;
 	}
 
 	write(address: number, value: number): void {
-		if (address >= this.#base && address - this.#base < this.#memory.length) {
-			this.#memory[address - this.#base] = value;
-		}
+		this.#memory[address - this.#base] = value;
 	}
 
 	reset(cold: boolean): void {
@@ -132,6 +157,7 @@ export class Rom implements Memory {
 	#memory: Uint8Array;
 	#base: number;
 	#mask: number;
+	#views = new Map<number, Uint8Array>();
 
 	constructor(contents: Uint8Array, base: number, mask: number) {
 		this.#memory = contents;
@@ -139,9 +165,28 @@ export class Rom implements Memory {
 		this.#mask = mask;
 	}
 
+	/**
+	 * A 256-byte view of the contents as decoded at `page`, mask (mirroring)
+	 * applied - or `FF_PAGE` when the decode lands past the end of the image
+	 * (a 10K OS's missing self-test and C000 regions read $FF). The MMU maps
+	 * FF_PAGE pages to `unconnectedMemory`, so `read` below never sees an
+	 * out-of-image address.
+	 */
+	pageView(page: number): Uint8Array {
+		let view = this.#views.get(page);
+		if (!view) {
+			const offset = ((page << 8) - this.#base) & this.#mask;
+			view =
+				offset + 0x100 <= this.#memory.length
+					? this.#memory.subarray(offset, offset + 0x100)
+					: FF_PAGE;
+			this.#views.set(page, view);
+		}
+		return view;
+	}
+
 	read(address: number): number {
-		// TODO(floating-bus): out-of-range = undriven; $FF is the XL/XE pull-up.
-		return this.#memory[(address - this.#base) & this.#mask] ?? 0xff;
+		return this.#memory[(address - this.#base) & this.#mask]!;
 	}
 
 	write(address: number, value: number): void {
@@ -150,7 +195,7 @@ export class Rom implements Memory {
 	}
 }
 
-export interface AtariBusOptions {
+export interface MmuOptions {
 	/**
 	 * Enable PORTB banking.
 	 */
@@ -219,8 +264,8 @@ export interface AtariBusOptions {
 	antic: Memory;
 }
 
-export class AtariBus implements Memory {
-	constructor(options: AtariBusOptions) {
+export class Mmu implements Memory {
+	constructor(options: MmuOptions) {
 		const {
 			portbBanking,
 			conventionalRamSize,
@@ -299,7 +344,8 @@ export class AtariBus implements Memory {
 		}
 
 		// TODO: non-power-of-two xeBankCount leaves bank indices within #bankMask
-		// that aren't backed by a Ram; #map falls back to conventional RAM for
+		// that aren't backed by a Ram; the page tables fall back to conventional
+		// RAM for
 		// those. The UI restricts to powers of two until we research the real
 		// aliasing schemes.
 		if (xeBankCount > 32) {
@@ -345,28 +391,44 @@ export class AtariBus implements Memory {
 		this.portbChanged = this.portbChanged.bind(this);
 		this.#unwatchPortbChanged = pia.portbOut.watch(this.portbChanged);
 
+		if (cartridge) {
+			cartridge.onMappingChanged = this.#cartMappingChanged;
+		}
+
 		// Sync derived banking state to the current PORTB instead of relying on
-		// the field defaults matching it.
+		// the field defaults matching it. portbChanged rebuilds the page tables;
+		// rebuild explicitly too for the non-banking case, where it early-outs.
 		this.portbChanged();
+		this.#rebuildPageTables();
 	}
 
 	/**
-	 * Drop the PORTB watch. Call before discarding the bus — the host
-	 * reconfigures the machine by building a fresh `AtariBus`, and without this
+	 * Drop the PORTB watch. Call before discarding the bus - the host
+	 * reconfigures the machine by building a fresh `Mmu`, and without this
 	 * the dead bus keeps receiving PORTB changes from the shared PIA.
 	 */
 	dispose() {
 		this.#unwatchPortbChanged?.();
 		this.#unwatchPortbChanged = null;
+		if (this.#cartridge) {
+			this.#cartridge.onMappingChanged = undefined;
+		}
 	}
 
 	/**
 	 * Hot-plug or remove the cartridge. This is the one bit of configuration
-	 * that changes at runtime — carts are physically inserted/removed — while
+	 * that changes at runtime - carts are physically inserted/removed - while
 	 * everything else is fixed at construction.
 	 */
 	setCartridge(cartridge: Cartridge | null) {
+		if (this.#cartridge) {
+			this.#cartridge.onMappingChanged = undefined;
+		}
 		this.#cartridge = cartridge ?? undefined;
+		if (this.#cartridge) {
+			this.#cartridge.onMappingChanged = this.#cartMappingChanged;
+		}
+		this.#rebuildPageTables();
 	}
 
 	reset(cold: boolean) {
@@ -384,15 +446,17 @@ export class AtariBus implements Memory {
 		this.#isBasicRomEnabled = false;
 		this.#isGameRomEnabled = false;
 		this.#isOsRomEnabled = true;
+
+		this.#rebuildPageTables();
 	}
 
 	#ram: Ram;
 	#banks: Ram[];
 	#bankMask = 0;
 
-	#osRom: Memory;
-	#basicRom?: Memory;
-	#gameRom?: Memory;
+	#osRom: Rom;
+	#basicRom?: Rom;
+	#gameRom?: Rom;
 	#cartridge?: Cartridge;
 
 	#gtia: Memory;
@@ -452,7 +516,7 @@ export class AtariBus implements Memory {
 			if (value & 0x04) bank |= 0x01;
 			if (value & 0x08) bank |= 0x02;
 
-			// TODO: bit 0 as a banking bit (Rambo 2112K / Compy 1088K) omitted —
+			// TODO: bit 0 as a banking bit (Rambo 2112K / Compy 1088K) omitted -
 			// never shipped.
 
 			if (this.#separateAnticAccess) {
@@ -468,172 +532,183 @@ export class AtariBus implements Memory {
 
 			this.#bank = bank & this.#bankMask;
 		}
+
+		this.#rebuildPageTables();
 	}
 
-	#map(address: number, options: ReadOptions): Memory {
-		if (address < 0xd100) {
-			// 0000..D0FF
-			if (address < 0x8000) {
-				// 0000..7FFF
-				if (address < 0x5000) {
-					// 0000..4FFF
-					if (address < 0x4000) {
-						// 0000..3FFF
-						return this.#ram;
-					} else {
-						// 4000..4FFF
-						const extended =
-							options & ReadOptions.DMA
-								? this.#anticSeesExtendedRam
-								: this.#cpuSeesExtendedRam;
+	// The page-dispatch table: for each of the 256 pages, fast read/write
+	// bytes plus a slow-path target, one set per bus master (the CPU, and
+	// ANTIC via ReadOptions.DMA - they can see different extended-RAM banks).
+	// Stored as parallel arrays (struct of arrays) so the hot path is a
+	// single element load. A non-null fast entry means the access is a plain
+	// byte load/store on a 256-byte view of the backing store - no virtual
+	// call, no bounds check, no trap check. Pages with registered traps and
+	// the chip-register pages have null fast entries and take
+	// #slowRead/#slowWrite. Splitting reads from writes is what unifies RAM
+	// and ROM: a ROM page is simply one with no fast write entry (stray
+	// writes fall through to the target's no-op).
+	//
+	// #rebuildPageTables re-derives everything on any event that can change
+	// the map: a PORTB change, cartridge insertion/removal, a cartridge bank
+	// switch (the views move even when no area maps or unmaps), reset, and a
+	// page's trap count dropping to zero. It allocates nothing: the page
+	// views are built once per backing store and cached.
+	#cpuReadFast = new Array<Uint8Array | null>(256).fill(null);
+	#dmaReadFast = new Array<Uint8Array | null>(256).fill(null);
+	#cpuWriteFast = new Array<Uint8Array | null>(256).fill(null);
+	#dmaWriteFast = new Array<Uint8Array | null>(256).fill(null);
+	#cpuTarget = new Array<Memory>(256).fill(unconnectedMemory);
+	#dmaTarget = new Array<Memory>(256).fill(unconnectedMemory);
 
-						if (extended) {
-							return this.#banks[this.#bank] ?? this.#ram;
-						} else {
-							return this.#ram;
-						}
-					}
-				} else {
-					// 5000..7FFF
-					if (address < 0x5800) {
-						// 5000..57FF
-						// The self-test window only appears while the OS ROM
-						// is also enabled — the self-test lives on the OS ROM
-						// chip (Acid800's mmu_xlbanking checks this).
-						if (this.#isSelfTestEnabled && this.#isOsRomEnabled) {
-							return this.#osRom;
-						}
+	// Registered traps per page; a page with any takes the slow path.
+	#trapCounts = new Uint16Array(256);
 
-						const extended =
-							options & ReadOptions.DMA
-								? this.#anticSeesExtendedRam
-								: this.#cpuSeesExtendedRam;
+	#cartMappingChanged = () => {
+		this.#rebuildPageTables();
+	};
 
-						if (extended) {
-							return this.#banks[this.#bank] ?? this.#ram;
-						}
+	/** Point `page` at `target` for both masters, with the given fast views. */
+	#setPage(
+		page: number,
+		target: Memory,
+		read: Uint8Array | null,
+		write: Uint8Array | null,
+	): void {
+		this.#cpuTarget[page] = target;
+		this.#dmaTarget[page] = target;
+		this.#cpuReadFast[page] = read;
+		this.#dmaReadFast[page] = read;
+		this.#cpuWriteFast[page] = write;
+		this.#dmaWriteFast[page] = write;
+	}
 
-						return this.#ram;
-					} else {
-						// 5800..7FFF
-						const extended =
-							options & ReadOptions.DMA
-								? this.#anticSeesExtendedRam
-								: this.#cpuSeesExtendedRam;
+	/** A conventional-RAM page: RAM where it exists, the $FF pull-up beyond. */
+	#setRamPage(page: number): void {
+		const view = this.#ram.pageViews[page];
+		if (view) this.#setPage(page, this.#ram, view, view);
+		else this.#setPage(page, unconnectedMemory, FF_PAGE, null);
+	}
 
-						if (extended) {
-							return this.#banks[this.#bank] ?? this.#ram;
-						} else {
-							return this.#ram;
-						}
-					}
+	/** A ROM page ($FF where the image doesn't cover the decode - 10K OS). */
+	#setRomPage(page: number, rom: Rom): void {
+		const view = rom.pageView(page);
+		if (view === FF_PAGE) this.#setPage(page, unconnectedMemory, FF_PAGE, null);
+		else this.#setPage(page, rom, view, null);
+	}
+
+	/**
+	 * A cartridge ROM page, per the AtariMemory pageView contract: a view is
+	 * fast bytes, null is the unconnected $FF page, and undefined (an absent
+	 * hook, or a read-sensitive page) routes every access through the
+	 * cartridge's read/write.
+	 */
+	#setCartPage(page: number, cartridge: Cartridge): void {
+		const view = cartridge.pageView?.(page);
+		if (view === undefined) {
+			this.#setPage(page, cartridge, null, null);
+		} else {
+			this.#setPage(page, cartridge, view ?? FF_PAGE, null);
+		}
+	}
+
+	#rebuildPageTables(): void {
+		// 0000-3FFF: conventional RAM.
+		for (let page = 0x00; page < 0x40; page++) {
+			this.#setRamPage(page);
+		}
+
+		// 4000-7FFF: the extended-RAM window, selected per bus master.
+		// Conventional RAM is the default; a missing bank (non-power-of-two
+		// configurations) also falls back to it, like the old decision tree.
+		const bank = this.#banks[this.#bank];
+		for (let page = 0x40; page < 0x80; page++) {
+			this.#setRamPage(page);
+			if (bank) {
+				const view = bank.pageViews[page - 0x40]!;
+				if (this.#cpuSeesExtendedRam) {
+					this.#cpuTarget[page] = bank;
+					this.#cpuReadFast[page] = view;
+					this.#cpuWriteFast[page] = view;
 				}
-			} else {
-				// 8000..D0FF
-				if (address < 0xc000) {
-					// 8000..BFFF
-					if (address < 0xa000) {
-						// 8000..9FFF
-						if (this.#cartridge?.has8000To9fff) {
-							return this.#cartridge;
-						}
-
-						return this.#ram;
-					} else {
-						// A000..BFFF
-						if (this.#cartridge?.hasA000ToBfff) {
-							return this.#cartridge;
-						}
-
-						if (this.#basicRom && this.#isBasicRomEnabled) {
-							return this.#basicRom;
-						}
-
-						if (this.#gameRom && this.#isGameRomEnabled) {
-							return this.#gameRom;
-						}
-
-						return this.#ram;
-					}
-				} else {
-					// C000..D0FF
-					if (address < 0xd000) {
-						// C000..CFFF
-						if (this.#portbBanking) {
-							if (this.#isOsRomEnabled) {
-								return this.#osRom;
-							}
-
-							return this.#ram;
-						}
-
-						// TODO: Axlon
-						return this.#ram;
-					} else {
-						// D000..D0FF
-						return this.#gtia;
-					}
+				if (this.#anticSeesExtendedRam) {
+					this.#dmaTarget[page] = bank;
+					this.#dmaReadFast[page] = view;
+					this.#dmaWriteFast[page] = view;
 				}
 			}
-		} else {
-			// D100..FFFF
-			if (address < 0xd500) {
-				// D100..D4FF
-				if (address < 0xd300) {
-					// D100..D3FF
-					if (address < 0xd200) {
-						// D100..D1FF
-						return this.#pbi;
-					} else {
-						// D200..D2FF
-						return this.#pokey;
-					}
-				} else {
-					// D300..D4FF
-					if (address < 0xd400) {
-						// D300..D3FF
-						return this.#pia;
-					} else {
-						// D400..D4FF
-						return this.#antic;
-					}
-				}
-			} else {
-				// D500..FFFF
-				if (address < 0xd800) {
-					// D500..D7FF
-					if (address < 0xd600) {
-						// D500..D5FF
-						return this.#cartridge ?? unconnectedMemory;
-					} else {
-						// D600..D6FF
-						return this.#pbi;
-					}
-				} else {
-					// D800..FFFF
-					if (address < 0xe000) {
-						// D800..DFFF
-						// TODO: PBI firmware
-						if (!this.#portbBanking || this.#isOsRomEnabled) {
-							return this.#osRom;
-						}
+		}
 
-						return this.#ram;
-					} else {
-						// E000..FFFF
-						if (!this.#portbBanking || this.#isOsRomEnabled) {
-							return this.#osRom;
-						}
+		// 5000-57FF: the self-test window overlays it, but only while the OS ROM
+		// is also enabled - the self-test lives on the OS ROM chip (Acid800's
+		// mmu_xlbanking checks this).
+		if (this.#isSelfTestEnabled && this.#isOsRomEnabled) {
+			for (let page = 0x50; page < 0x58; page++) {
+				this.#setRomPage(page, this.#osRom);
+			}
+		}
 
-						return this.#ram;
-					}
-				}
+		// 8000-9FFF: cartridge or RAM.
+		const cartridge = this.#cartridge;
+		const has8000 = cartridge?.has8000To9fff ?? false;
+		for (let page = 0x80; page < 0xa0; page++) {
+			if (has8000) this.#setCartPage(page, cartridge!);
+			else this.#setRamPage(page);
+		}
+
+		// A000-BFFF: cartridge, else built-in BASIC / game ROM, else RAM.
+		const hasA000 = cartridge?.hasA000ToBfff ?? false;
+		const builtinA000 =
+			this.#basicRom && this.#isBasicRomEnabled
+				? this.#basicRom
+				: this.#gameRom && this.#isGameRomEnabled
+					? this.#gameRom
+					: null;
+		for (let page = 0xa0; page < 0xc0; page++) {
+			if (hasA000) this.#setCartPage(page, cartridge!);
+			else if (builtinA000) this.#setRomPage(page, builtinA000);
+			else this.#setRamPage(page);
+		}
+
+		// C000-CFFF: OS ROM on XL/XE when enabled, RAM otherwise. TODO: Axlon.
+		const c000Os = this.#portbBanking && this.#isOsRomEnabled;
+		for (let page = 0xc0; page < 0xd0; page++) {
+			if (c000Os) this.#setRomPage(page, this.#osRom);
+			else this.#setRamPage(page);
+		}
+
+		// D000-D7FF: the hardware register pages - always the slow path, since
+		// registers have side effects. D5 is the cartridge control region ($FF
+		// when no cartridge is inserted).
+		this.#setPage(0xd0, this.#gtia, null, null);
+		this.#setPage(0xd1, this.#pbi, null, null);
+		this.#setPage(0xd2, this.#pokey, null, null);
+		this.#setPage(0xd3, this.#pia, null, null);
+		this.#setPage(0xd4, this.#antic, null, null);
+		if (cartridge) this.#setPage(0xd5, cartridge, null, null);
+		else this.#setPage(0xd5, unconnectedMemory, FF_PAGE, null);
+		this.#setPage(0xd6, this.#pbi, null, null);
+		this.#setPage(0xd7, this.#pbi, null, null);
+
+		// D800-FFFF: OS ROM, or RAM when banked out. TODO: PBI firmware.
+		const osHigh = !this.#portbBanking || this.#isOsRomEnabled;
+		for (let page = 0xd8; page < 0x100; page++) {
+			if (osHigh) this.#setRomPage(page, this.#osRom);
+			else this.#setRamPage(page);
+		}
+
+		// Trapped pages take the slow path in both directions.
+		for (let page = 0; page < 256; page++) {
+			if (this.#trapCounts[page]) {
+				this.#cpuReadFast[page] = null;
+				this.#dmaReadFast[page] = null;
+				this.#cpuWriteFast[page] = null;
+				this.#dmaWriteFast[page] = null;
 			}
 		}
 	}
 
 	// Last value driven on the data bus. Public so a chip that reads the bus
-	// without driving the address can see it — e.g. GTIA samples the bus on
+	// without driving the address can see it - e.g. GTIA samples the bus on
 	// cycles where it expects ANTIC to drive the address via DMA; with that DMA
 	// disabled ANTIC doesn't drive, and GTIA reads whatever was last here.
 	//
@@ -645,10 +720,27 @@ export class AtariBus implements Memory {
 	busData = 0xff;
 
 	read(address: number, options: ReadOptions) {
+		// The fast path: a plain byte load off the page view. Trap handling
+		// lives entirely on the slow path - a page with any registered trap
+		// has a null fast entry, so the hot path never consults the
+		// registries. A PEEK on a fast page is naturally side-effect-free; it
+		// just must not disturb the bus value.
+		const fast =
+			options & ReadOptions.DMA
+				? this.#dmaReadFast[address >>> 8]
+				: this.#cpuReadFast[address >>> 8];
+		if (fast) {
+			const value = fast[address & 0xff]!;
+			if (!(options & ReadOptions.PEEK)) this.busData = value;
+			return value;
+		}
+		return this.#slowRead(address, options);
+	}
+
+	// Chip registers and trapped pages: the full pre-table access protocol.
+	#slowRead(address: number, options: ReadOptions): number {
 		// A PEEK (debugger/disassembler inspection) must not fire traps or
-		// disturb the bus — it has no side effects. The `.size` guards keep the
-		// common no-traps path off the lookup hot path: these run on every
-		// access, so an empty registry must cost a field read, not a Map.get.
+		// disturb the bus - it has no side effects.
 		if (!(options & ReadOptions.PEEK) && this.#readInterceptors.size) {
 			const substitute = this.#runRead(
 				this.#readInterceptors,
@@ -664,7 +756,11 @@ export class AtariBus implements Memory {
 			}
 		}
 
-		const value = this.#map(address, options).read(address, options);
+		const target =
+			options & ReadOptions.DMA
+				? this.#dmaTarget[address >>> 8]!
+				: this.#cpuTarget[address >>> 8]!;
+		const value = target.read(address, options);
 		if (!(options & ReadOptions.PEEK)) {
 			this.busData = value;
 			if (this.#readObservers.size) {
@@ -676,16 +772,32 @@ export class AtariBus implements Memory {
 
 	write(address: number, value: number, options: ReadOptions) {
 		this.busData = value;
+		const fast =
+			options & ReadOptions.DMA
+				? this.#dmaWriteFast[address >>> 8]
+				: this.#cpuWriteFast[address >>> 8];
+		if (fast) {
+			fast[address & 0xff] = value;
+			return;
+		}
+		this.#slowWrite(address, value, options);
+	}
+
+	#slowWrite(address: number, value: number, options: ReadOptions): void {
 		// `options` carries DUMMY for a read-modify-write write-back, so a trap's
-		// mask can exclude it (the default { dummy: false } does — observers fire
+		// mask can exclude it (the default { dummy: false } does - observers fire
 		// on the committed store only).
 		if (
 			this.#writeInterceptors.size &&
 			this.#runWriteInterceptors(address, value, options)
 		) {
-			return; // suppressed — the store didn't commit, so no observers fire
+			return; // suppressed - the store didn't commit, so no observers fire
 		}
-		this.#map(address, options).write(address, value, options);
+		const target =
+			options & ReadOptions.DMA
+				? this.#dmaTarget[address >>> 8]!
+				: this.#cpuTarget[address >>> 8]!;
+		target.write(address, value, options);
 		if (this.#writeObservers.size) {
 			this.#runWriteObservers(address, value, options);
 		}
@@ -710,9 +822,34 @@ export class AtariBus implements Memory {
 		const list = map.get(address);
 		if (list) list.push(entry);
 		else map.set(address, [entry]);
+
+		// De-fasten the page so every access to it takes the slow path, where
+		// the registries are consulted. (Conservatively for both directions
+		// and masters - trap registration is rare, page rebuilds are cheap.)
+		const page = address >>> 8;
+		this.#trapCounts[page] = this.#trapCounts[page]! + 1;
+		this.#cpuReadFast[page] = null;
+		this.#dmaReadFast[page] = null;
+		this.#cpuWriteFast[page] = null;
+		this.#dmaWriteFast[page] = null;
+
 		return {
-			remove: () => removeEntry(map, address, entry),
+			remove: () => this.#removeTrap(map, address, entry),
 		};
+	}
+
+	// Unregister a trap; when its page's count drops to zero, a rebuild
+	// restores the fast entries.
+	#removeTrap<F>(
+		map: Map<number, TrapEntry<F>[]>,
+		address: number,
+		entry: TrapEntry<F>,
+	): void {
+		if (!removeEntry(map, address, entry)) return;
+		const page = address >>> 8;
+		if (--this.#trapCounts[page]! === 0) {
+			this.#rebuildPageTables();
+		}
 	}
 
 	// LIFO over the matching interceptors; first non-undefined return wins.
@@ -729,7 +866,7 @@ export class AtariBus implements Memory {
 				continue;
 			}
 			const result = entry.fn(address, flags);
-			if (entry.once) removeEntry(map, address, entry);
+			if (entry.once) this.#removeTrap(map, address, entry);
 			if (result !== undefined) return result;
 		}
 		return undefined;
@@ -744,7 +881,7 @@ export class AtariBus implements Memory {
 				continue;
 			}
 			entry.fn(address, value, flags);
-			if (entry.once) removeEntry(this.#readObservers, address, entry);
+			if (entry.once) this.#removeTrap(this.#readObservers, address, entry);
 		}
 	}
 
@@ -761,7 +898,7 @@ export class AtariBus implements Memory {
 				continue;
 			}
 			const suppress = entry.fn(address, value, flags);
-			if (entry.once) removeEntry(this.#writeInterceptors, address, entry);
+			if (entry.once) this.#removeTrap(this.#writeInterceptors, address, entry);
 			if (suppress) return true; // first to suppress wins
 		}
 		return false;
@@ -776,7 +913,7 @@ export class AtariBus implements Memory {
 				continue;
 			}
 			entry.fn(address, value, flags);
-			if (entry.once) removeEntry(this.#writeObservers, address, entry);
+			if (entry.once) this.#removeTrap(this.#writeObservers, address, entry);
 		}
 	}
 

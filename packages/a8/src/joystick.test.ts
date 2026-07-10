@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
-import { Cartridge } from "./cartridge.ts";
+import { createCartridge } from "./cartridge.ts";
 import { Atari } from "./machine.ts";
 
 const TRIG0 = 0xd010;
@@ -86,7 +86,7 @@ test("XL/XE TRIG3 senses the cartridge (RD5)", () => {
 		xl: true,
 		os: new Uint8Array(16384),
 		basic: new Uint8Array(8192),
-		cartridge: new Cartridge(cart),
+		cartridge: createCartridge(cart),
 	});
 	expect(withCart.read(TRIG3, ReadOptions.NONE)).toBe(1);
 });

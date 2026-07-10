@@ -10,7 +10,7 @@ start := .global::start
 .export FSTIN := $0241
 .export ARGS := $0300
 
-; Segment definitions (attributes — type:/executable: — deferred for now)
+; Segment definitions (attributes - type:/executable: - deferred for now)
 .define_segment "CODE"
 .define_segment "RODATA"
 .define_segment "DATA"
@@ -27,7 +27,7 @@ start := .global::start
     .word start  ; Reset
     .word 0              ; IRQ (unused)
 
-  ; Zero page RAM ( `.if`/`.error` bounds checks deferred — step 2)
+  ; Zero page RAM ( `.if`/`.error` bounds checks deferred - step 2)
   .org $0000
     .emplace "ZEROPAGE"
 

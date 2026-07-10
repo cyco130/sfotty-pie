@@ -4,7 +4,7 @@
 // uploaded, and where its bytes physically live.
 
 import { computed, signal } from "@preact/signals";
-import { canonicalize, type ImageKind } from "@sfotty-pie/a8";
+import { canonicalize, withCartType, type ImageKind } from "@sfotty-pie/a8";
 import {
 	builtinFirmware,
 	type FirmwareLibraryEntry,
@@ -29,7 +29,7 @@ import {
  * `preparing` while the dropped folder tree is walked (no count yet), then
  * `adding` while files are ingested. Export: `exporting` while images are read +
  * decompressed, then `compressing` (no count) while the zip is packed.
- * `elapsedMs` is the time so far — computed here (not in render) so an indicator
+ * `elapsedMs` is the time so far - computed here (not in render) so an indicator
  * can derive an ETA purely.
  */
 export type ImportProgress =
@@ -41,7 +41,7 @@ export type ImportProgress =
 /**
  * Live progress of an in-flight bulk import, or null when none is running.
  * Module-level (not panel state) so a top-level indicator keeps tracking it
- * after the library panel is closed — the import runs to completion regardless.
+ * after the library panel is closed - the import runs to completion regardless.
  * The `preparing` phase is set by the caller (it owns the folder walk); this
  * module drives `adding`.
  */
@@ -56,7 +56,7 @@ let loadPromise: Promise<void> | null = null;
 /**
  * Load the user's entries + built-in overrides from IndexedDB (idempotent).
  * Resilient: if IndexedDB is unavailable (private mode, quota, blocked), the
- * library runs with built-ins only rather than failing — callers (including the
+ * library runs with built-ins only rather than failing - callers (including the
  * host's boot path) can always await it.
  */
 export function readyLibrary(): Promise<void> {
@@ -112,7 +112,7 @@ function userImageEntry(e: StoredEntry): ImageEntry {
 	};
 }
 
-/** The merged library: built-ins (with overrides applied) ∪ user entries. */
+/** The merged library: built-ins (with overrides applied) + user entries. */
 export const libraryEntries = computed<ImageEntry[]>(() => {
 	const overrides = builtinOverrides.value;
 	const builtins = builtinFirmware
@@ -128,7 +128,7 @@ export function getImage(id: string): ImageEntry | undefined {
 	return libraryEntries.value.find((e) => e.id === id);
 }
 
-// Built-in bootable software (a recognized non-firmware image), by unified id —
+// Built-in bootable software (a recognized non-firmware image), by unified id -
 // the recents seed. Detection ignores the on-disk folder, so "software" is just
 // a recognized image with no firmware identity.
 const BUILTIN_SOFTWARE_IDS = new Set(
@@ -166,7 +166,7 @@ export async function updateUserMeta(
 		);
 		return;
 	}
-	if (!getImage(id)) return; // unknown id — nothing to override
+	if (!getImage(id)) return; // unknown id - nothing to override
 	const next = { ...(builtinOverrides.value.get(id) ?? {}), ...patch };
 	await putOverride({ id, user: next });
 	const overrides = new Map(builtinOverrides.value);
@@ -186,8 +186,8 @@ export async function keepImage(id: string): Promise<void> {
 }
 
 /**
- * Delete transient (auto-added) images whose ids aren't in `keep` — e.g. ones
- * that fell off the recents list — reclaiming any blob no survivor references.
+ * Delete transient (auto-added) images whose ids aren't in `keep` - e.g. ones
+ * that fell off the recents list - reclaiming any blob no survivor references.
  * Curated and built-in entries are never touched.
  */
 export async function sweepTransients(keep: Set<string>): Promise<void> {
@@ -294,7 +294,7 @@ export async function addImage(
  * usable mid-import (preferred over finishing faster). Drives {@link
  * importProgress} so a top-level indicator can track it independent of any
  * panel. Unrecognized files are counted, not thrown. Slow but live at thousands
- * of items — chunked batching is the lever if that changes.
+ * of items - chunked batching is the lever if that changes.
  */
 export function addFiles(
 	files: File[],
@@ -398,7 +398,7 @@ export function exportLibrary(): Promise<Blob> {
 /**
  * Import a previously exported library `.zip`: re-ingest each bundled ROM
  * (recomputing hash/derived/firmware) and apply the manifest's authored
- * metadata + built-in overrides. Mirrors {@link addFiles} — runs in the zip
+ * metadata + built-in overrides. Mirrors {@link addFiles} - runs in the zip
  * worker, fills the library live, and drives {@link importProgress}. Entries
  * already present (by content hash) are deduped, not duplicated.
  */
@@ -460,7 +460,7 @@ export function importZip(zip: Uint8Array): Promise<BulkAddResult> {
 
 /**
  * Wipe the entire library store (entries, blobs, overrides) and reset the
- * in-memory state — a dev/test reset, exposed on the console, not the UI.
+ * in-memory state - a dev/test reset, exposed on the console, not the UI.
  */
 export async function nukeLibrary(): Promise<void> {
 	await clearAll();
@@ -470,7 +470,7 @@ export async function nukeLibrary(): Promise<void> {
 }
 
 /**
- * Overwrite a user image's bytes in place — e.g. saving a disk the machine has
+ * Overwrite a user image's bytes in place - e.g. saving a disk the machine has
  * written to. Re-hashes, rewrites the (content-addressed) blob and reclaims the
  * old one, keeping the entry id. Returns false (a no-op) for built-ins or an
  * unknown id, which aren't writable.
@@ -478,6 +478,7 @@ export async function nukeLibrary(): Promise<void> {
 export async function updateImage(
 	id: string,
 	bytes: Uint8Array,
+	derived?: ImageKind,
 ): Promise<boolean> {
 	await readyLibrary();
 	const entry = userEntries.value.find((e) => e.id === id);
@@ -490,6 +491,7 @@ export async function updateImage(
 		...entry,
 		hash,
 		size: bytes.length,
+		derived: derived ?? entry.derived,
 		locator: { ...entry.locator, ref: hash },
 	};
 	await putEntry(updated);
@@ -501,6 +503,35 @@ export async function updateImage(
 		await blobs.delete(oldRef);
 	}
 	return true;
+}
+
+/**
+ * Set or change a cartridge's CART type: rewrite the header (wrapping a raw
+ * unknown-rom dump the first time) and re-derive the kind. The header is
+ * part of content identity, so the blob is swapped like any byte update -
+ * but the entry id stays stable, so favorites, ROM slots, and recents
+ * survive. User cart/unknown-rom entries only; returns false for anything
+ * else or a size-mismatched type.
+ */
+export async function retypeImage(
+	id: string,
+	cartType: number,
+): Promise<boolean> {
+	await readyLibrary();
+	const entry = userEntries.value.find((e) => e.id === id);
+	if (!entry) return false;
+	const kind = entry.derived.type;
+	if (kind !== "cart" && kind !== "unknown-rom") return false;
+	const bytes = await blobs.get(entry.locator.ref);
+	if (!bytes) return false;
+
+	let retyped: Uint8Array;
+	try {
+		retyped = withCartType(bytes, cartType);
+	} catch {
+		return false; // unknown type or size mismatch
+	}
+	return updateImage(id, retyped, { type: "cart", cartType });
 }
 
 /** Remove a user image; reclaim its blob if no other entry still references it. */

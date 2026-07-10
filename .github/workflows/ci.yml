@@ -12,7 +12,7 @@ defaults:
     working-directory: .
 
 jobs:
-  # Fast, single-platform checks: lint, typecheck, unit — the `pnpm test` tier
+  # Fast, single-platform checks: lint, typecheck, unit - the `pnpm test` tier
   # (lint-staged approximates it per-package for staged files on commit).
   quality:
     runs-on: ubuntu-latest
@@ -72,7 +72,7 @@ jobs:
       # SingleStepTests/65x02 6502 vectors for the CPU conformance suite. We
       # track upstream main (it changes rarely) but key the cache on its current
       # commit, so an unchanged upstream is a cache hit and a moved one
-      # auto-refreshes — no pinned commit to maintain.
+      # auto-refreshes - no pinned commit to maintain.
       - name: Resolve 65x02 vectors commit
         id: sst
         run: echo "sha=$(git ls-remote https://github.com/SingleStepTests/65x02 refs/heads/main | cut -f1)" >> "$GITHUB_OUTPUT"

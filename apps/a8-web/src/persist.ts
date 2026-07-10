@@ -3,7 +3,7 @@ import { storageName } from "./storage.ts";
 // Per-tab-stable persisted state. Reads sessionStorage (this tab's value, which
 // survives its own reload) first, falling back to the localStorage "last used"
 // seed a fresh tab inherits; writes update both. So multiple tabs never
-// cross-clobber the running machine — each is stable across its own reloads, and
+// cross-clobber the running machine - each is stable across its own reloads, and
 // a new tab inherits the most recent setup. Resilient: storage being
 // unavailable (private mode, quota, disabled) just means no persistence.
 
@@ -32,11 +32,11 @@ export function savePersisted(key: string, value: unknown): void {
 		sessionStorage.setItem(name, raw);
 		localStorage.setItem(name, raw);
 	} catch {
-		// Storage unavailable or full — run without persistence this session.
+		// Storage unavailable or full - run without persistence this session.
 	}
 }
 
-/** Read a value from this tab's session only — no cross-tab seed fallback. */
+/** Read a value from this tab's session only - no cross-tab seed fallback. */
 export function loadSession(key: string): unknown {
 	try {
 		const raw = sessionStorage.getItem(storageName(key));
@@ -51,7 +51,7 @@ export function saveSession(key: string, value: unknown): void {
 	try {
 		sessionStorage.setItem(storageName(key), JSON.stringify(value));
 	} catch {
-		// Storage unavailable or full — run without persistence this session.
+		// Storage unavailable or full - run without persistence this session.
 	}
 }
 
@@ -70,7 +70,7 @@ export function saveLocal(key: string, value: unknown): void {
 	try {
 		localStorage.setItem(storageName(key), JSON.stringify(value));
 	} catch {
-		// Storage unavailable or full — run without persistence this session.
+		// Storage unavailable or full - run without persistence this session.
 	}
 }
 
@@ -95,7 +95,7 @@ export function clearSessionPersisted(): void {
 	}
 }
 
-/** Drop all persisted state — this tab's and the saved seed (both stores). */
+/** Drop all persisted state - this tab's and the saved seed (both stores). */
 export function clearAllPersisted(): void {
 	try {
 		clearArea(sessionStorage);

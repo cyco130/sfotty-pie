@@ -1,11 +1,11 @@
-// Analog 2-axis position → digital 8-way, shared by the gamepad poller and the
+// Analog 2-axis position -> digital 8-way, shared by the gamepad poller and the
 // OSD touch stick. The pair is read radially, not per-axis: below the engage
 // radius (a circular deadzone) it's centred; past it the angle snaps to one of
 // 8 octants. Radial magnitude reaches 1 in every direction, so diagonals are as
 // reachable as cardinals (unlike a per-axis threshold, which a round gate caps
 // near 0.707 and leaves a dead wedge on every diagonal). Hysteresis stops
 // chatter: a lower release radius, and an angular margin before an engaged
-// stick jumps to a neighbouring octant. The thresholds are the caller's — a
+// stick jumps to a neighbouring octant. The thresholds are the caller's - a
 // spring-centred thumbstick and a thumb on glass want different tuning.
 
 const QUARTER_PI = Math.PI / 4;
@@ -18,12 +18,12 @@ export interface RadialStickConfig {
 	engage: number;
 	/** Radius an engaged stick must drop below to re-centre (< engage). */
 	release: number;
-	/** Radians past the 22.5° octant boundary before an engaged stick switches. */
+	/** Radians past the 22.5 deg octant boundary before an engaged stick switches. */
 	sectorMargin: number;
 }
 
 /** Per-stick hysteresis state: whether it's currently engaged, and its last
- *  octant (−1 = none). Persist one per stick across reads. */
+ *  octant (-1 = none). Persist one per stick across reads. */
 export interface RadialStickState {
 	engaged: boolean;
 	octant: number;
@@ -34,10 +34,10 @@ export function initialStickState(): RadialStickState {
 }
 
 /**
- * Read one stick sample. `x`/`y` are the position in −1..1 space (+y = down,
+ * Read one stick sample. `x`/`y` are the position in -1..1 space (+y = down,
  * matching both gamepad axes and screen coordinates). Updates `state` in place
- * and returns the octant — 0 = +x, counting towards +y (so 1 = down-right on
- * screen), or −1 for centred.
+ * and returns the octant - 0 = +x, counting towards +y (so 1 = down-right on
+ * screen), or -1 for centred.
  */
 export function readRadialStick(
 	x: number,

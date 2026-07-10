@@ -152,7 +152,7 @@ test("NMIEN gates the pull at the latch cycle, set-dominant", () => {
 	ag.beforeCpu(); // cycle 10: the line drops
 	expect(ag.nmi).toBe(false);
 
-	// ...and an enable landing at cycle 7 — after the arm sampled — fires
+	// ...and an enable landing at cycle 7 - after the arm sampled - fires
 	// a *delayed* NMI two cycles after the write, not at the cycle-8 pull.
 	ag.write(NMIRES_NMIST, 0);
 	ag.hpos = 7;
@@ -228,7 +228,7 @@ test("a JVB display list reloads its target every frame", () => {
 		ag.afterCpu(frame, 0xff);
 	}
 
-	// Both DLIs latch on every frame — the JVB jump target loads even
+	// Both DLIs latch on every frame - the JVB jump target loads even
 	// though the wait-for-VBI flag stops the rest of the line's DMA.
 	expect(latchLines).toEqual([39, 47, 39, 47, 39, 47]);
 });
@@ -252,7 +252,7 @@ test("VCOUNT increments at cycle 111 and rolls over a cycle late", () => {
 
 	// Last line: one cycle of "overflow" before the late rollover.
 	expect(readDuring(261, 110)).toBe(130);
-	expect(readDuring(261, 111)).toBe(131); // $83 — the 262 window
+	expect(readDuring(261, 111)).toBe(131); // $83 - the 262 window
 	expect(readDuring(261, 112)).toBe(0);
 	expect(readDuring(261, 113)).toBe(0);
 	expect(readDuring(0, 0)).toBe(0);
@@ -274,7 +274,7 @@ test("direct GRAF writes survive when GRACTL has latching off", () => {
 	const ag = makeAnticGtia();
 	const frame = new Uint8Array(376 * 240);
 
-	ag.write(0xd400, 0x0c); // DMACTL: P/M DMA — the fetch slots halt
+	ag.write(0xd400, 0x0c); // DMACTL: P/M DMA - the fetch slots halt
 	ag.write(0xd00d, 0xff); // GRAFP0, written by the CPU
 	for (let i = 0; i < 114 * 30; i++) {
 		ag.beforeCpu();
@@ -318,7 +318,7 @@ test("P/M graphics latch across the whole visible region, including the bottom b
 	// the plane. The latch must run for the full collision region (lines 8-247).
 	const ag = makeAnticGtia();
 	const frame = new Uint8Array(376 * 240);
-	ag.write(0xd400, 0x0c); // DMACTL: P/M DMA — the fetch slots halt
+	ag.write(0xd400, 0x0c); // DMACTL: P/M DMA - the fetch slots halt
 	ag.write(0xd01d, 0x02); // GRACTL: enable player-graphics latching
 
 	const latchOnLine = (vcount: number, busByte: number): number => {
@@ -335,7 +335,7 @@ test("P/M graphics latch across the whole visible region, including the bottom b
 
 	// Bottom of the visible region (scan line 240): latches (used to freeze).
 	expect(latchOnLine(240, 0x5a)).toBe(0x5a);
-	// Vertical blank (scan line 248): no latch — graphics are off, per the AHRM.
+	// Vertical blank (scan line 248): no latch - graphics are off, per the AHRM.
 	expect(latchOnLine(248, 0x5a)).toBe(0x00);
 });
 
@@ -365,7 +365,7 @@ test("priority selectors match the official PRIOR modes", () => {
 	// The fifth player rides PF3's slot but beats other playfields.
 	expect(prioritySelector(0b0100, 1, 0, true)).toBe(PF3);
 	// The %1000 fifth-player cascade (AHRM 6.7 prose): PF01 covers the
-	// players, then the fifth player's PF3 covers PF01 — but with PF01
+	// players, then the fifth player's PF3 covers PF01 - but with PF01
 	// absent, the players show.
 	expect(prioritySelector(0b1000, 1, 0b0001, true)).toBe(PF3);
 	expect(prioritySelector(0b1000, 0, 0b0001, true)).toBe(PM0);
@@ -466,7 +466,7 @@ test("P/M DMA fetches only within the visible region, lines 8-247", () => {
 
 	// A display line: the missile slot at cycle 0 and players at 2-5. A
 	// free-running cycle-counted kernel (RastaConverter) counts on the
-	// vertical-blank lines NOT having them — five phantom steals on the
+	// vertical-blank lines NOT having them - five phantom steals on the
 	// line between its WSYNC anchor and the display skewed every write.
 	const pm = [true, false, true, true, true, true, false, false];
 	expect(haltPattern(ag, 100)).toEqual(pm);

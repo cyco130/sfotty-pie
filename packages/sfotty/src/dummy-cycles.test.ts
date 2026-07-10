@@ -3,7 +3,7 @@ import { Sfotty } from "./sfotty.ts";
 import { DECODE } from "./microcode.ts";
 import { type Memory, ReadOptions } from "./bus.ts";
 
-// The DUMMY flag marks a bus access that doesn't commit anything — so traps can
+// The DUMMY flag marks a bus access that doesn't commit anything - so traps can
 // tell real reads from speculative/discarded ones. This file pins which cycles
 // carry it. (Step 5a: implied/accumulator internal-operation reads. Stack, RMW,
 // indexed and reset dummies are added in later steps.)
@@ -66,26 +66,26 @@ describe("dummy cycles", () => {
 		bytes[0x0200] = 0x68; // PLA: fetch, throwaway read PC, inc-S stack read, pull
 		run(cpu, 4);
 
-		// Cycle 2: "read next byte and throw it away" at $0201 — DUMMY, not SYNC.
+		// Cycle 2: "read next byte and throw it away" at $0201 - DUMMY, not SYNC.
 		const throwaway = reads.find(
 			(r) => r.address === 0x0201 && r.options & ReadOptions.DUMMY,
 		);
 		expect(throwaway).toBeDefined();
 		expect(throwaway!.options & ReadOptions.SYNC).toBe(0);
 
-		// Cycle 3: increment-S stack read at $01FF (S started $FF) — DUMMY.
+		// Cycle 3: increment-S stack read at $01FF (S started $FF) - DUMMY.
 		const incrementS = reads.find((r) => r.address === 0x01ff);
 		expect(incrementS).toBeDefined();
 		expect(incrementS!.options & ReadOptions.DUMMY).toBeTruthy();
 
-		// Cycle 4: the actual pull at $0100 (S now $00) — a real read, not DUMMY.
+		// Cycle 4: the actual pull at $0100 (S now $00) - a real read, not DUMMY.
 		const pull = reads.find((r) => r.address === 0x0100);
 		expect(pull).toBeDefined();
 		expect(pull!.options & ReadOptions.DUMMY).toBe(0);
 	});
 
 	test("an indexed read is DUMMY only on a page cross (the speculative read)", () => {
-		// LDA $12FF,X with X=1 → effective $1300, crossing the $12xx→$13xx page.
+		// LDA $12FF,X with X=1 -> effective $1300, crossing the $12xx->$13xx page.
 		const cross = record();
 		cross.bytes[0x0200] = 0xbd; // LDA abs,X
 		cross.bytes[0x0201] = 0xff;
@@ -103,7 +103,7 @@ describe("dummy cycles", () => {
 		expect(real).toBeDefined();
 		expect(real!.options & ReadOptions.DUMMY).toBe(0);
 
-		// No cross: LDA $1200,X with X=1 → $1201, a single real read, no dummy.
+		// No cross: LDA $1200,X with X=1 -> $1201, a single real read, no dummy.
 		const noCross = record();
 		noCross.bytes[0x0200] = 0xbd;
 		noCross.bytes[0x0201] = 0x00;
@@ -117,9 +117,9 @@ describe("dummy cycles", () => {
 	});
 
 	test("an indexed store always reads-before-write, and that read is DUMMY", () => {
-		// STA $12FF,X with X=1 → effective $1300. The 6502 can't undo a write to a
+		// STA $12FF,X with X=1 -> effective $1300. The 6502 can't undo a write to a
 		// wrong address, so it always reads the unfixed address ($1200) first and
-		// throws it away — a dummy read on every indexed store, cross or not.
+		// throws it away - a dummy read on every indexed store, cross or not.
 		const cross = record();
 		cross.bytes[0x0200] = 0x9d; // STA abs,X
 		cross.bytes[0x0201] = 0xff;
@@ -132,10 +132,10 @@ describe("dummy cycles", () => {
 		const dummyRead = cross.reads.find((r) => r.address === 0x1200);
 		expect(dummyRead).toBeDefined();
 		expect(dummyRead!.options & ReadOptions.DUMMY).toBeTruthy();
-		// And it didn't corrupt $1200 — only $1300 gets the store.
+		// And it didn't corrupt $1200 - only $1300 gets the store.
 		expect(cross.bytes[0x1300]).toBe(0x42);
 
-		// No cross either: STA $1200,X with X=1 → $1201, still a dummy read first.
+		// No cross either: STA $1200,X with X=1 -> $1201, still a dummy read first.
 		const noCross = record();
 		noCross.bytes[0x0200] = 0x9d;
 		noCross.bytes[0x0201] = 0x00;
@@ -151,9 +151,9 @@ describe("dummy cycles", () => {
 	});
 
 	test("a taken branch's internal PC re-reads are DUMMY", () => {
-		// BNE +$0E from $0200, Z clear → taken, same page. After fetching opcode and
+		// BNE +$0E from $0200, Z clear -> taken, same page. After fetching opcode and
 		// operand PC=$0202; cycle 3 re-reads $0202 to add the offset and throws it
-		// away — the real opcode fetch is the following DECODE at $0210.
+		// away - the real opcode fetch is the following DECODE at $0210.
 		const noCross = record();
 		noCross.bytes[0x0200] = 0xd0; // BNE
 		noCross.bytes[0x0201] = 0x0e;
@@ -171,7 +171,7 @@ describe("dummy cycles", () => {
 		expect(real).toBeDefined();
 		expect(real!.options & ReadOptions.DUMMY).toBe(0);
 
-		// Page cross adds a second dummy: BNE +$40 from $02F0 → $0332. Cycle 3
+		// Page cross adds a second dummy: BNE +$40 from $02F0 -> $0332. Cycle 3
 		// re-reads $02F2 (dummy), cycle 4 re-reads $0232 at the unfixed PCH (dummy),
 		// then DECODE fetches the real opcode at the fixed $0332.
 		const cross = record();
@@ -195,7 +195,7 @@ describe("dummy cycles", () => {
 
 	test("a read-modify-write writes the old value back as a DUMMY, the new value for real", () => {
 		// INC $80 (zero page): read, write the old value back (dummy), write old+1.
-		// The 6502 always does that throwaway write-back — traps key on DUMMY to
+		// The 6502 always does that throwaway write-back - traps key on DUMMY to
 		// tell it from the committed store.
 		const { cpu, bytes, writes } = record();
 		bytes[0x0200] = 0xe6; // INC zp
@@ -230,7 +230,7 @@ describe("dummy cycles", () => {
 
 	test("a real operand read is not DUMMY", () => {
 		const { cpu, bytes, reads } = record();
-		bytes[0x0200] = LDA_IMM; // LDA #$EA — operand read at $0201 is real
+		bytes[0x0200] = LDA_IMM; // LDA #$EA - operand read at $0201 is real
 		run(cpu, 2);
 
 		const operand = reads.find(

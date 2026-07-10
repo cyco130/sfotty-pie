@@ -16,7 +16,7 @@ import { type Memory, ReadOptions } from "./bus.ts";
 // against a Visual6502 trace.
 
 const NOP = 0xea;
-const CIM = 0x02; // jams — a "control reached here" marker at handler entries
+const CIM = 0x02; // jams - a "control reached here" marker at handler entries
 const CLI = 0x58;
 const BRK = 0x00;
 const BNE = 0xd0;
@@ -62,7 +62,7 @@ function frame1Return(ram: Ram): number {
 	return (ram.bytes[0x01ff]! << 8) | ram.bytes[0x01fe]!;
 }
 
-/** Status byte pushed by the first frame — its bit 4 is the B flag. */
+/** Status byte pushed by the first frame - its bit 4 is the B flag. */
 function frame1Status(ram: Ram): number {
 	return ram.bytes[0x01fd]!;
 }
@@ -96,7 +96,7 @@ describe("interrupts", () => {
 
 		// The very first decode can't see it (nothing was polled two cycles
 		// earlier), so the first NOP retires and the IRQ is taken at the next
-		// decode — the pushed return address is the *second* instruction.
+		// decode - the pushed return address is the *second* instruction.
 		expect(frame1Return(ram)).toBe(0x0201);
 	});
 
@@ -108,13 +108,13 @@ describe("interrupts", () => {
 		cpu.IRQ = true; // IRQ taken after the first NOP (return $0201)
 
 		// Pulse NMI mid-IRQ-sequence, past the hijack window so it doesn't steal
-		// the IRQ vector — it must be latched and serviced *after* the handler's
+		// the IRQ vector - it must be latched and serviced *after* the handler's
 		// first instruction, not at the post-sequence decode.
 		run(cpu, 7);
 		cpu.NMI = true;
 		run(cpu, 40);
 
-		// Two frames: the IRQ, then the NMI taken after the handler's NOP — so the
+		// Two frames: the IRQ, then the NMI taken after the handler's NOP - so the
 		// NMI's return address is the handler's *second* instruction, not its entry.
 		expect(cpu.PC & 0xff00).toBe(NMI_VEC & 0xff00);
 		expect(frame2Return(ram)).toBe(IRQ_VEC + 1);
@@ -130,7 +130,7 @@ describe("interrupts", () => {
 
 		// The poll at CLI's last cycle still sees I set, so the IRQ is not taken at
 		// CLI's boundary; the instruction after CLI ($0201) runs first, and the IRQ
-		// is taken at the boundary after it — return address $0202.
+		// is taken at the boundary after it - return address $0202.
 		expect(frame1Return(ram)).toBe(0x0202);
 	});
 
@@ -175,15 +175,15 @@ describe("interrupts", () => {
 
 		// BRK cycles (decode = c0): c0 fetch, c1 read, c2/c3/c4 push PCH/PCL/P,
 		// c5 vector-low, c6 vector-high. NMI true at the start of c4 (the push-P
-		// cycle — too late to hijack) and false again at c6, i.e. held for only two
+		// cycle - too late to hijack) and false again at c6, i.e. held for only two
 		// cycles. It must be completely lost: never latched past the sequence.
 		run(cpu, 4); // c0..c3
 		cpu.NMI = true; // start of c4 (push-P)
 		run(cpu, 2); // c4, c5
-		cpu.NMI = false; // start of c6 (vector-high) — gone before the sequence ends
+		cpu.NMI = false; // start of c6 (vector-high) - gone before the sequence ends
 		run(cpu, 40);
 
-		// Vectored through the BRK/IRQ vector, and only the BRK frame exists — the
+		// Vectored through the BRK/IRQ vector, and only the BRK frame exists - the
 		// NMI was dropped, so PC never reaches the NMI handler and S isn't pushed
 		// a second time.
 		expect(cpu.PC & 0xff00).toBe(IRQ_VEC & 0xff00);
@@ -202,17 +202,17 @@ describe("interrupts", () => {
 
 		// Too late to hijack (BRK took the IRQ/BRK vector), but the held NMI
 		// outlasts the sequence, so it's serviced after the handler's first
-		// instruction — the NMI frame's return is the handler's second instruction.
+		// instruction - the NMI frame's return is the handler's second instruction.
 		expect(cpu.PC & 0xff00).toBe(NMI_VEC & 0xff00);
 		expect(frame2Return(ram)).toBe(IRQ_VEC + 1);
 	});
 
 	test("8: the interrupt dummy fetch is SYNC|DUMMY, the committed fetch SYNC-only", () => {
 		// A held IRQ is taken after the first instruction (point 2). The decode it
-		// hijacks still issues an opcode fetch at PC — SYNC asserts (Visual6502) —
+		// hijacks still issues an opcode fetch at PC - SYNC asserts (Visual6502) -
 		// but the opcode never executes (PC isn't advanced; the BRK sequence runs).
 		// So that fetch carries DUMMY; the committed fetch does not. A committed
-		// opcode fetch (SYNC & !DUMMY) is what execute traps key on — they must not
+		// opcode fetch (SYNC & !DUMMY) is what execute traps key on - they must not
 		// fire on the dummy, or they'd double-fire on the post-RTI re-fetch.
 		const reads: { address: number; options: number }[] = [];
 		const ram = new Ram();
@@ -230,7 +230,7 @@ describe("interrupts", () => {
 		cpu.S = 0xff;
 		cpu.state = DECODE;
 		cpu.iFlag = false;
-		cpu.IRQ = true; // held — taken at the $0201 boundary
+		cpu.IRQ = true; // held - taken at the $0201 boundary
 
 		run(cpu, 10);
 
@@ -251,7 +251,7 @@ describe("interrupts", () => {
 
 	test("9: an RDY-stalled opcode fetch is SYNC|DUMMY", () => {
 		// While RDY is low the decode read is re-issued every cycle but doesn't
-		// commit, so it carries DUMMY too — only the fetch on the cycle RDY rises
+		// commit, so it carries DUMMY too - only the fetch on the cycle RDY rises
 		// is a committed (SYNC, no DUMMY) fetch.
 		const reads: { address: number; options: number }[] = [];
 		const ram = new Ram();

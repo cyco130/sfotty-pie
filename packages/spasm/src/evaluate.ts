@@ -25,7 +25,7 @@ export interface EvalEnv {
 
 /**
  * Evaluate an expression. Returns `undefined` if any part is unresolved (a
- * not-yet-defined symbol) or an error made it uncomputable — callers tell the
+ * not-yet-defined symbol) or an error made it uncomputable - callers tell the
  * two apart by whether `report` fired. Reports may fire on non-final passes;
  * the assemble loop keeps only the final settled pass's diagnostics.
  */

@@ -41,13 +41,15 @@ The program contents are loaded starting from the address `$0400`.
 | `$0202` | `STDOUT` | `W`          | Write a byte to the standard output.                         |
 | `$0203` | `STDERR` | `W`          | Write a byte to the standard error.                          |
 | `$0240` | `RAND`   | `R`          | Read a random byte.                                          |
-| `$0241` | `FSTIN`  | `R`          | Status of stdin: EOF if bit 7 set.                           |
+| `$0241` | `FSTIN`  | `R`          | Status of stdin: EOF if bit 7 set (blocks until decidable).  |
+
+When standard input is a terminal, it is line-buffered with echo and line editing; the program sees each line as it is entered. When it is redirected (a pipe or a file), the program receives it byte-for-byte.
 
 **Page 3** (addresses from `$0300` to `$03FF`) will contain the command line arguments as a null-terminated list of null-terminated strings, truncated to fit the page (254 bytes plus the final two terminators).
 
 Everything other than the I/O area is RAM, including the command line argument area, the program contents, and the interrupt vectors. Free areas will contain all zeroes.
 
-Executing a CIM (also known as JAM, KIL, etc.) instruction crashes the program with exit code 2.
+Executing a CIM (also known as JAM, KIL, etc.) instruction crashes the program with exit code 2. On a crash (CIM or an access to an undefined I/O address), the emulator writes a debug dump to stderr: the CPU microstate, the registers, and a disassembly of the last instructions executed.
 
 ## Sample programs
 

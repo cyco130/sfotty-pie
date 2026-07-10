@@ -19,8 +19,8 @@ import { PanelFrame } from "./panel-frame.tsx";
 
 const KEYS = "/a8/emu/keys";
 
-// A modifier's form state. "off" → must be up (omitted), "on" → required down,
-// "any" → don't-care. Maps to Binding's Mod (absent | true | "any").
+// A modifier's form state. "off" -> must be up (omitted), "on" -> required down,
+// "any" -> don't-care. Maps to Binding's Mod (absent | true | "any").
 type Tri = "off" | "on" | "any";
 const MODS = ["ctrl", "shift", "alt", "meta"] as const;
 type ModName = (typeof MODS)[number];
@@ -33,7 +33,7 @@ function isCommand(value: string): value is Command {
 }
 
 // App commands default to the global scope (their `PRESS_`-less name), machine
-// keys to "a8" — the editor's suggestion, overridable.
+// keys to "a8" - the editor's suggestion, overridable.
 const defaultScope = (command: Command): "global" | "a8" =>
 	command.startsWith("PRESS_") ? "a8" : "global";
 
@@ -206,7 +206,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 		? host.keyBindings.value.find((b) => triggerKey(b) === candTrigger)
 		: undefined;
 	// A bare character key (no Ctrl/Alt/Cmd required down) is shadowed by typing
-	// in Character mode — it only fires in Positional.
+	// in Character mode - it only fires in Positional.
 	const bareTyping =
 		!!code &&
 		CHARACTER_CODES.has(code) &&
@@ -222,7 +222,7 @@ export default function KeyCommandPanel({ command: raw }: { command: string }) {
 
 	const add = () => {
 		if (!candidate || !candTrigger) return;
-		// One trigger → one command: drop any binding already on this trigger
+		// One trigger -> one command: drop any binding already on this trigger
 		// (the reassign), then append.
 		host.updateBindings([
 			...host.keyBindings.value.filter((b) => triggerKey(b) !== candTrigger),

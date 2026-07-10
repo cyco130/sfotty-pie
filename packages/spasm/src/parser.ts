@@ -47,7 +47,7 @@ class Parser {
 
 				// Try to recover by ignoring everything until newline or EOF.
 				// The cast defeats TS narrowing `#token.type` to exclude "eof" (from
-				// the outer `while (… !== "eof")`); recovery can reach eof at a final
+				// the outer `while (... !== "eof")`); recovery can reach eof at a final
 				// statement with no trailing newline.
 				while (
 					this.#token.type !== "newline" &&
@@ -317,7 +317,7 @@ class Parser {
 
 					const closingBracketToken = this.#expect(")");
 
-					// "(expr), Y" — indirect-indexed
+					// "(expr), Y" - indirect-indexed
 					if (this.#token.type === "," && this.#lookahead.type === "y") {
 						const commaToken = this.#token;
 						this.#consume();
@@ -336,7 +336,7 @@ class Parser {
 					// Otherwise "(expr)" is a grouped expression. Extend it with any
 					// infix tail; if nothing follows, the whole operand was "(expr)" and
 					// it's indirect addressing. A tail (or a trailing ",X") makes it a
-					// computed value instead — "(sym + 2) * 2" is absolute, not indirect.
+					// computed value instead - "(sym + 2) * 2" is absolute, not indirect.
 					const grouped: GroupedExpression = {
 						type: "grouped-expression",
 						openingBracketToken,
@@ -355,7 +355,7 @@ class Parser {
 						this.#token.type === "," &&
 						(this.#lookahead.type === "x" || this.#lookahead.type === "y")
 					) {
-						// "(expr), X" / "(expr) * 2, Y" — grouped value, indexed
+						// "(expr), X" / "(expr) * 2, Y" - grouped value, indexed
 						const commaToken = this.#token;
 						this.#consume();
 						const register = this.#expect("x", "y");
@@ -369,7 +369,7 @@ class Parser {
 					}
 
 					if (head === grouped) {
-						// Nothing followed "(expr)" — indirect addressing.
+						// Nothing followed "(expr)" - indirect addressing.
 						return {
 							type: "indirect-operand",
 							openingBracketToken,
@@ -378,7 +378,7 @@ class Parser {
 						};
 					}
 
-					// Grouped expression with a tail — a computed value operand.
+					// Grouped expression with a tail - a computed value operand.
 					return {
 						type: "simple-operand",
 						expression: head,

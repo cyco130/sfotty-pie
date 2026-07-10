@@ -1,11 +1,24 @@
 export { AnticGtia, type TvAdapter } from "./antic-gtia.ts";
+export type { AtariMemory } from "./atari-memory.ts";
 export { AtrImage } from "./atr.ts";
+export { BountyBobCartridge } from "./bounty-bob-cartridge.ts";
 export {
 	canonicalize,
+	withCartType,
 	type CanonicalPiece,
 	type ImageKind,
 } from "./canonicalize.ts";
-export { Cartridge, CART_TYPES, type CartType } from "./cartridge.ts";
+export {
+	RomCartridge,
+	createCartridge,
+	cartTypesForSize,
+	isCartTypeSupported,
+	suggestCartType,
+	CART_TYPES,
+	type Cartridge,
+	type CartType,
+	type CartTypeOption,
+} from "./cartridge.ts";
 export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
 export { buildBootDisk } from "./xex-boot.ts";
 export {

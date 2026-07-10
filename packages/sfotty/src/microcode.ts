@@ -21,7 +21,7 @@ export const RESET = 0x801;
 /**
  * One CPU cycle. It performs the cycle's single bus access (which may throw to
  * interrupt the CPU), applies the internal register transfers, and writes the
- * next microstate last — so a throw unwinds with the CPU untouched and the cycle
+ * next microstate last - so a throw unwinds with the CPU untouched and the cycle
  * is retried on the next `run()`. Lives in the {@link SfottyCore}-indexed dispatch
  * table emitted by `generate-steps.ts`.
  */
@@ -41,7 +41,7 @@ export type BusOp =
 export type InternalOp =
 	| "decode"
 	| "nop"
-	| "dummy" // marks this cycle's bus access as non-committing → ReadOptions.DUMMY (not a real op; stripped by the step generator)
+	| "dummy" // marks this cycle's bus access as non-committing -> ReadOptions.DUMMY (not a real op; stripped by the step generator)
 	| "cc--"
 	| "?" // If page boundary was crossed, do the next micro-op and go to the next cycle, otherwise do the micro-op after next and skip the next cycle
 	| "ar=fffe"

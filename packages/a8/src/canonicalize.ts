@@ -1,22 +1,24 @@
+import { CART_TYPES, cartTypesForSize } from "./cartridge.ts";
 import {
 	type AtariFileFormat,
 	detectFileFormat,
+	hasRawRomExtension,
 } from "./detect-file-format.ts";
 
 // Canonicalization: turn an arbitrary image file into one or more canonical
 // images, deriving their content facts. The canonical form per kind:
 //
-//   cartridge  →  `.car` (16-byte CART header + ROM) — a raw `.rom`/`.bin`
+//   cartridge  ->  `.car` (16-byte CART header + ROM) - a raw `.rom`/`.bin`
 //                 gets the header prepended; the mapper/type lives in the
 //                 header, so it becomes part of the content identity.
-//   OS / XEX   →  the raw bytes (no container).
-//   combined   →  split: an XEGS 32K dump becomes a game cart, a BASIC cart,
+//   OS / XEX   ->  the raw bytes (no container).
+//   combined   ->  split: an XEGS 32K dump becomes a game cart, a BASIC cart,
 //                 and the OS, each canonicalized independently.
-//   disk       →  passthrough for now (ATR container-stripping is deferred).
+//   disk       ->  passthrough for now (ATR container-stripping is deferred).
 //
 // Every piece reports the SOURCE byte range `[from, to)` and the `header` it
 // prepends, so a build can keep the bundled file untouched and reconstruct the
-// canonical image at fetch time from a `header`/`from`/`to` recipe — while the
+// canonical image at fetch time from a `header`/`from`/`to` recipe - while the
 // `bytes` are the materialized canonical image for hashing or direct storage.
 
 /** Content-derived facts: a coarse kind plus its one discriminating fact. */
@@ -24,7 +26,11 @@ export type ImageKind =
 	| { type: "os"; sizeClass: 10 | 16 }
 	| { type: "cart"; cartType: number } // the CART-table number = mapper/subtype
 	| { type: "disk"; sectorSize: 128 | 256; sectors: number }
-	| { type: "xex" };
+	| { type: "xex" }
+	// A raw cartridge dump whose mapper couldn't be detected (its size matches
+	// at least one CART type). Stored raw; picking a type later completes the
+	// canonicalization by writing the CART header.
+	| { type: "unknown-rom" };
 
 /** One canonical image produced from a source file. */
 export interface CanonicalPiece {
@@ -137,11 +143,11 @@ function carPiece(source: Uint8Array): CanonicalPiece {
 	};
 }
 
-/** ATR passthrough — geometry only; container-stripping is deferred. */
+/** ATR passthrough - geometry only; container-stripping is deferred. */
 function diskPiece(source: Uint8Array): CanonicalPiece {
 	const sectorSize =
 		((source[4] ?? 0) | ((source[5] ?? 0) << 8)) === 256 ? 256 : 128;
-	// Paragraph (16-byte) count → total image bytes.
+	// Paragraph (16-byte) count -> total image bytes.
 	const paragraphs =
 		(source[2] ?? 0) | ((source[3] ?? 0) << 8) | ((source[6] ?? 0) << 16);
 	const dataBytes = paragraphs * 16;
@@ -159,6 +165,35 @@ function diskPiece(source: Uint8Array): CanonicalPiece {
 		bytes: source,
 		kind: { type: "disk", sectorSize, sectors },
 	};
+}
+
+/**
+ * Re-canonicalize a cartridge image under CART type `cartType`: a raw dump
+ * gets the 16-byte header written, an existing `.car` gets its header
+ * rebuilt (type and checksum both refreshed). This is the pick-the-mapper /
+ * change-the-mapper primitive; the header is part of content identity, so
+ * callers must treat the result as a new image (new hash). Throws when the
+ * type is unknown or the ROM size doesn't match it; unimplemented and 5200
+ * types are allowed - recording a known-but-unsupported mapper is valid.
+ */
+export function withCartType(image: Uint8Array, cartType: number): Uint8Array {
+	const type = CART_TYPES[cartType];
+	if (!type) {
+		throw new Error(`Unknown cartridge type #${cartType}`);
+	}
+	const isCar =
+		image[0] === 0x43 && // 'C'
+		image[1] === 0x41 && // 'A'
+		image[2] === 0x52 && // 'R'
+		image[3] === 0x54; // 'T'
+	const rom = isCar ? image.subarray(16) : image;
+	if (rom.length !== type.size * 1024) {
+		throw new Error(
+			`Cartridge type #${cartType} (${type.name}) needs ${type.size}K, ` +
+				`got ${rom.length} bytes`,
+		);
+	}
+	return concat(cartHeader(cartType, rom), rom);
 }
 
 /**
@@ -200,6 +235,26 @@ export function canonicalize(
 				osPiece(source, 16, XEGS_BASIC_END, XEGS_OS_END, "os"),
 			];
 		case null:
+			// A raw-ROM-named (or nameless) dump whose size matches at least one
+			// CART type is a cartridge of unknown mapper - kept raw until the
+			// user picks a type, which writes the header and completes the
+			// canonicalization.
+			if (
+				(!fileName || hasRawRomExtension(fileName)) &&
+				source.length >= 2048 &&
+				source.length % 1024 === 0 &&
+				cartTypesForSize(source.length / 1024).length > 0
+			) {
+				return [
+					{
+						from: 0,
+						to: source.length,
+						header: EMPTY,
+						bytes: source,
+						kind: { type: "unknown-rom" },
+					},
+				];
+			}
 			throw new Error("Unrecognized image format");
 	}
 }

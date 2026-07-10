@@ -13,8 +13,8 @@ import { firmwareLibrary } from "./firmware-library-plugin.ts";
 // (leaving the root `index.html` alone), removing the now-empty directory.
 // Cloudflare Pages derives its trailing-slash behaviour from the file layout: a
 // directory-style `a8/docs/index.html` makes `/a8/docs/` canonical and
-// redirects `/a8/docs` → `/a8/docs/`, whereas a flat `a8/docs.html` makes
-// `/a8/docs` canonical and redirects the other way — which is what we want.
+// redirects `/a8/docs` -> `/a8/docs/`, whereas a flat `a8/docs.html` makes
+// `/a8/docs` canonical and redirects the other way - which is what we want.
 // Done in `writeBundle` (files
 // already on disk) rather than by re-keying the bundle, which desyncs Rollup's
 // emitted-asset bookkeeping and drops the file.
@@ -60,7 +60,7 @@ export default defineConfig({
 	// Build-time constant: replaces `import.meta.env.GIT_HASH` in the source.
 	define: { "import.meta.env.GIT_HASH": JSON.stringify(gitHash()) },
 	// basicSsl serves dev over HTTPS so the page is a secure context on a LAN
-	// IP — required for AudioWorklet (and other secure-only APIs) to exist when
+	// IP - required for AudioWorklet (and other secure-only APIs) to exist when
 	// testing on a real device. Expect a one-time "untrusted certificate"
 	// prompt in the browser. `host: true` exposes the server on the LAN so the
 	// device can reach it in the first place.
@@ -74,7 +74,7 @@ export default defineConfig({
 		// (src/prerender.tsx, referenced explicitly so it never ships to the
 		// browser) emits real markup for /a8/docs* and an empty shell for
 		// everything else, including `/` which the plugin always writes into
-		// index.html — keeping index.html a neutral SPA fallback. `renderTarget`
+		// index.html - keeping index.html a neutral SPA fallback. `renderTarget`
 		// matches where main.tsx mounts (<main id="app">).
 		preact({
 			prerender: {
@@ -104,8 +104,8 @@ export default defineConfig({
 		// (everything here is fingerprinted, so it's safe to cache forever).
 		assetsDir: "_app/assets",
 		// Never inline SVGs as data URIs: the icon sprite is referenced with
-		// `<use href="…#id">`, and browsers don't resolve a #fragment against a
-		// data: URI — it must stay a real (hashed) file. `false` opts out;
+		// `<use href="...#id">`, and browsers don't resolve a #fragment against a
+		// data: URI - it must stay a real (hashed) file. `false` opts out;
 		// `undefined` keeps Vite's default size threshold for everything else.
 		assetsInlineLimit: (filePath) =>
 			filePath.endsWith(".svg") ? false : undefined,

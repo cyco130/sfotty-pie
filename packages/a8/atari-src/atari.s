@@ -5,7 +5,7 @@
 .export INITAD := $02E2		; per-segment init address of a loaded binary
 
 ; Zero page
-.export BOOTQ := $09		; "BOOT?" — successful-boot flags (bit 0 = disk)
+.export BOOTQ := $09		; "BOOT?" - successful-boot flags (bit 0 = disk)
 .export DOSINI := $0C		; init vector, called on every warmstart
 .export SAVMSC := $58		; address of the top-left of the screen
 

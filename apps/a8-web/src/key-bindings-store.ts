@@ -9,19 +9,19 @@ import { KEYBOARD_LAYOUTS } from "./keyboard-layouts.ts";
 import { loadPersisted, savePersisted } from "./persist.ts";
 
 // The user's binding set, persisted as one flat list. Generated from the
-// defaults on first run (and on explicit reset) and then owned by the user — so
+// defaults on first run (and on explicit reset) and then owned by the user - so
 // later code changes to the defaults don't reach an existing store until it's
 // reset. Labels and anchoring are baked in at generation from a layout snapshot
 // (see below), so the stored set is a self-consistent snapshot that never shifts
 // on refresh; bump VERSION to invalidate stores when the shape changes.
 export const KEY_BINDINGS_KEY = "key-bindings";
 // v2: bindings keyed by `code` only (the `{ key }` trigger arm was dropped).
-// v3: + the global Cmd/Alt+K → OPEN_PALETTE binding and the `scope` field.
+// v3: + the global Cmd/Alt+K -> OPEN_PALETTE binding and the `scope` field.
 // v4: letter app-shortcuts (palette, the Alt/Ctrl+letter aliases) anchored to
 //     the produced letter via the layout, not the QWERTY position.
 const VERSION = 4;
 
-// The layout snapshot the current bindings were baked from — `code` → legend.
+// The layout snapshot the current bindings were baked from - `code` -> legend.
 // Persisted alongside the bindings so it survives refresh (labels stay stable)
 // and so the editor can label brand-new bindings the same way; on reset it's
 // re-read from the live keyboard (or, absent getLayoutMap, the user's saved
@@ -83,7 +83,7 @@ export function loadStoredLayout(): Map<string, string> | undefined {
 
 // The layout map to bake from: a manual pick wins (the setup page); else the live
 // keyboard layout when the browser exposes it (re-read, so a reset in auto mode
-// picks up an OS-level switch); else empty — which bakes plain QWERTY.
+// picks up an OS-level switch); else empty - which bakes plain QWERTY.
 async function resolveLayout(): Promise<Map<string, string>> {
 	const pref = loadLayoutPref();
 	if (pref !== LAYOUT_AUTO) {
@@ -96,7 +96,7 @@ async function resolveLayout(): Promise<Map<string, string>> {
 }
 
 /** Generate the default binding set from the resolved layout, persisting both the
- *  bindings and the layout snapshot — the first-run and reset path. Returns both
+ *  bindings and the layout snapshot - the first-run and reset path. Returns both
  *  so the caller can seed the editor's labeling map without re-reading storage. */
 export async function freshBindings(
 	mac: boolean,
@@ -109,7 +109,7 @@ export async function freshBindings(
 }
 
 /** The layout snapshot for labeling the editor's live preview: the persisted one,
- *  or — for a store predating the snapshot — initialized once from the live
+ *  or - for a store predating the snapshot - initialized once from the live
  *  layout so previews aren't stuck on QWERTY until the next reset. */
 export async function ensureStoredLayout(): Promise<Map<string, string>> {
 	const stored = loadStoredLayout();

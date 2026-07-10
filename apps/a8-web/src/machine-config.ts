@@ -48,7 +48,7 @@ export function hasBuiltinBasic(model: AtariModel): boolean {
 	return model === "xl/xe" || model === "xegs";
 }
 
-// All XL/XE-class machines share the same range — PORTB shared-function
+// All XL/XE-class machines share the same range - PORTB shared-function
 // latching makes every extension safe regardless of model.
 const XL_RAM: readonly number[] = [16, 64, 128, 192, 320, 576, 1088];
 
@@ -96,7 +96,7 @@ export function clampRam(
 
 /**
  * Coerce a persisted/untrusted value into valid {@link MachineSettings},
- * clamping RAM to the model — returns `fallback` if it isn't a recognizable
+ * clamping RAM to the model - returns `fallback` if it isn't a recognizable
  * settings object (e.g. an unknown model from an older or corrupt store).
  */
 export function sanitizeSettings(

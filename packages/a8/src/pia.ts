@@ -29,13 +29,13 @@ import { Signal } from "./signal.ts";
  *   0  IRQ1 enable
  * ```
  *
- * The status bits latch on active transitions regardless of the enables —
+ * The status bits latch on active transitions regardless of the enables -
  * the enables only gate the IRQ outputs. Reading the data port clears both
  * status bits. (Port B's strobes fire on data-port *writes* instead of
  * reads, per the chip.)
  *
  * On the Atari: PORTA carries joysticks 0/1, PORTB joysticks 2/3 (400/800)
- * or memory banking (XL/XE — the {@link AtariBus} watches {@link portbOut});
+ * or memory banking (XL/XE - the {@link Mmu} watches {@link portbOut});
  * the control lines belong to SIO: CA1 = proceed and CB1 = interrupt
  * (inputs), CA2 = motor control and CB2 = command (outputs).
  */
@@ -48,7 +48,7 @@ export class Pia implements Memory {
 
 	/**
 	 * The port B external input pins. On the Atari these are joysticks 2/3
-	 * (400/800 only — nothing external connects to port B on XL/XE).
+	 * (400/800 only - nothing external connects to port B on XL/XE).
 	 */
 	readonly portbIn = new Signal(0xff);
 
@@ -150,7 +150,7 @@ export class Pia implements Memory {
 	/**
 	 * Advance the strobe timing one machine cycle: ends a one-cycle CA2/CB2
 	 * pulse (output mode 01). The Atari OS doesn't use pulse mode, but the
-	 * chip is generic — a host that needs it must call this every cycle.
+	 * chip is generic - a host that needs it must call this every cycle.
 	 */
 	cycle(): void {
 		if ((this.#ctrlA & 0x38) === 0x28) this.ca2Out.value = true;
@@ -228,9 +228,9 @@ export class Pia implements Memory {
 						this.#ca2Pending = false;
 					}
 				} else {
-					// CA2 turned input: a pending edge — or a pin snap from
+					// CA2 turned input: a pending edge - or a pin snap from
 					// the driven level to the pulled-up external line that
-					// matches the edge select — becomes the IRQ2 status.
+					// matches the edge select - becomes the IRQ2 status.
 					this.#ca2InputEntry();
 				}
 				// Enable-bit changes take effect immediately, both ways.
@@ -342,7 +342,7 @@ export class Pia implements Memory {
 			this.#readPort(this.#outB, this.#ddrB) & this.portbIn.value;
 	}
 
-	// The enables gate the IRQ outputs: bit 0 for IRQ1, and bit 3 for IRQ2 —
+	// The enables gate the IRQ outputs: bit 0 for IRQ1, and bit 3 for IRQ2 -
 	// the latter only in input mode (bit 6 set, bit 5 clear, bit 3 set).
 	#updateIrqA(): void {
 		this.irqA =

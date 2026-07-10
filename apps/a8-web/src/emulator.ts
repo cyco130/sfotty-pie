@@ -18,7 +18,7 @@ import type { AudioOutput } from "./audio.ts";
 const TRACE_RING_SIZE = 8192;
 
 // On a reset, capture this many (loop-compressed) instructions of the boot
-// that follows, then freeze — the warm/cold decision is near the start, so
+// that follows, then freeze - the warm/cold decision is near the start, so
 // this keeps it from being evicted by the post-boot idle loop.
 const RESET_TRACE_CAPTURE = 4096;
 
@@ -37,7 +37,7 @@ const SCANLINE_BATCH = 64;
 const YIELD_INTERVAL = 257;
 
 // When we fall further behind than this (tab jank, a debugger pause), rebase
-// the clock and drop the lost time instead of replaying it — avoids the
+// the clock and drop the lost time instead of replaying it - avoids the
 // spiral of death.
 const MAX_LAG_MS = 100;
 
@@ -47,7 +47,7 @@ export interface EmulatorConfig extends MachineConfig {
 	/** Audio sink. When its context runs, the audio clock paces emulation. */
 	audio?: AudioOutput;
 	/**
-	 * Hold OPTION down for the first frames after a cold boot — how the
+	 * Hold OPTION down for the first frames after a cold boot - how the
 	 * XL/XE disables built-in BASIC (the OS samples CONSOL during init).
 	 */
 	holdOption?: boolean;
@@ -79,7 +79,7 @@ export class Emulator {
 	frameCount = 0;
 
 	/** Called after each yield to the event loop (see {@link #loop}). The host
-	 *  samples the gamepad here — the freshest point, since the browser refreshes
+	 *  samples the gamepad here - the freshest point, since the browser refreshes
 	 *  input state between tasks, and it lands just before the next scanlines read
 	 *  the joystick pins. */
 	afterYield: (() => void) | undefined;
@@ -140,7 +140,7 @@ export class Emulator {
 		this.#traceFreezeAt = -1;
 	}
 
-	/** Traced instructions, oldest first — the last `count`, or all of them. */
+	/** Traced instructions, oldest first - the last `count`, or all of them. */
 	dumpTrace(count?: number): string[] {
 		const total = this.#traceCount;
 		const start = Math.max(
@@ -164,7 +164,7 @@ export class Emulator {
 	// BASIC-disable: hold OPTION for a few frames after each cold boot.
 	readonly #holdOption: boolean;
 
-	// One-shot callbacks fired after a countdown of presented frames — timed key
+	// One-shot callbacks fired after a countdown of presented frames - timed key
 	// releases (the boot OPTION-hold, momentary "tap" pulses). Frame-paced rather
 	// than wall-clock so they stay correct under turbo (where real-time timers
 	// would span dozens of emulated frames) and across tab-hidden stalls.
@@ -173,8 +173,8 @@ export class Emulator {
 	// Wall-clock pacing is per-TV-standard (NTSC ~1.79MHz, PAL ~1.77MHz).
 	readonly #msPerScanline: number;
 
-	// The audio pipeline: per-cycle POKEY+speaker level → anti-alias filter
-	// → nearest-neighbor decimation → DC blocker → fixed-size chunks.
+	// The audio pipeline: per-cycle POKEY+speaker level -> anti-alias filter
+	// -> nearest-neighbor decimation -> DC blocker -> fixed-size chunks.
 	#audio: AudioOutput | null;
 	#filter = new AntiAliasFilter();
 	#cyclesPerSample = 0;
@@ -243,7 +243,7 @@ export class Emulator {
 	coldStart(): void {
 		this.machine.reset(true);
 		this.machine.cpu.reset(true);
-		// Drop any timed releases queued against the old machine — a stale OPTION
+		// Drop any timed releases queued against the old machine - a stale OPTION
 		// release could otherwise cut the fresh boot's hold short.
 		this.#pending = [];
 		this.#startOptionHold();
@@ -251,7 +251,7 @@ export class Emulator {
 
 	/**
 	 * Run `fn` after `frames` presented frames (clamped to at least one). Paced by
-	 * the emulated frame clock — see {@link #pending}.
+	 * the emulated frame clock - see {@link #pending}.
 	 */
 	afterFrames(frames: number, fn: () => void): void {
 		this.#pending.push({ framesLeft: Math.max(1, frames), fn });
@@ -290,7 +290,7 @@ export class Emulator {
 
 			if (this.#turboMode) {
 				// Unthrottled: run a whole emulated frame back-to-back, then
-				// yield a macrotask — the only thing turbo waits on, so input
+				// yield a macrotask - the only thing turbo waits on, so input
 				// and the present loop still get a task turn. No sleep, no audio
 				// gate. One frame per yield self-bounds main-thread hold time.
 				const target = this.frameCount + 1;
@@ -338,7 +338,7 @@ export class Emulator {
 			} else if (ahead < -MAX_LAG_MS) {
 				this.#epoch = performance.now() - this.#scanlines * this.#msPerScanline;
 			} else if (this.#scanlines % YIELD_INTERVAL === 0) {
-				// A macrotask yield — `await void 0` would only drain microtasks
+				// A macrotask yield - `await void 0` would only drain microtasks
 				// and starve rendering, input, and requestAnimationFrame.
 				await yieldMacrotask();
 			}
@@ -363,7 +363,7 @@ export class Emulator {
 			// One whole machine cycle: ANTIC + POKEY + bus + CPU + render, the
 			// audio level returned. Instructions are recorded via onInstruction
 			// (see #recordTrace). a8-web installs no suspending traps, so cycle()
-			// never throws — no resumeCycle() needed here.
+			// never throws - no resumeCycle() needed here.
 			this.#collectAudio(this.machine.cycle(), ag.consoleSpeaker);
 		}
 
@@ -377,7 +377,7 @@ export class Emulator {
 			this.frameCount++;
 
 			// Fire any timed callbacks that come due this frame (e.g. the boot
-			// OPTION-hold release). Collect first, then run — a callback may itself
+			// OPTION-hold release). Collect first, then run - a callback may itself
 			// queue a new pulse without disturbing this pass.
 			if (this.#pending.length > 0) {
 				const due: (() => void)[] = [];

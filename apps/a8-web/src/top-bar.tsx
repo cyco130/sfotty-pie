@@ -28,7 +28,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 
 	// The compact font keeps the bar from wrapping on narrow viewports. It
 	// normally relaxes to full size at `sm` (640px), but an open sidebar steals
-	// ~1/4 of the width, so while it's open we hold compact until `lg` (1024px) —
+	// ~1/4 of the width, so while it's open we hold compact until `lg` (1024px) -
 	// otherwise the bar crowds on a landscape phone.
 	const density = panelOpen
 		? "lg:gap-5 lg:px-3 lg:text-base"
@@ -104,7 +104,7 @@ export function TopBar({ host }: { host: EmulatorHost }) {
 					<Icon name="zap" class="size-6" />
 				</button>
 				<span class="w-16 text-right text-neutral-500 tabular-nums">
-					{fps ? `${fps} fps` : "—"}
+					{fps ? `${fps} fps` : "-"}
 				</span>
 			</div>
 		</header>

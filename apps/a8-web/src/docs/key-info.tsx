@@ -73,7 +73,7 @@ function Produced({ refKey }: { refKey: FunctionRef }) {
 			)}
 			{f.handledInKeyboardIrq && (
 				<div class="text-xs text-neutral-500">
-					Handled in the keyboard IRQ — not remappable.
+					Handled in the keyboard IRQ - not remappable.
 				</div>
 			)}
 			{f.notes?.map((n) => (
@@ -125,7 +125,7 @@ export function KeyInfo({
 				</span>
 				{pinned && (
 					<span class="rounded-sm bg-amber-400/20 px-1.5 py-0.5 text-xs font-medium text-amber-300">
-						Pinned — click again to release
+						Pinned - click again to release
 					</span>
 				)}
 			</div>
@@ -139,7 +139,7 @@ export function KeyInfo({
 						<div>+Control {num(c | 0x80)}</div>
 						<div class={noShiftCtrl ? "text-neutral-600" : ""}>
 							+Shift+Ctrl {num(c | 0xc0)}
-							{noShiftCtrl && " — not scannable"}
+							{noShiftCtrl && " - not scannable"}
 						</div>
 					</div>
 				</div>

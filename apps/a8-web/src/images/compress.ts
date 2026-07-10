@@ -1,7 +1,7 @@
 // Compression at rest for user blobs. `deflate-raw` has the least per-blob
 // overhead, and the library content-hashes the *uncompressed* payload, so the
 // compressed form is purely a storage encoding that nothing above the blob
-// store ever sees. Native streams — zero-dep, available in every browser the
+// store ever sees. Native streams - zero-dep, available in every browser the
 // app targets. Disk images are mostly zeroed sectors, exactly what deflate
 // crushes; ROMs barely move, which is why the blob store keeps whichever is
 // smaller.

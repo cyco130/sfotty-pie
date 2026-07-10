@@ -4,7 +4,7 @@ import { useLocation } from "preact-iso";
  * Two-way bind a set of query-string params to the URL, so view state (a
  * table's sort / filter / page) survives reload and is shareable. Returns the
  * current values (a missing param reads as "") and a setter that merges updates
- * — `null`/`""` deletes a param — and *replaces* the URL, so filtering doesn't
+ * - `null`/`""` deletes a param - and *replaces* the URL, so filtering doesn't
  * spam history. Reactive: a URL change re-renders the caller.
  */
 export function useUrlParams<K extends string>(
@@ -25,7 +25,7 @@ export function useUrlParams<K extends string>(
 			}
 		}
 		const qs = next.toString();
-		route(qs ? `${path}?${qs}` : path, true); // replace — view state, not history
+		route(qs ? `${path}?${qs}` : path, true); // replace - view state, not history
 	};
 
 	return [params, set];

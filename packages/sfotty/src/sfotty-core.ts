@@ -42,8 +42,8 @@ const ANE_MAGIC = 0xee;
 /**
  * The CPU core implementation. Package-internal: hosts use the `Sfotty`
  * facade from [sfotty.ts](./sfotty.ts), which exposes only the host-facing
- * contract. Everything here is reachable by the generated step functions —
- * in particular the `opXxx` micro-op methods — and must stay public *on this
+ * contract. Everything here is reachable by the generated step functions -
+ * in particular the `opXxx` micro-op methods - and must stay public *on this
  * class*, but the class itself is never exported from the package.
  */
 export class SfottyCore {
@@ -61,7 +61,7 @@ export class SfottyCore {
 	dFlag = false;
 	vFlag = false;
 	nFlag = false;
-	// The B flag. Unlike the others it isn't a real register bit — it only exists
+	// The B flag. Unlike the others it isn't a real register bit - it only exists
 	// in the status byte pushed to the stack, where it's 1 for a software push
 	// (BRK/PHP) and 0 for a hardware interrupt (IRQ/NMI). `decode` sets it: true on
 	// a normal fetch, false when it forces the interrupt sequence. setP() ignores
@@ -95,14 +95,14 @@ export class SfottyCore {
 	 * The RDY input line. When the host pulls it false before a read cycle, that
 	 * cycle still issues its bus read but then stalls: no register is mutated and
 	 * `state` does not advance, so the next `run()` repeats the same read until
-	 * RDY is true again. NMOS quirk: only read cycles honor RDY — write cycles
+	 * RDY is true again. NMOS quirk: only read cycles honor RDY - write cycles
 	 * complete regardless.
 	 */
 	RDY = true;
 
 	/**
 	 * The IRQ input line (positive logic here: `true` = asserted). Level-sensitive
-	 * — while it is asserted and the I flag is clear, an IRQ is recognized at an
+	 * - while it is asserted and the I flag is clear, an IRQ is recognized at an
 	 * instruction boundary. The host must wired-OR all its IRQ sources into this
 	 * single boolean.
 	 */
@@ -110,7 +110,7 @@ export class SfottyCore {
 
 	/**
 	 * The NMI input line (positive logic here: `true` = asserted). Edge-triggered
-	 * — a false→true transition latches a pending NMI, serviced at the next
+	 * - a false->true transition latches a pending NMI, serviced at the next
 	 * instruction boundary regardless of the I flag. The host must wired-OR all
 	 * its NMI sources into this single boolean, and must hold the line asserted
 	 * for several cycles until the CPU acknowledges it.
@@ -186,7 +186,7 @@ export class SfottyCore {
 	/**
 	 * Start the reset sequence (emulates the RES line). Puts the CPU into a
 	 * dedicated seven-cycle sequence that decrements S three times, sets I, and
-	 * reads the reset vector at $FFFC/$FFFD into PC — so the next seven run()
+	 * reads the reset vector at $FFFC/$FFFD into PC - so the next seven run()
 	 * calls carry out the reset and land back at DECODE. Timing is not exact (no
 	 * reset-pulse-too-short modeling). When `cold` is true (power-on) the
 	 * registers, flags, and internal latches are first cleared to a known state
@@ -217,7 +217,7 @@ export class SfottyCore {
 			this.#nmiPending = false;
 			this.#interruptDetected = false;
 			// Baseline the edge detector to the current line so a held NMI doesn't
-			// register a phantom false→true edge on the first post-reset cycle.
+			// register a phantom false->true edge on the first post-reset cycle.
 			this.#nmiPrev = this.NMI;
 		}
 		this.crashed = false;
@@ -225,7 +225,7 @@ export class SfottyCore {
 	}
 
 	/**
-	 * The bus read choke point — issues the single read. RDY is not handled here:
+	 * The bus read choke point - issues the single read. RDY is not handled here:
 	 * each read op issues the read through this method and then, if RDY is low,
 	 * bails without mutating state (so the bus still sees the read every stalled
 	 * cycle). A throw from the bus propagates out, before any register changes.
@@ -246,7 +246,7 @@ export class SfottyCore {
 	 * The bus write choke point. Writes ignore RDY entirely (NMOS quirk), so this
 	 * never stalls. The DUMMY table (keyed by microstate) marks the non-committing
 	 * write-back cycle of a read-modify-write instruction, so traps can tell it
-	 * from the real store. Writes are never SPECULATIVE — only reads cross pages.
+	 * from the real store. Writes are never SPECULATIVE - only reads cross pages.
 	 * @internal
 	 */
 	#write(address: number, value: number): void {
@@ -255,48 +255,48 @@ export class SfottyCore {
 	}
 
 	/**
-	 * Human-readable description of a microstate, for logging/debugging — e.g.
-	 * `"LDA abs · cycle 3"` or `"decode"`. Cycles count the opcode fetch as cycle
+	 * Human-readable description of a microstate, for logging/debugging - e.g.
+	 * `"LDA abs - cycle 3"` or `"decode"`. Cycles count the opcode fetch as cycle
 	 * 0 (`decode`), so `code[i]` is cycle `i + 1`, matching the generated step
 	 * names.
 	 */
 	describeState(state: number = this.state): string {
 		if (state === DECODE) return "decode";
 		if (state >= RESET && state <= RESET + 6) {
-			return `reset · cycle ${state - RESET + 1}`;
+			return `reset - cycle ${state - RESET + 1}`;
 		}
 		const instruction = NMOS_INSTRUCTIONS[state >> 3];
 		const cycle = state & 7;
 		if (!instruction || cycle >= instruction.code.length) {
 			return `<invalid state ${state}>`;
 		}
-		return `${instruction.mnemonic} ${instruction.mode} · cycle ${cycle + 1}`;
+		return `${instruction.mnemonic} ${instruction.mode} - cycle ${cycle + 1}`;
 	}
 
 	// --- Micro-op implementations (called by the microcode table) -------------
 	// One method per microcode token, all prefixed `op` so they stand apart from
 	// the public CPU API. The generator maps each token to one of these (e.g.
-	// "r-pc++" → opReadOperand). They are grouped below as bus reads, then bus
+	// "r-pc++" -> opReadOperand). They are grouped below as bus reads, then bus
 	// writes, then internal ops: bus ops perform the single read/write and bump
 	// pointers *after* the access returns (so a bus throw leaves state intact); internal
 	// ops are pure register transfers.
 	//
 	// Bus reads return a boolean: `false` means RDY was low, so the read was issued
-	// to the bus but no register changed — the generated step must bail without
+	// to the bus but no register changed - the generated step must bail without
 	// advancing `state`, leaving the cycle to repeat (and re-read) until RDY rises.
 	// Writes ignore RDY and internal ops never stall, so both return void.
 
 	// Bus reads ----------------------------------------------------------------
 
 	/**
-	 * `opReadDecode` — the decode cycle: read the next opcode
+	 * `opReadDecode` - the decode cycle: read the next opcode
 	 * while asserting the SYNC line. Normally it advances PC and jumps to the
 	 * opcode's microcode. But if a poll latched a pending interrupt, the read is a
 	 * dummy: PC is *not* advanced and the CPU runs the BRK/interrupt sequence
 	 * (`state = 0`) instead of the fetched opcode, with `bFlag` cleared so the
-	 * pushed status has B = 0. The pending flag is consumed here — the sequence
+	 * pushed status has B = 0. The pending flag is consumed here - the sequence
 	 * itself never polls, so without this the next decode would re-enter it.
-	 * Unlike the other bus reads it is a whole step — it sets `state` itself — and
+	 * Unlike the other bus reads it is a whole step - it sets `state` itself - and
 	 * the generator wires it into the DECODE slot rather than mapping it from a
 	 * token. @internal
 	 */
@@ -305,7 +305,7 @@ export class SfottyCore {
 		// that don't commit an instruction: the dummy fetch done here when an
 		// interrupt is pending (the BRK sequence runs instead), and the re-fetch of
 		// an RDY-stalled cycle (re-issued until RDY rises). A committed opcode fetch
-		// is therefore SYNC without DUMMY — what execute traps key on, so they fire
+		// is therefore SYNC without DUMMY - what execute traps key on, so they fire
 		// once on the real fetch, not the dummy or the stall re-reads.
 		// #interruptPending is already latched on entry (the poll ran last cycle).
 		const dummy = this.#interruptPending || !this.RDY;
@@ -345,7 +345,7 @@ export class SfottyCore {
 	}
 
 	/**
-	 * `r-brk`: BRK/interrupt second-cycle read. Reads at PC (the value is a dummy —
+	 * `r-brk`: BRK/interrupt second-cycle read. Reads at PC (the value is a dummy -
 	 * it gets overwritten by the following `dr=pch`) and advances PC *only* on a
 	 * software BRK (`bFlag`); a hardware interrupt leaves PC put, so the pushed
 	 * return address is the interrupted instruction rather than skipping a byte.
@@ -547,22 +547,22 @@ export class SfottyCore {
 		}
 	}
 
-	/** `sha` (SHA/AHX): store A & X & (H+1) — unstable. @internal */
+	/** `sha` (SHA/AHX): store A & X & (H+1) - unstable. @internal */
 	opSha(): void {
 		this.#storeHigh(this.A & this.X);
 	}
 
-	/** `shx` (SHX/SXA): store X & (H+1) — unstable. @internal */
+	/** `shx` (SHX/SXA): store X & (H+1) - unstable. @internal */
 	opShx(): void {
 		this.#storeHigh(this.X);
 	}
 
-	/** `shy` (SHY/SYA): store Y & (H+1) — unstable. @internal */
+	/** `shy` (SHY/SYA): store Y & (H+1) - unstable. @internal */
 	opShy(): void {
 		this.#storeHigh(this.Y);
 	}
 
-	/** `shs` (TAS/SHS): SP = A & X, then store A & X & (H+1) — unstable. @internal */
+	/** `shs` (TAS/SHS): SP = A & X, then store A & X & (H+1) - unstable. @internal */
 	opShs(): void {
 		this.S = this.A & this.X;
 		this.#storeHigh(this.A & this.X);
@@ -697,7 +697,7 @@ export class SfottyCore {
 		}
 	}
 
-	/** `ro-sbx` (SBX/AXS): X ← (A & X) − imm; carry set on no borrow. @internal */
+	/** `ro-sbx` (SBX/AXS): X = (A & X) - imm; carry set on no borrow. @internal */
 	opSbx(): void {
 		const diff = (this.A & this.X) - this.#dr;
 		this.cFlag = diff >= 0;
@@ -705,13 +705,13 @@ export class SfottyCore {
 		this.#setNZ(this.X);
 	}
 
-	/** `ro-ane` (ANE/XAA): A ← (A | magic) & X & imm — unstable. @internal */
+	/** `ro-ane` (ANE/XAA): A = (A | magic) & X & imm - unstable. @internal */
 	opAne(): void {
 		this.A = (this.A | ANE_MAGIC) & this.X & this.#dr;
 		this.#setNZ(this.A);
 	}
 
-	/** `ro-lxa` (LXA/LAX imm): A = X ← (A | magic) & imm — unstable. @internal */
+	/** `ro-lxa` (LXA/LAX imm): A = X = (A | magic) & imm - unstable. @internal */
 	opLxa(): void {
 		const value = (this.A | ANE_MAGIC) & this.#dr;
 		this.A = value;
@@ -719,7 +719,7 @@ export class SfottyCore {
 		this.#setNZ(value);
 	}
 
-	/** `ro-las` (LAS/LAR): A = X = S ← memory & S. @internal */
+	/** `ro-las` (LAS/LAR): A = X = S = memory & S. @internal */
 	opLas(): void {
 		const value = this.#dr & this.S;
 		this.A = value;
@@ -881,7 +881,7 @@ export class SfottyCore {
 		this.#setNZ(this.X);
 	}
 
-	/** `s=x` (TXS) — does not affect flags. @internal */
+	/** `s=x` (TXS) - does not affect flags. @internal */
 	opSFromX(): void {
 		this.S = this.X;
 	}
@@ -1029,8 +1029,8 @@ export class SfottyCore {
 
 	/**
 	 * `ar=vector`: select the interrupt vector at the push-P cycle. If an NMI is
-	 * latched it takes priority — address latch = `$FFFA` and the NMI is
-	 * acknowledged (`#nmiPending` cleared) — so an NMI asserted early enough in a
+	 * latched it takes priority - address latch = `$FFFA` and the NMI is
+	 * acknowledged (`#nmiPending` cleared) - so an NMI asserted early enough in a
 	 * BRK/IRQ sequence hijacks it. Otherwise it's the IRQ/BRK vector `$FFFE`.
 	 * @internal
 	 */
@@ -1049,7 +1049,7 @@ export class SfottyCore {
 	 * `nmi-hold`: the interrupt sequence's last cycle. Drop a still-pending NMI if
 	 * its line has gone inactive. An NMI latched too late to hijack the vector (at
 	 * the push-P cycle) is only serviced if it outlasts the sequence; a shorter
-	 * pulse is lost here. It only clears — never sets — so an NMI already consumed
+	 * pulse is lost here. It only clears - never sets - so an NMI already consumed
 	 * by the vector selection (a hijack) is unaffected. @internal
 	 */
 	opNmiHold(): void {
@@ -1080,7 +1080,7 @@ export class SfottyCore {
 	}
 
 	// TODO(fatih): CIM should set this on its first cycle so we know early.
-	/** `cc--`: crash — flag it; the microcode repeats this cycle forever. @internal */
+	/** `cc--`: crash - flag it; the microcode repeats this cycle forever. @internal */
 	opCrash(): void {
 		this.crashed = true;
 	}

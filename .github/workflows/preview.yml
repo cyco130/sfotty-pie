@@ -54,7 +54,7 @@ jobs:
             --branch "$HEAD_REF" --commit-dirty=true | tee wrangler-output.txt
           # Parse by label rather than fixed offsets so a wrangler output tweak
           # doesn't silently mangle the URLs. `|| true` so a parse miss doesn't
-          # fail the step — the deploy itself already succeeded above.
+          # fail the step - the deploy itself already succeeded above.
           alias_url=$(grep -iE 'alias' wrangler-output.txt | grep -oiE 'https://[a-z0-9.-]+\.pages\.dev' | head -1 || true)
           hash_url=$(grep -iE 'peek|deployment complete|view' wrangler-output.txt | grep -oiE 'https://[a-z0-9.-]+\.pages\.dev' | head -1 || true)
           echo "alias_url=$alias_url" >> "$GITHUB_OUTPUT"

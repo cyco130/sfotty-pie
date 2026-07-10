@@ -3,24 +3,24 @@ import type { EmulatorHost } from "./host.ts";
 import { labels, type LabelKey } from "./messages.ts";
 
 export interface CommandContext {
-	/** The live machine — for the key-matrix and joystick commands. */
+	/** The live machine - for the key-matrix and joystick commands. */
 	emulator: Emulator;
-	/** The application host — for app-level commands (audio, pause, menu). */
+	/** The application host - for app-level commands (audio, pause, menu). */
 	host: EmulatorHost;
 }
 
 /**
  * A command: a static label key (into {@link labels}) plus its action. `run` is
- * the action — or, for a control, its press half. `release` is the matching key
+ * the action - or, for a control, its press half. `release` is the matching key
  * up; when present, a momentary trigger (palette, click) auto-releases after a
  * short pulse so it doesn't leave the control stuck, while a sustained trigger
- * (held key, touch) ties release to its own up event. Absent `release` ⇒
+ * (held key, touch) ties release to its own up event. Absent `release` =>
  * press-only: app verbs (POWER_CYCLE, SET_*) and Break alike.
  *
- * The palette lists every command — it's the catch-all fallback for any action
+ * The palette lists every command - it's the catch-all fallback for any action
  * whose key binding is unavailable; a held control surfaced there just pulses
  * (one keystroke / one joystick step). `palette: false` removes one from that
- * list (still bindable) — wired but unused for now, for a future bindable-only
+ * list (still bindable) - wired but unused for now, for a future bindable-only
  * verb like "turbo while held".
  */
 interface CommandSpec {
@@ -29,13 +29,13 @@ interface CommandSpec {
 	release?: (ctx: CommandContext) => void;
 	palette?: boolean;
 	// A POKEY keyboard-matrix key (one shared register). The keyboard releases
-	// these only when the last held matrix key is up — see {@link MATRIX_COMMANDS}.
+	// these only when the last held matrix key is up - see {@link MATRIX_COMMANDS}.
 	matrix?: boolean;
 }
 
 // On real hardware the keyboard matrix can't scan a key whose base scan code is
-// $00–$07 or $10–$17 while both Ctrl and Shift are held, so the press does
-// nothing. Those Ctrl+Shift commands ($C0–$C7, $D0–$D7 — bits $08 and $20 both
+// $00-$07 or $10-$17 while both Ctrl and Shift are held, so the press does
+// nothing. Those Ctrl+Shift commands ($C0-$C7, $D0-$D7 - bits $08 and $20 both
 // clear) stay bound (harmlessly) but are hidden from the palette, where a no-op
 // is just clutter.
 const isDeadCtrlShift = (code: number): boolean =>
@@ -55,7 +55,7 @@ const press = (code: number, label: LabelKey): CommandSpec => ({
 // Joystick direction/trigger presses, one factory per kind. `port` is 0-3;
 // direction `mask` bits are 1 = up, 2 = down, 4 = left, 8 = right. Held while a
 // trigger sustains them; a palette pick pulses a single step. Ports 2/3 exist on
-// the 800 only — on the XL/XE the machine ignores them (see
+// the 800 only - on the XL/XE the machine ignores them (see
 // `machine.joystickDown`), so their commands are harmless there.
 const joyDir = (port: number, mask: number, label: LabelKey): CommandSpec => ({
 	label,
@@ -96,8 +96,8 @@ export const commands = {
 		run: ({ host }) => host.toggleTurboMode(),
 	},
 	// Turbo while held: press runs unthrottled, release returns to real time.
-	// Bindable-only — a momentary palette pulse would enable turbo for a couple of
-	// frames, which is pointless — so it's kept out of the palette.
+	// Bindable-only - a momentary palette pulse would enable turbo for a couple of
+	// frames, which is pointless - so it's kept out of the palette.
 	TURBO_HOLD: {
 		label: "TURBO_HOLD",
 		run: ({ host }) => host.setTurboMode(true),
@@ -134,12 +134,12 @@ export const commands = {
 		run: ({ host }) => host.toggleAudio(),
 	},
 
-	// Sidebar panels — each opens its panel; CLOSE_PANEL dismisses whichever is
+	// Sidebar panels - each opens its panel; CLOSE_PANEL dismisses whichever is
 	// showing. (Showing one when it's already open is a no-op.)
 	OPEN_MENU: { label: "OPEN_MENU", run: ({ host }) => host.showPanel("menu") },
 	// The consolidated settings view (opens on its first tab, Hardware). The
 	// menu's Settings entry; hidden from the palette, where the per-tab
-	// commands (Settings: Hardware…, Display…, …) cover it without duplication.
+	// commands (Settings: Hardware..., Display..., ...) cover it without duplication.
 	OPEN_SETTINGS: {
 		label: "OPEN_SETTINGS",
 		run: ({ host }) => host.showPanel("config"),
@@ -153,7 +153,7 @@ export const commands = {
 		label: "OPEN_CONFIG",
 		run: ({ host }) => host.showPanel("config"),
 	},
-	// The command palette (this surface) — also the fallback for any action whose
+	// The command palette (this surface) - also the fallback for any action whose
 	// key binding is unavailable.
 	OPEN_PALETTE: {
 		label: "OPEN_PALETTE",
@@ -570,7 +570,7 @@ export const commands = {
 		release: ({ emulator }) => emulator.machine.consoleKeyUp(1),
 	},
 
-	// Break — a release isn't observable by software (no key-up), so press-only.
+	// Break - a release isn't observable by software (no key-up), so press-only.
 	PRESS_BREAK: {
 		label: "PRESS_BREAK",
 		run: ({ emulator }) => emulator.machine.breakKeyDown(),
@@ -628,7 +628,7 @@ for (const key of Object.keys(commands) as Command[]) {
 	}
 }
 
-/** Every bindable command name — the key-binding and palette surface. */
+/** Every bindable command name - the key-binding and palette surface. */
 export type Command = keyof typeof commands;
 
 /** The display label for a command (its current-language string). */
@@ -636,7 +636,7 @@ export function labelOf(command: Command): string {
 	return labels[commands[command].label];
 }
 
-/** A label's searchable text: a trailing "[…]" annotation (e.g. "[reboots]") is
+/** A label's searchable text: a trailing "[...]" annotation (e.g. "[reboots]") is
  *  a reader's aside, shown but not matched by search. */
 export function searchLabel(command: Command): string {
 	return labelOf(command).replace(/\s*\[[^\]]*\]$/u, "");
@@ -657,7 +657,7 @@ export const MATRIX_COMMANDS: ReadonlySet<Command> = new Set(
 );
 
 /**
- * The commands the palette lists, sorted alphabetically by label — its default
+ * The commands the palette lists, sorted alphabetically by label - its default
  * (empty-query) order. Everything is listed (the palette is the fallback for any
  * unavailable binding) unless a command opts out with `palette: false`.
  * (Recently-used commands will float to the top later.)

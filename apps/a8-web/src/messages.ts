@@ -2,7 +2,7 @@
  * The app's user-facing text, in one place so it can become a per-language
  * translation table later. Two catalogs live here:
  *
- * - `messages`: prose and labels — alerts, status text, panel titles, button
+ * - `messages`: prose and labels - alerts, status text, panel titles, button
  *   labels, placeholders, and help/About copy. Parameterized messages are
  *   functions; everything else is a plain string.
  * - `labels`: the command catalog (keyed by command label key; see commands.ts).
@@ -40,10 +40,10 @@ export const messages = {
 			thirdPartyLicenses: "Third-party licenses",
 		},
 		emu: {
-			title: "A8 Web — Sfotty Pie",
+			title: "A8 Web - Sfotty Pie",
 		},
 		atari: {
-			title: "Atari 8-bit — Sfotty Pie",
+			title: "Atari 8-bit - Sfotty Pie",
 			heading: "Atari 8-bit",
 			emu: "Emulator",
 			docs: "Docs",
@@ -52,23 +52,23 @@ export const messages = {
 			referenceDesc: "Keyboard, ATASCII, and character tables.",
 		},
 		reference: {
-			title: "Reference — Sfotty Pie",
+			title: "Reference - Sfotty Pie",
 			heading: "Atari 8-bit reference",
 			atasciiKeyboard: "ATASCII & keyboard",
 		},
 		atasciiKeyboard: {
-			title: "ATASCII & keyboard — Sfotty Pie",
+			title: "ATASCII & keyboard - Sfotty Pie",
 		},
 		labs: {
-			title: "Labs — Sfotty Pie",
+			title: "Labs - Sfotty Pie",
 			heading: "Labs",
 			keyboard: "Keyboard event lab",
 		},
 		keyboard: {
-			title: "Keyboard event lab — Sfotty Pie",
+			title: "Keyboard event lab - Sfotty Pie",
 		},
 		notFound: {
-			title: "Not found — Sfotty Pie",
+			title: "Not found - Sfotty Pie",
 			heading: "Page not found",
 			body: "That page doesn’t exist.",
 			home: "Go home",
@@ -107,7 +107,7 @@ export const messages = {
 		rebootToApply: "Reboot to apply",
 		keys: "Keys",
 		about: "About",
-		aboutBlurb: "Sfotty Pie A8 Web — an Atari 8-bit emulator. MIT-licensed.",
+		aboutBlurb: "Sfotty Pie A8 Web - an Atari 8-bit emulator. MIT-licensed.",
 		sourceOnGitHub: "Source on GitHub",
 		firmwareNotice:
 			"Bundled firmware (AltirraOS, Altirra BASIC, Atari++) is used under its own license.",
@@ -164,7 +164,7 @@ export const messages = {
 		},
 	},
 
-	// The main menu is a launcher, so its entries read as short destinations —
+	// The main menu is a launcher, so its entries read as short destinations -
 	// not the palette's "Category: verb" phrasing (though they run the same
 	// commands). Order (after `docs`) matches MENU_COMMANDS in sidebar.tsx;
 	// `docs` is a standalone link to the docs subapp, not a command.
@@ -199,7 +199,7 @@ export const messages = {
 		primary: "Primary",
 		makePrimary: "Make primary",
 		layoutWarning:
-			"Key labels assume a US layout — this browser doesn't expose your keyboard layout, so they may not match your keys.",
+			"Key labels assume a US layout - this browser doesn't expose your keyboard layout, so they may not match your keys.",
 		setupLayout: "Set up your keyboard",
 		layoutTitle: "Keyboard layout",
 		layoutIntro:
@@ -213,8 +213,8 @@ export const messages = {
 		// Display names for the layout picker. Several labels can share one built-in
 		// map (Finnish uses the Swedish map, Catalan the Spanish, Austrian the
 		// German, Slovenian the Croatian; Dutch and Polish are US QWERTY at the
-		// base layer). These are language names — translatable copy, not hardware
-		// tokens — so unlike the machine/RAM names they live here.
+		// base layer). These are language names - translatable copy, not hardware
+		// tokens - so unlike the machine/RAM names they live here.
 		layoutNames: {
 			us: "English (US)",
 			uk: "English (UK)",
@@ -263,9 +263,9 @@ export const messages = {
 		confirmReset:
 			"Reset all key bindings to defaults? Your customizations will be lost.",
 		unknownCommand: "Unknown command",
-		warnTyping: "Types in Character mode — only fires in Positional.",
+		warnTyping: "Types in Character mode - only fires in Positional.",
 		warnConflict: (label: string) =>
-			`Currently "${label}" — adding will reassign it.`,
+			`Currently "${label}" - adding will reassign it.`,
 	},
 
 	roms: {
@@ -291,7 +291,7 @@ export const messages = {
 		title: "Favorites",
 		recentsTitle: "Recent",
 		empty:
-			"No favorites yet — star games in the menu's Recents list or in the library.",
+			"No favorites yet - star games in the menu's Recents list or in the library.",
 		hint: "🕹 select · A / ✕ boot · B / ○ back",
 	},
 
@@ -337,14 +337,14 @@ export const messages = {
 		sourceUser: "Yours",
 		prev: "Prev",
 		next: "Next",
-		// Field labels — filter selects, the item detail view, and table heads.
+		// Field labels - filter selects, the item detail view, and table heads.
 		columns: {
 			name: "Name",
 			type: "Type",
 			size: "Size",
 			source: "Source",
 		},
-		// Extra table head for a type-filtered disk view — sectors×bytes-per-sector.
+		// Extra table head for a type-filtered disk view - sectors×bytes-per-sector.
 		// `sectors`/`bps` label the dismissable filter chips for each part.
 		detail: {
 			geometry: "Geometry",
@@ -360,6 +360,15 @@ export const messages = {
 			sectors: "Sectors",
 			sectorSize: "Sector size",
 		},
+		// The cartridge-type picker on unknown ROMs / cart entries.
+		cartTypeUnknown:
+			"The cartridge type of this ROM couldn't be detected. Pick one to boot it - if it doesn't run, come back and try another.",
+		cartTypeUnknownToast: (name: string) =>
+			`${name}: Pick a cartridge type first`,
+		pickCartType: "Pick a cartridge type…",
+		suggestedSuffix: " (suggested)",
+		notEmulatedSuffix: " - not emulated yet",
+		is5200Suffix: " - Atari 5200",
 		// The slot flags an 8K cart can be tagged with (the BASIC / built-in-game
 		// ROM slots). "BASIC" is a hardware token; the rest is translatable.
 		slots: {
@@ -382,9 +391,10 @@ export const messages = {
 			cart: "Cartridge",
 			disk: "Disk",
 			xex: "Executable",
+			"unknown-rom": "Unknown ROM",
 		},
 		range: (from: number, to: number, total: number): string =>
-			`${from}–${to} of ${total}`,
+			`${from}-${to} of ${total}`,
 		uploaded: (
 			added: number,
 			deduped: number,
@@ -412,7 +422,7 @@ export const messages = {
 			"Wipe the entire library AND all saved settings? This can't be undone.",
 		confirmDefaults:
 			"Reset all settings to defaults? Saved settings and key bindings will be lost.",
-		everything: "Reset everything — library and settings",
+		everything: "Reset everything - library and settings",
 		tab: "This tab reset to your saved settings",
 		defaults: "All settings reset to defaults",
 	},
@@ -424,8 +434,8 @@ export const messages = {
 		coldReset: "Cold reset",
 	},
 
-	// Keyboard key and modifier labels. macOS uses glyphs (⌘⇧…, ⌫, ↑) kept inline —
-	// they're symbols, not translatable copy — and so does "fn". Windows spells
+	// Keyboard key and modifier labels. macOS uses glyphs (⌘⇧…, ⌫, ↑) kept inline -
+	// they're symbols, not translatable copy - and so does "fn". Windows spells
 	// keys with the short, localizable words below; bare modifier keys spell their
 	// name in full on macOS (Control/Option/Command) but short on Windows.
 	keys: {
@@ -434,7 +444,7 @@ export const messages = {
 		// macOS full forms for bare modifier keys (Shift is the same short/full).
 		modFull: { control: "Control", option: "Option", command: "Command" },
 		side: { left: "Left", right: "Right" },
-		// Named keys — Windows short forms (macOS uses glyphs / fn-combos).
+		// Named keys - Windows short forms (macOS uses glyphs / fn-combos).
 		backspace: "BkSp",
 		enter: "Enter",
 		tab: "Tab",
@@ -485,7 +495,7 @@ export const messages = {
 		wideGamutActive: "Output: Display P3 (wide gamut)",
 		wideGamutOff: "Output: sRGB",
 		notRunning:
-			"The machine is on the other standard — these settings preview in the guide below only.",
+			"The machine is on the other standard - these settings preview in the guide below only.",
 		overscanPresets: {
 			full: "Full",
 			normal: "Normal",
@@ -498,9 +508,9 @@ export const messages = {
 			calibrated: "Calibrated",
 			blueGr0: "Blue GR. 0",
 		} as Record<string, string>,
-		guideGrays: "Grays 0–15",
-		guideHues: "Hues 1–15 · luma 8",
-		guideOs: "OS defaults PF0–PF3",
+		guideGrays: "Grays 0-15",
+		guideHues: "Hues 1-15 · luma 8",
+		guideOs: "OS defaults PF0-PF3",
 		guideWrap: "Hue 1 vs hue 15 · luma 8",
 	},
 
@@ -512,15 +522,17 @@ export const messages = {
 	},
 
 	errors: {
-		osRom: "that looks like an OS ROM, not something loadable",
-		unrecognized: "unrecognized file format",
+		osRom: "That looks like an OS ROM, not something loadable.",
+		unrecognized: "Unrecognized file format.",
+		cartTypeUnsupported: "This cartridge type isn't emulated yet.",
+		cart5200: "Atari 5200 cartridges can't run on this machine.",
 		audioUnavailable: "Audio is unavailable in this browser.",
 		audioUnavailableReason: (reason: string) => `Audio unavailable: ${reason}`,
 		noWritableDisk: "No writable disk in D1: to download.",
 		noDiskToSave: "No disk in D1: to save.",
 		notLibraryDisk: "Only a disk attached from the library can be saved.",
 		noDiskToDetach: "No disk in D1: to detach.",
-		notACartridge: "not a cartridge image",
+		notACartridge: "Not a cartridge image.",
 		noCartridge: "No cartridge to detach.",
 		fullscreenUnavailable: "Full screen isn't available in this browser.",
 		noCompatibleOs: (model: string, tv: string) =>
@@ -528,7 +540,7 @@ export const messages = {
 	},
 
 	// Announcements (info/warning toasts) for state changes that would
-	// otherwise be silent — especially palette commands. Present tense.
+	// otherwise be silent - especially palette commands. Present tense.
 	toasts: {
 		controllerConnected: (name: string, port: number | null) =>
 			port === null
@@ -553,6 +565,7 @@ export const messages = {
 			`Keyboard: ${mode === "positional" ? "Positional" : "Character"} mode`,
 		keyBindingsReset: "Key bindings reset to defaults",
 		saving: (name: string) => `Saving (${name})`,
+		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
 		copy: "Copy",
 		copied: "Copied",
@@ -563,7 +576,7 @@ export const messages = {
 /**
  * The flat label catalog. Today it is the English strings; it is shaped to
  * become a per-language translation table later (commands reference these keys,
- * not the strings). No interpolation yet — add it if/when a label needs it.
+ * not the strings). No interpolation yet - add it if/when a label needs it.
  */
 export const labels = {
 	POWER_CYCLE: "Atari: Reboot (cold reset)",

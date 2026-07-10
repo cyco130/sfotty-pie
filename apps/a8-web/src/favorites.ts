@@ -1,4 +1,4 @@
-// Starred games — the game picker's shelf (see favorites-menu.tsx). A global
+// Starred games - the game picker's shelf (see favorites-menu.tsx). A global
 // (cross-tab) ordered id list in localStorage, like the recents history;
 // entries resolve against the library when rendered, skipping any that no
 // longer exist. Starring happens in the menu's Recents list, which includes

@@ -151,7 +151,7 @@ test("the 800 Reset key drives the RNMI line, not the reset line", () => {
 	const machine = makeMachine("800");
 
 	// Set up some PIA state: it must survive, since nothing pulses the
-	// 400/800 hardware reset line — the Reset key is only an NMI source.
+	// 400/800 hardware reset line - the Reset key is only an NMI source.
 	machine.write(0xd302, 0x3c, ReadOptions.NONE); // PACTL: CA2 manual high, data register
 	machine.write(0xd300, 0xa5, ReadOptions.NONE); // PORTA output latch
 

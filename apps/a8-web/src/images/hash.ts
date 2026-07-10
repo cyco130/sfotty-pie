@@ -1,4 +1,4 @@
-// SHA-256 of an image's canonical payload, hex-encoded — the library's content
+// SHA-256 of an image's canonical payload, hex-encoded - the library's content
 // identifier (dedup detection + content-addressed blob refs). `crypto.subtle`
 // is secure-context-only, which dev already runs under (HTTPS).
 

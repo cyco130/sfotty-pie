@@ -2,7 +2,7 @@
 ;
 ; Three single-density boot sectors loaded at $0700. The OS boots them and
 ; calls `init` through DOSINI; the loader then reads the XEX file laid out
-; from sector 4 onward — `file_size` is patched by the image builder — and
+; from sector 4 onward - `file_size` is patched by the image builder - and
 ; honors the INITAD/RUNAD protocol like DOS does.
 
 .import "./atari.s"
@@ -17,7 +17,7 @@ BOOT_ERROR_DISK = 'd'
 BOOT_ERROR_CHUNK = 'c'
 
 ; Zero page workspace. This overlaps ZIOCB ($20-$2F), which any INITAD
-; routine doing CIO calls will clobber — safe here, because both variables
+; routine doing CIO calls will clobber - safe here, because both variables
 ; are freshly initialized before every read and INITAD code only runs
 ; between reads.
 count = $20			; number of bytes to read
@@ -96,7 +96,7 @@ read_chunk:
 	sta file_size + 2
 	bcs read_ok
 
-	; Read past EOF: the file is done — run it. (Real DOS doesn't treat a
+	; Read past EOF: the file is done - run it. (Real DOS doesn't treat a
 	; short final chunk as an error either, and some XEX files rely on it.)
 	pla
 	pla
@@ -151,7 +151,7 @@ error:
 init:
 	; Present a completed disk boot, the state DOS-loaded executables see:
 	; BOOTQ = disk-booted, COLDST clear. We load everything from inside the
-	; boot init, so the OS hasn't set these yet — and a game that restarts
+	; boot init, so the OS hasn't set these yet - and a game that restarts
 	; itself by hijacking DOSVEC and jumping through the OS warmstart (e.g.
 	; Bruce Lee) would have that warmstart turned into a cold reboot of
 	; this very disk by the mid-boot state.
@@ -161,7 +161,7 @@ init:
 	sta COLDST
 
 	; Default DOSINI to the OS cold start, so a Reset with no game hook
-	; re-boots this disk and reloads the executable — this loader consumes
+	; re-boots this disk and reloads the executable - this loader consumes
 	; its own state (file_size, sector) and can't be re-entered. The OS
 	; points DOSINI at us before this call, so the write sticks; games
 	; that hook Reset (like Bruce Lee) overwrite it again.
@@ -246,7 +246,7 @@ chunk_ok:
 
 run:
 	; Done, run the executable. If it ever returns, there is nothing left to
-	; run — enter the blackboard (Memo Pad) through its public vector, which
+	; run - enter the blackboard (Memo Pad) through its public vector, which
 	; also lets a host harness trap BLKBDV to end the session.
 	jsr go_run
 	jmp BLKBDV

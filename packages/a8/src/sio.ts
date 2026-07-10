@@ -44,12 +44,12 @@ export interface SioHandlerOptions {
  *
  * The trap is a thin translator: each SIO command maps to a method on the
  * {@link AtrImage} medium (read/write a sector, report write-protect and
- * density). Disk behavior lives on the image, not here — so a future real
+ * density). Disk behavior lives on the image, not here - so a future real
  * drive (a 1050/Happy with its own 6507 running the protocol on the wire)
  * could slot in behind `getDisk` without rewriting this trap; it'd be a
  * separate subsystem, not a refactor of it.
  *
- * The handler is idempotent by design — a WSYNC stall can repeat the trapped
+ * The handler is idempotent by design - a WSYNC stall can repeat the trapped
  * fetch (re-running a write just replays the same bytes to the same sector).
  */
 export function createSioHandler(

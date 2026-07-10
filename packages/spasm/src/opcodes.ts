@@ -1,5 +1,5 @@
 // Generated from @sfotty-pie/sfotty's NMOS_OPCODES by generate-opcodes.ts.
-// Do not edit by hand — run `pnpm generate:opcodes` to regenerate.
+// Do not edit by hand - run `pnpm generate:opcodes` to regenerate.
 // Documented NMOS 6502 opcodes only; undocumented opcodes are excluded for now.
 
 export type Mode =

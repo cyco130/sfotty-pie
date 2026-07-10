@@ -16,7 +16,7 @@ test("defaults are the Normal preset per standard, frameBlending off", () => {
 	expect(d.pal.frameBlending).toBe(0);
 });
 
-test("sanitizeFrameBlending clamps to 0–0.9", () => {
+test("sanitizeFrameBlending clamps to 0-0.9", () => {
 	expect(sanitizeFrameBlending(-1)).toBe(0);
 	expect(sanitizeFrameBlending(0.5)).toBe(0.5);
 	expect(sanitizeFrameBlending(1)).toBe(0.9);
@@ -32,8 +32,8 @@ test("the full frame crops to the whole buffer", () => {
 });
 
 test("no-overscan is exactly the OS playfield window", () => {
-	// Playfield: absolute hi-res 96..415 → buffer 28..347; display vcount
-	// 32..223 → buffer rows 24..215.
+	// Playfield: absolute hi-res 96..415 -> buffer 28..347; display vcount
+	// 32..223 -> buffer rows 24..215.
 	expect(overscanCrop({ width: 320, height: 192 })).toEqual({
 		left: 28,
 		top: 24,
@@ -42,8 +42,8 @@ test("no-overscan is exactly the OS playfield window", () => {
 	});
 });
 
-test("336×208 sits centred on the playfield, not the buffer", () => {
-	// 336 → absolute 88..423 → buffer left 20; 208 → vcount 24..231 → top 16.
+test("336x208 sits centred on the playfield, not the buffer", () => {
+	// 336 -> absolute 88..423 -> buffer left 20; 208 -> vcount 24..231 -> top 16.
 	expect(overscanCrop({ width: 336, height: 208 })).toEqual({
 		left: 20,
 		top: 16,
@@ -72,12 +72,12 @@ test("palette defaults come from each standard's first preset", () => {
 	expect(d.ntsc.palette).toEqual(PALETTE_PRESETS.ntsc["vintage"]);
 	expect(d.pal.palette).toEqual(PALETTE_PRESETS.pal["calibrated"]);
 	// The NTSC presets differ only in tint (the display's knob): Vintage's
-	// period −40° hue 1 vs Modern's calibrated −57°.
+	// period -40 deg hue 1 vs Modern's calibrated -57 deg.
 	expect(PALETTE_PRESETS.ntsc["modern"]).toEqual({
 		...PALETTE_PRESETS.ntsc["vintage"]!,
 		hue1Angle: 303,
 	});
-	// "15 hues" is the equal-spacing camp: 360/15 = 24°/step (hue 15 stays
+	// "15 hues" is the equal-spacing camp: 360/15 = 24 deg/step (hue 15 stays
 	// distinct from hue 1), tinted to keep Vintage's GR.0 blue.
 	expect(PALETTE_PRESETS.ntsc["hues15"]).toEqual({
 		...PALETTE_PRESETS.ntsc["vintage"]!,
@@ -102,7 +102,7 @@ test("sanitizePalette clamps to slider ranges", () => {
 			brightness: -2,
 			contrast: 9,
 			gamma: 0,
-			primaries: "vga" as never, // unknown → safe default
+			primaries: "vga" as never, // unknown -> safe default
 		}),
 	).toEqual({
 		hue1Angle: 360,

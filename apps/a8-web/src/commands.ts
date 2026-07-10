@@ -555,25 +555,25 @@ export const commands = {
 
 	PRESS_RESET: {
 		label: "PRESS_RESET",
-		run: ({ emulator }) => (emulator.consolePanel.reset = true),
-		release: ({ emulator }) => (emulator.consolePanel.reset = false),
+		run: ({ emulator }) => (emulator.machine.console.reset = true),
+		release: ({ emulator }) => (emulator.machine.console.reset = false),
 	},
 
 	// Console buttons
 	PRESS_OPTION: {
 		label: "PRESS_OPTION",
-		run: ({ emulator }) => (emulator.consolePanel.option = true),
-		release: ({ emulator }) => (emulator.consolePanel.option = false),
+		run: ({ emulator }) => (emulator.machine.console.option = true),
+		release: ({ emulator }) => (emulator.machine.console.option = false),
 	},
 	PRESS_SELECT: {
 		label: "PRESS_SELECT",
-		run: ({ emulator }) => (emulator.consolePanel.select = true),
-		release: ({ emulator }) => (emulator.consolePanel.select = false),
+		run: ({ emulator }) => (emulator.machine.console.select = true),
+		release: ({ emulator }) => (emulator.machine.console.select = false),
 	},
 	PRESS_START: {
 		label: "PRESS_START",
-		run: ({ emulator }) => (emulator.consolePanel.start = true),
-		release: ({ emulator }) => (emulator.consolePanel.start = false),
+		run: ({ emulator }) => (emulator.machine.console.start = true),
+		release: ({ emulator }) => (emulator.machine.console.start = false),
 	},
 
 	// Break - a release isn't observable by software (no key-up), so press-only.

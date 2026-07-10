@@ -13,7 +13,7 @@ import {
 	type WriteObserver,
 } from "./mmu.ts";
 import { builtinSlotRom, type Cartridge } from "./cartridge.ts";
-import { ConsoleConnector } from "./console-connector.ts";
+import { ConsolePanel } from "./console-panel.ts";
 import { JoystickConnector } from "./joystick-connector.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
@@ -112,9 +112,10 @@ export interface MachineConfig {
  * host's business.
  */
 export class Atari implements Memory {
-	// Connectors - the supported host surface; devices plug in here.
+	// The host surface: connectors (devices plug in) and the built-in
+	// controls (the console panel; the cartridge accessor below).
 	readonly joysticks: readonly JoystickConnector[];
-	readonly console: ConsoleConnector;
+	readonly console: ConsolePanel;
 
 	get cartridge(): Cartridge | undefined {
 		return this.#cartridge;
@@ -192,7 +193,7 @@ export class Atari implements Memory {
 		});
 
 		this.joysticks = this.#connectJoystickConnectors();
-		this.console = this.#connectConsoleConnector();
+		this.console = this.#connectConsolePanel();
 
 		// The slot starts empty, via the accessor: on XL/XE that drives the
 		// cartridge sense (TRIG3) low, which GTIA's own power-on default
@@ -282,83 +283,38 @@ export class Atari implements Memory {
 		return [joystick0, joystick1, joystick2, joystick3];
 	}
 
-	// Create and wire the console connector - the wires between the console
-	// shell and the components. Connector signals are wire levels; this is
-	// the only place that knows which chip pins the console wires land on.
-	#connectConsoleConnector(): ConsoleConnector {
-		const connector = new ConsoleConnector();
-		const gtia = this.anticGtia;
-		const pia = this.pia;
-
-		// The power switch cold-resets every component, the CPU included.
-		connector.power.watch(() => {
-			this.#reset(true);
-			this.cpu.reset(true);
-		});
-
-		// The Reset key. XL/XE: the system reset line soft-resets the
-		// components immediately and holds the CPU's RES until released (see
-		// resetAsserted). 400/800: it drives ANTIC's RNMI instead - a
-		// software warmstart, nothing is hardware-reset.
-		connector.reset.watch((source) => {
-			if (this.#xl) {
-				if (source.value) {
-					this.#reset(false);
-					this.#resetHeld = true;
+	// The console shell's controls are part of the machine, not a socketed
+	// device - no connector layer. This is the only place that knows which
+	// chip ends the panel's wires land on.
+	#connectConsolePanel(): ConsolePanel {
+		return new ConsolePanel({
+			gtia: this.anticGtia,
+			// The LED lines sit on PIA PB2/PB3. Physically a 1200XL feature,
+			// but the wires are ordinary port pins, so every XL/XE gets
+			// them; on the 400/800 port B belongs to joysticks 2/3.
+			pia: this.#xl ? this.pia : undefined,
+			// The power switch cold-resets every component, the CPU included.
+			powerCycle: () => {
+				this.#reset(true);
+				this.cpu.reset(true);
+			},
+			// The Reset key. XL/XE: the system reset line soft-resets the
+			// components immediately and holds the CPU's RES until released
+			// (see resetAsserted). 400/800: it drives ANTIC's RNMI instead -
+			// a software warmstart, nothing is hardware-reset.
+			setReset: (pressed) => {
+				if (this.#xl) {
+					if (pressed) {
+						this.#reset(false);
+						this.#resetHeld = true;
+					} else {
+						this.#resetHeld = false;
+					}
 				} else {
-					this.#resetHeld = false;
+					this.anticGtia.rnmi = pressed;
 				}
-			} else {
-				gtia.rnmi = source.value;
-			}
+			},
 		});
-
-		// Start/Select/Option buttons and the speaker drive GTIA's switch
-		// lines S0-S3; the resolved levels come back out.
-		connector.startIn.watch((source) => {
-			gtia.switchesIn.value =
-				(gtia.switchesIn.value & ~0x01) | (source.value ? 0x01 : 0);
-		});
-		connector.selectIn.watch((source) => {
-			gtia.switchesIn.value =
-				(gtia.switchesIn.value & ~0x02) | (source.value ? 0x02 : 0);
-		});
-		connector.optionIn.watch((source) => {
-			gtia.switchesIn.value =
-				(gtia.switchesIn.value & ~0x04) | (source.value ? 0x04 : 0);
-		});
-		connector.speakerIn.watch((source) => {
-			gtia.switchesIn.value =
-				(gtia.switchesIn.value & ~0x08) | (source.value ? 0x08 : 0);
-		});
-		gtia.switchesOut.watch((source) => {
-			connector.startOut.value = !!(source.value & 0x01);
-			connector.selectOut.value = !!(source.value & 0x02);
-			connector.optionOut.value = !!(source.value & 0x04);
-			connector.speakerOut.value = !!(source.value & 0x08);
-		});
-
-		// The LED lines sit on PIA PB2/PB3 (low = lit). Physically a 1200XL
-		// feature, but the wires are ordinary port pins, so every XL/XE gets
-		// them; on the 400/800 port B belongs to joysticks 2/3 instead.
-		if (this.#xl) {
-			connector.led1In.watch((source) => {
-				pia.portbIn.value = source.value
-					? pia.portbIn.value | 0x04
-					: pia.portbIn.value & ~0x04;
-			});
-			connector.led2In.watch((source) => {
-				pia.portbIn.value = source.value
-					? pia.portbIn.value | 0x08
-					: pia.portbIn.value & ~0x08;
-			});
-			pia.portbOut.watch((source) => {
-				connector.led1Out.value = !!(source.value & 0x04);
-				connector.led2Out.value = !!(source.value & 0x08);
-			});
-		}
-
-		return connector;
 	}
 
 	/** The last value driven on the data bus (see {@link Mmu.busData}). */

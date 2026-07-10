@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
 import { ReadOptions } from "@sfotty-pie/sfotty";
 import { AnticGtia } from "./antic-gtia.ts";
-import { ConsolePanel } from "./console-panel.ts";
 import { Atari } from "./machine.ts";
 import { Pokey } from "./pokey.ts";
 
@@ -156,7 +155,7 @@ test("the 800 Reset key drives the RNMI line, not the reset line", () => {
 	machine.write(0xd302, 0x3c, ReadOptions.NONE); // PACTL: CA2 manual high, data register
 	machine.write(0xd300, 0xa5, ReadOptions.NONE); // PORTA output latch
 
-	const panel = new ConsolePanel(machine.console);
+	const panel = machine.console;
 	panel.reset = true;
 	expect(machine.anticGtia.rnmi).toBe(true);
 	expect(machine.resetAsserted).toBe(false);
@@ -180,7 +179,7 @@ test("the XL Reset button resets components and holds the reset line", () => {
 	machine.write(0xe000, 0x55, ReadOptions.NONE);
 	expect(machine.read(0xe000, ReadOptions.NONE)).toBe(0x55);
 
-	const panel = new ConsolePanel(machine.console);
+	const panel = machine.console;
 	panel.reset = true;
 	expect(machine.resetAsserted).toBe(true);
 	expect(machine.anticGtia.rnmi).toBe(false);
@@ -201,7 +200,7 @@ test("console keys drive the CONSOL register (active low)", () => {
 	machine.write(CONSOL, 0x08, ReadOptions.NONE);
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
 
-	const panel = new ConsolePanel(machine.console);
+	const panel = machine.console;
 	panel.option = true;
 	panel.start = true;
 	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(2);

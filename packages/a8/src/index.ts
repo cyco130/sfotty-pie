@@ -37,8 +37,7 @@ export {
 	preferredBasicKeys,
 	type FirmwareContext,
 } from "./firmware-preferences.ts";
-export { ConsoleConnector } from "./console-connector.ts";
-export { ConsolePanel } from "./console-panel.ts";
+export { ConsolePanel, type ConsolePanelWiring } from "./console-panel.ts";
 export { JoystickConnector } from "./joystick-connector.ts";
 export { Joystick } from "./joystick.ts";
 export {

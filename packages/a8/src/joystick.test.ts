@@ -134,8 +134,8 @@ test("joystick state survives a reset (switches are physical)", () => {
 	// only an NMI source).
 	const machine = makeMachine("800XL");
 	plugStick(machine, 0).press(0x08);
-	machine.console.reset.value = true;
-	machine.console.reset.value = false;
+	machine.console.reset = true;
+	machine.console.reset = false;
 	machine.write(PACTL, 0x04, ReadOptions.NONE);
 	expect(machine.read(PORTA, ReadOptions.NONE)).toBe(0xf7);
 });

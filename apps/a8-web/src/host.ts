@@ -984,7 +984,7 @@ export class EmulatorHost {
 		}
 		// The connector's LED signals only fire on real level changes, so the
 		// bank-switch noise on the underlying PIA port never reaches us.
-		const panel = this.#emulator.consolePanel;
+		const panel = this.#emulator.machine.console;
 		this.#unwatchLeds = panel.watchLeds((led1, led2) => {
 			this.leds.value = [led1, led2];
 		});

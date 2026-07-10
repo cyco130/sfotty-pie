@@ -167,3 +167,29 @@ test("the trap fires on a real JSR through SIOV", () => {
 	expect(cpu.Y).toBe(0x01);
 	expect(machine.read(0x2000, ReadOptions.NONE)).toBe(3);
 });
+
+test("the built-in trap only fires while the OS ROM is mapped", () => {
+	// The machine's own wiring this time (not a handler registered by the
+	// test): a committed fetch at SIOV with the ROM mapped is substituted
+	// with an RTS by the built-in SIO trap.
+	const machine = makeMachine("800XL");
+	machine.insertDisk(new AtrImage(makeAtr(128, 4)));
+	setDcb(machine, { command: 0x52, buffer: 0x2000, byteCount: 128, aux: 2 });
+	expect(machine.read(SIOV, ReadOptions.SYNC)).toBe(0x60);
+
+	// Bank the OS ROM out (PBCTL selects the DDR, all outputs, then the data
+	// register with bit 0 clear) and plant a byte in the RAM underneath.
+	machine.write(0xd303, 0x00, ReadOptions.NONE);
+	machine.write(0xd301, 0xff, ReadOptions.NONE);
+	machine.write(0xd303, 0x04, ReadOptions.NONE);
+	machine.write(0xd301, 0xfe, ReadOptions.NONE);
+	machine.write(SIOV, 0x42, ReadOptions.NONE);
+
+	// Turbo Basic XL keeps its interpreter under the OS: with the ROM banked
+	// out, the fetch must fall through to the program's own code.
+	expect(machine.read(SIOV, ReadOptions.SYNC)).toBe(0x42);
+
+	// Banked back in, the trap serves SIO again.
+	machine.write(0xd301, 0xff, ReadOptions.NONE);
+	expect(machine.read(SIOV, ReadOptions.SYNC)).toBe(0x60);
+});

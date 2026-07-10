@@ -199,14 +199,17 @@ export class Atari implements Memory {
 
 		// Built-in SIO high-level emulation: a JSR through SIOV is trapped and
 		// served from the inserted D1: image (no serial hardware emulated). Wired
-		// once; insertDisk swaps the image the handler reads.
-		this.interceptExecute(
-			SIOV,
-			createSioHandler({
-				machine: this,
-				cpu: this.#cpu,
-				getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
-			}),
+		// once; insertDisk swaps the image the handler reads. Only fires while
+		// the OS ROM is mapped: with RAM banked in under the OS, $E459 is the
+		// running program's own code (Turbo Basic XL keeps its interpreter
+		// there), so the fetch must fall through to it.
+		const sioHandler = createSioHandler({
+			machine: this,
+			cpu: this.#cpu,
+			getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
+		});
+		this.interceptExecute(SIOV, (address) =>
+			this.mmu.isOsRomMapped ? sioHandler(address) : undefined,
 		);
 	}
 

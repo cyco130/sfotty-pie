@@ -41,13 +41,13 @@ interface CommandSpec {
 const isDeadCtrlShift = (code: number): boolean =>
 	code >= 0xc0 && (code & 0x28) === 0;
 
-/** Factory for the POKEY matrix key presses, which differ only by key code. The
- *  matrix is one shared register, so every key releases the same way. Palette
- *  picks pulse a single keystroke. */
+/** Factory for the keyboard matrix key presses, which differ only by key
+ *  code (a scan code with KBCODE-style Shift/Ctrl bits; the host synthesizes
+ *  the meta lines). Palette picks pulse a single keystroke. */
 const press = (code: number, label: LabelKey): CommandSpec => ({
 	label,
-	run: ({ emulator }) => emulator.machine.pokeyKeyDown(code),
-	release: ({ emulator }) => emulator.machine.pokeyKeyUp(),
+	run: ({ host }) => host.matrixKeyDown(code),
+	release: ({ host }) => host.matrixKeyUp(code),
 	matrix: true,
 	...(isDeadCtrlShift(code) && { palette: false }),
 });
@@ -123,6 +123,26 @@ export const commands = {
 	KEYBOARD_MODE_TOGGLE: {
 		label: "KEYBOARD_MODE_TOGGLE",
 		run: ({ host }) => host.toggleKeyboardMode(),
+	},
+	KEYBOARD_REALISTIC_SCAN_ENABLE: {
+		label: "KEYBOARD_REALISTIC_SCAN_ENABLE",
+		run: ({ host }) => host.setRealisticScan(true),
+	},
+	KEYBOARD_REALISTIC_SCAN_DISABLE: {
+		label: "KEYBOARD_REALISTIC_SCAN_DISABLE",
+		run: ({ host }) => host.setRealisticScan(false),
+	},
+	KEYBOARD_REALISTIC_SCAN_TOGGLE: {
+		label: "KEYBOARD_REALISTIC_SCAN_TOGGLE",
+		run: ({ host }) => host.toggleRealisticScan(),
+	},
+	KEYBOARD_ATTACH: {
+		label: "KEYBOARD_ATTACH",
+		run: ({ host }) => host.setKeyboardAttached(true),
+	},
+	KEYBOARD_DETACH: {
+		label: "KEYBOARD_DETACH",
+		run: ({ host }) => host.setKeyboardAttached(false),
 	},
 	KEY_BINDINGS_RESET: {
 		label: "KEY_BINDINGS_RESET",
@@ -549,8 +569,8 @@ export const commands = {
 
 	PRESS_SHIFT: {
 		label: "PRESS_SHIFT",
-		run: ({ emulator }) => emulator.machine.shiftKeyDown(),
-		release: ({ emulator }) => emulator.machine.shiftKeyUp(),
+		run: ({ host }) => host.setShiftKey(true),
+		release: ({ host }) => host.setShiftKey(false),
 	},
 
 	PRESS_RESET: {
@@ -579,7 +599,7 @@ export const commands = {
 	// Break - a release isn't observable by software (no key-up), so press-only.
 	PRESS_BREAK: {
 		label: "PRESS_BREAK",
-		run: ({ emulator }) => emulator.machine.breakKeyDown(),
+		run: ({ host }) => host.pressBreakKey(),
 	},
 
 	// Joysticks 0-3, one set per port (directions + trigger). Ports 2/3 are the

@@ -15,6 +15,7 @@ import {
 import { builtinSlotRom, type Cartridge } from "./cartridge.ts";
 import { ConsolePanel } from "./console-panel.ts";
 import { JoystickConnector } from "./joystick-connector.ts";
+import { Keyboard } from "./keyboard.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
@@ -72,6 +73,14 @@ export interface MachineConfig {
 	basic?: Uint8Array;
 	/** Built-in game ROM (8K), PORTB-banked - the XEGS. Requires `xl`. */
 	game?: Uint8Array;
+	/**
+	 * Wire the keyboard's presence sense to GTIA TRIG2, like the XEGS does
+	 * for its detachable keyboard: TRIG2 reads 1 with the keyboard attached,
+	 * 0 without (see {@link Keyboard.attached}). Only honored with `xl`; the
+	 * other XL/XE leave T2 disconnected (reads 1), and on the 400/800 it is
+	 * joystick 2's trigger.
+	 */
+	keyboardSense?: boolean;
 	/** Debug log sink (used by ANTIC's display list disassembler). */
 	log?: (message: string) => void;
 }
@@ -104,18 +113,22 @@ export interface MachineConfig {
  * // read machine.frame for video and machine.audio for sound
  * ```
  *
- * Keyboard input goes through the `pokeyKeyDown`/`pokeyKeyUp` family of
- * methods. Joystick input goes through the {@link joysticks} connectors -
- * plug a {@link Joystick} device into one and drive the device. The machine
- * knows nothing about host key assignments - mapping host keys to matrix
- * codes or joystick lines (layouts, special key bindings) is entirely the
- * host's business.
+ * Keyboard input goes through the {@link keyboard} matrix device: press
+ * and release 6-bit scan codes and meta lines (Shift/Control/Break). POKEY
+ * scans the matrix at 15KHz like the real chip, so KBCODE, the senses, the
+ * IRQs, and debounce all follow from the scan - a debounced press registers
+ * within ~8ms, and only while the OS has the scan enabled (SKCTL bit 1). Joystick input goes through the
+ * {@link joysticks} connectors - plug a {@link Joystick} device into one and
+ * drive the device. The machine knows nothing about host key assignments -
+ * mapping host keys to matrix codes or joystick lines (layouts, special key
+ * bindings) is entirely the host's business.
  */
 export class Atari implements Memory {
 	// The host surface: connectors (devices plug in) and the built-in
 	// controls (the console panel; the cartridge accessor below).
 	readonly joysticks: readonly JoystickConnector[];
 	readonly console: ConsolePanel;
+	readonly keyboard: Keyboard;
 
 	get cartridge(): Cartridge | undefined {
 		return this.#cartridge;
@@ -194,6 +207,18 @@ export class Atari implements Memory {
 
 		this.joysticks = this.#connectJoystickConnectors();
 		this.console = this.#connectConsolePanel();
+		// The keyboard plugs straight into POKEY's scanner seam: the chip
+		// addresses the matrix at 15KHz and everything (KBCODE, the senses,
+		// debounce, Break) follows from the scan.
+		this.keyboard = new Keyboard();
+		this.pokey.keyboard = this.keyboard;
+		if (xl && config.keyboardSense) {
+			// XEGS: the keyboard-presence sense line lands on GTIA TRIG2.
+			this.anticGtia.trig2 = this.keyboard.attached.value ? 1 : 0;
+			this.keyboard.attached.watch((source) => {
+				this.anticGtia.trig2 = source.value ? 1 : 0;
+			});
+		}
 
 		// The slot starts empty, via the accessor: on XL/XE that drives the
 		// cartridge sense (TRIG3) low, which GTIA's own power-on default
@@ -431,46 +456,6 @@ export class Atari implements Memory {
 	 */
 	get resetAsserted(): boolean {
 		return this.#resetHeld;
-	}
-
-	/**
-	 * Press a keyboard matrix key. `code` is the full KBCODE byte: the 6-bit
-	 * matrix scan code with bit 6 (Shift) and bit 7 (Ctrl) composed by the
-	 * host. The key registers update and the keyboard IRQ fires immediately -
-	 * there is no scan timing yet.
-	 */
-	pokeyKeyDown(code: number): void {
-		this.pokey.keyDown(code);
-	}
-
-	/**
-	 * Release the keyboard matrix key. POKEY only tracks one key, so with
-	 * several host keys held, call this when the last one is released.
-	 */
-	pokeyKeyUp(): void {
-		this.pokey.keyUp();
-	}
-
-	/**
-	 * Press the Shift key. Drives the SKSTAT shift sense only - the Shift bit
-	 * inside KBCODE comes from {@link pokeyKeyDown}'s `code`, and the two may
-	 * disagree, just like on real hardware mid-scan.
-	 */
-	shiftKeyDown(): void {
-		this.pokey.shiftKeyDown();
-	}
-
-	/** Release the Shift key. */
-	shiftKeyUp(): void {
-		this.pokey.shiftKeyUp();
-	}
-
-	/**
-	 * Press the Break key. There is no key-up: a Break release is not
-	 * observable by software.
-	 */
-	breakKeyDown(): void {
-		this.pokey.breakKeyDown();
 	}
 
 	/**

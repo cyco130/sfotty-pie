@@ -11,6 +11,7 @@ const IRQ_TIMER2 = 0x02;
 const IRQ_TIMER1 = 0x01;
 
 // SKSTAT bits (active low: 0 = condition present).
+const SKSTAT_KB_OVERRUN = 0x40;
 const SKSTAT_SHIFT_HELD = 0x08;
 const SKSTAT_KEY_HELD = 0x04;
 
@@ -39,19 +40,29 @@ const OP_TWOTONE_RESYNC = 0x80;
  * shifter clocked by the SKCTL-selected timer, the SEROR latch and SEROC
  * level IRQs, byte delivery via {@link serialOutByte}); and the
  * keyboard-facing registers - KBCODE, the keyboard/Break bits of
- * IRQEN/IRQST, and the key/Shift sense bits of SKSTAT.
+ * IRQEN/IRQST, the 15KHz keyboard scan (debounce, the Shift/Control/Break
+ * latches, overruns), and the keyboard bits of SKSTAT.
  *
  * The host clocks the chip by calling {@link cycle} once per machine cycle;
  * the return value is the summed audio output (0-60), for the host to sample
  * and filter as it sees fit.
  *
- * There is no keyboard scan timing yet: key events latch the registers and
- * raise the IRQ line immediately.
- *
- * TODO: serial input, high-pass filters, SKCTL's keyboard scan/debounce
- * gating, POT scanning, and real keyboard scan timing.
+ * TODO: serial input, high-pass filters, and POT scanning.
  */
+export interface PokeyKeyboard {
+	scan(code: number): void;
+	readonly KR1: boolean;
+	readonly KR2: boolean;
+}
+
 export class Pokey implements Memory {
+	/**
+	 * The keyboard matrix the 15KHz scan addresses: latch a scan code, read
+	 * the sense lines back. The machine plugs its Keyboard device in; a
+	 * future 5200 puts its controller mux behind the same seam.
+	 */
+	keyboard: PokeyKeyboard | undefined;
+
 	// IRQST latches are active low (0 = interrupt occurred). An event only
 	// latches while its IRQEN bit is set; writing 0 to an IRQEN bit clears the
 	// latch.
@@ -61,6 +72,17 @@ export class Pokey implements Memory {
 	#kbcode = 0xff;
 	#keyHeld = false;
 	#shiftHeld = false;
+	#controlHeld = false;
+	#breakHeld = false;
+	#kbOverrun = false;
+
+	// The keyboard scanner (AHRM 5.8): a 6-bit counter stepped once per
+	// 15KHz tick, a latched compare register, and a four-state debounce
+	// machine. States (the hardware's own numbering): 0 = key up, 1 =
+	// debounce key down, 3 = confirmed key down, 2 = debounce key up.
+	#scanCounter = 0;
+	#scanCompare = 0;
+	#scanState = 0;
 
 	#audf1 = 0;
 	#audf2 = 0;
@@ -192,68 +214,110 @@ export class Pokey implements Memory {
 		return shifting ? irqst | IRQ_SEROC : irqst & ~IRQ_SEROC;
 	}
 
-	/**
-	 * Press a keyboard matrix key. `code` is the full KBCODE byte: the 6-bit
-	 * matrix scan code with bit 6 (Shift) and bit 7 (Ctrl) composed by the
-	 * caller.
-	 */
-	keyDown(code: number): void {
-		code &= 0xff;
+	// One step of the keyboard scan, run on each 15KHz tick while SKCTL bit
+	// 1 enables it: check the one key the counter addresses, and run the
+	// debounce state machine (AHRM 5.8).
+	#scanKeyboard(): void {
+		const keyboard = this.keyboard;
+		if (!keyboard) return;
+		const code = this.#scanCounter;
+		this.#scanCounter = (code + 1) & 0x3f;
+		keyboard.scan(code);
+		const down = keyboard.KR1;
 
-		// With both Ctrl and Shift held, the matrix can't scan the keys with
-		// scan codes $00-$07 and $10-$17 (L J ; K + * and V C B X Z, plus
-		// Help and F1-F4 on machines that have them). Real hardware doesn't
-		// see those presses at all, so neither do we.
-		const scan = code & 0x3f;
-		if (
-			(code & 0xc0) === 0xc0 &&
-			(scan <= 0x07 || (scan >= 0x10 && scan <= 0x17))
-		) {
-			return;
+		// Control, Shift, and Break ride the KR2 line, latched as the
+		// counter passes their lines' codes ($00/$10/$30). Not debounced,
+		// no key sense, no overruns.
+		if (code === 0x00) {
+			this.#controlHeld = keyboard.KR2;
+		} else if (code === 0x10) {
+			this.#shiftHeld = keyboard.KR2;
+		} else if (code === 0x30) {
+			// Only the down transition is observable: the Break IRQ won't
+			// retrigger while held, and a press while the IRQ is disabled
+			// is lost for good.
+			if (keyboard.KR2 && !this.#breakHeld && this.#irqen & IRQ_BREAK) {
+				this.#irqst &= ~IRQ_BREAK;
+			}
+			this.#breakHeld = keyboard.KR2;
 		}
 
-		this.#kbcode = code;
+		// With debounce (SKCTL bit 0) off, the compare always matches: the
+		// machine then effectively tests consecutive CODES instead of the
+		// same code on consecutive scans, which is why the keyboard barely
+		// works in that mode (the 5200 keypads depend on it).
+		const match = (this.#skctl & 0x01) === 0 || code === this.#scanCompare;
+		switch (this.#scanState) {
+			case 0: // key up
+				if (down) {
+					this.#scanCompare = code;
+					this.#scanState = 1;
+				}
+				break;
+			case 1: // debounce key down
+				if (match) {
+					if (down) {
+						this.#latchKey(code);
+						this.#scanState = 3;
+					} else {
+						this.#scanState = 0;
+					}
+				} else if (down) {
+					// A second key seen during the verify pass rejects the
+					// press - debounce is why two keys held at once never
+					// register.
+					this.#scanState = 0;
+				}
+				break;
+			case 3: // confirmed key down
+				if (match && !down) this.#scanState = 2;
+				break;
+			case 2: // debounce key up
+				if (match) {
+					if (down) {
+						this.#scanState = 3; // bounced back down
+					} else {
+						this.#keyHeld = false;
+						this.#scanState = 0;
+					}
+				}
+				break;
+		}
+	}
+
+	// A debounced key press registers: KBCODE latches the code with the
+	// Shift/Control bits as of now, the key sense asserts, the keyboard IRQ
+	// fires - and if the previous IRQ is still pending, that's an overrun
+	// (SKSTAT bit 6, cleared via SKRES).
+	#latchKey(code: number): void {
+		if ((this.#irqst & IRQ_KEYBOARD) === 0) this.#kbOverrun = true;
+		this.#kbcode =
+			code | (this.#shiftHeld ? 0x40 : 0) | (this.#controlHeld ? 0x80 : 0);
 		this.#keyHeld = true;
 		if (this.#irqen & IRQ_KEYBOARD) {
 			this.#irqst &= ~IRQ_KEYBOARD;
 		}
 	}
 
-	/** Release the keyboard matrix key (no matrix key is held anymore). */
-	keyUp(): void {
-		this.#keyHeld = false;
-	}
-
-	/** Press the Shift key. Drives the SKSTAT shift sense, nothing else. */
-	shiftKeyDown(): void {
-		this.#shiftHeld = true;
-	}
-
-	/** Release the Shift key. */
-	shiftKeyUp(): void {
-		this.#shiftHeld = false;
-	}
-
-	/**
-	 * Press the Break key. There is no key-up: a Break release is not
-	 * observable by software.
-	 */
-	breakKeyDown(): void {
-		if (this.#irqen & IRQ_BREAK) {
-			this.#irqst &= ~IRQ_BREAK;
-		}
-	}
-
 	/**
 	 * POKEY has no reset pin, so only a power cycle (`cold`) clears it; on a
-	 * warm reset the OS reinitializes it in software. The key/Shift held
-	 * states reflect physical switches and are left alone either way.
+	 * warm reset the OS reinitializes it in software. The keyboard scanner
+	 * clears with everything else - held physical keys live in the Keyboard
+	 * device and are re-detected by the scan.
 	 */
 	reset(cold: boolean): void {
 		if (!cold) return;
 		this.#irqen = 0;
 		this.#irqst = 0xff;
 		this.#kbcode = 0xff;
+		this.#keyHeld = false;
+		this.#shiftHeld = false;
+		this.#controlHeld = false;
+		this.#breakHeld = false;
+		this.#kbOverrun = false;
+		this.#scanCounter = 0;
+		this.#scanCompare = 0;
+		this.#scanState = 0;
 
 		this.#audf1 = this.#audf2 = this.#audf3 = this.#audf4 = 0;
 		this.#audc1 = this.#audc2 = this.#audc3 = this.#audc4 = 0;
@@ -450,6 +514,8 @@ export class Pokey implements Memory {
 			if (--this.#clock15 <= 0) {
 				this.#clock15 = 114;
 				if (this.#slowDivisor === 114) slowTick = true;
+				// The keyboard scan rides the 15KHz clock (SKCTL bit 1).
+				if (this.#skctl & 0x02) this.#scanKeyboard();
 			}
 		}
 
@@ -642,6 +708,7 @@ export class Pokey implements Memory {
 			case 0x0f:
 				return (
 					0xff &
+					~(this.#kbOverrun ? SKSTAT_KB_OVERRUN : 0) &
 					~(this.#keyHeld ? SKSTAT_KEY_HELD : 0) &
 					~(this.#shiftHeld ? SKSTAT_SHIFT_HELD : 0)
 				);
@@ -719,6 +786,11 @@ export class Pokey implements Memory {
 				this.#out3 = this.#out4 = 1;
 				break;
 			}
+			case 0x0a:
+				// SKRES: reset the latched SKSTAT status bits - the keyboard
+				// overrun here (the serial error bits when they're modeled).
+				this.#kbOverrun = false;
+				break;
 			case 0x0d:
 				// SEROUT: the holding register. Overwrites any byte still
 				// waiting; the transfer to the shifter happens on a
@@ -741,12 +813,20 @@ export class Pokey implements Memory {
 				// cycles after this write; our offsets carry one extra
 				// cycle for the write-to-tick ordering (Acid800
 				// inittiming pins all four phase cases).
-				// TODO: keyboard scan/debounce gating (bits 0-1).
 				const wasInit = this.#initMode;
 				this.#skctl = value;
 				this.#initMode = (value & 0x03) === 0;
 				this.#twoTone = (value & 0x08) !== 0;
 				this.#forceBreak = (value & 0x80) !== 0;
+				// Keyboard scan disable (bit 1 clear): the state machine is
+				// forced to state 0 and the counter held in reset, and the
+				// key sense releases - but KBCODE, pending IRQs, and the
+				// Shift sense keep their state, and Break goes undetected.
+				if (!(value & 0x02)) {
+					this.#scanState = 0;
+					this.#scanCounter = 0;
+					this.#keyHeld = false;
+				}
 				if (this.#initMode) {
 					// The 9/17-bit counter is not reset here - it fills
 					// gradually, one fillCycle() per machine cycle,

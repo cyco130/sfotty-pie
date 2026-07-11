@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { Keyboard } from "./keyboard.ts";
 import { Pokey } from "./pokey.ts";
 
 const AUDF1 = 0x00;
@@ -236,9 +237,12 @@ test("a stopped transmit clock never loads the shifter", () => {
 
 test("init mode does not touch IRQ state or fast channels", () => {
 	const pokey = new Pokey();
+	const keyboard = new Keyboard();
+	pokey.keyboard = keyboard;
 	pokey.write(SKCTL, 0x03);
 	pokey.write(IRQEN_IRQST, 0x40);
-	pokey.keyDown(0x3f); // latch the keyboard IRQ
+	keyboard.pressKey(0x3f); // latch the keyboard IRQ via the scan
+	for (let i = 0; i < 200 * 114; i++) pokey.cycle();
 
 	pokey.write(SKCTL, 0x00); // back into init
 	expect(pokey.read(IRQEN_IRQST)).toBe(0xb7); // the latch survives

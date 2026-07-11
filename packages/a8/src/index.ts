@@ -39,6 +39,7 @@ export {
 } from "./firmware-preferences.ts";
 export { ConsolePanel, type ConsolePanelWiring } from "./console-panel.ts";
 export { JoystickConnector } from "./joystick-connector.ts";
+export { KEYBOARD_LINES, Keyboard } from "./keyboard.ts";
 export { Joystick } from "./joystick.ts";
 export {
 	Atari,

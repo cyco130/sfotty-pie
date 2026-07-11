@@ -139,3 +139,13 @@ test("repositioning an in-flight player onto the beam retriggers and merges", ()
 	expect(spanFor(false)).toBe("16-39:24");
 	expect(spanFor(true)).toBe("10-49:40");
 });
+
+test("the machine ticks the PIA: a CA2 read pulse ends after one cycle", () => {
+	const machine = quietMachine();
+	machine.write(0xd302, 0x2c, ReadOptions.NONE); // PACTL: CA2 pulse mode
+	machine.read(0xd300, ReadOptions.NONE); // the PORTA read fires the strobe
+	expect(machine.pia.ca2Out.value).toBe(false);
+
+	machine.cycle();
+	expect(machine.pia.ca2Out.value).toBe(true);
+});

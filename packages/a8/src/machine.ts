@@ -411,6 +411,7 @@ export class Atari implements Memory {
 			case PHASE.IDLE:
 				this.anticGtia.beforeCpu();
 				this.pokey.cycle();
+				this.pia.cycle();
 				this.phase = PHASE.BUS;
 
 			// falls through

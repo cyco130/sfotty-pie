@@ -150,7 +150,7 @@ export class Pia implements Memory {
 	/**
 	 * Advance the strobe timing one machine cycle: ends a one-cycle CA2/CB2
 	 * pulse (output mode 01). The Atari OS doesn't use pulse mode, but the
-	 * chip is generic - a host that needs it must call this every cycle.
+	 * chip is generic - the machine ticks this every cycle.
 	 */
 	cycle(): void {
 		if ((this.#ctrlA & 0x38) === 0x28) this.ca2Out.value = true;

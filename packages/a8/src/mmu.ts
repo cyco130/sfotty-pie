@@ -397,25 +397,13 @@ export class Mmu implements Memory {
 		this.#pia = pia;
 		this.#antic = antic;
 
-		this.#unwatchPortbChanged = pia.portbOut.watch(this.portbChanged);
+		pia.portbOut.watch(this.portbChanged);
 
 		// Sync derived banking state to the current PORTB instead of relying on
 		// the field defaults matching it. portbChanged rebuilds the page tables;
 		// rebuild explicitly too for the non-banking case, where it early-outs.
 		this.portbChanged();
 		this.#rebuildPageTables();
-	}
-
-	/**
-	 * Drop the PORTB watch. Call before discarding the bus - the host
-	 * reconfigures the machine by building a fresh `Mmu`, and without this
-	 * the dead bus keeps receiving PORTB changes from the shared PIA.
-	 */
-	dispose() {
-		this.#unwatchPortbChanged?.();
-		this.#unwatchPortbChanged = null;
-		this.#unwatchCartMapping?.();
-		this.#unwatchCartMapping = null;
 	}
 
 	/**
@@ -492,7 +480,6 @@ export class Mmu implements Memory {
 		return !this.#portbBanking || this.#isOsRomEnabled;
 	}
 
-	#unwatchPortbChanged: (() => void) | null = null;
 	#unwatchCartMapping: (() => void) | null = null;
 	portbChanged() {
 		if (!this.#portbBanking) return;

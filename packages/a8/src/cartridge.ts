@@ -2,6 +2,7 @@ import { ReadOptions } from "@sfotty-pie/sfotty";
 import type { AtariMemory } from "./atari-memory.ts";
 import { BountyBobCartridge } from "./bounty-bob-cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
+import { Pulse } from "./signal.ts";
 
 export type BankMapping = null | number;
 export type AreaMapping =
@@ -1325,14 +1326,15 @@ export interface Cartridge extends AtariMemory {
 	readonly hasA000ToBfff: boolean;
 	reset(cold: boolean): void;
 	/**
-	 * Fired after anything changes which addresses the cartridge decodes or
-	 * what bytes they map. Set by the MMU so it can rebuild its page tables;
-	 * implementations must call it on every mapping change (bank switches
-	 * included) and on a mapping-restoring reset. Results of the inherited
-	 * {@link AtariMemory.pageView} must stay valid until it fires; the MMU
-	 * only consults pageView for pages inside a claimed area.
+	 * Fires after anything changes which addresses the cartridge decodes or
+	 * what bytes they map. The MMU watches it to rebuild its page tables; on
+	 * XL/XE the machine watches it to keep the cartridge sense (RD5 -> GTIA
+	 * TRIG3) live. Implementations must emit on every mapping change (bank
+	 * switches included) and on a mapping-restoring reset. Results of the
+	 * inherited {@link AtariMemory.pageView} must stay valid until it fires;
+	 * the MMU only consults pageView for pages inside a claimed area.
 	 */
-	onMappingChanged: (() => void) | undefined;
+	readonly mappingChanged: Pulse;
 }
 
 const CART_HEADER_SIZE = 16;
@@ -1422,8 +1424,8 @@ export class RomCartridge implements Cartridge {
 	// which the MMU never routes here anyway).
 	#slots = new Int32Array(8).fill(-1);
 
-	/** See {@link Cartridge.onMappingChanged}. */
-	onMappingChanged: (() => void) | undefined;
+	/** See {@link Cartridge.mappingChanged}. */
+	readonly mappingChanged = new Pulse();
 
 	constructor(fileContents: Uint8Array, fileName?: string) {
 		const format = detectFileFormat(fileContents, fileName);
@@ -1572,7 +1574,7 @@ export class RomCartridge implements Cartridge {
 			const mapping = this.#type.control?.(address, null, this.#mapping);
 			if (mapping && !(options & ReadOptions.PEEK)) {
 				this.#applyMapping(mapping);
-				this.onMappingChanged?.();
+				this.mappingChanged.emit();
 			}
 			return value;
 		}
@@ -1595,7 +1597,7 @@ export class RomCartridge implements Cartridge {
 			const mapping = this.#type.control?.(address, value, this.#mapping);
 			if (mapping) {
 				this.#applyMapping(mapping);
-				this.onMappingChanged?.();
+				this.mappingChanged.emit();
 			}
 			return;
 		}
@@ -1606,7 +1608,7 @@ export class RomCartridge implements Cartridge {
 	reset(cold: boolean) {
 		if (cold) {
 			this.#applyMapping(this.#type.initialMapping!);
-			this.onMappingChanged?.();
+			this.mappingChanged.emit();
 		}
 	}
 }

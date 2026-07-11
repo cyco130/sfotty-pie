@@ -563,6 +563,10 @@ export const messages = {
 		powerCycling: "Rebooting",
 		keyboardMode: (mode: "character" | "positional"): string =>
 			`Keyboard: ${mode === "positional" ? "Positional" : "Character"} mode`,
+		realisticScan: (enabled: boolean): string =>
+			`Keyboard: Realistic key scan ${enabled ? "on" : "off"}`,
+		keyboardAttached: (attached: boolean): string =>
+			attached ? "Keyboard attached" : "Keyboard detached",
 		keyBindingsReset: "Key bindings reset to defaults",
 		saving: (name: string) => `Saving (${name})`,
 		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
@@ -592,6 +596,13 @@ export const labels = {
 	KEYBOARD_MODE_POSITIONAL:
 		"Keyboard: Switch to positional mode (raw, by physical key)",
 	KEYBOARD_MODE_TOGGLE: "Keyboard: Toggle character / positional mode",
+	KEYBOARD_REALISTIC_SCAN_ENABLE:
+		"Keyboard: Enable realistic key scan (keys can jam, like the hardware)",
+	KEYBOARD_REALISTIC_SCAN_DISABLE:
+		"Keyboard: Disable realistic key scan (new presses lift held keys)",
+	KEYBOARD_REALISTIC_SCAN_TOGGLE: "Keyboard: Toggle realistic key scan",
+	KEYBOARD_ATTACH: "Keyboard: Attach",
+	KEYBOARD_DETACH: "Keyboard: Detach (an XEGS senses the absence)",
 	KEY_BINDINGS_RESET: "Keyboard: Reset key bindings to defaults",
 	AUDIO_MUTE: "Audio: Mute",
 	AUDIO_UNMUTE: "Audio: Unmute",

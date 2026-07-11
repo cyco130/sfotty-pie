@@ -98,8 +98,8 @@ export class Pia implements Memory {
 		this.portaIn.watch(() => this.#updatePortaOut());
 		this.portbIn.watch(() => this.#updatePortbOut());
 
-		this.ca1In.watch((old) => {
-			if (this.#activeEdge(old, this.ca1In.value, this.#ctrlA & 0x02)) {
+		this.ca1In.watch((source, old) => {
+			if (this.#activeEdge(old, source.value, this.#ctrlA & 0x02)) {
 				this.#ctrlA |= 0x80;
 				// A read handshake ends on the next active CA1 transition.
 				if ((this.#ctrlA & 0x38) === 0x20) {
@@ -110,17 +110,17 @@ export class Pia implements Memory {
 			}
 		});
 
-		this.ca2In.watch((old) => {
+		this.ca2In.watch((source, old) => {
 			if (this.#ctrlA & 0x20) return; // output mode: the pin is driven
-			this.#ca2Pin = this.ca2In.value;
-			if (this.#activeEdge(old, this.ca2In.value, this.#ctrlA & 0x10)) {
+			this.#ca2Pin = source.value;
+			if (this.#activeEdge(old, source.value, this.#ctrlA & 0x10)) {
 				this.#ctrlA |= 0x40;
 				this.#updateIrqA();
 			}
 		});
 
-		this.cb1In.watch((old) => {
-			if (this.#activeEdge(old, this.cb1In.value, this.#ctrlB & 0x02)) {
+		this.cb1In.watch((source, old) => {
+			if (this.#activeEdge(old, source.value, this.#ctrlB & 0x02)) {
 				this.#ctrlB |= 0x80;
 				// A write handshake ends on the next active CB1 transition.
 				if ((this.#ctrlB & 0x38) === 0x20) {
@@ -131,10 +131,10 @@ export class Pia implements Memory {
 			}
 		});
 
-		this.cb2In.watch((old) => {
+		this.cb2In.watch((source, old) => {
 			if (this.#ctrlB & 0x20) return;
-			this.#cb2Pin = this.cb2In.value;
-			if (this.#activeEdge(old, this.cb2In.value, this.#ctrlB & 0x10)) {
+			this.#cb2Pin = source.value;
+			if (this.#activeEdge(old, source.value, this.#ctrlB & 0x10)) {
 				this.#ctrlB |= 0x40;
 				this.#updateIrqB();
 			}

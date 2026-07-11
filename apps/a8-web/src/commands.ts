@@ -41,13 +41,13 @@ interface CommandSpec {
 const isDeadCtrlShift = (code: number): boolean =>
 	code >= 0xc0 && (code & 0x28) === 0;
 
-/** Factory for the POKEY matrix key presses, which differ only by key code. The
- *  matrix is one shared register, so every key releases the same way. Palette
- *  picks pulse a single keystroke. */
+/** Factory for the keyboard matrix key presses, which differ only by key
+ *  code (a scan code with KBCODE-style Shift/Ctrl bits; the host synthesizes
+ *  the meta lines). Palette picks pulse a single keystroke. */
 const press = (code: number, label: LabelKey): CommandSpec => ({
 	label,
-	run: ({ emulator }) => emulator.machine.pokeyKeyDown(code),
-	release: ({ emulator }) => emulator.machine.pokeyKeyUp(),
+	run: ({ host }) => host.matrixKeyDown(code),
+	release: ({ host }) => host.matrixKeyUp(code),
 	matrix: true,
 	...(isDeadCtrlShift(code) && { palette: false }),
 });
@@ -55,17 +55,23 @@ const press = (code: number, label: LabelKey): CommandSpec => ({
 // Joystick direction/trigger presses, one factory per kind. `port` is 0-3;
 // direction `mask` bits are 1 = up, 2 = down, 4 = left, 8 = right. Held while a
 // trigger sustains them; a palette pick pulses a single step. Ports 2/3 exist on
-// the 800 only - on the XL/XE the machine ignores them (see
-// `machine.joystickDown`), so their commands are harmless there.
+// the 800 only - on the XL/XE `emulator.joysticks` has no device there, so
+// their commands are harmless no-ops.
 const joyDir = (port: number, mask: number, label: LabelKey): CommandSpec => ({
 	label,
-	run: ({ emulator }) => emulator.machine.joystickDown(port, mask),
-	release: ({ emulator }) => emulator.machine.joystickUp(port, mask),
+	run: ({ emulator }) => emulator.joysticks[port]?.press(mask),
+	release: ({ emulator }) => emulator.joysticks[port]?.release(mask),
 });
 const joyTrigger = (port: number, label: LabelKey): CommandSpec => ({
 	label,
-	run: ({ emulator }) => emulator.machine.joystickTriggerDown(port),
-	release: ({ emulator }) => emulator.machine.joystickTriggerUp(port),
+	run: ({ emulator }) => {
+		const joystick = emulator.joysticks[port];
+		if (joystick) joystick.trigger = true;
+	},
+	release: ({ emulator }) => {
+		const joystick = emulator.joysticks[port];
+		if (joystick) joystick.trigger = false;
+	},
 });
 
 export const commands = {
@@ -117,6 +123,26 @@ export const commands = {
 	KEYBOARD_MODE_TOGGLE: {
 		label: "KEYBOARD_MODE_TOGGLE",
 		run: ({ host }) => host.toggleKeyboardMode(),
+	},
+	KEYBOARD_REALISTIC_SCAN_ENABLE: {
+		label: "KEYBOARD_REALISTIC_SCAN_ENABLE",
+		run: ({ host }) => host.setRealisticScan(true),
+	},
+	KEYBOARD_REALISTIC_SCAN_DISABLE: {
+		label: "KEYBOARD_REALISTIC_SCAN_DISABLE",
+		run: ({ host }) => host.setRealisticScan(false),
+	},
+	KEYBOARD_REALISTIC_SCAN_TOGGLE: {
+		label: "KEYBOARD_REALISTIC_SCAN_TOGGLE",
+		run: ({ host }) => host.toggleRealisticScan(),
+	},
+	KEYBOARD_ATTACH: {
+		label: "KEYBOARD_ATTACH",
+		run: ({ host }) => host.setKeyboardAttached(true),
+	},
+	KEYBOARD_DETACH: {
+		label: "KEYBOARD_DETACH",
+		run: ({ host }) => host.setKeyboardAttached(false),
 	},
 	KEY_BINDINGS_RESET: {
 		label: "KEY_BINDINGS_RESET",
@@ -543,37 +569,37 @@ export const commands = {
 
 	PRESS_SHIFT: {
 		label: "PRESS_SHIFT",
-		run: ({ emulator }) => emulator.machine.shiftKeyDown(),
-		release: ({ emulator }) => emulator.machine.shiftKeyUp(),
+		run: ({ host }) => host.setShiftKey(true),
+		release: ({ host }) => host.setShiftKey(false),
 	},
 
 	PRESS_RESET: {
 		label: "PRESS_RESET",
-		run: ({ emulator }) => emulator.machine.resetButtonDown(),
-		release: ({ emulator }) => emulator.machine.resetButtonUp(),
+		run: ({ emulator }) => (emulator.machine.console.reset = true),
+		release: ({ emulator }) => (emulator.machine.console.reset = false),
 	},
 
 	// Console buttons
 	PRESS_OPTION: {
 		label: "PRESS_OPTION",
-		run: ({ emulator }) => emulator.machine.consoleKeyDown(4),
-		release: ({ emulator }) => emulator.machine.consoleKeyUp(4),
+		run: ({ emulator }) => (emulator.machine.console.option = true),
+		release: ({ emulator }) => (emulator.machine.console.option = false),
 	},
 	PRESS_SELECT: {
 		label: "PRESS_SELECT",
-		run: ({ emulator }) => emulator.machine.consoleKeyDown(2),
-		release: ({ emulator }) => emulator.machine.consoleKeyUp(2),
+		run: ({ emulator }) => (emulator.machine.console.select = true),
+		release: ({ emulator }) => (emulator.machine.console.select = false),
 	},
 	PRESS_START: {
 		label: "PRESS_START",
-		run: ({ emulator }) => emulator.machine.consoleKeyDown(1),
-		release: ({ emulator }) => emulator.machine.consoleKeyUp(1),
+		run: ({ emulator }) => (emulator.machine.console.start = true),
+		release: ({ emulator }) => (emulator.machine.console.start = false),
 	},
 
 	// Break - a release isn't observable by software (no key-up), so press-only.
 	PRESS_BREAK: {
 		label: "PRESS_BREAK",
-		run: ({ emulator }) => emulator.machine.breakKeyDown(),
+		run: ({ host }) => host.pressBreakKey(),
 	},
 
 	// Joysticks 0-3, one set per port (directions + trigger). Ports 2/3 are the

@@ -99,18 +99,17 @@ export class Headless {
 	}
 
 	// Advance one machine cycle, awaiting input across a GETBYT suspend and
-	// resuming the same cycle (retrying through a spurious wakeup). Returns false
-	// only when input is closed while a cycle is suspended.
+	// resuming the same cycle (retrying through a spurious wakeup) - cycle()
+	// picks up a suspended cycle where it left off. Returns false only when
+	// input is closed while a cycle is suspended.
 	async #advanceCycle(): Promise<boolean> {
-		let step = (): number => this.#machine.cycle();
 		for (;;) {
 			try {
-				step();
+				this.#machine.cycle();
 				return true;
 			} catch (signal) {
 				if (signal !== NEED_INPUT) throw signal;
 				if (!this.#input || !(await this.#input.wait())) return false;
-				step = () => this.#machine.resumeCycle();
 			}
 		}
 	}

@@ -12,6 +12,7 @@ import {
 	FRAME_BUFFER_WIDTH,
 	NTSC_PIXEL_ASPECT_RATIO,
 	PAL_PIXEL_ASPECT_RATIO,
+	KEYBOARD_LINES,
 	preferredBasicKeys,
 	preferredOsKeys,
 	type AtariFileFormat,
@@ -153,6 +154,7 @@ const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
 const CONFIG_KEY = "config";
 const ROMS_KEY = "roms";
 const KBMODE_KEY = "keyboard-mode";
+const REALISTIC_SCAN_KEY = "realistic-key-scan";
 
 // How long a momentary trigger (palette, click) holds a control before its
 // auto-release - long enough for the OS to sense the key/button. Counted in
@@ -281,6 +283,17 @@ export class EmulatorHost {
 	/** Keyboard interpretation: Character (layout-aware typing) vs Positional
 	 *  (raw, by physical key). Persisted; loaded in the constructor. */
 	readonly keyboardMode = signal<KeyboardMode>("character");
+
+	/** Whether the (XEGS-style detachable) keyboard is plugged in. Applied
+	 *  to every machine; on an XEGS config the presence sense shows on
+	 *  TRIG2. */
+	readonly keyboardAttached = signal(true);
+
+	/** Raw hardware key scanning. Off (the default) = a new key press lifts
+	 *  the previous keys first, so fast rollover typing never trips the
+	 *  matrix's two-keys-held debounce block. The 15KHz scan itself runs
+	 *  either way; the mode only limits what the matrix holds. */
+	readonly realisticScan = signal(false);
 
 	/** The active key bindings (one flat set); mirrors what the keyboard resolves,
 	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
@@ -450,6 +463,7 @@ export class EmulatorHost {
 		this.stagedRoms.value = this.appliedRoms.peek();
 		this.keyboardMode.value =
 			loadPersisted(KBMODE_KEY) === "positional" ? "positional" : "character";
+		this.realisticScan.value = loadPersisted(REALISTIC_SCAN_KEY) === "on";
 
 		// Key bindings: this tab's stored flat set, or empty until create()
 		// generates and persists the platform defaults (first run / cleared store).
@@ -628,25 +642,90 @@ export class EmulatorHost {
 		releaseOf(command)?.(this.#commandContext());
 	}
 
+	// Composed-key synthesis. Command key codes carry Shift/Ctrl bits
+	// (KBCODE-style, bit 6/7); the machine's keyboard is a physical matrix
+	// where Shift and Control are LINES. The host holds the composed keys
+	// and drives the meta lines with the union of the held keys' bits plus
+	// the standalone SHIFT command - so overlapping shifted presses and a
+	// held Shift key can't release each other's line early.
+	#heldComposed = new Map<number, number>(); // scan code -> composed code
+	#shiftCommandHeld = false;
+
+	/** Press a composed key code (scan code + Shift/Ctrl bits). */
+	matrixKeyDown(code: number): void {
+		const scan = code & 0x3f;
+		const keyboard = this.#emulator.machine.keyboard;
+		// Forgiving mode (the default): lift the previous keys first, so a
+		// fast-typed overlap never trips the matrix's two-keys-held debounce
+		// block. The scan itself stays real - the matrix just only ever
+		// holds the newest key.
+		if (!this.realisticScan.value) {
+			for (const held of this.#heldComposed.keys()) {
+				if (held === scan) continue;
+				keyboard.releaseKey(held);
+				this.#heldComposed.delete(held);
+			}
+		}
+		this.#heldComposed.set(scan, code);
+		this.#syncMetaLines(); // lines first, so KBCODE composes the bits
+		keyboard.pressKey(scan);
+	}
+
+	/** Release a composed key code. */
+	matrixKeyUp(code: number): void {
+		this.#heldComposed.delete(code & 0x3f);
+		this.#emulator.machine.keyboard.releaseKey(code & 0x3f);
+		this.#syncMetaLines();
+	}
+
+	/** The standalone Shift key (its own bindable command). */
+	setShiftKey(held: boolean): void {
+		this.#shiftCommandHeld = held;
+		this.#syncMetaLines();
+	}
+
+	/** Tap Break. Press-only: a release is not observable by software, so
+	 *  the line is pulsed (the IRQ fires on the rising edge). */
+	pressBreakKey(): void {
+		const keyboard = this.#emulator.machine.keyboard;
+		keyboard.pressMetaKey(KEYBOARD_LINES.BREAK);
+		keyboard.releaseMetaKey(KEYBOARD_LINES.BREAK);
+	}
+
+	#syncMetaLines(): void {
+		const keyboard = this.#emulator.machine.keyboard;
+		let bits = 0;
+		for (const code of this.#heldComposed.values()) bits |= code;
+		if (this.#shiftCommandHeld || bits & 0x40) {
+			keyboard.pressMetaKey(KEYBOARD_LINES.SHIFT);
+		} else {
+			keyboard.releaseMetaKey(KEYBOARD_LINES.SHIFT);
+		}
+		if (bits & 0x80) keyboard.pressMetaKey(KEYBOARD_LINES.CONTROL);
+		else keyboard.releaseMetaKey(KEYBOARD_LINES.CONTROL);
+	}
+
 	/**
-	 * Release the POKEY keyboard matrix - one shared register, so every matrix
-	 * key releases the same way. The keyboard/OSD call this when the last held
-	 * matrix key goes up.
+	 * Release every held matrix key (not the standalone Shift). The
+	 * keyboard/OSD call this when the last held matrix key goes up.
 	 */
 	releaseMatrix(): void {
-		this.#emulator.machine.pokeyKeyUp();
+		const keyboard = this.#emulator.machine.keyboard;
+		for (const scan of this.#heldComposed.keys()) {
+			keyboard.releaseKey(scan);
+		}
+		this.#heldComposed.clear();
+		this.#syncMetaLines();
 	}
 
 	/**
 	 * Set joystick 0 to an absolute direction - for the analog OSD stick,
 	 * which (unlike the keyboard's per-direction press/release) reports a
 	 * whole position at once. `mask` bits: 1 = up, 2 = down, 4 = left,
-	 * 8 = right; 0 = centred. Release-then-press is atomic between frames.
+	 * 8 = right; 0 = centred.
 	 */
 	setJoystickDirection(mask: number): void {
-		const machine = this.#emulator.machine;
-		machine.joystickUp(0, 0x0f & ~mask);
-		machine.joystickDown(0, mask);
+		this.#emulator.joysticks[0]!.direction = mask;
 	}
 
 	/** Assign a connected gamepad (by its `gamepad.index`) to an Atari port (0-3)
@@ -932,12 +1011,14 @@ export class EmulatorHost {
 			...(builtinBasic && basicBytes && { basic: basicBytes }),
 			...(builtinBasic && basicDisabled && { holdOption: true }),
 			...(model === "xegs" && gameBytes && { game: gameBytes }),
+			...(model === "xegs" && { keyboardSense: true }),
 			...(cartridge && { cartridge }),
 			...(this.#drives[0] && { disk: this.#drives[0].disk }),
 			...(this.#audio && { audio: this.#audio }),
 		});
 		emulator.setTrace(this.#cpuTrace);
 		emulator.setTurboMode(this.#turboMode);
+		emulator.machine.keyboard.attached.value = this.keyboardAttached.value;
 		// Sample the gamepad on every emulation-loop yield (see Emulator.afterYield)
 		// - the freshest read, right before the next scanlines poll the pins.
 		emulator.afterYield = () => this.#gamepads.poll();
@@ -967,6 +1048,8 @@ export class EmulatorHost {
 	#rebuild(): void {
 		this.#emulator.stop();
 		this.#audio?.clear();
+		this.#heldComposed.clear();
+		this.#shiftCommandHeld = false;
 		this.#emulator = this.#makeEmulator();
 		this.#emulator.start();
 		this.running.value = true;
@@ -984,18 +1067,13 @@ export class EmulatorHost {
 			this.leds.value = null;
 			return;
 		}
-		const portb = this.#emulator.machine.pia.portbOut;
-		const refresh = (): void => {
-			const value = portb.value;
-			const l1 = (value & 0x04) === 0;
-			const l2 = (value & 0x08) === 0;
-			// PORTB changes on every bank switch; only repaint when an LED moves.
-			const current = this.leds.value;
-			if (current && current[0] === l1 && current[1] === l2) return;
-			this.leds.value = [l1, l2];
-		};
-		this.#unwatchLeds = portb.watch(refresh);
-		refresh();
+		// The connector's LED signals only fire on real level changes, so the
+		// bank-switch noise on the underlying PIA port never reaches us.
+		const panel = this.#emulator.machine.console;
+		this.#unwatchLeds = panel.watchLeds((led1, led2) => {
+			this.leds.value = [led1, led2];
+		});
+		this.leds.value = [panel.led1, panel.led2];
 	}
 
 	// Fetch whatever firmware the new config needs, then power-cycle into it.
@@ -1060,6 +1138,27 @@ export class EmulatorHost {
 		this.setKeyboardMode(
 			this.keyboardMode.value === "character" ? "positional" : "character",
 		);
+	}
+
+	/** Switch between realistic key scanning and the forgiving default (see
+	 *  {@link realisticScan}). Persisted. */
+	setRealisticScan(enabled: boolean): void {
+		this.realisticScan.value = enabled;
+		savePersisted(REALISTIC_SCAN_KEY, enabled ? "on" : "off");
+		this.toast(messages.toasts.realisticScan(enabled));
+	}
+
+	toggleRealisticScan(): void {
+		this.setRealisticScan(!this.realisticScan.value);
+	}
+
+	/** Plug or unplug the keyboard. Detached, the matrix sends no response,
+	 *  and an XEGS senses the absence on TRIG2. Session-only - a rebuild
+	 *  carries it over, like a cable nobody replugged. */
+	setKeyboardAttached(attached: boolean): void {
+		this.keyboardAttached.value = attached;
+		this.#emulator.machine.keyboard.attached.value = attached;
+		this.toast(messages.toasts.keyboardAttached(attached));
 	}
 
 	/** Whether this host runs on macOS - for platform-specific shortcut labels. */
@@ -2116,7 +2215,14 @@ export class EmulatorHost {
 			event.preventDefault();
 			input.focus();
 		};
-		const releaseAll = () => this.#keyboard.releaseAll();
+		const releaseAll = () => {
+			this.#keyboard.releaseAll();
+			// The machine-side backstop: a keyup the app never saw (focus
+			// stolen mid-press) can't leave a matrix key wedged down.
+			this.#heldComposed.clear();
+			this.#shiftCommandHeld = false;
+			this.#emulator.machine.keyboard.releaseAll();
+		};
 		root.addEventListener("pointerdown", refocus);
 		window.addEventListener("blur", releaseAll);
 		return () => {

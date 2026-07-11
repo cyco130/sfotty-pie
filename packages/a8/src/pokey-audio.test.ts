@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { Keyboard } from "./keyboard.ts";
 import { Pokey } from "./pokey.ts";
 
 const AUDF1 = 0x00;
@@ -65,7 +66,8 @@ test("a volume-only channel outputs its volume constantly", () => {
 	pokey.write(AUDC1, 0x1f); // volume-only, volume 15
 
 	for (let i = 0; i < 100; i++) {
-		expect(pokey.cycle()).toBe(15);
+		pokey.cycle();
+		expect(pokey.audio).toBe(15);
 	}
 });
 
@@ -76,7 +78,10 @@ test("a square-wave channel toggles with a stable period", () => {
 	pokey.write(AUDC1, 0xaf); // square wave, volume 15
 
 	const samples: number[] = [];
-	for (let i = 0; i < 300; i++) samples.push(pokey.cycle());
+	for (let i = 0; i < 300; i++) {
+		pokey.cycle();
+		samples.push(pokey.audio);
+	}
 
 	expect(samples).toContain(0);
 	expect(samples).toContain(15);
@@ -98,7 +103,10 @@ test("linking 1+2 silences channel 1's own output", () => {
 	pokey.write(AUDC1, 0xa8); // square wave, volume 8
 
 	let sawOutput = false;
-	for (let i = 0; i < 50; i++) sawOutput ||= pokey.cycle() === 8;
+	for (let i = 0; i < 50; i++) {
+		pokey.cycle();
+		sawOutput ||= pokey.audio === 8;
+	}
 	expect(sawOutput).toBe(true);
 
 	// In 16-bit linked mode channel 1 only clocks channel 2 - its own
@@ -106,17 +114,20 @@ test("linking 1+2 silences channel 1's own output", () => {
 	pokey.write(AUDCTL, 0x50);
 	pokey.cycle();
 	for (let i = 0; i < 100; i++) {
-		expect(pokey.cycle()).toBe(0);
+		pokey.cycle();
+		expect(pokey.audio).toBe(0);
 	}
 });
 
 test("a power cycle silences and clears the audio state", () => {
 	const pokey = new Pokey();
 	pokey.write(AUDC1, 0x1f);
-	expect(pokey.cycle()).toBe(15);
+	pokey.cycle();
+	expect(pokey.audio).toBe(15);
 
 	pokey.reset(true);
-	expect(pokey.cycle()).toBe(0);
+	pokey.cycle();
+	expect(pokey.audio).toBe(0);
 });
 
 test("init mode locks RANDOM at $FF and freezes the slow clocks", () => {
@@ -226,9 +237,12 @@ test("a stopped transmit clock never loads the shifter", () => {
 
 test("init mode does not touch IRQ state or fast channels", () => {
 	const pokey = new Pokey();
+	const keyboard = new Keyboard();
+	pokey.keyboard = keyboard;
 	pokey.write(SKCTL, 0x03);
 	pokey.write(IRQEN_IRQST, 0x40);
-	pokey.keyDown(0x3f); // latch the keyboard IRQ
+	keyboard.pressKey(0x3f); // latch the keyboard IRQ via the scan
+	for (let i = 0; i < 200 * 114; i++) pokey.cycle();
 
 	pokey.write(SKCTL, 0x00); // back into init
 	expect(pokey.read(IRQEN_IRQST)).toBe(0xb7); // the latch survives
@@ -240,7 +254,10 @@ test("init mode does not touch IRQ state or fast channels", () => {
 	pokey.write(AUDC1, 0xaf);
 	pokey.write(STIMER, 0);
 	const samples = new Set<number>();
-	for (let i = 0; i < 50; i++) samples.add(pokey.cycle());
+	for (let i = 0; i < 50; i++) {
+		pokey.cycle();
+		samples.add(pokey.audio);
+	}
 	expect(samples.has(15)).toBe(true);
 	expect(samples.has(0)).toBe(true);
 });

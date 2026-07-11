@@ -14,7 +14,7 @@ export class Signal<T> {
 
 		const oldValue = this.#value;
 		this.#value = value;
-		this.#watchers.forEach((callback) => callback(oldValue, this));
+		this.#watchers.forEach((callback) => callback(this, oldValue));
 	}
 
 	watch(callback: SignalChangeCallback<Signal<T>>): () => void {
@@ -35,6 +35,26 @@ export class Signal<T> {
 }
 
 export type SignalChangeCallback<S extends Signal<any>> = (
-	oldValue: S["value"],
 	source: S,
+	oldValue: S["value"],
 ) => void;
+
+// A Signal models a level (holds a value, notifies on change); a Pulse models
+// an edge (no state, notifies on every emit).
+export class Pulse<T = void> {
+	emit(...args: undefined extends T ? [value?: T] : [value: T]): void {
+		const value = args[0] as T;
+		this.#watchers.forEach((callback) => callback(value, this));
+	}
+
+	watch(callback: PulseCallback<T>): () => void {
+		this.#watchers.add(callback);
+		return () => {
+			this.#watchers.delete(callback);
+		};
+	}
+
+	#watchers: Set<PulseCallback<T>> = new Set();
+}
+
+export type PulseCallback<T> = (value: T, source: Pulse<T>) => void;

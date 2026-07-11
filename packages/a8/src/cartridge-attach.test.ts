@@ -16,20 +16,30 @@ function makeMachine(model: "800" | "800XL" | "130XE", cartridge?: Cartridge) {
 	basic[0] = 0xbb; // marker to tell BASIC from a game cart
 	basic[8191] = 0xa0;
 
-	return new Atari({
+	const machine = new Atari({
 		xl: model !== "800",
 		...(model === "130XE" && { xeBankCount: 4, separateAnticAccess: true }),
 		os: new Uint8Array(model === "800" ? 10240 : 16384),
 		basic,
-		cartridge,
 	});
+	if (cartridge) machine.cartridge = cartridge;
+	return machine;
 }
 
-test("a cartridge takes the 800's BASIC slot", () => {
+test("on the 800, BASIC is a cartridge the host attaches and swaps", () => {
+	// `basic` in the config is XL/XE-only; a bare 800 slot is empty (RAM).
 	const bare = makeMachine("800");
-	expect(bare.read(0xa000, ReadOptions.NONE)).toBe(0xbb);
+	expect(bare.read(0xa000, ReadOptions.NONE)).toBe(0x00);
 
-	const machine = makeMachine("800", makeCart(0x42));
+	// BASIC goes in like any $A000 cart...
+	const basicCart = new Uint8Array(8192);
+	basicCart[0] = 0xbb;
+	basicCart[8191] = 0xa0;
+	const machine = makeMachine("800", createCartridge(basicCart));
+	expect(machine.read(0xa000, ReadOptions.NONE)).toBe(0xbb);
+
+	// ...and a game cart displaces it.
+	machine.cartridge = makeCart(0x42);
 	expect(machine.read(0xa000, ReadOptions.NONE)).toBe(0x42);
 });
 

@@ -1,5 +1,6 @@
 import { ReadOptions } from "@sfotty-pie/sfotty";
 import type { Cartridge } from "./cartridge.ts";
+import { Pulse } from "./signal.ts";
 
 /**
  * Bounty Bob Strikes Back (CART type 18) - the one cartridge whose banking
@@ -24,8 +25,8 @@ export class BountyBobCartridge implements Cartridge {
 	#bankHigh = 0; // $9000-$9FFF: image bank 4-7, stored as 0-3
 	#views = new Map<number, Uint8Array>();
 
-	/** See {@link Cartridge.onMappingChanged}. */
-	onMappingChanged: (() => void) | undefined;
+	/** See {@link Cartridge.mappingChanged}. */
+	readonly mappingChanged = new Pulse();
 
 	constructor(rom: Uint8Array) {
 		if (rom.length !== 40 * 1024) {
@@ -68,7 +69,7 @@ export class BountyBobCartridge implements Cartridge {
 		} else {
 			return;
 		}
-		this.onMappingChanged?.();
+		this.mappingChanged.emit();
 	}
 
 	read(address: number, options: ReadOptions): number {
@@ -115,7 +116,7 @@ export class BountyBobCartridge implements Cartridge {
 		if (cold && (this.#bankLow !== 0 || this.#bankHigh !== 0)) {
 			this.#bankLow = 0;
 			this.#bankHigh = 0;
-			this.onMappingChanged?.();
+			this.mappingChanged.emit();
 		}
 	}
 }

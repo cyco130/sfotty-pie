@@ -3,9 +3,11 @@ import {
 	CYCLES_PER_LINE,
 	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
+	Joystick,
 	NTSC_CYCLES_PER_SECOND,
 	PAL_CYCLES_PER_SECOND,
 	type AtrImage,
+	type Cartridge,
 	type MachineConfig,
 } from "@sfotty-pie/a8";
 import { ReadOptions, traceLine, type Sfotty } from "@sfotty-pie/sfotty";
@@ -42,6 +44,9 @@ const YIELD_INTERVAL = 257;
 const MAX_LAG_MS = 100;
 
 export interface EmulatorConfig extends MachineConfig {
+	/** Cartridge in the (left) slot - inserted via the machine's cartridge
+	 *  accessor after construction. */
+	cartridge?: Cartridge;
 	/** Disk in drive D1: (read-only; served by the trap-based SIO). */
 	disk?: AtrImage;
 	/** Audio sink. When its context runs, the audio clock paces emulation. */
@@ -65,6 +70,10 @@ const OPTION_HOLD_FRAMES = 7;
  */
 export class Emulator {
 	readonly machine: Atari;
+
+	/** One Joystick device plugged into each of the machine's ports (two on
+	 *  the XL/XE, four on the 400/800). Index = Atari port. */
+	readonly joysticks: readonly Joystick[];
 
 	// Double buffer for tear-free display: the machine renders into #frames[#back]
 	// (its own default buffer is reused as one half), and at each frame boundary
@@ -173,7 +182,7 @@ export class Emulator {
 	// Wall-clock pacing is per-TV-standard (NTSC ~1.79MHz, PAL ~1.77MHz).
 	readonly #msPerScanline: number;
 
-	// The audio pipeline: per-cycle POKEY+speaker level -> anti-alias filter
+	// The audio pipeline: the machine's per-cycle audio level -> anti-alias filter
 	// -> nearest-neighbor decimation -> DC blocker -> fixed-size chunks.
 	#audio: AudioOutput | null;
 	#filter = new AntiAliasFilter();
@@ -187,6 +196,9 @@ export class Emulator {
 
 	constructor(config: EmulatorConfig) {
 		this.machine = new Atari(config);
+		this.joysticks = this.machine.joysticks.map(
+			(connector) => new Joystick(connector),
+		);
 		// Reuse the machine's default buffer as one half of the double buffer; the
 		// machine already renders into it (#back starts at 0), so the first frame
 		// needs no setFrameBuffer. The front starts on the other (empty) half.
@@ -196,6 +208,7 @@ export class Emulator {
 		];
 		this.frame = this.#frames[1];
 
+		if (config.cartridge) this.machine.cartridge = config.cartridge;
 		if (config.disk) this.machine.insertDisk(config.disk);
 
 		this.#holdOption = config.holdOption ?? false;
@@ -241,8 +254,7 @@ export class Emulator {
 
 	/** Power cycle: cold-reset the machine and the CPU. */
 	coldStart(): void {
-		this.machine.reset(true);
-		this.machine.cpu.reset(true);
+		this.machine.console.powerCycle();
 		// Drop any timed releases queued against the old machine - a stale OPTION
 		// release could otherwise cut the fresh boot's hold short.
 		this.#pending = [];
@@ -260,8 +272,10 @@ export class Emulator {
 	// Press OPTION at boot (BASIC-disable); release it after OPTION_HOLD_FRAMES.
 	#startOptionHold(): void {
 		if (!this.#holdOption) return;
-		this.machine.consoleKeyDown(0x04);
-		this.afterFrames(OPTION_HOLD_FRAMES, () => this.machine.consoleKeyUp(0x04));
+		this.machine.console.option = true;
+		this.afterFrames(OPTION_HOLD_FRAMES, () => {
+			this.machine.console.option = false;
+		});
 	}
 
 	async #loop(): Promise<void> {
@@ -346,13 +360,14 @@ export class Emulator {
 	}
 
 	#runScanline(): void {
-		const ag = this.machine.anticGtia;
+		const machine = this.machine;
+		const ag = machine.anticGtia;
 
 		for (let cycle = 0; cycle < CYCLES_PER_LINE; cycle++) {
 			// On the XL Reset line's release, start a fresh trace capture of the
 			// boot that follows (the 800's Reset is an NMI, captured in normal
 			// flow). The CPU reset itself is handled inside cycle().
-			const resetAsserted = this.machine.resetAsserted;
+			const resetAsserted = machine.resetAsserted;
 			if (this.#trace && this.#wasResetAsserted && !resetAsserted) {
 				this.#traceCount = 0;
 				this.#traceFreezeAt = RESET_TRACE_CAPTURE;
@@ -360,11 +375,11 @@ export class Emulator {
 			}
 			this.#wasResetAsserted = resetAsserted;
 
-			// One whole machine cycle: ANTIC + POKEY + bus + CPU + render, the
-			// audio level returned. Instructions are recorded via onInstruction
-			// (see #recordTrace). a8-web installs no suspending traps, so cycle()
-			// never throws - no resumeCycle() needed here.
-			this.#collectAudio(this.machine.cycle(), ag.consoleSpeaker);
+			// One whole machine cycle: ANTIC + POKEY + bus + CPU + render.
+			// Instructions are recorded via onInstruction (see #recordTrace).
+			// a8-web installs no suspending traps, so cycle() never throws.
+			machine.cycle();
+			this.#collectAudio(machine.audio);
 		}
 
 		// vcount wraps to 0 while the last line of the frame is run: present the
@@ -373,7 +388,7 @@ export class Emulator {
 			// The `=== 0 ? 0 : 1` keeps a literal tuple index (no undefined).
 			this.frame = this.#frames[this.#back === 0 ? 0 : 1];
 			this.#back ^= 1;
-			this.machine.setFrameBuffer(this.#frames[this.#back === 0 ? 0 : 1]);
+			machine.frame = this.#frames[this.#back === 0 ? 0 : 1];
 			this.frameCount++;
 
 			// Fire any timed callbacks that come due this frame (e.g. the boot
@@ -391,10 +406,11 @@ export class Emulator {
 		}
 	}
 
-	// Per machine cycle: mix POKEY (0-60) with the console speaker, filter at
-	// the machine rate, then pick one sample per audio frame (the filter has
-	// already removed everything above ~18kHz) and DC-block it.
-	#collectAudio(pokeyLevel: number, speaker: number): void {
+	// Per machine cycle: take the machine's summed audio level (0-2, one unit
+	// per source), apply the master gain, filter at the machine rate, then
+	// pick one sample per audio frame (the filter has already removed
+	// everything above ~18kHz) and DC-block it.
+	#collectAudio(level: number): void {
 		const audio = this.#audio;
 		if (!audio?.running) return;
 		// In turbo we generate samples far faster than real-time playback;
@@ -402,9 +418,7 @@ export class Emulator {
 		// and let the context underrun to silence until turbo ends.
 		if (this.#turboMode) return;
 
-		const filtered = this.#filter.apply(
-			(pokeyLevel / 60) * 0.2 + speaker * 0.2,
-		);
+		const filtered = this.#filter.apply(level * 0.2);
 
 		if (++this.#phase < this.#cyclesPerSample) return;
 		this.#phase -= this.#cyclesPerSample;

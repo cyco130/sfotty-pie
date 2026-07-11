@@ -49,7 +49,7 @@ const POWER_ON_COLOR = 0xf0;
 // character glyph fetches sit one cycle later - three cycles after their
 // name fetches at 10/18/26 - and take 6. Both land the first pixel exactly
 // at the playfield start (HPOS 32/48/64). The delays below cover the trip
-// to the ANx bus (as a DelayLine delay scheduled from busCycle time,
+// to the ANx bus (as a DelayLine delay scheduled from busPhase time,
 // before the cycle's own two ticks, that is bus-lag + 1); GTIA's output
 // register (#anxHold) adds the final color clock.
 const ANX_BITMAP_DELAY = 8;
@@ -830,27 +830,27 @@ export class AnticGtia implements Memory {
 	// is one comparison.
 	#applyPendingWrites(): void {
 		if (this.#pendingGtiaWrites === 0) return;
-		let w = this.#posWrites.tick();
+		let w = this.#posWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
 		}
-		w = this.#sizeWrites.tick();
+		w = this.#sizeWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
 		}
-		w = this.#grafWrites.tick();
+		w = this.#grafWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
 		}
-		w = this.#colorWrites.tick();
+		w = this.#colorWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
 		}
-		w = this.#priorWrites.tick();
+		w = this.#priorWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
@@ -983,8 +983,8 @@ export class AnticGtia implements Memory {
 	/** The RDY output line: false while a WSYNC stall is in effect. */
 	rdy = true;
 
-	// Carried from beforeCpu to busCycle: the cycle's hpos slot (captured
-	// before beforeCpu advances hpos), so busCycle needn't re-derive it off
+	// Carried from beforeCpu to busPhase: the cycle's hpos slot (captured
+	// before beforeCpu advances hpos), so busPhase needn't re-derive it off
 	// the already-advanced counter.
 	#dmaHpos = 0;
 
@@ -1091,7 +1091,7 @@ export class AnticGtia implements Memory {
 
 		// NMI line events. The rise is processed after the drop so that a
 		// same-cycle race keeps the line up.
-		const nmiOps = this.#nmiDelay.tick();
+		const nmiOps = this.#nmiDelay.cycle();
 		if (nmiOps & OP_NMI_DROP) {
 			this.nmi = false;
 		}
@@ -1248,7 +1248,7 @@ export class AnticGtia implements Memory {
 			this.lastDisplayListAddress = this.displayListAddress;
 		}
 
-		// The DMA fetch itself - a bus access - is busCycle's job; beforeCpu
+		// The DMA fetch itself - a bus access - is busPhase's job; beforeCpu
 		// commits the cycle's scheduling without touching the bus.
 		this.#dmaHpos = i;
 	}
@@ -1263,7 +1263,7 @@ export class AnticGtia implements Memory {
 	 * re-advancing ANTIC's counters. Call once per cycle, between beforeCpu
 	 * and running the CPU.
 	 */
-	busCycle(): void {
+	busPhase(): void {
 		const entry = this.#dmaPattern[this.#dmaHpos]!;
 		if (entry & (DMA_STOP_CHECK | DMA_DECODE_FIRST)) {
 			if (entry & DMA_DECODE_FIRST) {
@@ -1402,7 +1402,7 @@ export class AnticGtia implements Memory {
 	// cycle within horizontal blank, or -1 while none has occurred yet.
 	#pmFetchCycle = -1;
 
-	// A virtual/masked load slot from busCycle awaiting the bus value the
+	// A virtual/masked load slot from busPhase awaiting the bus value the
 	// CPU drives during the slot cycle (Acid800 virtdma pins the capture
 	// point via a timed LDA's operand byte).
 	#virtualLoad = 0;
@@ -1420,7 +1420,7 @@ export class AnticGtia implements Memory {
 				this.#emitBitmapPixels(busData);
 			} else {
 				// DMA_PF_SKIP: capture the bus into the line buffer (MSC
-				// already advanced in busCycle); the display stays off.
+				// already advanced in busPhase); the display stays off.
 				this.#buffer[index] = busData;
 			}
 		}
@@ -1754,7 +1754,7 @@ export class AnticGtia implements Memory {
 			pixel = 0;
 		} else {
 			this.#anxDrain--;
-			pixel = this.#anxLine.tick();
+			pixel = this.#anxLine.cycle();
 		}
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
@@ -2519,7 +2519,7 @@ const NAME_FETCH_START = [0, 26, 18, 10] as const;
 const REFRESH_REQUEST = new Uint8Array(114);
 for (let c = 25; c <= 57; c += 4) REFRESH_REQUEST[c] = 1;
 
-// DMA action codes for the per-line pattern table: busCycle dispatches on
+// DMA action codes for the per-line pattern table: busPhase dispatches on
 // `pattern[cycle] & 0xff`, with the action's argument (player number or
 // line-buffer index) in the high byte.
 const DMA_NONE = 0;
@@ -2538,7 +2538,7 @@ const DMA_GLYPH_VIRT = 12; // dropped glyph fetch: loads from the bus
 const DMA_BITMAP_VIRT = 13; // dropped bitmap fetch: loads from the bus
 const DMA_PF_ARM = 14; // the playfield start latch (deadline + 1)
 
-// Flag bits riding on top of a cycle's action (busCycle handles them
+// Flag bits riding on top of a cycle's action (busPhase handles them
 // before dispatching the action itself).
 const DMA_ACTION_MASK = 0x3f;
 const DMA_DECODE_FIRST = 0x40; // re-decode the instruction, then the action
@@ -2563,10 +2563,10 @@ const VIRTUAL_DMA_CUTOFF = 106;
 /**
  * Build a scanline's DMA pattern from a state key. A line's whole pattern is
  * a pure function of rarely-changing state, so patterns are computed once
- * and cached (see #rebuildDmaPattern for the key layout); busCycle then
+ * and cached (see #rebuildDmaPattern for the key layout); busPhase then
  * reduces to one table lookup per cycle. DRAM refresh is deliberately NOT in
  * the table - the pending-refresh flag is live, sequential state (a blocked
- * request slides to the next free cycle), and stays in busCycle.
+ * request slides to the next free cycle), and stays in busPhase.
  */
 function buildDmaPattern(key: number): Uint16Array {
 	const pattern = new Uint16Array(114);

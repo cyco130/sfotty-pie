@@ -27,21 +27,21 @@ Everything exported lives in [src/index.ts](src/index.ts):
 - `DECODE` - the sentinel microstate for the opcode-fetch cycle.
 - `disassemble`, `traceLine`, `Disassembly`, `PeekReader` - the disassembler in [src/disasm.ts](src/disasm.ts), used for tracing and debugging.
 
-`Sfotty` is a thin facade ([src/sfotty.ts](src/sfotty.ts)) over the internal `SfottyCore` ([src/sfotty-core.ts](src/sfotty-core.ts)), which it holds in a private field. The split exists for runtime encapsulation: the `opXxx` micro-op methods must be public on the core so the generated steps (a separate module) can call them, but the facade keeps them unreachable - inspecting a `Sfotty` in a debugger or browser console shows only real 6502 state. Hosts never see the core; everything below about registers, lines, and `run()` is exposed 1:1 on the facade as delegating accessors.
+`Sfotty` is a thin facade ([src/sfotty.ts](src/sfotty.ts)) over the internal `SfottyCore` ([src/sfotty-core.ts](src/sfotty-core.ts)), which it holds in a private field. The split exists for runtime encapsulation: the `opXxx` micro-op methods must be public on the core so the generated steps (a separate module) can call them, but the facade keeps them unreachable - inspecting a `Sfotty` in a debugger or browser console shows only real 6502 state. Hosts never see the core; everything below about registers, lines, and `cycle()` is exposed 1:1 on the facade as delegating accessors.
 
-Programmer-visible registers (`A`, `X`, `Y`, `S`, `PC`) and the discrete status flags (`cFlag`, `zFlag`, etc.) are public fields; `getP()`/`setP()` pack and unpack them into a status byte. The host can seed these directly, or call `reset(cold)` to run the reset sequence (see [The reset sequence](#the-reset-sequence)). The input lines `RDY`, `IRQ`, and `NMI` are public booleans the host drives between `run()` calls (see [The RDY line](#the-rdy-line) and [Interrupts](#interrupts)). The facade also exposes `onFetch` - an optional host callback fired on each _committed_ opcode fetch (`SYNC` asserted, `DUMMY` not), which is what tracing builds on - plus `crashed` (a CIM jam happened), the raw `state` microstate, and `describeState()` to render it for debugging.
+Programmer-visible registers (`A`, `X`, `Y`, `S`, `PC`) and the discrete status flags (`cFlag`, `zFlag`, etc.) are public fields; `getP()`/`setP()` pack and unpack them into a status byte. The host can seed these directly, or call `reset(cold)` to run the reset sequence (see [The reset sequence](#the-reset-sequence)). The input lines `RDY`, `IRQ`, and `NMI` are public booleans the host drives between `cycle()` calls (see [The RDY line](#the-rdy-line) and [Interrupts](#interrupts)). The facade also exposes `onFetch` - an optional host callback fired on each _committed_ opcode fetch (`SYNC` asserted, `DUMMY` not), which is what tracing builds on - plus `crashed` (a CIM jam happened), the raw `state` microstate, and `describeState()` to render it for debugging.
 
-## The execution model: one cycle per `run()`
+## The execution model: one cycle per `cycle()` call
 
-`run()` advances the CPU by exactly one clock cycle, which is exactly one bus access. Its whole body is:
+`cycle()` advances the CPU by exactly one clock cycle, which is exactly one bus access. Its whole body is:
 
 ```ts
-run(): void {
+cycle(): void {
 	this.#microcode[this.state]!(this);
 }
 ```
 
-`state` is the current microstate; `#microcode[state]` is a `Step` function; calling it performs this cycle's bus op, applies its register transfers, and writes the next `state`. There is no "execute a whole instruction" entry point - the host loops `run()` and counts cycles. This is what makes the core cycle-accurate: an interrupt, a DMA steal, or a trap can land between any two cycles.
+`state` is the current microstate; `#microcode[state]` is a `Step` function; calling it performs this cycle's bus op, applies its register transfers, and writes the next `state`. There is no "execute a whole instruction" entry point - the host loops `cycle()` and counts cycles. This is what makes the core cycle-accurate: an interrupt, a DMA steal, or a trap can land between any two cycles.
 
 ## Microstates and the dispatch table
 
@@ -105,7 +105,7 @@ write(address: number, value: number, options: ReadOptions): void;
 
 `ReadOptions` is a bit-flag set (a `const` object, not an `enum` - enums emit runtime code this repo's no-transpile model rejects): `NONE`, `PEEK` for side-effect-free inspection (disassembler/debugger), `SYNC` for the opcode-fetch cycle, `DUMMY` for non-committing accesses (see [Dummy cycles](#dummy-cycles)), `DMA` for accesses driven by another chip. `write` receives the same flags (only `DUMMY` is meaningful there - the RMW double write-back); an implementor that doesn't care may declare a narrower signature, which still satisfies the interface.
 
-If the host needs to suspend the CPU for anything it can't answer inline - async I/O behind a memory-mapped register, a debugger pause, an execute trap - it can throw a sentinel value from `read` or `write`, catch it around `run()`, react, and re-`run()` to retry the same cycle. See [Traps and asynchronous behavior](readme.md#traps-and-asynchronous-behavior) for an example. Step functions are designed so that the bus access is the first thing that happens in a cycle, before any state is mutated. This way, retrying a cycle after a throw from the bus is always safe.
+If the host needs to suspend the CPU for anything it can't answer inline - async I/O behind a memory-mapped register, a debugger pause, an execute trap - it can throw a sentinel value from `read` or `write`, catch it around `cycle()`, react, and re-`cycle()` to retry the same cycle. See [Traps and asynchronous behavior](readme.md#traps-and-asynchronous-behavior) for an example. Step functions are designed so that the bus access is the first thing that happens in a cycle, before any state is mutated. This way, retrying a cycle after a throw from the bus is always safe.
 
 ## Dummy cycles
 
@@ -119,13 +119,13 @@ Which cycles are dummies is mostly static per microstate, so it's authored in th
 
 The `RDY` input (a public boolean on `Sfotty`, default `true`) models the NMOS ready line. The host pulls it low to stall the CPU - on the Atari this is the `WSYNC` strobe, which syncs the CPU to the start of a scanline. (DMA cycle-stealing is a _separate_ mechanism, ANTIC's `HALT`, not `RDY`.) Two NMOS quirks define the behavior: only **read** cycles honor `RDY` (writes complete regardless), and a halted CPU keeps its address parked and **re-reads** every cycle, consuming the byte present on the cycle `RDY` finally rises.
 
-This is encoded in the bus-read micro-ops themselves. Each read op issues its read through the `#read` choke point, then checks `RDY`: if low it returns `false` _without_ mutating any register or latch; otherwise it commits (stores `DR`, bumps pointers) and returns `true`. The read happens before the `RDY` check, so the bus still sees the read every stalled cycle. The generator emits the bus op of a read cycle as `if (!cpu.opReadX()) return;`, so a stalled read bails before any internal op runs and before `state` advances - the next `run()` re-enters the same step and re-reads, until `RDY` rises and the cycle completes (its read being the consumed one). Write ops (`opWriteAddr`/`opWriteAddrDec`) never consult `RDY` and return void, so write cycles always finish. `opReadDecode` is the one read that owns its own `state` transition, so it returns `false` on a stall and simply doesn't advance.
+This is encoded in the bus-read micro-ops themselves. Each read op issues its read through the `#read` choke point, then checks `RDY`: if low it returns `false` _without_ mutating any register or latch; otherwise it commits (stores `DR`, bumps pointers) and returns `true`. The read happens before the `RDY` check, so the bus still sees the read every stalled cycle. The generator emits the bus op of a read cycle as `if (!cpu.opReadX()) return;`, so a stalled read bails before any internal op runs and before `state` advances - the next `cycle()` re-enters the same step and re-reads, until `RDY` rises and the cycle completes (its read being the consumed one). Write ops (`opWriteAddr`/`opWriteAddrDec`) never consult `RDY` and return void, so write cycles always finish. `opReadDecode` is the one read that owns its own `state` transition, so it returns `false` on a stall and simply doesn't advance.
 
-An earlier design threw a `NOT_READY` symbol from `#read` and caught it in `run()`, reusing the trap-unwind invariant. It was correct but ~15x slower per stalled cycle (a `WSYNC` kernel stalls most of every scanline), so the boolean short-circuit replaced it; stalled cycles now cost about the same as running ones. The stall path is covered by [src/sfotty.test.ts](src/sfotty.test.ts).
+An earlier design threw a `NOT_READY` symbol from `#read` and caught it in `cycle()`, reusing the trap-unwind invariant. It was correct but ~15x slower per stalled cycle (a `WSYNC` kernel stalls most of every scanline), so the boolean short-circuit replaced it; stalled cycles now cost about the same as running ones. The stall path is covered by [src/sfotty.test.ts](src/sfotty.test.ts).
 
 ## The reset sequence
 
-`reset(cold)` emulates the `RES` line. It doesn't set the post-reset registers directly - it launches a real seven-cycle sequence (states `RESET`..`RESET + 6`, reserved above `DECODE`), so the next seven `run()`s carry out the reset and land back at `DECODE`. The cycles: two dummy reads, three fake stack "pushes" done as **reads** with `S--` each, then the reset vector at `$FFFC`/`$FFFD` read into `PC` with `I` set. Starting from `S = 0` (a cold reset), the three decrements leave `S = $FD`, the familiar power-on value. The reads honor `RDY` like any other, so a stalled reset just re-reads.
+`reset(cold)` emulates the `RES` line. It doesn't set the post-reset registers directly - it launches a real seven-cycle sequence (states `RESET`..`RESET + 6`, reserved above `DECODE`), so the next seven `cycle()`s carry out the reset and land back at `DECODE`. The cycles: two dummy reads, three fake stack "pushes" done as **reads** with `S--` each, then the reset vector at `$FFFC`/`$FFFD` read into `PC` with `I` set. Starting from `S = 0` (a cold reset), the three decrements leave `S = $FD`, the familiar power-on value. The reads honor `RDY` like any other, so a stalled reset just re-reads.
 
 It is a _dedicated_ sequence rather than a BRK variant: BRK would need runtime conditionals for write-suppression and the `$FFFC` vector, whereas the reset steps (hand-written in `generate-steps.ts` like the `decode` wrapper, since reset isn't an opcode) just do the right thing. `cold` additionally clears the registers, flags, and internal latches to a known state before the sequence; a warm reset leaves them (so `S` is decremented from its current value and `D` is untouched, matching NMOS). Either way it clears a CIM crash. Construction arms a cold reset automatically - a new `Sfotty` is already at the start of the sequence, so power-on equals `new` + `reset(true)`; the host calls `reset()` itself only for later RES pulses. Hosts that seed registers directly instead (the single-step-test harness, savestate restores) skip the sequence by also setting `state = DECODE`.
 
@@ -135,7 +135,7 @@ The host drives two input lines, public booleans on `Sfotty` in positive logic (
 
 Recognition is a three-stage pipeline with a deliberate one-cycle delay, so an interrupt is taken based on the line state **two cycles before** the decode that services it - matching the hardware, where the poll reads edge/level detectors that lag the pins by half a cycle (we round that up to a whole cycle, since we don't model phi1/phi2):
 
-1. **Detect** - at the _end_ of every `run()`, `#nmiPending` latches on a false->true `NMI` edge (`#nmiPrev` tracks the line), and `#interruptDetected = #nmiPending || (IRQ && !iFlag)` is recomputed. Because this runs after the step, anything reading `#interruptDetected` during a step sees the _previous_ cycle's value - that's the one-cycle delay, for free.
+1. **Detect** - at the _end_ of every `cycle()`, `#nmiPending` latches on a false->true `NMI` edge (`#nmiPrev` tracks the line), and `#interruptDetected = #nmiPending || (IRQ && !iFlag)` is recomputed. Because this runs after the step, anything reading `#interruptDetected` during a step sees the _previous_ cycle's value - that's the one-cycle delay, for free.
 2. **Poll** - `opPoll` latches `#interruptDetected` into `#interruptPending`. The generator injects it (as a synthetic `poll` token) on every cycle that can end an instruction - terminal cycles, a branch's `cond?` cycle, an indexed read's `?` cycle - **except** BRK (the sequence never polls) and a taken branch's `pc+=dr?` (PCL-add) cycle. It sits right after the bus op, before any I-flag write, and overwrites rather than accumulates (so a later poll in the same instruction, e.g. a branch's fix-up cycle, wins).
 3. **Recognize** - `decode` (`opReadDecode`) checks `#interruptPending`. If set it does a dummy opcode fetch (PC _not_ advanced), clears the flag, sets `bFlag = false`, and forces `state = 0` - the BRK microcode - instead of dispatching the fetched opcode.
 
@@ -193,7 +193,7 @@ The repo-level `pnpm test` (vitest + typecheck + lint + publint) is separate and
 | File                                                                     | Role                                                                                                           |
 | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | [src/sfotty.ts](src/sfotty.ts)                                           | The public `Sfotty` facade: delegating accessors over the core, nothing else reachable.                        |
-| [src/sfotty-core.ts](src/sfotty-core.ts)                                 | `SfottyCore`: registers, latches, `run()`, `decode()`, and every `opXxx` micro-op. The ISA's behavior.         |
+| [src/sfotty-core.ts](src/sfotty-core.ts)                                 | `SfottyCore`: registers, latches, `cycle()`, `decode()`, and every `opXxx` micro-op. The ISA's behavior.       |
 | [src/microcode.ts](src/microcode.ts)                                     | Core types (`Step`, `Instruction`, `BusOp`, `InternalOp`) and the `DECODE` constant. The microcode vocabulary. |
 | [src/nmos-instructions.generated.ts](src/nmos-instructions.generated.ts) | _Generated._ The 256 instructions as microcode data (`NMOS_INSTRUCTIONS`).                                     |
 | [src/nmos-steps.generated.ts](src/nmos-steps.generated.ts)               | _Generated._ Step functions and the `MICROCODE` dispatch table.                                                |
@@ -205,7 +205,7 @@ The repo-level `pnpm test` (vitest + typecheck + lint + publint) is separate and
 
 ## Correspondence to the real 6502 pins
 
-Apart from the power and clock pins, which roughly correspond to the `reset(true)` and `run()` methods, the 6502's pins map to the CPU's public API surface as follows:
+Apart from the power and clock pins, which roughly correspond to the `reset(true)` and `cycle()` methods, the 6502's pins map to the CPU's public API surface as follows:
 
 | Pin      | Direction | Description                         | Emulation API      |
 | -------- | --------- | ----------------------------------- | ------------------ |
@@ -221,4 +221,4 @@ Apart from the power and clock pins, which roughly correspond to the `reset(true
 
 The `bus: Memory` constructor argument implements address and data buses. The `R/W` pin is implicit in which bus method (`read` or `write`) is called. The `SYNC` pin is emulated by the `ReadOptions.SYNC` flag on `bus.read`'s second argument. Note that while the physical `IRQ` and `NMI` pins are active low, the corresponding properties use positive logic (`true` = asserted).
 
-Atari's 6502C ("Sally") has a `HALT` pin that stops the CPU by stretching the clock signal and isolating the CPU from the bus. It can be emulated simply by not calling `run()` for halted cycles.
+Atari's 6502C ("Sally") has a `HALT` pin that stops the CPU by stretching the clock signal and isolating the CPU from the bus. It can be emulated simply by not calling `cycle()` for halted cycles.

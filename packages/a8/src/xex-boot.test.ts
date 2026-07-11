@@ -67,7 +67,7 @@ test("booting the disk loads and runs the executable", () => {
 
 	cpu.RDY = true;
 	cpu.reset(true);
-	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.run();
+	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.cycle();
 	cpu.PC =
 		machine.read(0x0704, ReadOptions.NONE) |
 		(machine.read(0x0705, ReadOptions.NONE) << 8);
@@ -81,7 +81,7 @@ test("booting the disk loads and runs the executable", () => {
 		i < 100_000 && !(cpu.PC === 0x3013 && cpu.state === DECODE);
 		i++
 	) {
-		cpu.run();
+		cpu.cycle();
 	}
 	expect(cpu.PC).toBe(0x3013);
 

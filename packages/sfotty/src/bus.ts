@@ -34,7 +34,7 @@ export interface Memory {
 	 * May throw to interrupt the CPU (for memory-mapped I/O, breakpoints, or
 	 * execute traps). The bus access is the first thing a cycle does, before any
 	 * register is mutated, so a throw unwinds with the CPU in its exact pre-cycle
-	 * state - the host can catch it around `run()`, react, and re-`run()` to retry
+	 * state - the host can catch it around `cycle()`, react, and re-`cycle()` to retry
 	 * the same cycle. See the readme.
 	 *
 	 * @returns The byte read

@@ -522,7 +522,7 @@ export class Pokey implements Memory {
 		this.#underflowed1 = false;
 		this.#underflowed3 = false;
 
-		let due = this.#delay.tick();
+		let due = this.#delay.cycle();
 		if (due) {
 			// The two-tone resync goes first: it preempts a timer 1 fire
 			// landing on the resync cycle itself (a fire one cycle earlier

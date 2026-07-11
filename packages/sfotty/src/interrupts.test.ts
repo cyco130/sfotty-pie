@@ -54,7 +54,7 @@ function newCpu(): { cpu: Sfotty; ram: Ram } {
 }
 
 function run(cpu: Sfotty, cycles: number): void {
-	for (let i = 0; i < cycles; i++) cpu.run();
+	for (let i = 0; i < cycles; i++) cpu.cycle();
 }
 
 /** Return address pushed by the first interrupt/BRK frame (S started $ff). */
@@ -267,7 +267,7 @@ describe("interrupts", () => {
 		cpu.S = 0xff;
 		cpu.state = DECODE;
 		cpu.RDY = false; // stalled
-		cpu.run();
+		cpu.cycle();
 
 		const stalled = reads.find((r) => r.address === 0x0200);
 		expect(stalled).toBeDefined();

@@ -158,10 +158,10 @@ test("the trap fires on a real JSR through SIOV", () => {
 	machine.write(0x0602, SIOV >> 8, ReadOptions.NONE);
 
 	cpu.reset(true);
-	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.run();
+	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.cycle();
 	cpu.PC = 0x0600;
 	cpu.S = 0xfd;
-	for (let i = 0; i < 60 && cpu.PC !== 0x0603; i++) cpu.run();
+	for (let i = 0; i < 60 && cpu.PC !== 0x0603; i++) cpu.cycle();
 
 	expect(cpu.PC).toBe(0x0603);
 	expect(cpu.Y).toBe(0x01);

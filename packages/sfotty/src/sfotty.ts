@@ -208,8 +208,8 @@ export class Sfotty {
 	}
 
 	/** Advance the CPU by exactly one clock cycle (one bus access). */
-	run(): void {
-		this.#core.run();
+	cycle(): void {
+		this.#core.cycle();
 	}
 
 	/**

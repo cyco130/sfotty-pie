@@ -415,7 +415,7 @@ export class Atari implements Memory {
 
 			// falls through
 			case PHASE.BUS:
-				this.anticGtia.busCycle(); // ANTIC DMA read - may throw
+				this.anticGtia.busPhase(); // ANTIC DMA read - may throw
 				this.cpu.NMI = this.anticGtia.nmi;
 				// The CPU sees the wire-ORed /IRQ line as of the end of the
 				// previous cycle: the open-collector line settles across a
@@ -429,7 +429,7 @@ export class Atari implements Memory {
 			// falls through
 			case PHASE.CPU:
 				if (this.resetAsserted) this.cpu.reset(false);
-				else if (!this.anticGtia.halt) this.cpu.run(); // may throw
+				else if (!this.anticGtia.halt) this.cpu.cycle(); // may throw
 				this.anticGtia.afterCpu(this.frame, this.busData);
 				this.#irqLine = this.irq;
 				this.phase = PHASE.IDLE;

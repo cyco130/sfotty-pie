@@ -82,7 +82,7 @@ function runTest(test: SingleStepTest): string | null {
 	let pc = 0;
 	try {
 		for (let i = 0; i < test.cycles.length + 1; i++) {
-			sfotty.run();
+			sfotty.cycle();
 			if (i === test.cycles.length - 1) pc = sfotty.PC;
 		}
 	} catch (error) {

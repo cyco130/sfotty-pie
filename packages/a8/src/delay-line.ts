@@ -57,7 +57,7 @@ export class DelayLine {
 	}
 
 	/** Advance one cycle: return what's due now and clear its slot. */
-	tick(): number {
+	cycle(): number {
 		const cursor = this.#cursor;
 		const bits = this.#slots[cursor]!;
 		this.#slots[cursor] = 0;

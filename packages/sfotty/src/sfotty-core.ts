@@ -171,7 +171,7 @@ export class SfottyCore {
 	}
 
 	/** Advance the CPU by exactly one clock cycle (one bus access). */
-	run(): void {
+	cycle(): void {
 		this.#microcode[this.state]!(this);
 
 		// Interrupt detection: Checking it here introduces a one-cycle delay.

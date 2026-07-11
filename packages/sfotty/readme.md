@@ -12,7 +12,7 @@ Sfotty implements all documented and undocumented opcodes, and is verified cycle
 npm install @sfotty-pie/sfotty
 ```
 
-The CPU must be provided with a `Memory` implementation during construction, and then you can drive it by calling `run()` in a loop. The CPU will call the bus's `read` and `write` methods on every cycle, and you can react to those calls to implement memory-mapped I/O, breakpoints, execute traps, or whatever else your system needs.
+The CPU must be provided with a `Memory` implementation during construction, and then you can drive it by calling `cycle()` in a loop. The CPU will call the bus's `read` and `write` methods on every cycle, and you can react to those calls to implement memory-mapped I/O, breakpoints, execute traps, or whatever else your system needs.
 
 ```ts
 import { Sfotty, type Memory } from "@sfotty-pie/sfotty";
@@ -33,7 +33,7 @@ ram.set([0x00, 0x06], 0xfffc);
 // A new CPU powers on into the 7-cycle reset sequence, like the real chip.
 const cpu = new Sfotty(bus);
 
-for (let i = 0; i < 12; i++) cpu.run(); // 7 reset cycles + LDA (2) + STA (3)
+for (let i = 0; i < 12; i++) cpu.cycle(); // 7 reset cycles + LDA (2) + STA (3)
 
 console.log(cpu.A); // 42
 console.log(ram[0x00]); // 42
@@ -41,13 +41,13 @@ console.log(ram[0x00]); // 42
 
 Both bus methods receive `ReadOptions` bit flags that classify the access (side-effect-free peek, opcode fetch, dummy cycle, DMA), so read- and write-sensitive I/O registers can react correctly - as in the example, an implementation that doesn't care may just omit the parameter.
 
-Beyond `run()`, the CPU exposes the registers and flags, the `RDY`/`IRQ`/`NMI` input lines, `reset()`, hardware-variant construction options, and a small disassembler ships in the same package - see the JSDoc comments on the exported types for the full surface.
+Beyond `cycle()`, the CPU exposes the registers and flags, the `RDY`/`IRQ`/`NMI` input lines, `reset()`, hardware-variant construction options, and a small disassembler ships in the same package - see the JSDoc comments on the exported types for the full surface.
 
 ### Traps and asynchronous behavior
 
-`run()` is synchronous, so the bus can't return a promise - but it can **throw**. Throwing from `read` or `write` is the supported way to suspend the CPU for anything that can't be answered inline: asynchronous I/O behind a memory-mapped register, a debugger pausing on a breakpoint or watchpoint, an execute trap on a magic address, and so on.
+`cycle()` is synchronous, so the bus can't return a promise - but it can **throw**. Throwing from `read` or `write` is the supported way to suspend the CPU for anything that can't be answered inline: asynchronous I/O behind a memory-mapped register, a debugger pausing on a breakpoint or watchpoint, an execute trap on a magic address, and so on.
 
-This is safe because the first thing every cycle does is its single bus access - no register or internal state is touched before it. A throw therefore unwinds with the CPU in its exact pre-cycle state, and once the host has reacted it calls `run()` again to retry the same cycle from scratch.
+This is safe because the first thing every cycle does is its single bus access - no register or internal state is touched before it. A throw therefore unwinds with the CPU in its exact pre-cycle state, and once the host has reacted it calls `cycle()` again to retry the same cycle from scratch.
 
 ```ts
 const TRAP = Symbol("trap");
@@ -63,11 +63,11 @@ class Bus implements Memory {
 }
 
 try {
-  cpu.run();
+  cpu.cycle();
 } catch (e) {
   if (e !== TRAP) throw e;
   await serviceRegister(); // react: do async I/O, pause in a debugger, etc.
-  cpu.run(); // retries the exact same cycle
+  cpu.cycle(); // retries the exact same cycle
 }
 ```
 

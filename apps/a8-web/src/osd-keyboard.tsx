@@ -33,7 +33,7 @@ interface KeyBase {
  * A key in the layout. `char` keys carry a base token (matching the command
  * suffix, e.g. `A`, `1`, `SEMICOLON`) and recompose under Shift/Control. `lit`
  * keys are a fixed momentary POKEY command (a shifted glyph like `"` whose
- * meaning shouldn't shift again). `tap` fires once with no release (Break).
+ * meaning shouldn't shift again). `tap` fires once and auto-releases (Break).
  * `mod`/`layer` drive the keyboard's own state.
  */
 type Key =

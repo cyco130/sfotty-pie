@@ -475,12 +475,14 @@ export class EmulatorHost {
 		this.#syncMetaLines();
 	}
 
-	/** Tap Break. Press-only: a release is not observable by software, so
-	 *  the line is pulsed (the IRQ fires on the rising edge). */
-	pressBreakKey(): void {
+	/** The Break key (its own bindable command). A KR2 meta line like Shift:
+	 *  only the down edge raises the IRQ, but the held LEVEL is part of the
+	 *  matrix (phantom chains, two-meta-key contention), so it tracks the
+	 *  host key rather than pulsing. */
+	setBreakKey(held: boolean): void {
 		const keyboard = this.#emulator.machine.keyboard;
-		keyboard.pressMetaKey(KEYBOARD_LINES.BREAK);
-		keyboard.releaseMetaKey(KEYBOARD_LINES.BREAK);
+		if (held) keyboard.pressMetaKey(KEYBOARD_LINES.BREAK);
+		else keyboard.releaseMetaKey(KEYBOARD_LINES.BREAK);
 	}
 
 	#syncMetaLines(): void {

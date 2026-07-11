@@ -232,8 +232,8 @@ const base: Binding[] = [
 	{ on: "F5", shift: "any", command: "PRESS_RESET" },
 	{ on: "F5", ctrl: true, shift: "any", command: "POWER_CYCLE" },
 
-	// Break - no release (a key-up isn't observable), so instant. On F8: its one
-	// reachability gap is Ctrl+F8 (Mac Safari), which Break never uses.
+	// Break - held like any meta line (the level is matrix-observable). On F8:
+	// its one reachability gap is Ctrl+F8 (Mac Safari), which Break never uses.
 	{ on: "F8", command: "PRESS_BREAK" },
 	{ on: "Pause", command: "PRESS_BREAK" },
 

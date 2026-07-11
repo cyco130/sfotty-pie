@@ -596,10 +596,12 @@ export const commands = {
 		release: ({ emulator }) => (emulator.machine.console.start = false),
 	},
 
-	// Break - a release isn't observable by software (no key-up), so press-only.
+	// Break - sustained like Shift: the IRQ fires on the down edge only, but the
+	// held line is observable through the matrix, so key-up releases it.
 	PRESS_BREAK: {
 		label: "PRESS_BREAK",
-		run: ({ host }) => host.pressBreakKey(),
+		run: ({ host }) => host.setBreakKey(true),
+		release: ({ host }) => host.setBreakKey(false),
 	},
 
 	// Joysticks 0-3, one set per port (directions + trigger). Ports 2/3 are the

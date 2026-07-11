@@ -121,8 +121,6 @@ The `RDY` input (a public boolean on `Sfotty`, default `true`) models the NMOS r
 
 This is encoded in the bus-read micro-ops themselves. Each read op issues its read through the `#read` choke point, then checks `RDY`: if low it returns `false` _without_ mutating any register or latch; otherwise it commits (stores `DR`, bumps pointers) and returns `true`. The read happens before the `RDY` check, so the bus still sees the read every stalled cycle. The generator emits the bus op of a read cycle as `if (!cpu.opReadX()) return;`, so a stalled read bails before any internal op runs and before `state` advances - the next `cycle()` re-enters the same step and re-reads, until `RDY` rises and the cycle completes (its read being the consumed one). Write ops (`opWriteAddr`/`opWriteAddrDec`) never consult `RDY` and return void, so write cycles always finish. `opReadDecode` is the one read that owns its own `state` transition, so it returns `false` on a stall and simply doesn't advance.
 
-An earlier design threw a `NOT_READY` symbol from `#read` and caught it in `cycle()`, reusing the trap-unwind invariant. It was correct but ~15x slower per stalled cycle (a `WSYNC` kernel stalls most of every scanline), so the boolean short-circuit replaced it; stalled cycles now cost about the same as running ones. The stall path is covered by [src/sfotty.test.ts](src/sfotty.test.ts).
-
 ## The reset sequence
 
 `reset(cold)` emulates the `RES` line. It doesn't set the post-reset registers directly - it launches a real seven-cycle sequence (states `RESET`..`RESET + 6`, reserved above `DECODE`), so the next seven `cycle()`s carry out the reset and land back at `DECODE`. The cycles: two dummy reads, three fake stack "pushes" done as **reads** with `S--` each, then the reset vector at `$FFFC`/`$FFFD` read into `PC` with `I` set. Starting from `S = 0` (a cold reset), the three decrements leave `S = $FD`, the familiar power-on value. The reads honor `RDY` like any other, so a stalled reset just re-reads.
@@ -147,7 +145,7 @@ The IRQ/NMI sequence is the **BRK microcode reused** (RESET is separate - see ab
 
 What falls out, with no per-instruction special-casing: the two-cycles-before timing; the one-instruction `CLI`/`SEI`/`PLP` delay (the poll reads the pre-write I via `#interruptDetected`) versus immediate `RTI` (which writes I mid-sequence); the taken-non-crossing-branch delay (that cycle doesn't poll); NMI hijacking; and a too-short NMI at the push-P cycle being lost. These behaviors are tested in [src/interrupts.test.ts](src/interrupts.test.ts) (stack-frame and landing-vector observables); none are covered by the single-step tests (no async IRQ/NMI in those vectors).
 
-**Deferred / approximate.** We're cycle-exact, not phi-exact, so the _precise_ hijack window and the exact lost/caught boundary are modeled to a whole-cycle grid and still want confirmation against a Visual6502 trace.
+**Deferred / approximate.** We're cycle-exact, not phi-exact, so the _precise_ hijack window and the exact lost/caught boundary are modeled to a whole-cycle grid.
 
 ## Relative state transitions (and why dedup falls out)
 

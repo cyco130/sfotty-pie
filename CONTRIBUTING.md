@@ -49,11 +49,11 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 
 ## Pull requests
 
-- AI use is fine as long and is subject to the same review standards as human-written code.
 - Small, focused, and well-described PRs are welcome.
 - For large or complex changes, open an issue first to discuss the approach before investing time in implementation.
+- AI use is fine and is subject to the same review standards as human-written code.
 - CI (`.github/workflows/ci.yml`) must pass - both the `quality` job (lint, typecheck, unit) and the `conformance` job (CPU single-step tests, Acid800). PRs also get a Cloudflare Pages preview deployment of the web app, and merges to `main` deploy production.
 
-## Releases
+## NPM releases
 
-Releases are cut by a maintainer via the `Publish to NPM` workflow in GitHub Actions, which runs `./version <semver>` and publishes to npm via `pnpm -r publish`.
+NPM releases are cut by a maintainer via the `Publish to NPM` workflow in GitHub Actions, which runs `./version <semver>` and publishes to npm via `pnpm -r publish`.

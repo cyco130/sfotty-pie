@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@sfotty-pie/sfotty": "^0.2.1"
+    "@sfotty-pie/sfotty": "^0.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.0"

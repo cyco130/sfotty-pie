@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { DECODE, ReadOptions, Sfotty } from "@sfotty-pie/sfotty";
 import { makeAtr } from "./atr-fixture.ts";
 import { AtrImage } from "./atr.ts";
+import { DiskDrive } from "./disk-drive.ts";
 import { Atari } from "./machine.ts";
 import { recognizableOs } from "./os-fixture.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
@@ -25,10 +26,12 @@ function makeMachine(model: "800" | "800XL" | "130XE" = "800") {
 function setup(disk?: AtrImage) {
 	const machine = makeMachine();
 	const cpu = new Sfotty(machine.mmu, { withoutUndocumented: false });
+	const drive = new DiskDrive(1);
+	drive.disk = disk;
 	const handler = createSioHandler({
 		machine,
 		cpu,
-		getDisk: (unit) => (unit === 1 ? disk : undefined),
+		devices: () => [drive],
 	});
 	return { machine, cpu, handler };
 }

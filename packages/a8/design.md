@@ -35,17 +35,22 @@ Built-in machine features use the same public trap machinery: the SIO handler is
 ## Chips
 
 - **[src/antic-gtia.ts](src/antic-gtia.ts)** - ANTIC and GTIA fused into one `AnticGtia` class, because they share cycle timing; GTIA effectively runs a fixed color-clock skew behind ANTIC (see the delay-line comments in the source). It owns display-list DMA, player/missile graphics (latched across the full visible region), the NMI/RDY/HALT lines, console-key and trigger inputs, the per-cycle scanline render (`beforeCpu`/`busPhase`/`afterCpu`), and a display-list disassembler gated on the `log` config option.
-- **[src/pokey.ts](src/pokey.ts)** - the four audio channels (an output level per cycle), keyboard scan, serial-port IRQs, SKSTAT.
+- **[src/pokey.ts](src/pokey.ts)** - the four audio channels (an output level per cycle), keyboard scan, the full serial port (transmit and receive shifters, async receive's timer hold, SKSTAT, the data/clock line levels), and the serial/timer IRQs.
 - **[src/pia.ts](src/pia.ts)** - the 6520: PORTA (joysticks), PORTB (joysticks on the 400/800; memory banking on XL/XE), IRQ lines.
 - The CPU is not in this package - it's the `Sfotty` core, driven through the bus.
 
 Framebuffer: `frame` is one Atari color byte per pixel, `FRAME_BUFFER_WIDTH x FRAME_BUFFER_HEIGHT` (376x240 - the full overscan region). Palette decode is the host's job; [src/palette.ts](src/palette.ts) provides NTSC (YIQ) and PAL (YUV) palette builders returning 256-entry `Uint32Array`s of little-endian RGBA words, designed to be written straight through a `Uint32Array` view of canvas `ImageData`. NTSC/PAL timing (line counts, rates) lives in [src/timing-constants.ts](src/timing-constants.ts), re-exported wholesale from the index.
 
-## Disk I/O: SIO high-level emulation
+## The SIO bus: one device, two fronts
 
-No serial hardware is emulated. `createSioHandler` ([src/sio.ts](src/sio.ts)) is a synchronous execute trap on the OS's SIOV vector: it reads the device control block from RAM, performs the request against the mounted `AtrImage` ([src/atr.ts](src/atr.ts)) in-process, writes the result back, and returns an RTS opcode to resume the caller. No throw, no await - a host that only serves disks never sees a suspend. `Atari.insertDisk`/`ejectDisk` manage the single D1: image; ejecting mid-run is safe (SIO then times out, like real hardware with no drive).
+An SIO peripheral is an `SioDevice` ([src/sio-connector.ts](src/sio-connector.ts)): it claims bus IDs (`respondsTo`) and speaks the byte-level command protocol (`command`: a frame in, a complete/error/nak result out, with a `receive` continuation for commands that take a data frame from the computer). Devices attach to the machine's `sio` connector, which also carries the command and motor control lines off the PIA's CB2/CA2. Two independent fronts dispatch into the same device interface:
 
-`AtrImage` wraps a whole `.atr` file (header + data) with sector read/write and `toBytes()` for write-back; 128- and 256-byte sectors are supported.
+- **The SIOV trap** (default, [src/sio.ts](src/sio.ts)): a synchronous execute trap on the OS's SIOV vector. It reads the device control block from RAM, computes the bus ID like the OS does (DDEVIC + DUNIT - 1), calls the claiming device directly, and maps the result onto DSTATS/Y before returning an RTS opcode. No serial traffic, no throw, no await - OS-conformant disk I/O is instant. It only fires while the OS ROM is mapped.
+- **The wire engine** ([src/sio-bus.ts](src/sio-bus.ts), machine-internal): always live underneath the trap. It deserializes command frames off POKEY's transmitter (gated by the command line), dispatches to the same devices, and serializes ACK/Complete/Error and data frames back onto POKEY's serial input line bit by bit with protocol-legal delays - POKEY's own receive logic does the sampling, so framing and async-mode behavior are the chip's, not the engine's. Devices are clock followers: the engine measures the bit cell from the SIO clock-out line, so any programmed rate works. This is what custom fast loaders, SpartaDOS's own SIO, and Acid800's serial tests hit.
+
+`DiskDrive` ([src/disk-drive.ts](src/disk-drive.ts)) is the first device: a stock-speed drive holding an `AtrImage` ([src/atr.ts](src/atr.ts)); an empty drive claims nothing, so requests time out like an absent drive. `Atari.insertDisk`/`ejectDisk` manage the built-in D1: drive's disk; hosts attach further devices (D2:-D8:, and eventually printers or cassette) to `machine.sio`.
+
+`AtrImage` wraps a whole `.atr` file (header + data) with sector read/write and `toBytes()` for write-back; 128- and 256-byte sectors are supported. Disk behavior lives on the image; the drive is the protocol personality around it.
 
 ## The OS trap framework
 
@@ -84,7 +89,10 @@ Unit tests (vitest, `*.test.ts` beside the sources) cover the chips, traps, ATR/
 | [src/antic-gtia.ts](src/antic-gtia.ts)                              | ANTIC+GTIA fused: display list, P/M graphics, NMI/RDY/HALT, scanline render.                     |
 | [src/pokey.ts](src/pokey.ts)                                        | POKEY: audio, keyboard scan, IRQs.                                                               |
 | [src/pia.ts](src/pia.ts)                                            | PIA: joystick ports, XL/XE banking latch.                                                        |
-| [src/sio.ts](src/sio.ts)                                            | SIO high-level emulation (execute trap on SIOV).                                                 |
+| [src/sio.ts](src/sio.ts)                                            | The SIOV execute trap: the DCB front end onto `SioDevice`s.                                      |
+| [src/sio-connector.ts](src/sio-connector.ts)                        | `SioConnector` + the `SioDevice` protocol types and checksum.                                    |
+| [src/sio-bus.ts](src/sio-bus.ts)                                    | The serial-wire engine: frames on/off POKEY's serial port (not exported).                        |
+| [src/disk-drive.ts](src/disk-drive.ts)                              | `DiskDrive`: a stock-speed drive over an `AtrImage`.                                             |
 | [src/atr.ts](src/atr.ts)                                            | `AtrImage`: sector-level `.atr` access.                                                          |
 | [src/cartridge.ts](src/cartridge.ts)                                | The `Cartridge` port interface; `RomCartridge` (raw/`.car` images) and the `CART_TYPES` mappers. |
 | [src/xex-boot.ts](src/xex-boot.ts)                                  | `buildBootDisk`: XEX -> bootable ATR via the generated loader.                                   |

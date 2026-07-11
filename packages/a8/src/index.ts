@@ -21,6 +21,15 @@ export {
 } from "./cartridge.ts";
 export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
 export { textToAtascii, type PasteMode } from "./os-traps.ts";
+export {
+	SioConnector,
+	sioChecksum,
+	type SioCommandFrame,
+	type SioCommandResponse,
+	type SioCommandResult,
+	type SioDevice,
+} from "./sio-connector.ts";
+export { DiskDrive } from "./disk-drive.ts";
 export { buildBootDisk } from "./xex-boot.ts";
 export {
 	detectFileFormat,

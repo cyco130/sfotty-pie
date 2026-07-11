@@ -9,16 +9,21 @@ import { DelayLine } from "./delay-line.ts";
  * polynomial counters and RANDOM; SKCTL initialization mode with the two
  * free-running slow clocks; the serial transmitter (SEROUT, the 10-bit
  * shifter clocked by the SKCTL-selected timer, the SEROR latch and SEROC
- * level IRQs, byte delivery via {@link serialOutByte}); and the
- * keyboard-facing registers - KBCODE, the keyboard/Break bits of
- * IRQEN/IRQST, the 15KHz keyboard scan (debounce, the Shift/Control/Break
- * latches, overruns), and the keyboard bits of SKSTAT.
+ * level IRQs, byte delivery via {@link serialOutByte}); the serial receiver
+ * (the {@link serialIn} line sampled by the 10-bit input shifter, SERIN,
+ * asynchronous receive mode's timer 3+4 hold, the SERIN-ready IRQ, and the
+ * framing/overrun/busy/direct-input bits of SKSTAT); the serial line levels
+ * ({@link serialOut} with two-tone FSK and force break, and the
+ * {@link serialClockOut} clock line); and the keyboard-facing registers -
+ * KBCODE, the keyboard/Break bits of IRQEN/IRQST, the 15KHz keyboard scan
+ * (debounce, the Shift/Control/Break latches, overruns), and the keyboard
+ * bits of SKSTAT.
  *
  * The host clocks the chip by calling {@link cycle} once per machine cycle;
  * the return value is the summed audio output (0-60), for the host to sample
  * and filter as it sees fit.
  *
- * TODO: serial input, high-pass filters, and POT scanning.
+ * TODO: high-pass filters and POT scanning.
  */
 export interface PokeyKeyboard {
 	scan(code: number): void;
@@ -35,6 +40,22 @@ export class Pokey implements Memory {
 	audio = 0;
 
 	cycle(): void {
+		// The serial input line, watched while the async-receive hold is
+		// engaged: the start bit's leading edge releases the timer 3+4
+		// hold and presets the receive clock phase, landing the first
+		// sample mid-start-bit (AHRM 5.6, figure 10). The previous level
+		// is snapshotted when the hold engages, so this is the only place
+		// that needs to track the line.
+		if (this.#asyncHold) {
+			const serialIn = this.serialIn ? 1 : 0;
+			if (serialIn === 0 && this.#serialInPrev === 1) {
+				this.#asyncHold = false;
+				this.#rxPhase = 1;
+				this.#restartTimers34();
+			}
+			this.#serialInPrev = serialIn;
+		}
+
 		// Init mode holds the polynomial counters and both slow clocks in
 		// reset. The 1.79MHz channels run on - that's the machine clock.
 		let slowTick = false;
@@ -120,6 +141,9 @@ export class Pokey implements Memory {
 			if (due & OP_SERIAL_TICK && !this.#initMode) {
 				this.#serialClockTick();
 			}
+			if (due & OP_SERIAL_RTICK && !this.#initMode) {
+				this.#serialReceiveTick();
+			}
 			if (due & OP_FIRE2) {
 				this.#inFlight2 = false;
 				this.#out2 = this.#flip(this.#out2, this.#audc2, 0x80 >> 2);
@@ -137,6 +161,9 @@ export class Pokey implements Memory {
 				this.#counter4 = this.#reload34() - (this.#fastClock3 ? 2 : 0);
 				if (!this.#initMode && this.#transmitClock === 4) {
 					this.#delay.schedule(2, OP_SERIAL_TICK);
+				}
+				if (!this.#initMode && this.#receiveTicksOnTimer4) {
+					this.#delay.schedule(2, OP_SERIAL_RTICK);
 				}
 			}
 		}
@@ -182,15 +209,22 @@ export class Pokey implements Memory {
 			}
 		}
 
+		// Asynchronous receive holds timers 3+4 in reset (no counting, no
+		// fires) while the input line idles; the start-bit edge above
+		// releases them.
 		if (this.#link34) {
 			this.#out3 = 0;
-			if (!this.#inFlight4 && (this.#fastClock3 || slowTick)) {
+			if (
+				!this.#inFlight4 &&
+				!this.#asyncHold &&
+				(this.#fastClock3 || slowTick)
+			) {
 				if (--this.#counter4 <= 0) {
 					this.#inFlight4 = true;
 					this.#delay.schedule(3, OP_FIRE4); // reload happens there
 				}
 			}
-		} else {
+		} else if (!this.#asyncHold) {
 			if (this.#fastClock3) {
 				if (!this.#inFlight3 && --this.#counter3 <= 0) {
 					this.#inFlight3 = true;
@@ -208,6 +242,9 @@ export class Pokey implements Memory {
 				this.#raiseIrq(IRQ_TIMER4);
 				if (this.#transmitClock === 4) {
 					this.#delay.schedule(2, OP_SERIAL_TICK);
+				}
+				if (this.#receiveTicksOnTimer4) {
+					this.#delay.schedule(2, OP_SERIAL_RTICK);
 				}
 			}
 		}
@@ -243,6 +280,39 @@ export class Pokey implements Memory {
 	 * Signal: bytes are events, and repeated values must still notify.)
 	 */
 	serialOutByte: ((byte: number) => void) | null = null;
+
+	/**
+	 * The serial input line level (SIO DATA IN), driven by the host or the
+	 * SIO bus; idles at mark (1). POKEY samples it with the receive clock;
+	 * SKSTAT bit 4 reads it raw.
+	 */
+	serialIn = 1;
+
+	/**
+	 * The serial output line level (SIO DATA OUT): the FSK flip-flop in
+	 * two-tone mode, else space while force break holds the line, else the
+	 * output shifter's bit (idles at mark). Neither init mode nor the
+	 * serial-clock reset clears the shifter's last bit - interrupting a
+	 * send can leave the line stuck low, like the hardware.
+	 */
+	get serialOut(): number {
+		if (this.#twoTone) return this.#fskOut;
+		if (this.#forceBreak) return 0;
+		return this.#serialOutBit;
+	}
+
+	/**
+	 * The bidirectional clock line level (SIO CLOCK OUT): driven with the
+	 * transmit clock's free-running divide-by-two in the two output-clock
+	 * modes (SKCTL bits 4-6 = %010/%110), pulled up (1) otherwise. A
+	 * clock-following device shifts on its edges, whatever the programmed
+	 * rate.
+	 */
+	get serialClockOut(): number {
+		const mode = (this.#skctl >> 4) & 0x07;
+		if (mode === 2 || mode === 6) return this.#clockOutPhase ? 0 : 1;
+		return 1;
+	}
 
 	/**
 	 * The keyboard matrix the 15KHz scan addresses: latch a scan code, read
@@ -290,8 +360,19 @@ export class Pokey implements Memory {
 		this.#shiftBitsLeft = 0;
 		this.#serialOutBit = 1;
 		this.#serialHalfBit = false;
+		this.#clockOutPhase = false;
+		this.#serin = 0;
+		this.#rxShift = 0;
+		this.#rxBitsLeft = 0;
+		this.#rxPhase = 0;
+		this.#rxBusy = false;
+		this.#framingError = false;
+		this.#serialOverrun = false;
+		this.#serialInPrev = 1;
+		this.#asyncHold = false;
 		this.#twoTone = false;
 		this.#forceBreak = false;
+		this.#fskOut = 1;
 		this.#delay.reset();
 		this.#inFlight1 = this.#inFlight2 = false;
 		this.#inFlight3 = this.#inFlight4 = false;
@@ -319,16 +400,27 @@ export class Pokey implements Memory {
 			// $FF while init mode holds the counter in reset.
 			case 0x0a:
 				return this.#usePoly9 ? this.#poly9.random() : this.#poly17.random();
+			// SERIN ($D20D): the last byte received, errors included.
+			// Reading has no side effects - acknowledgment is clearing the
+			// IRQST bit 5 latch, not this read.
+			case 0x0d:
+				return this.#serin;
 			// IRQST ($D20E). Bit 3 (SEROC) is composed in as a level.
 			case 0x0e:
 				return this.#serocLevel(this.#irqst);
-			// SKSTAT ($D20F): unmodeled bits (serial state etc.) read 1.
+			// SKSTAT ($D20F): serial and keyboard status. Error/state bits
+			// are active low; bit 4 reads the raw input line level and bit
+			// 0 always reads 1.
 			case 0x0f:
 				return (
 					0xff &
+					~(this.#framingError ? SKSTAT_FRAMING_ERROR : 0) &
 					~(this.#kbOverrun ? SKSTAT_KB_OVERRUN : 0) &
+					~(this.#serialOverrun ? SKSTAT_SERIAL_OVERRUN : 0) &
+					~(this.serialIn ? 0 : SKSTAT_SERIAL_IN) &
+					~(this.#shiftHeld ? SKSTAT_SHIFT_HELD : 0) &
 					~(this.#keyHeld ? SKSTAT_KEY_HELD : 0) &
-					~(this.#shiftHeld ? SKSTAT_SHIFT_HELD : 0)
+					~(this.#rxBusy ? SKSTAT_RX_BUSY : 0)
 				);
 			// Unmapped/unmodeled registers read $FF (Acid800 checks $D20C).
 			default:
@@ -405,9 +497,11 @@ export class Pokey implements Memory {
 				break;
 			}
 			case 0x0a:
-				// SKRES: reset the latched SKSTAT status bits - the keyboard
-				// overrun here (the serial error bits when they're modeled).
+				// SKRES: reset the latched SKSTAT status bits (5-7) - the
+				// framing error, keyboard overrun, and serial input overrun.
 				this.#kbOverrun = false;
+				this.#framingError = false;
+				this.#serialOverrun = false;
 				break;
 			case 0x0d:
 				// SEROUT: the holding register. Overwrites any byte still
@@ -436,6 +530,16 @@ export class Pokey implements Memory {
 				this.#initMode = (value & 0x03) === 0;
 				this.#twoTone = (value & 0x08) !== 0;
 				this.#forceBreak = (value & 0x80) !== 0;
+				// Two-tone off resets the FSK output flip-flop to mark.
+				if (!this.#twoTone) this.#fskOut = 1;
+				// Serial clock mode %000 resets both serial clock phase
+				// flip-flops, to opposite phases (AHRM 5.6 "Serial port
+				// reset"; the one/two-clock update latencies are folded
+				// into the write).
+				if (((value >> 4) & 0x07) === 0) {
+					this.#serialHalfBit = false;
+					this.#rxPhase = 1;
+				}
 				// Keyboard scan disable (bit 1 clear): the state machine is
 				// forced to state 0 and the counter held in reset, and the
 				// key sense releases - but KBCODE, pending IRQs, and the
@@ -448,17 +552,36 @@ export class Pokey implements Memory {
 				if (this.#initMode) {
 					// The 9/17-bit counter is not reset here - it fills
 					// gradually, one fillCycle() per machine cycle,
-					// starting the cycle after this write. The serial
-					// shifter is halted but keeps its contents; only the
-					// bit-cell phase resets.
+					// starting the cycle after this write. Both serial
+					// state machines reset: a byte mid-shift is dropped
+					// (in either direction) and a byte queued in SEROUT is
+					// flushed (AHRM 5.6 "Serial port reset"). The output
+					// shift register's contents are NOT cleared - the last
+					// shifted bit stays on the line, the stuck-low case.
 					if (!wasInit) this.#initFillDelay = true;
 					this.#poly4.reset();
 					this.#poly5.reset();
 					this.#serialHalfBit = false;
+					this.#serout = null;
+					this.#shiftBitsLeft = 0;
+					this.#rxBitsLeft = 0;
+					this.#rxBusy = false;
+					this.#delay.cancel(OP_SERIAL_RTICK);
 				} else if (wasInit) {
 					this.#initFillDelay = false;
 					this.#clock64 = 25;
 					this.#clock15 = 84;
+				}
+				// Asynchronous receive (bit 4): while the input shifter is
+				// idle, timers 3+4 sit in reset waiting for a start bit.
+				// Turning it off releases them like a start-bit edge does.
+				const wasHold = this.#asyncHold;
+				this.#asyncHold = (value & 0x10) !== 0 && this.#rxBitsLeft === 0;
+				if (this.#asyncHold && !wasHold) {
+					this.#serialInPrev = this.serialIn ? 1 : 0;
+					this.#delay.cancel(OP_SERIAL_RTICK);
+				} else if (!this.#asyncHold && wasHold) {
+					this.#restartTimers34();
 				}
 				break;
 			}
@@ -578,17 +701,38 @@ export class Pokey implements Memory {
 	#shiftBitsLeft = 0; // 0 = shifter empty (SEROC's level)
 	#serialOutBit = 1; // the output data bit; idles at mark
 	#serialHalfBit = false; // divide-by-two phase within a bit cell
+	// The SIO clock-out line: a free-running divide-by-two of the transmit
+	// clock, independent of the output shifter's bit-cell phase (the line
+	// keeps toggling while the shifter idles).
+	#clockOutPhase = false;
+
+	// Serial input (AHRM 5.6). The receive clock is timer 4 (or timers 3+4
+	// in asynchronous mode), two ticks per bit cell; the line is sampled on
+	// every second tick. Ten samples per byte: start, 8 data LSB-first,
+	// stop. The stop-bit sample lands the byte in SERIN (errors included),
+	// raises the input-ready IRQ, and latches the framing/overrun errors.
+	#serin = 0;
+	#rxShift = 0; // data bits assembled MSB-down
+	#rxBitsLeft = 0; // samples still due after the start bit; 0 = idle
+	#rxPhase = 0; // divide-by-two phase; samples land on the 1 -> 0 toggle
+	#rxBusy = false; // SKSTAT bit 1: mid-start-bit to mid-stop-bit
+	#framingError = false; // sticky until SKRES
+	#serialOverrun = false; // sticky until SKRES
+	#serialInPrev = 1; // for the async start-bit edge detect
+	// Asynchronous receive's timer hold: timers 3+4 sit in reset while the
+	// shifter is idle, released by the start bit's leading edge.
+	#asyncHold = false;
 
 	// Two-tone mode (SKCTL bit 3): the serial output line carries an FSK
 	// square wave instead of data levels - timer 1's tone for a 1 bit,
 	// timer 2's for a 0. A "used" timer fire (timer 2 always; timer 1
 	// only while the output data bit is 1 and force break is off) toggles
 	// the output flip-flop and resyncs both timers two cycles after the
-	// triggering timer's reload. The flip-flop itself isn't modeled until
-	// something can observe the line level; the resync is the part the
-	// timers (and Acid800) see.
+	// triggering timer's reload. The flip-flop is the line level in
+	// two-tone mode (see serialOut); clearing SKCTL bit 3 resets it.
 	#twoTone = false;
 	#forceBreak = false;
+	#fskOut = 1; // the two-tone output flip-flop
 
 	// SEROC (IRQST bit 3) is a level, not a latch: it directly reflects
 	// "not shifting" regardless of IRQEN (the enable only gates the IRQ
@@ -732,11 +876,23 @@ export class Pokey implements Memory {
 		return 0;
 	}
 
+	// Whether timer 4 clocks the receive shifter: always in asynchronous
+	// mode (bit 4 set), and in the %010/%110 synchronous modes. The input
+	// clock is never timer 2, and %000/%100 select the external clock -
+	// which never ticks, there being no external clock source yet (AHRM
+	// table 10).
+	get #receiveTicksOnTimer4(): boolean {
+		if (this.#skctl & 0x10) return true;
+		const mode = (this.#skctl >> 4) & 0x07;
+		return mode === 2 || mode === 6;
+	}
+
 	// A "used" two-tone timer fired: toggle the FSK flip-flop and schedule
 	// the timer 1+2 resync - two cycles after the triggering timer's
 	// reload, which is fire+1 for the 1.79MHz pipeline and fire+2 for the
 	// slow clocks (where the delay is absorbed into the next tick anyway).
 	#twoToneFire(fast: boolean): void {
+		this.#fskOut = this.#fskOut ? 0 : 1;
 		this.#delay.schedule(fast ? 1 : 2, OP_TWOTONE_RESYNC);
 	}
 
@@ -752,6 +908,7 @@ export class Pokey implements Memory {
 	// shifter empty and a byte waiting (Acid800 sertiming pins the load
 	// to the first clock edge after the SEROUT write).
 	#serialClockTick(): void {
+		this.#clockOutPhase = !this.#clockOutPhase;
 		if (this.#shiftBitsLeft > 0) {
 			this.#serialHalfBit = !this.#serialHalfBit;
 			if (!this.#serialHalfBit) {
@@ -784,6 +941,67 @@ export class Pokey implements Memory {
 
 	#lastShiftedByte = 0;
 
+	// One receive-clock tick. Two ticks per bit cell; the line is sampled
+	// on every second tick, mid-bit - the async start-bit edge presets the
+	// phase so the first sample lands mid-start-bit, and the %000 clock
+	// reset presets it opposite to the transmit phase (full-duplex sampling
+	// away from the transmitter's transitions).
+	#serialReceiveTick(): void {
+		this.#rxPhase ^= 1;
+		if (this.#rxPhase !== 0) return;
+		const bit = this.serialIn ? 1 : 0;
+		if (this.#rxBitsLeft === 0) {
+			// Idle: this sample is the start-bit test.
+			if (bit === 0) {
+				// Mid-start-bit: the shifter goes busy (SKSTAT bit 1).
+				this.#rxBusy = true;
+				this.#rxShift = 0;
+				this.#rxBitsLeft = 9; // 8 data bits + the stop bit
+			} else {
+				// A false start: in async mode the timers freeze again.
+				this.#engageAsyncHold();
+			}
+		} else if (this.#rxBitsLeft > 1) {
+			this.#rxShift = (this.#rxShift >> 1) | (bit << 7);
+			this.#rxBitsLeft--;
+		} else {
+			// The stop-bit sample: the byte lands in SERIN regardless of
+			// errors. An overrun means the input-ready IRQ was still
+			// pending (which requires it enabled - disabled means no
+			// detection); a framing error means the stop bit read low.
+			// Both are sticky until SKRES. Async mode stops the timers
+			// again here.
+			this.#rxBitsLeft = 0;
+			this.#rxBusy = false;
+			this.#serin = this.#rxShift;
+			if (bit === 0) this.#framingError = true;
+			if ((this.#irqst & IRQ_SERIN) === 0) this.#serialOverrun = true;
+			this.#raiseIrq(IRQ_SERIN);
+			this.#engageAsyncHold();
+		}
+	}
+
+	// Put timers 3+4 back into the async-receive reset hold (no-op outside
+	// async mode). In-flight receive ticks are cancelled - the stopped
+	// timers must not produce a stray sample - and the line level is
+	// snapshotted for the start-bit edge watch in cycle().
+	#engageAsyncHold(): void {
+		if (!(this.#skctl & 0x10)) return;
+		this.#asyncHold = true;
+		this.#serialInPrev = this.serialIn ? 1 : 0;
+		this.#delay.cancel(OP_SERIAL_RTICK);
+	}
+
+	// Release timers 3+4 from the reset hold: like STIMER, the counters
+	// leave reset with the reload pipeline offsets, so the first fire lands
+	// one period (plus the pipeline beat) after the releasing edge.
+	#restartTimers34(): void {
+		this.#counter3 = this.#fastClock3 ? this.#audf3 + 4 : this.#reload3();
+		this.#counter4 = this.#link34
+			? this.#reload34() + (this.#fastClock3 ? 1 : 0)
+			: this.#reload4();
+	}
+
 	// Reload values, in each channel's clock-domain ticks. The 1.79MHz
 	// periods carry the hardware's reload pipeline: N+4 for one byte, N+7
 	// linked; the slow clocks tick whole periods of N+1.
@@ -815,26 +1033,33 @@ export class Pokey implements Memory {
 	}
 }
 
-// IRQEN/IRQST bits (only the ones modeled so far).
+// IRQEN/IRQST bits.
 const IRQ_BREAK = 0x80;
 const IRQ_KEYBOARD = 0x40;
+const IRQ_SERIN = 0x20;
 const IRQ_SEROR = 0x10;
 const IRQ_SEROC = 0x08;
 const IRQ_TIMER4 = 0x04;
 const IRQ_TIMER2 = 0x02;
 const IRQ_TIMER1 = 0x01;
 
-// SKSTAT bits (active low: 0 = condition present).
+// SKSTAT bits (active low: 0 = condition present; bit 4 reads the raw
+// input line level directly).
+const SKSTAT_FRAMING_ERROR = 0x80;
 const SKSTAT_KB_OVERRUN = 0x40;
+const SKSTAT_SERIAL_OVERRUN = 0x20;
+const SKSTAT_SERIAL_IN = 0x10;
 const SKSTAT_SHIFT_HELD = 0x08;
 const SKSTAT_KEY_HELD = 0x04;
+const SKSTAT_RX_BUSY = 0x02;
 
 // AUDC bits
 const AUDC_VOLUME_ONLY = 0x10;
 
 // Delay-line ops: the timer fire pipelines (see the comments in `cycle`),
-// and the serial transmit-clock edge, which trails its timer's fire by
-// two cycles (Acid800 sertiming pins the load two cycles after the fire).
+// and the serial transmit/receive clock edges, which trail their timer's
+// fire by two cycles (Acid800 sertiming pins the load two cycles after
+// the fire).
 const OP_COMMIT1 = 0x01;
 const OP_FIRE1 = 0x02;
 const OP_COMMIT3 = 0x04;
@@ -843,6 +1068,7 @@ const OP_FIRE2 = 0x10;
 const OP_FIRE4 = 0x20;
 const OP_SERIAL_TICK = 0x40;
 const OP_TWOTONE_RESYNC = 0x80;
+const OP_SERIAL_RTICK = 0x100;
 
 /**
  * The 9/17-bit polynomial counter: a right-shifting Fibonacci LFSR with XOR

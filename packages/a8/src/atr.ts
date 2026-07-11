@@ -16,17 +16,6 @@
  * see {@link ./xex-boot.ts}.)
  */
 export class AtrImage {
-	readonly sectorSize: 128 | 256;
-	readonly sectorCount: number;
-	readonly writeProtected: boolean;
-
-	// The full image (header + data); #data views the data region of the same
-	// buffer, so writes through #data are visible in #raw and thus toBytes().
-	readonly #raw: Uint8Array;
-	readonly #data: Uint8Array;
-	// Whether sectors 1-3 occupy 128-byte slots on a double-density image.
-	readonly #boot128: boolean;
-
 	constructor(
 		contents: Uint8Array,
 		options: { writeProtected?: boolean } = {},
@@ -61,28 +50,9 @@ export class AtrImage {
 		}
 	}
 
-	// The data-region offset and transfer length of a 1-based sector, or null
-	// when out of range. Boot sectors (1-3) always transfer 128 bytes; on a
-	// double-density image they occupy 128- or 256-byte slots per #boot128.
-	#locate(sector: number): { offset: number; length: number } | null {
-		if (sector < 1 || sector > this.sectorCount) return null;
-
-		if (this.sectorSize === 128) {
-			return { offset: (sector - 1) * 128, length: 128 };
-		}
-
-		if (sector <= 3) {
-			return {
-				offset: (sector - 1) * (this.#boot128 ? 128 : 256),
-				length: 128,
-			};
-		}
-
-		const offset = this.#boot128
-			? 384 + (sector - 4) * 256
-			: (sector - 1) * 256;
-		return { offset, length: 256 };
-	}
+	readonly sectorSize: 128 | 256;
+	readonly sectorCount: number;
+	readonly writeProtected: boolean;
 
 	/**
 	 * The contents of a sector (1-based), or `null` when out of range. The
@@ -113,5 +83,35 @@ export class AtrImage {
 	/** The full image bytes (header + data), reflecting any writes. */
 	toBytes(): Uint8Array {
 		return this.#raw;
+	}
+
+	// The full image (header + data); #data views the data region of the same
+	// buffer, so writes through #data are visible in #raw and thus toBytes().
+	readonly #raw: Uint8Array;
+	readonly #data: Uint8Array;
+	// Whether sectors 1-3 occupy 128-byte slots on a double-density image.
+	readonly #boot128: boolean;
+
+	// The data-region offset and transfer length of a 1-based sector, or null
+	// when out of range. Boot sectors (1-3) always transfer 128 bytes; on a
+	// double-density image they occupy 128- or 256-byte slots per #boot128.
+	#locate(sector: number): { offset: number; length: number } | null {
+		if (sector < 1 || sector > this.sectorCount) return null;
+
+		if (this.sectorSize === 128) {
+			return { offset: (sector - 1) * 128, length: 128 };
+		}
+
+		if (sector <= 3) {
+			return {
+				offset: (sector - 1) * (this.#boot128 ? 128 : 256),
+				length: 128,
+			};
+		}
+
+		const offset = this.#boot128
+			? 384 + (sector - 4) * 256
+			: (sector - 1) * 256;
+		return { offset, length: 256 };
 	}
 }

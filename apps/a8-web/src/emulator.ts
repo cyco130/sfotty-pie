@@ -14,6 +14,21 @@ import { ReadOptions, traceLine, type Sfotty } from "@sfotty-pie/sfotty";
 import { AntiAliasFilter } from "./audio-filter.ts";
 import type { AudioOutput } from "./audio.ts";
 
+export interface EmulatorConfig extends MachineConfig {
+	/** Cartridge in the (left) slot - inserted via the machine's cartridge
+	 *  accessor after construction. */
+	cartridge?: Cartridge;
+	/** Disk in drive D1: (read-only; served by the trap-based SIO). */
+	disk?: AtrImage;
+	/** Audio sink. When its context runs, the audio clock paces emulation. */
+	audio?: AudioOutput;
+	/**
+	 * Hold OPTION down for the first frames after a cold boot - how the
+	 * XL/XE disables built-in BASIC (the OS samples CONSOL during init).
+	 */
+	holdOption?: boolean;
+}
+
 // The CPU trace ring: the last this many executed instructions, kept for the
 // dev console. Captured as formatted lines so a later dump is unaffected by
 // memory changes (e.g. the bank switches around a reset).
@@ -43,21 +58,6 @@ const YIELD_INTERVAL = 257;
 // spiral of death.
 const MAX_LAG_MS = 100;
 
-export interface EmulatorConfig extends MachineConfig {
-	/** Cartridge in the (left) slot - inserted via the machine's cartridge
-	 *  accessor after construction. */
-	cartridge?: Cartridge;
-	/** Disk in drive D1: (read-only; served by the trap-based SIO). */
-	disk?: AtrImage;
-	/** Audio sink. When its context runs, the audio clock paces emulation. */
-	audio?: AudioOutput;
-	/**
-	 * Hold OPTION down for the first frames after a cold boot - how the
-	 * XL/XE disables built-in BASIC (the OS samples CONSOL during init).
-	 */
-	holdOption?: boolean;
-}
-
 // Frames to hold OPTION for the BASIC-disable: the OS reads CONSOL early in
 // its cold-boot init, so a handful of frames is plenty.
 const OPTION_HOLD_FRAMES = 7;
@@ -69,131 +69,6 @@ const OPTION_HOLD_FRAMES = 7;
  * frame, `frameCount` ticks on every flip.
  */
 export class Emulator {
-	readonly machine: Atari;
-
-	/** One Joystick device plugged into each of the machine's ports (two on
-	 *  the XL/XE, four on the 400/800). Index = Atari port. */
-	readonly joysticks: readonly Joystick[];
-
-	// Double buffer for tear-free display: the machine renders into #frames[#back]
-	// (its own default buffer is reused as one half), and at each frame boundary
-	// we present it and repoint the machine at the other half. Both assigned in
-	// the constructor, once `machine` exists.
-	readonly #frames: readonly [Uint8Array, Uint8Array];
-	#back = 0;
-
-	/** The latest completed frame (one Atari color byte per pixel). */
-	frame: Uint8Array;
-	/** Increments on every completed frame. */
-	frameCount = 0;
-
-	/** Called after each yield to the event loop (see {@link #loop}). The host
-	 *  samples the gamepad here - the freshest point, since the browser refreshes
-	 *  input state between tasks, and it lands just before the next scanlines read
-	 *  the joystick pins. */
-	afterYield: (() => void) | undefined;
-
-	/** True once the CPU has jammed on a CIM (KIL/JAM) instruction. */
-	get crashed(): boolean {
-		return this.machine.cpu.crashed;
-	}
-
-	/** The CPU, for the dev console (inspection only). */
-	get cpu(): Sfotty {
-		return this.machine.cpu;
-	}
-
-	#trace = false;
-	#traceRing: (string | undefined)[] = new Array(TRACE_RING_SIZE);
-	#traceCount = 0;
-	// A reset clears the ring and captures the boot, then freezes (so the
-	// post-boot idle loop can't evict it). -1 = capture freely.
-	#traceFreezeAt = -1;
-	#wasResetAsserted = false;
-	// Loop compression: skip recording a PC seen in the last this-many
-	// recorded instructions, so tight loops (the XL coldstart's ~71k-iteration
-	// delay, RAM clears) collapse and the ring spans real control flow.
-	#recentPcs = new Int32Array(LOOP_WINDOW).fill(-1);
-	readonly #peek = (address: number): number =>
-		this.machine.read(address & 0xffff, ReadOptions.PEEK);
-
-	// Record one committed-fetch instruction, skipping a PC seen in the last
-	// LOOP_WINDOW records so tight loops collapse. Wired to the machine's
-	// onInstruction only while tracing, so there's no per-instruction cost when
-	// it's off; once a reset-capture fills, it unwires itself to freeze the ring.
-	readonly #recordTrace = (pc: number): void => {
-		if (this.#recentPcs.includes(pc)) return;
-		this.#traceRing[this.#traceCount % TRACE_RING_SIZE] = traceLine(
-			this.machine.cpu,
-			this.#peek,
-			pc,
-		);
-		this.#recentPcs[this.#traceCount % LOOP_WINDOW] = pc;
-		this.#traceCount++;
-		if (this.#traceFreezeAt >= 0 && this.#traceCount >= this.#traceFreezeAt) {
-			this.#trace = false; // ring now holds the boot; freeze it
-			this.machine.onInstruction = undefined;
-		}
-	};
-
-	/** Enable/disable the CPU instruction trace ring. */
-	setTrace(enabled: boolean): void {
-		this.#trace = enabled;
-		this.#traceFreezeAt = -1;
-		this.machine.onInstruction = enabled ? this.#recordTrace : undefined;
-	}
-
-	/** Clear the trace ring. */
-	clearTrace(): void {
-		this.#traceCount = 0;
-		this.#traceFreezeAt = -1;
-	}
-
-	/** Traced instructions, oldest first - the last `count`, or all of them. */
-	dumpTrace(count?: number): string[] {
-		const total = this.#traceCount;
-		const start = Math.max(
-			0,
-			total - (count ?? total),
-			total - TRACE_RING_SIZE,
-		);
-		const lines: string[] = [];
-		for (let i = start; i < total; i++) {
-			const line = this.#traceRing[i % TRACE_RING_SIZE];
-			if (line !== undefined) lines.push(line);
-		}
-		return lines;
-	}
-
-	#running = false;
-	#turboMode = false;
-	#scanlines = 0;
-	#epoch = 0;
-
-	// BASIC-disable: hold OPTION for a few frames after each cold boot.
-	readonly #holdOption: boolean;
-
-	// One-shot callbacks fired after a countdown of presented frames - timed key
-	// releases (the boot OPTION-hold, momentary "tap" pulses). Frame-paced rather
-	// than wall-clock so they stay correct under turbo (where real-time timers
-	// would span dozens of emulated frames) and across tab-hidden stalls.
-	#pending: { framesLeft: number; fn: () => void }[] = [];
-
-	// Wall-clock pacing is per-TV-standard (NTSC ~1.79MHz, PAL ~1.77MHz).
-	readonly #msPerScanline: number;
-
-	// The audio pipeline: the machine's per-cycle audio level -> anti-alias filter
-	// -> nearest-neighbor decimation -> DC blocker -> fixed-size chunks.
-	#audio: AudioOutput | null;
-	#filter = new AntiAliasFilter();
-	#cyclesPerSample = 0;
-	#targetBuffer = 0;
-	#phase = 0;
-	#chunk = new Float32Array(CHUNK_SAMPLES);
-	#chunkLength = 0;
-	#dcIn = 0;
-	#dcOut = 0;
-
 	constructor(config: EmulatorConfig) {
 		this.machine = new Atari(config);
 		this.joysticks = this.machine.joysticks.map(
@@ -226,6 +101,27 @@ export class Emulator {
 			this.#cyclesPerSample = cyclesPerSecond / rate;
 			this.#targetBuffer = Math.round(rate * TARGET_BUFFER_SECONDS);
 		}
+	}
+
+	readonly machine: Atari;
+
+	/** One Joystick device plugged into each of the machine's ports (two on
+	 *  the XL/XE, four on the 400/800). Index = Atari port. */
+	readonly joysticks: readonly Joystick[];
+
+	/** The latest completed frame (one Atari color byte per pixel). */
+	frame: Uint8Array;
+	/** Increments on every completed frame. */
+	frameCount = 0;
+
+	/** True once the CPU has jammed on a CIM (KIL/JAM) instruction. */
+	get crashed(): boolean {
+		return this.machine.cpu.crashed;
+	}
+
+	/** The CPU, for the dev console (inspection only). */
+	get cpu(): Sfotty {
+		return this.machine.cpu;
 	}
 
 	start(): void {
@@ -268,6 +164,110 @@ export class Emulator {
 	afterFrames(frames: number, fn: () => void): void {
 		this.#pending.push({ framesLeft: Math.max(1, frames), fn });
 	}
+
+	/** Enable/disable the CPU instruction trace ring. */
+	setTrace(enabled: boolean): void {
+		this.#trace = enabled;
+		this.#traceFreezeAt = -1;
+		this.machine.onInstruction = enabled ? this.#recordTrace : undefined;
+	}
+
+	/** Clear the trace ring. */
+	clearTrace(): void {
+		this.#traceCount = 0;
+		this.#traceFreezeAt = -1;
+	}
+
+	/** Traced instructions, oldest first - the last `count`, or all of them. */
+	dumpTrace(count?: number): string[] {
+		const total = this.#traceCount;
+		const start = Math.max(
+			0,
+			total - (count ?? total),
+			total - TRACE_RING_SIZE,
+		);
+		const lines: string[] = [];
+		for (let i = start; i < total; i++) {
+			const line = this.#traceRing[i % TRACE_RING_SIZE];
+			if (line !== undefined) lines.push(line);
+		}
+		return lines;
+	}
+
+	/** Called after each yield to the event loop (see {@link #loop}). The host
+	 *  samples the gamepad here - the freshest point, since the browser refreshes
+	 *  input state between tasks, and it lands just before the next scanlines read
+	 *  the joystick pins. */
+	afterYield: (() => void) | undefined;
+
+	// Double buffer for tear-free display: the machine renders into #frames[#back]
+	// (its own default buffer is reused as one half), and at each frame boundary
+	// we present it and repoint the machine at the other half. Both assigned in
+	// the constructor, once `machine` exists.
+	readonly #frames: readonly [Uint8Array, Uint8Array];
+	#back = 0;
+
+	#trace = false;
+	#traceRing: (string | undefined)[] = new Array(TRACE_RING_SIZE);
+	#traceCount = 0;
+	// A reset clears the ring and captures the boot, then freezes (so the
+	// post-boot idle loop can't evict it). -1 = capture freely.
+	#traceFreezeAt = -1;
+	#wasResetAsserted = false;
+	// Loop compression: skip recording a PC seen in the last this-many
+	// recorded instructions, so tight loops (the XL coldstart's ~71k-iteration
+	// delay, RAM clears) collapse and the ring spans real control flow.
+	#recentPcs = new Int32Array(LOOP_WINDOW).fill(-1);
+	readonly #peek = (address: number): number =>
+		this.machine.mmu.read(address & 0xffff, ReadOptions.PEEK);
+
+	// Record one committed-fetch instruction, skipping a PC seen in the last
+	// LOOP_WINDOW records so tight loops collapse. Wired to the machine's
+	// onInstruction only while tracing, so there's no per-instruction cost when
+	// it's off; once a reset-capture fills, it unwires itself to freeze the ring.
+	readonly #recordTrace = (pc: number): void => {
+		if (this.#recentPcs.includes(pc)) return;
+		this.#traceRing[this.#traceCount % TRACE_RING_SIZE] = traceLine(
+			this.machine.cpu,
+			this.#peek,
+			pc,
+		);
+		this.#recentPcs[this.#traceCount % LOOP_WINDOW] = pc;
+		this.#traceCount++;
+		if (this.#traceFreezeAt >= 0 && this.#traceCount >= this.#traceFreezeAt) {
+			this.#trace = false; // ring now holds the boot; freeze it
+			this.machine.onInstruction = undefined;
+		}
+	};
+
+	#running = false;
+	#turboMode = false;
+	#scanlines = 0;
+	#epoch = 0;
+
+	// BASIC-disable: hold OPTION for a few frames after each cold boot.
+	readonly #holdOption: boolean;
+
+	// One-shot callbacks fired after a countdown of presented frames - timed key
+	// releases (the boot OPTION-hold, momentary "tap" pulses). Frame-paced rather
+	// than wall-clock so they stay correct under turbo (where real-time timers
+	// would span dozens of emulated frames) and across tab-hidden stalls.
+	#pending: { framesLeft: number; fn: () => void }[] = [];
+
+	// Wall-clock pacing is per-TV-standard (NTSC ~1.79MHz, PAL ~1.77MHz).
+	readonly #msPerScanline: number;
+
+	// The audio pipeline: the machine's per-cycle audio level -> anti-alias filter
+	// -> nearest-neighbor decimation -> DC blocker -> fixed-size chunks.
+	#audio: AudioOutput | null;
+	#filter = new AntiAliasFilter();
+	#cyclesPerSample = 0;
+	#targetBuffer = 0;
+	#phase = 0;
+	#chunk = new Float32Array(CHUNK_SAMPLES);
+	#chunkLength = 0;
+	#dcIn = 0;
+	#dcOut = 0;
 
 	// Press OPTION at boot (BASIC-disable); release it after OPTION_HOLD_FRAMES.
 	#startOptionHold(): void {

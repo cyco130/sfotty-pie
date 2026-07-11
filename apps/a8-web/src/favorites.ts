@@ -11,12 +11,6 @@ import { loadLocal, saveLocal } from "./persist.ts";
 
 const FAVORITES_KEY = "favorites";
 
-function load(): string[] {
-	const raw = loadLocal(FAVORITES_KEY);
-	if (!Array.isArray(raw)) return [];
-	return raw.filter((x): x is string => typeof x === "string");
-}
-
 /** The starred ids, in starring order. */
 export const favoriteIds = signal<string[]>(load());
 
@@ -40,3 +34,9 @@ export const favoritesView = computed<ImageEntry[]>(() =>
 		.map((id) => getImage(id))
 		.filter((e): e is ImageEntry => e !== undefined),
 );
+
+function load(): string[] {
+	const raw = loadLocal(FAVORITES_KEY);
+	if (!Array.isArray(raw)) return [];
+	return raw.filter((x): x is string => typeof x === "string");
+}

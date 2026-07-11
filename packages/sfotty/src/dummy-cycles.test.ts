@@ -38,7 +38,7 @@ function record(): {
 }
 
 function run(cpu: Sfotty, cycles: number): void {
-	for (let i = 0; i < cycles; i++) cpu.run();
+	for (let i = 0; i < cycles; i++) cpu.cycle();
 }
 
 describe("dummy cycles", () => {

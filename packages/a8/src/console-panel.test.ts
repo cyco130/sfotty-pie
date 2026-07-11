@@ -16,20 +16,20 @@ function makeMachine(model: "800" | "800XL") {
 test("console buttons drive CONSOL reads, active low", () => {
 	const machine = makeMachine("800");
 	// The written latch powers on all-set: CONSOL reads 0 until written.
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(0);
-	machine.write(CONSOL, 0x08, ReadOptions.NONE);
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(0);
+	machine.mmu.write(CONSOL, 0x08, ReadOptions.NONE);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(7);
 
 	machine.console.start = true;
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(6);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(6);
 	expect(machine.console.start).toBe(true);
 
 	machine.console.option = true;
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(2);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(2);
 
 	machine.console.start = false;
 	machine.console.option = false;
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(7);
 });
 
 test("the written CONSOL latch shows on GTIA's switch Out lines", () => {
@@ -39,14 +39,14 @@ test("the written CONSOL latch shows on GTIA's switch Out lines", () => {
 	// Power-on: the latch pulls S0-S2 low, the speaker line is high.
 	expect(gtia.switchesOut.value).toBe(0x08);
 
-	machine.write(CONSOL, 0x08, ReadOptions.NONE); // release S0-S2
+	machine.mmu.write(CONSOL, 0x08, ReadOptions.NONE); // release S0-S2
 	expect(gtia.switchesOut.value).toBe(0x0f);
 
-	machine.write(CONSOL, 0x00, ReadOptions.NONE); // speaker pulls S3 low
+	machine.mmu.write(CONSOL, 0x00, ReadOptions.NONE); // speaker pulls S3 low
 	expect(gtia.switchesOut.value).toBe(0x07);
 
 	// A held button shows on the resolved line too.
-	machine.write(CONSOL, 0x08, ReadOptions.NONE);
+	machine.mmu.write(CONSOL, 0x08, ReadOptions.NONE);
 	machine.console.select = true;
 	expect(gtia.switchesOut.value).toBe(0x0d);
 });
@@ -74,13 +74,13 @@ test("the Reset key is ANTIC's RNMI on the 400/800", () => {
 
 test("the power switch cold-resets the components", () => {
 	const machine = makeMachine("800");
-	machine.write(CONSOL, 0x08, ReadOptions.NONE);
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
+	machine.mmu.write(CONSOL, 0x08, ReadOptions.NONE);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(7);
 
 	// GTIA has no reset line, so only a power cycle restores the written
 	// latch (CONSOL reads 0 again).
 	machine.console.powerCycle();
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(0);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(0);
 });
 
 test("the LEDs follow PIA PB2/PB3 on the XL, without bank-switch noise", () => {
@@ -93,11 +93,11 @@ test("the LEDs follow PIA PB2/PB3 on the XL, without bank-switch noise", () => {
 
 	// DDRB all-outputs drives the zeroed output latch onto the pins: both
 	// LEDs light for the moment until the data write - like the hardware.
-	machine.write(PORTB, 0xff, ReadOptions.NONE); // PBCTL bit 2 is 0: DDRB
+	machine.mmu.write(PORTB, 0xff, ReadOptions.NONE); // PBCTL bit 2 is 0: DDRB
 	expect(changes).toEqual([[true, true]]);
 
-	machine.write(PBCTL, 0x04, ReadOptions.NONE);
-	machine.write(PORTB, 0xfb, ReadOptions.NONE); // PB2 low: LED 1 lit
+	machine.mmu.write(PBCTL, 0x04, ReadOptions.NONE);
+	machine.mmu.write(PORTB, 0xfb, ReadOptions.NONE); // PB2 low: LED 1 lit
 	expect(panel.led1).toBe(true);
 	expect(panel.led2).toBe(false);
 	expect(changes).toEqual([
@@ -106,7 +106,7 @@ test("the LEDs follow PIA PB2/PB3 on the XL, without bank-switch noise", () => {
 	]);
 
 	// A bank switch that leaves the LED bits alone reaches no watcher.
-	machine.write(PORTB, 0xfa, ReadOptions.NONE); // PB0 low too
+	machine.mmu.write(PORTB, 0xfa, ReadOptions.NONE); // PB0 low too
 	expect(changes.length).toBe(2);
 });
 

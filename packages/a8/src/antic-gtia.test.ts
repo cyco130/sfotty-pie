@@ -40,7 +40,7 @@ const POWER_ON_READS = [
 
 test("GTIA read registers match the documented power-on state", () => {
 	const ag = new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 
@@ -54,7 +54,7 @@ test("GTIA read registers match the documented power-on state", () => {
 
 test("writing CONSOL releases the switch lines", () => {
 	const ag = new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 
@@ -67,7 +67,7 @@ test("writing CONSOL releases the switch lines", () => {
 
 function makeAnticGtia() {
 	return new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 }
@@ -209,7 +209,7 @@ test("a JVB display list reloads its target every frame", () => {
 	dlist.forEach((b, i) => (ram[0x2c00 + i] = b));
 
 	const ag = new AnticGtia(
-		{ dmaRead: (address) => ram[address]!, log: () => {} },
+		{ bus: { read: (address) => ram[address]! }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 	ag.write(0xd402, 0x00); // DLISTL
@@ -224,7 +224,7 @@ test("a JVB display list reloads its target every frame", () => {
 			latchLines.push(ag.vcount);
 			ag.dli = false; // observe each latch separately
 		}
-		ag.busCycle();
+		ag.busPhase();
 		ag.afterCpu(frame, 0xff);
 	}
 
@@ -260,7 +260,7 @@ test("VCOUNT increments at cycle 111 and rolls over a cycle late", () => {
 
 test("the PAL VCOUNT overflow window reads $9C", () => {
 	const ag = new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "pal", gtiaTvSystem: "pal" },
 	);
 
@@ -278,7 +278,7 @@ test("direct GRAF writes survive when GRACTL has latching off", () => {
 	ag.write(0xd00d, 0xff); // GRAFP0, written by the CPU
 	for (let i = 0; i < 114 * 30; i++) {
 		ag.beforeCpu();
-		ag.busCycle();
+		ag.busPhase();
 		ag.afterCpu(frame, 0x20); // with GRACTL off, the slots must not clobber it
 	}
 	expect(ag.grafP0).toBe(0xff);
@@ -286,7 +286,7 @@ test("direct GRAF writes survive when GRACTL has latching off", () => {
 	ag.write(0xd01d, 0x02); // GRACTL: latch player data
 	for (let i = 0; i < 114 * 30; i++) {
 		ag.beforeCpu();
-		ag.busCycle();
+		ag.busPhase();
 		ag.afterCpu(frame, 0x20);
 	}
 	expect(ag.grafP0).toBe(0x20); // now the bus byte latches, like DMA
@@ -304,7 +304,7 @@ test("with all DMA off, GRACTL latching finds no fetch slot and loads nothing", 
 	ag.write(0xd01d, 0x03); // GRACTL: latch players + missiles
 	for (let i = 0; i < 114 * 30; i++) {
 		ag.beforeCpu();
-		ag.busCycle();
+		ag.busPhase();
 		ag.afterCpu(frame, 0x20);
 	}
 	expect(ag.grafP0).toBe(0xff);
@@ -327,7 +327,7 @@ test("P/M graphics latch across the whole visible region, including the bottom b
 		ag.grafP0 = 0x00;
 		for (let i = 0; i < 114; i++) {
 			ag.beforeCpu();
-			ag.busCycle();
+			ag.busPhase();
 			ag.afterCpu(frame, busByte);
 		}
 		return ag.grafP0;
@@ -454,7 +454,7 @@ function haltPattern(ag: AnticGtia, vcount: number): boolean[] {
 	const halts: boolean[] = [];
 	for (let i = 0; i < 8; i++) {
 		ag.beforeCpu();
-		ag.busCycle();
+		ag.busPhase();
 		halts.push(ag.halt);
 	}
 	return halts;

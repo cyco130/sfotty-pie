@@ -15,11 +15,6 @@ import { loadPersisted, savePersisted } from "./persist.ts";
 // (see below), so the stored set is a self-consistent snapshot that never shifts
 // on refresh; bump VERSION to invalidate stores when the shape changes.
 export const KEY_BINDINGS_KEY = "key-bindings";
-// v2: bindings keyed by `code` only (the `{ key }` trigger arm was dropped).
-// v3: + the global Cmd/Alt+K -> OPEN_PALETTE binding and the `scope` field.
-// v4: letter app-shortcuts (palette, the Alt/Ctrl+letter aliases) anchored to
-//     the produced letter via the layout, not the QWERTY position.
-const VERSION = 4;
 
 // The layout snapshot the current bindings were baked from - `code` -> legend.
 // Persisted alongside the bindings so it survives refresh (labels stay stable)
@@ -41,11 +36,6 @@ export function saveLayoutPref(pref: string): void {
 export function loadLayoutPref(): string {
 	const stored = loadPersisted(KEY_LAYOUT_PREF);
 	return typeof stored === "string" ? stored : LAYOUT_AUTO;
-}
-
-interface Stored {
-	v: number;
-	bindings: Binding[];
 }
 
 /** The persisted binding set, or `undefined` if absent / outdated / malformed
@@ -81,20 +71,6 @@ export function loadStoredLayout(): Map<string, string> | undefined {
 	return map;
 }
 
-// The layout map to bake from: a manual pick wins (the setup page); else the live
-// keyboard layout when the browser exposes it (re-read, so a reset in auto mode
-// picks up an OS-level switch); else empty - which bakes plain QWERTY.
-async function resolveLayout(): Promise<Map<string, string>> {
-	const pref = loadLayoutPref();
-	if (pref !== LAYOUT_AUTO) {
-		const layout = KEYBOARD_LAYOUTS.find((l) => l.id === pref);
-		if (layout) return upperLegends(Object.entries(layout.map));
-	}
-	const live = await loadLayoutLabels();
-	if (live.size > 0) return live;
-	return new Map();
-}
-
 /** Generate the default binding set from the resolved layout, persisting both the
  *  bindings and the layout snapshot - the first-run and reset path. Returns both
  *  so the caller can seed the editor's labeling map without re-reading storage. */
@@ -117,4 +93,29 @@ export async function ensureStoredLayout(): Promise<Map<string, string>> {
 	const live = await loadLayoutLabels();
 	if (live.size > 0) saveLayout(live);
 	return live;
+}
+
+// v2: bindings keyed by `code` only (the `{ key }` trigger arm was dropped).
+// v3: + the global Cmd/Alt+K -> OPEN_PALETTE binding and the `scope` field.
+// v4: letter app-shortcuts (palette, the Alt/Ctrl+letter aliases) anchored to
+//     the produced letter via the layout, not the QWERTY position.
+const VERSION = 4;
+
+interface Stored {
+	v: number;
+	bindings: Binding[];
+}
+
+// The layout map to bake from: a manual pick wins (the setup page); else the live
+// keyboard layout when the browser exposes it (re-read, so a reset in auto mode
+// picks up an OS-level switch); else empty - which bakes plain QWERTY.
+async function resolveLayout(): Promise<Map<string, string>> {
+	const pref = loadLayoutPref();
+	if (pref !== LAYOUT_AUTO) {
+		const layout = KEYBOARD_LAYOUTS.find((l) => l.id === pref);
+		if (layout) return upperLegends(Object.entries(layout.map));
+	}
+	const live = await loadLayoutLabels();
+	if (live.size > 0) return live;
+	return new Map();
 }

@@ -34,6 +34,160 @@ import {
 import { builtinLibrary } from "./library.ts";
 import { builtinFirmware } from "virtual:firmware-library";
 
+/**
+ * Install `window.a8`: a poor-man's monitor for the browser console - live
+ * machine/cpu access, peek/poke, a disassembler, and the CPU/command traces.
+ *
+ *   a8.trace.cpu(true); ...reproduce...; a8.trace.dump(300)
+ *   a8.peek(0x0244)        a8.disasm(a8.cpu.PC)
+ */
+export function installDevConsole(host: EmulatorHost): void {
+	const peek = (address: number) =>
+		host.emulator.machine.mmu.read(address & 0xffff, ReadOptions.PEEK);
+
+	const a8 = {
+		get emulator() {
+			return host.emulator;
+		},
+		get machine() {
+			return host.emulator.machine;
+		},
+		get cpu() {
+			return host.emulator.cpu;
+		},
+		peek,
+		poke: (address: number, value: number) =>
+			host.emulator.machine.mmu.write(
+				address & 0xffff,
+				value & 0xff,
+				ReadOptions.NONE,
+			),
+		disasm: (address: number, count = 16) => {
+			let pc = address & 0xffff;
+			const lines: string[] = [];
+			for (let i = 0; i < count; i++) {
+				const { text, length } = disassemble(peek, pc);
+				lines.push(`${hex(pc, 4)}  ${text}`);
+				pc = (pc + length) & 0xffff;
+			}
+			console.log(lines.join("\n"));
+		},
+		// The built-in image library (merged committed + local folders).
+		get library() {
+			return builtinLibrary;
+		},
+		// The image-library harness (uploads/canonicalization/blob store).
+		images,
+		trace: {
+			cpu: (enabled: boolean) => host.setCpuTrace(enabled),
+			commands: (enabled: boolean) => setCommandTrace(enabled),
+			clear: () => host.clearCpuTrace(),
+			// No count -> the whole capture (after a reset, the captured boot).
+			dump: (count?: number) =>
+				console.log(host.dumpCpuTrace(count).join("\n")),
+		},
+		// The synthetic non-standard pad (see the fake-gamepad section below),
+		// plus a canned calibration: the same samples the wizard will collect
+		// by prompting, run through the real classifier and applied live.
+		fakePad: {
+			...fakePad,
+			calibrate: () => {
+				const rest = {
+					buttons: Array.from({ length: 8 }, () => false),
+					axes: [0, 0, -1, hatValue(8)],
+				};
+				const hat = (p: number) => ({
+					...rest,
+					axes: [0, 0, -1, hatValue(p)],
+				});
+				host.setGamepadProfile(
+					FAKE_ID,
+					classify({
+						rest,
+						up: hat(0),
+						right: hat(2),
+						down: hat(4),
+						left: hat(6),
+						trigger: { ...rest, buttons: rest.buttons.map((_, i) => i === 5) },
+					}),
+				);
+				console.log(
+					"fake pad calibrated - the hat drives the D-pad, button 5 is fire " +
+						"(a8.fakePad.decalibrate() to undo)",
+				);
+			},
+			decalibrate: () => host.setGamepadProfile(FAKE_ID, null),
+		},
+		// Ground truth for "is my mapping applied": the raw pad next to its
+		// normalized view, exactly as the poller computes it.
+		padView: (index?: number) => {
+			const pads = navigator.getGamepads();
+			const pad = index === undefined ? pads.find((x) => x) : pads[index];
+			if (!pad) return undefined;
+			const profile = host.gamepadNormalize.peek()[pad.id];
+			const dump = (v: PadView) => ({
+				pressed: v.buttons.flatMap((b, i) => (b.pressed ? [i] : [])),
+				axes: v.axes.map((a) => Number(a.toFixed(2))),
+			});
+			return {
+				id: pad.id,
+				profiled: !!profile,
+				raw: dump(pad),
+				view: dump(normalize(pad, profile)),
+			};
+		},
+		// Adjust the running standard's overscan crop (persisted; sanitized to
+		// 320-376 x 192-240, even). No args just reports the current setting.
+		overscan: (width?: number, height?: number) => {
+			const tv = host.config.peek().tv;
+			if (width !== undefined && height !== undefined) {
+				host.setOverscan(tv, { width, height });
+			}
+			return { tv, ...host.displaySettings.peek()[tv].overscan };
+		},
+		// Adjust the running standard's palette generation parameters
+		// (persisted; partial merge), or apply a named preset:
+		//   a8.palette({ hueStep: 19 })    a8.palette("blueGr0")
+		// No args just reports the current values.
+		palette: (params?: Partial<PaletteSettings> | string) => {
+			const tv = host.config.peek().tv;
+			if (typeof params === "string") {
+				const preset = PALETTE_PRESETS[tv][params];
+				if (preset) host.setPalette(tv, preset);
+				else {
+					console.log(
+						`no "${params}" preset for ${tv}; available:`,
+						Object.keys(PALETTE_PRESETS[tv]),
+					);
+				}
+			} else if (params) {
+				host.setPalette(tv, params);
+			}
+			return { tv, ...host.displaySettings.peek()[tv].palette };
+		},
+		// The running standard's frame blending (0-0.9, persisted).
+		frameBlending: (value?: number) => {
+			const tv = host.config.peek().tv;
+			if (value !== undefined) host.setFrameBlending(tv, value);
+			return {
+				tv,
+				frameBlending: host.displaySettings.peek()[tv].frameBlending,
+			};
+		},
+		// Prompt-driven calibration of a real pad (defaults to the first
+		// connected one); works on standard pads too, as a layout override.
+		calibrate: (index?: number) => void calibratePad(host, index),
+		uncalibrate: (index?: number) => {
+			const pads = navigator.getGamepads();
+			const pad = index === undefined ? pads.find((x) => x) : pads[index];
+			if (pad) host.setGamepadProfile(pad.id, null);
+		},
+	};
+
+	Object.assign(window, { a8 });
+	console.log("Dev console ready: window.a8 (try a8.trace.cpu(true))");
+}
+
 function hex(value: number, width: number): string {
 	return value.toString(16).padStart(width, "0");
 }
@@ -303,158 +457,4 @@ async function calibratePad(host: EmulatorHost, index?: number): Promise<void> {
 	const profile = classify(samples);
 	host.setGamepadProfile(id, profile);
 	console.log("profile applied (a8.uncalibrate() to remove):", profile);
-}
-
-/**
- * Install `window.a8`: a poor-man's monitor for the browser console - live
- * machine/cpu access, peek/poke, a disassembler, and the CPU/command traces.
- *
- *   a8.trace.cpu(true); ...reproduce...; a8.trace.dump(300)
- *   a8.peek(0x0244)        a8.disasm(a8.cpu.PC)
- */
-export function installDevConsole(host: EmulatorHost): void {
-	const peek = (address: number) =>
-		host.emulator.machine.read(address & 0xffff, ReadOptions.PEEK);
-
-	const a8 = {
-		get emulator() {
-			return host.emulator;
-		},
-		get machine() {
-			return host.emulator.machine;
-		},
-		get cpu() {
-			return host.emulator.cpu;
-		},
-		peek,
-		poke: (address: number, value: number) =>
-			host.emulator.machine.write(
-				address & 0xffff,
-				value & 0xff,
-				ReadOptions.NONE,
-			),
-		disasm: (address: number, count = 16) => {
-			let pc = address & 0xffff;
-			const lines: string[] = [];
-			for (let i = 0; i < count; i++) {
-				const { text, length } = disassemble(peek, pc);
-				lines.push(`${hex(pc, 4)}  ${text}`);
-				pc = (pc + length) & 0xffff;
-			}
-			console.log(lines.join("\n"));
-		},
-		// The built-in image library (merged committed + local folders).
-		get library() {
-			return builtinLibrary;
-		},
-		// The image-library harness (uploads/canonicalization/blob store).
-		images,
-		trace: {
-			cpu: (enabled: boolean) => host.setCpuTrace(enabled),
-			commands: (enabled: boolean) => setCommandTrace(enabled),
-			clear: () => host.clearCpuTrace(),
-			// No count -> the whole capture (after a reset, the captured boot).
-			dump: (count?: number) =>
-				console.log(host.dumpCpuTrace(count).join("\n")),
-		},
-		// The synthetic non-standard pad (see the fake-gamepad section above),
-		// plus a canned calibration: the same samples the wizard will collect
-		// by prompting, run through the real classifier and applied live.
-		fakePad: {
-			...fakePad,
-			calibrate: () => {
-				const rest = {
-					buttons: Array.from({ length: 8 }, () => false),
-					axes: [0, 0, -1, hatValue(8)],
-				};
-				const hat = (p: number) => ({
-					...rest,
-					axes: [0, 0, -1, hatValue(p)],
-				});
-				host.setGamepadProfile(
-					FAKE_ID,
-					classify({
-						rest,
-						up: hat(0),
-						right: hat(2),
-						down: hat(4),
-						left: hat(6),
-						trigger: { ...rest, buttons: rest.buttons.map((_, i) => i === 5) },
-					}),
-				);
-				console.log(
-					"fake pad calibrated - the hat drives the D-pad, button 5 is fire " +
-						"(a8.fakePad.decalibrate() to undo)",
-				);
-			},
-			decalibrate: () => host.setGamepadProfile(FAKE_ID, null),
-		},
-		// Ground truth for "is my mapping applied": the raw pad next to its
-		// normalized view, exactly as the poller computes it.
-		padView: (index?: number) => {
-			const pads = navigator.getGamepads();
-			const pad = index === undefined ? pads.find((x) => x) : pads[index];
-			if (!pad) return undefined;
-			const profile = host.gamepadNormalize.peek()[pad.id];
-			const dump = (v: PadView) => ({
-				pressed: v.buttons.flatMap((b, i) => (b.pressed ? [i] : [])),
-				axes: v.axes.map((a) => Number(a.toFixed(2))),
-			});
-			return {
-				id: pad.id,
-				profiled: !!profile,
-				raw: dump(pad),
-				view: dump(normalize(pad, profile)),
-			};
-		},
-		// Adjust the running standard's overscan crop (persisted; sanitized to
-		// 320-376 x 192-240, even). No args just reports the current setting.
-		overscan: (width?: number, height?: number) => {
-			const tv = host.config.peek().tv;
-			if (width !== undefined && height !== undefined) {
-				host.setOverscan(tv, { width, height });
-			}
-			return { tv, ...host.displaySettings.peek()[tv].overscan };
-		},
-		// Adjust the running standard's palette generation parameters
-		// (persisted; partial merge), or apply a named preset:
-		//   a8.palette({ hueStep: 19 })    a8.palette("blueGr0")
-		// No args just reports the current values.
-		palette: (params?: Partial<PaletteSettings> | string) => {
-			const tv = host.config.peek().tv;
-			if (typeof params === "string") {
-				const preset = PALETTE_PRESETS[tv][params];
-				if (preset) host.setPalette(tv, preset);
-				else {
-					console.log(
-						`no "${params}" preset for ${tv}; available:`,
-						Object.keys(PALETTE_PRESETS[tv]),
-					);
-				}
-			} else if (params) {
-				host.setPalette(tv, params);
-			}
-			return { tv, ...host.displaySettings.peek()[tv].palette };
-		},
-		// The running standard's frame blending (0-0.9, persisted).
-		frameBlending: (value?: number) => {
-			const tv = host.config.peek().tv;
-			if (value !== undefined) host.setFrameBlending(tv, value);
-			return {
-				tv,
-				frameBlending: host.displaySettings.peek()[tv].frameBlending,
-			};
-		},
-		// Prompt-driven calibration of a real pad (defaults to the first
-		// connected one); works on standard pads too, as a layout override.
-		calibrate: (index?: number) => void calibratePad(host, index),
-		uncalibrate: (index?: number) => {
-			const pads = navigator.getGamepads();
-			const pad = index === undefined ? pads.find((x) => x) : pads[index];
-			if (pad) host.setGamepadProfile(pad.id, null);
-		},
-	};
-
-	Object.assign(window, { a8 });
-	console.log("Dev console ready: window.a8 (try a8.trace.cpu(true))");
 }

@@ -1,35 +1,6 @@
 import type { Memory } from "@sfotty-pie/sfotty";
 import { DelayLine } from "./delay-line.ts";
 
-// IRQEN/IRQST bits (only the ones modeled so far).
-const IRQ_BREAK = 0x80;
-const IRQ_KEYBOARD = 0x40;
-const IRQ_SEROR = 0x10;
-const IRQ_SEROC = 0x08;
-const IRQ_TIMER4 = 0x04;
-const IRQ_TIMER2 = 0x02;
-const IRQ_TIMER1 = 0x01;
-
-// SKSTAT bits (active low: 0 = condition present).
-const SKSTAT_KB_OVERRUN = 0x40;
-const SKSTAT_SHIFT_HELD = 0x08;
-const SKSTAT_KEY_HELD = 0x04;
-
-// AUDC bits
-const AUDC_VOLUME_ONLY = 0x10;
-
-// Delay-line ops: the timer fire pipelines (see the comments in `cycle`),
-// and the serial transmit-clock edge, which trails its timer's fire by
-// two cycles (Acid800 sertiming pins the load two cycles after the fire).
-const OP_COMMIT1 = 0x01;
-const OP_FIRE1 = 0x02;
-const OP_COMMIT3 = 0x04;
-const OP_FIRE3 = 0x08;
-const OP_FIRE2 = 0x10;
-const OP_FIRE4 = 0x20;
-const OP_SERIAL_TICK = 0x40;
-const OP_TWOTONE_RESYNC = 0x80;
-
 /**
  * POKEY. 16 registers mirrored every $10 across $D200-$D2FF.
  *
@@ -56,431 +27,6 @@ export interface PokeyKeyboard {
 }
 
 export class Pokey implements Memory {
-	/**
-	 * The keyboard matrix the 15KHz scan addresses: latch a scan code, read
-	 * the sense lines back. The machine plugs its Keyboard device in; a
-	 * future 5200 puts its controller mux behind the same seam.
-	 */
-	keyboard: PokeyKeyboard | undefined;
-
-	// IRQST latches are active low (0 = interrupt occurred). An event only
-	// latches while its IRQEN bit is set; writing 0 to an IRQEN bit clears the
-	// latch.
-	#irqen = 0;
-	#irqst = 0xff;
-
-	#kbcode = 0xff;
-	#keyHeld = false;
-	#shiftHeld = false;
-	#controlHeld = false;
-	#breakHeld = false;
-	#kbOverrun = false;
-
-	// The keyboard scanner (AHRM 5.8): a 6-bit counter stepped once per
-	// 15KHz tick, a latched compare register, and a four-state debounce
-	// machine. States (the hardware's own numbering): 0 = key up, 1 =
-	// debounce key down, 3 = confirmed key down, 2 = debounce key up.
-	#scanCounter = 0;
-	#scanCompare = 0;
-	#scanState = 0;
-
-	#audf1 = 0;
-	#audf2 = 0;
-	#audf3 = 0;
-	#audf4 = 0;
-
-	#audc1 = 0;
-	#audc2 = 0;
-	#audc3 = 0;
-	#audc4 = 0;
-
-	// Timer down-counters, in ticks of each channel's clock domain. AUDF
-	// writes only matter at the next reload, like the hardware.
-	#counter1 = 0;
-	#counter2 = 0;
-	#counter3 = 0;
-	#counter4 = 0;
-
-	// The two free-running slow clocks; AUDCTL bit 0 picks which one the
-	// slow channels listen to. Each counts down to its next tick. SKCTL
-	// init mode holds both in reset; leaving init restarts them at fixed
-	// offsets (calibrated against Acid800's inittiming).
-	#clock64 = 0;
-	#clock15 = 0;
-
-	// SKCTL ($D20F write). Bits 0-1 clear = initialization mode. Power-on
-	// biases to init (the chip has no reset line; this is the benign
-	// corner of its indeterminate power-up space, and it's what makes
-	// RANDOM deterministic from boot).
-	#skctl = 0;
-	#initMode = true;
-	// The cycle carrying the init-entry write still shifts the 9/17-bit
-	// poly normally; the ones-fill starts the cycle after (pokey_noise's
-	// hot-stop samples sit exactly on this boundary).
-	#initFillDelay = false;
-
-	// The timer fire pipelines, as delay-line events. Fast (1.79MHz)
-	// unlinked channels: underflow, then 3 cycles later the counter reloads
-	// (from the live AUDF - that's the write deadline), and the flip/IRQ
-	// lands one cycle after that - deriving the N+4 period, the fire-2 AUDF
-	// deadline, and the STIMER preemption boundary, all per Acid800. In
-	// 16-bit linked mode the high half fires (and reloads, late) 3 cycles
-	// after the underflow.
-	#delay = new DelayLine(8);
-
-	// A channel's counter holds still while its fire is in flight; the
-	// this-cycle underflow flags resolve the STIMER write race.
-	#inFlight1 = false;
-	#inFlight2 = false;
-	#inFlight3 = false;
-	#inFlight4 = false;
-	#underflowed1 = false;
-	#underflowed3 = false;
-
-	// Reloads sample AUDF one cycle behind the CPU's view: a write landing
-	// two cycles before a fire still affects its reload, one cycle before
-	// doesn't (Acid800's 22c/23c change tests).
-	#shadowAudf1 = 0;
-	#shadowAudf2 = 0;
-	#shadowAudf3 = 0;
-	#shadowAudf4 = 0;
-
-	#out1 = 0;
-	#out2 = 0;
-	#out3 = 0;
-	#out4 = 0;
-
-	// AUDCTL bits
-	#usePoly9 = false;
-	#fastClock1 = false;
-	#fastClock3 = false;
-	#link12 = false;
-	#link34 = false;
-	// TODO: High-pass filter bits (0x04, 0x02)
-	#slowDivisor: 28 | 114 = 28;
-
-	#poly4 = new LinearFeedbackShiftRegister(0xc);
-	#poly5 = new LinearFeedbackShiftRegister(0x14);
-	#poly9 = new PolyCounter(5, 9);
-	#poly17 = new PolyCounter(5, 17);
-
-	// Serial output. A byte written to SEROUT waits in the holding register
-	// until the 10-bit shifter (start + 8 data + stop, LSB first) is empty,
-	// then transfers on a transmit-clock edge - raising the SEROR IRQ. The
-	// transmit clock is the selected timer's fire, two fires per bit (the
-	// output square wave's two edges). Init mode halts the shifter but
-	// does not clear it (Acid800 timertiming relies on pushing a byte
-	// through to reset the output state).
-	#serout: number | null = null; // holding register
-	#shiftData = 0; // remaining bits, next-out in bit 0
-	#shiftBitsLeft = 0; // 0 = shifter empty (SEROC's level)
-	#serialOutBit = 1; // the output data bit; idles at mark
-	#serialHalfBit = false; // divide-by-two phase within a bit cell
-
-	/**
-	 * Host hook: called with each fully shifted-out byte. Bytes are
-	 * delivered at the end of their stop bit. (A callback rather than a
-	 * Signal: bytes are events, and repeated values must still notify.)
-	 */
-	serialOutByte: ((byte: number) => void) | null = null;
-
-	// Two-tone mode (SKCTL bit 3): the serial output line carries an FSK
-	// square wave instead of data levels - timer 1's tone for a 1 bit,
-	// timer 2's for a 0. A "used" timer fire (timer 2 always; timer 1
-	// only while the output data bit is 1 and force break is off) toggles
-	// the output flip-flop and resyncs both timers two cycles after the
-	// triggering timer's reload. The flip-flop itself isn't modeled until
-	// something can observe the line level; the resync is the part the
-	// timers (and Acid800) see.
-	#twoTone = false;
-	#forceBreak = false;
-
-	/** The IRQ output line (true = asserted). */
-	get irq(): boolean {
-		return (this.#irqen & ~this.#serocLevel(this.#irqst)) !== 0;
-	}
-
-	// SEROC (IRQST bit 3) is a level, not a latch: it directly reflects
-	// "not shifting" regardless of IRQEN (the enable only gates the IRQ
-	// line), and can't be acknowledged while the condition holds (Acid800
-	// pokey_seroc pins both the enabled and disabled reads). A byte
-	// waiting in the holding register doesn't count - complete stays
-	// active until shifting actually starts - and a shifter frozen by a
-	// stopped transmit clock or init mode also reads complete (Acid800
-	// serclock's external-clock check).
-	#serocLevel(irqst: number): number {
-		const shifting =
-			this.#shiftBitsLeft > 0 && this.#transmitClock !== 0 && !this.#initMode;
-		return shifting ? irqst | IRQ_SEROC : irqst & ~IRQ_SEROC;
-	}
-
-	// One step of the keyboard scan, run on each 15KHz tick while SKCTL bit
-	// 1 enables it: check the one key the counter addresses, and run the
-	// debounce state machine (AHRM 5.8).
-	#scanKeyboard(): void {
-		const keyboard = this.keyboard;
-		if (!keyboard) return;
-		const code = this.#scanCounter;
-		this.#scanCounter = (code + 1) & 0x3f;
-		keyboard.scan(code);
-		const down = keyboard.KR1;
-
-		// Control, Shift, and Break ride the KR2 line, latched as the
-		// counter passes their lines' codes ($00/$10/$30). Not debounced,
-		// no key sense, no overruns.
-		if (code === 0x00) {
-			this.#controlHeld = keyboard.KR2;
-		} else if (code === 0x10) {
-			this.#shiftHeld = keyboard.KR2;
-		} else if (code === 0x30) {
-			// Only the down transition is observable: the Break IRQ won't
-			// retrigger while held, and a press while the IRQ is disabled
-			// is lost for good.
-			if (keyboard.KR2 && !this.#breakHeld && this.#irqen & IRQ_BREAK) {
-				this.#irqst &= ~IRQ_BREAK;
-			}
-			this.#breakHeld = keyboard.KR2;
-		}
-
-		// With debounce (SKCTL bit 0) off, the compare always matches: the
-		// machine then effectively tests consecutive CODES instead of the
-		// same code on consecutive scans, which is why the keyboard barely
-		// works in that mode (the 5200 keypads depend on it).
-		const match = (this.#skctl & 0x01) === 0 || code === this.#scanCompare;
-		switch (this.#scanState) {
-			case 0: // key up
-				if (down) {
-					this.#scanCompare = code;
-					this.#scanState = 1;
-				}
-				break;
-			case 1: // debounce key down
-				if (match) {
-					if (down) {
-						this.#latchKey(code);
-						this.#scanState = 3;
-					} else {
-						this.#scanState = 0;
-					}
-				} else if (down) {
-					// A second key seen during the verify pass rejects the
-					// press - debounce is why two keys held at once never
-					// register.
-					this.#scanState = 0;
-				}
-				break;
-			case 3: // confirmed key down
-				if (match && !down) this.#scanState = 2;
-				break;
-			case 2: // debounce key up
-				if (match) {
-					if (down) {
-						this.#scanState = 3; // bounced back down
-					} else {
-						this.#keyHeld = false;
-						this.#scanState = 0;
-					}
-				}
-				break;
-		}
-	}
-
-	// A debounced key press registers: KBCODE latches the code with the
-	// Shift/Control bits as of now, the key sense asserts, the keyboard IRQ
-	// fires - and if the previous IRQ is still pending, that's an overrun
-	// (SKSTAT bit 6, cleared via SKRES).
-	#latchKey(code: number): void {
-		if ((this.#irqst & IRQ_KEYBOARD) === 0) this.#kbOverrun = true;
-		this.#kbcode =
-			code | (this.#shiftHeld ? 0x40 : 0) | (this.#controlHeld ? 0x80 : 0);
-		this.#keyHeld = true;
-		if (this.#irqen & IRQ_KEYBOARD) {
-			this.#irqst &= ~IRQ_KEYBOARD;
-		}
-	}
-
-	/**
-	 * POKEY has no reset pin, so only a power cycle (`cold`) clears it; on a
-	 * warm reset the OS reinitializes it in software. The keyboard scanner
-	 * clears with everything else - held physical keys live in the Keyboard
-	 * device and are re-detected by the scan.
-	 */
-	reset(cold: boolean): void {
-		if (!cold) return;
-		this.#irqen = 0;
-		this.#irqst = 0xff;
-		this.#kbcode = 0xff;
-		this.#keyHeld = false;
-		this.#shiftHeld = false;
-		this.#controlHeld = false;
-		this.#breakHeld = false;
-		this.#kbOverrun = false;
-		this.#scanCounter = 0;
-		this.#scanCompare = 0;
-		this.#scanState = 0;
-
-		this.#audf1 = this.#audf2 = this.#audf3 = this.#audf4 = 0;
-		this.#audc1 = this.#audc2 = this.#audc3 = this.#audc4 = 0;
-		this.#counter1 = this.#counter2 = this.#counter3 = this.#counter4 = 0;
-		this.#shadowAudf1 = this.#shadowAudf2 = 0;
-		this.#shadowAudf3 = this.#shadowAudf4 = 0;
-		this.#clock64 = this.#clock15 = 0;
-		this.#skctl = 0;
-		this.#initMode = true;
-		this.#initFillDelay = false;
-		this.#serout = null;
-		this.#shiftData = 0;
-		this.#shiftBitsLeft = 0;
-		this.#serialOutBit = 1;
-		this.#serialHalfBit = false;
-		this.#twoTone = false;
-		this.#forceBreak = false;
-		this.#delay.reset();
-		this.#inFlight1 = this.#inFlight2 = false;
-		this.#inFlight3 = this.#inFlight4 = false;
-		this.#underflowed1 = this.#underflowed3 = false;
-		this.#out1 = this.#out2 = this.#out3 = this.#out4 = 0;
-		this.#usePoly9 = false;
-		this.#fastClock1 = false;
-		this.#fastClock3 = false;
-		this.#link12 = false;
-		this.#link34 = false;
-		this.#slowDivisor = 28;
-		this.#poly4.reset();
-		this.#poly5.reset();
-		this.#poly9.reset();
-		this.#poly17.reset();
-	}
-
-	// Channel output update on a timer countdown: volume-only is handled at
-	// mix time; otherwise the 5-bit poly can mask the event, and the channel
-	// either toggles (square wave) or samples the selected polynomial.
-	#flip(current: number, ctl: number, ch: number): number {
-		const MASK_5 = 0x80; // 5-bit poly masks countdowns (0) or doesn't (1)
-		if (!(ctl & MASK_5) && (this.#poly5.register & ch) === 0) {
-			return current;
-		}
-
-		const FLIP = 0x20; // noise (0) or square wave (1)
-		if (ctl & FLIP) {
-			return 1 - current;
-		}
-
-		const USE_POLY_4 = 0x40; // 9/17-bit polynomial (0) or 4-bit (1)
-		const p =
-			ctl & USE_POLY_4
-				? this.#poly4.register & ch
-				: this.#usePoly9
-					? this.#poly9.register & ch
-					: this.#poly17.register & ch;
-
-		return p ? 1 : 0;
-	}
-
-	// An interrupt source fired: the IRQST latch only takes it while the
-	// source is enabled.
-	#raiseIrq(bit: number): void {
-		if (this.#irqen & bit) {
-			this.#irqst &= ~bit;
-		}
-	}
-
-	// The transmit clock source per SKCTL bits 4-6: %11x = timer 2,
-	// %01x/%10x = timer 4, %00x = external (no clock - the shifter never
-	// advances; Acid800 serclock pins all three).
-	get #transmitClock(): 0 | 2 | 4 {
-		const mode = (this.#skctl >> 4) & 0x07;
-		if (mode >= 6) return 2;
-		if (mode >= 2) return 4;
-		return 0;
-	}
-
-	// A "used" two-tone timer fired: toggle the FSK flip-flop and schedule
-	// the timer 1+2 resync - two cycles after the triggering timer's
-	// reload, which is fire+1 for the 1.79MHz pipeline and fire+2 for the
-	// slow clocks (where the delay is absorbed into the next tick anyway).
-	#twoToneFire(fast: boolean): void {
-		this.#delay.schedule(fast ? 1 : 2, OP_TWOTONE_RESYNC);
-	}
-
-	// Whether timer 1's fires drive the two-tone output: only for a 1
-	// data bit, and force break pins the data bit to 0.
-	get #twoToneUsesTimer1(): boolean {
-		return this.#serialOutBit === 1 && !this.#forceBreak;
-	}
-
-	// One transmit-clock edge (the selected timer fired). Two edges per
-	// bit cell - the output square wave's halves; the bit-cell phase
-	// restarts at each load, which happens on the first edge with the
-	// shifter empty and a byte waiting (Acid800 sertiming pins the load
-	// to the first clock edge after the SEROUT write).
-	#serialClockTick(): void {
-		if (this.#shiftBitsLeft > 0) {
-			this.#serialHalfBit = !this.#serialHalfBit;
-			if (!this.#serialHalfBit) {
-				// A full bit boundary: the current bit completes.
-				this.#shiftBitsLeft--;
-				if (this.#shiftBitsLeft === 0) {
-					// The stop bit shipped; the line idles at mark and the
-					// byte is done (SEROC's level goes complete).
-					this.#serialOutBit = 1;
-					this.serialOutByte?.(this.#lastShiftedByte);
-				} else {
-					this.#serialOutBit = this.#shiftData & 1;
-					this.#shiftData >>= 1;
-				}
-			}
-		}
-
-		if (this.#shiftBitsLeft === 0 && this.#serout !== null) {
-			// Load: holding register -> shifter. The start bit (0) goes out
-			// now; SEROR reports the holding register free.
-			this.#lastShiftedByte = this.#serout;
-			this.#shiftData = this.#serout | 0x100; // data LSB first, stop high
-			this.#shiftBitsLeft = 10;
-			this.#serialOutBit = 0;
-			this.#serialHalfBit = false;
-			this.#serout = null;
-			this.#raiseIrq(IRQ_SEROR);
-		}
-	}
-
-	#lastShiftedByte = 0;
-
-	// Reload values, in each channel's clock-domain ticks. The 1.79MHz
-	// periods carry the hardware's reload pipeline: N+4 for one byte, N+7
-	// linked; the slow clocks tick whole periods of N+1.
-	// Slow-clock reloads (the fast paths reload inside their pipelines).
-	#reload1(): number {
-		return this.#shadowAudf1 + 1;
-	}
-
-	#reload2(): number {
-		return this.#shadowAudf2 + 1;
-	}
-
-	#reload12(): number {
-		const n = this.#shadowAudf1 + this.#shadowAudf2 * 256;
-		return this.#fastClock1 ? n + 7 : n + 1;
-	}
-
-	#reload3(): number {
-		return this.#shadowAudf3 + 1;
-	}
-
-	#reload4(): number {
-		return this.#shadowAudf4 + 1;
-	}
-
-	#reload34(): number {
-		const n = this.#shadowAudf3 + this.#shadowAudf4 * 256;
-		return this.#fastClock3 ? n + 7 : n + 1;
-	}
-
-	/**
-	 * Advance the chip one machine cycle. Returns the summed audio output of
-	 * the four channels, 0-60 (each channel contributes its 0-15 volume).
-	 */
 	/**
 	 * The AUD pin: the summed audio output level (0-60) as of the last
 	 * {@link cycle} - four channels of volume 0-15. A plain value the host
@@ -522,7 +68,7 @@ export class Pokey implements Memory {
 		this.#underflowed1 = false;
 		this.#underflowed3 = false;
 
-		let due = this.#delay.tick();
+		let due = this.#delay.cycle();
 		if (due) {
 			// The two-tone resync goes first: it preempts a timer 1 fire
 			// landing on the resync cycle itself (a fire one cycle earlier
@@ -691,6 +237,78 @@ export class Pokey implements Memory {
 		this.audio = result;
 	}
 
+	/**
+	 * Host hook: called with each fully shifted-out byte. Bytes are
+	 * delivered at the end of their stop bit. (A callback rather than a
+	 * Signal: bytes are events, and repeated values must still notify.)
+	 */
+	serialOutByte: ((byte: number) => void) | null = null;
+
+	/**
+	 * The keyboard matrix the 15KHz scan addresses: latch a scan code, read
+	 * the sense lines back. The machine plugs its Keyboard device in; a
+	 * future 5200 puts its controller mux behind the same seam.
+	 */
+	keyboard: PokeyKeyboard | undefined;
+
+	/** The IRQ output line (true = asserted). */
+	get irq(): boolean {
+		return (this.#irqen & ~this.#serocLevel(this.#irqst)) !== 0;
+	}
+
+	/**
+	 * POKEY has no reset pin, so only a power cycle (`cold`) clears it; on a
+	 * warm reset the OS reinitializes it in software. The keyboard scanner
+	 * clears with everything else - held physical keys live in the Keyboard
+	 * device and are re-detected by the scan.
+	 */
+	reset(cold: boolean): void {
+		if (!cold) return;
+		this.#irqen = 0;
+		this.#irqst = 0xff;
+		this.#kbcode = 0xff;
+		this.#keyHeld = false;
+		this.#shiftHeld = false;
+		this.#controlHeld = false;
+		this.#breakHeld = false;
+		this.#kbOverrun = false;
+		this.#scanCounter = 0;
+		this.#scanCompare = 0;
+		this.#scanState = 0;
+
+		this.#audf1 = this.#audf2 = this.#audf3 = this.#audf4 = 0;
+		this.#audc1 = this.#audc2 = this.#audc3 = this.#audc4 = 0;
+		this.#counter1 = this.#counter2 = this.#counter3 = this.#counter4 = 0;
+		this.#shadowAudf1 = this.#shadowAudf2 = 0;
+		this.#shadowAudf3 = this.#shadowAudf4 = 0;
+		this.#clock64 = this.#clock15 = 0;
+		this.#skctl = 0;
+		this.#initMode = true;
+		this.#initFillDelay = false;
+		this.#serout = null;
+		this.#shiftData = 0;
+		this.#shiftBitsLeft = 0;
+		this.#serialOutBit = 1;
+		this.#serialHalfBit = false;
+		this.#twoTone = false;
+		this.#forceBreak = false;
+		this.#delay.reset();
+		this.#inFlight1 = this.#inFlight2 = false;
+		this.#inFlight3 = this.#inFlight4 = false;
+		this.#underflowed1 = this.#underflowed3 = false;
+		this.#out1 = this.#out2 = this.#out3 = this.#out4 = 0;
+		this.#usePoly9 = false;
+		this.#fastClock1 = false;
+		this.#fastClock3 = false;
+		this.#link12 = false;
+		this.#link34 = false;
+		this.#slowDivisor = 28;
+		this.#poly4.reset();
+		this.#poly5.reset();
+		this.#poly9.reset();
+		this.#poly17.reset();
+	}
+
 	read(address: number): number {
 		switch (address & 0x0f) {
 			// KBCODE ($D209): the last latched key code.
@@ -846,7 +464,385 @@ export class Pokey implements Memory {
 			}
 		}
 	}
+
+	// IRQST latches are active low (0 = interrupt occurred). An event only
+	// latches while its IRQEN bit is set; writing 0 to an IRQEN bit clears the
+	// latch.
+	#irqen = 0;
+	#irqst = 0xff;
+
+	#kbcode = 0xff;
+	#keyHeld = false;
+	#shiftHeld = false;
+	#controlHeld = false;
+	#breakHeld = false;
+	#kbOverrun = false;
+
+	// The keyboard scanner (AHRM 5.8): a 6-bit counter stepped once per
+	// 15KHz tick, a latched compare register, and a four-state debounce
+	// machine. States (the hardware's own numbering): 0 = key up, 1 =
+	// debounce key down, 3 = confirmed key down, 2 = debounce key up.
+	#scanCounter = 0;
+	#scanCompare = 0;
+	#scanState = 0;
+
+	#audf1 = 0;
+	#audf2 = 0;
+	#audf3 = 0;
+	#audf4 = 0;
+
+	#audc1 = 0;
+	#audc2 = 0;
+	#audc3 = 0;
+	#audc4 = 0;
+
+	// Timer down-counters, in ticks of each channel's clock domain. AUDF
+	// writes only matter at the next reload, like the hardware.
+	#counter1 = 0;
+	#counter2 = 0;
+	#counter3 = 0;
+	#counter4 = 0;
+
+	// The two free-running slow clocks; AUDCTL bit 0 picks which one the
+	// slow channels listen to. Each counts down to its next tick. SKCTL
+	// init mode holds both in reset; leaving init restarts them at fixed
+	// offsets (calibrated against Acid800's inittiming).
+	#clock64 = 0;
+	#clock15 = 0;
+
+	// SKCTL ($D20F write). Bits 0-1 clear = initialization mode. Power-on
+	// biases to init (the chip has no reset line; this is the benign
+	// corner of its indeterminate power-up space, and it's what makes
+	// RANDOM deterministic from boot).
+	#skctl = 0;
+	#initMode = true;
+	// The cycle carrying the init-entry write still shifts the 9/17-bit
+	// poly normally; the ones-fill starts the cycle after (pokey_noise's
+	// hot-stop samples sit exactly on this boundary).
+	#initFillDelay = false;
+
+	// The timer fire pipelines, as delay-line events. Fast (1.79MHz)
+	// unlinked channels: underflow, then 3 cycles later the counter reloads
+	// (from the live AUDF - that's the write deadline), and the flip/IRQ
+	// lands one cycle after that - deriving the N+4 period, the fire-2 AUDF
+	// deadline, and the STIMER preemption boundary, all per Acid800. In
+	// 16-bit linked mode the high half fires (and reloads, late) 3 cycles
+	// after the underflow.
+	#delay = new DelayLine(8);
+
+	// A channel's counter holds still while its fire is in flight; the
+	// this-cycle underflow flags resolve the STIMER write race.
+	#inFlight1 = false;
+	#inFlight2 = false;
+	#inFlight3 = false;
+	#inFlight4 = false;
+	#underflowed1 = false;
+	#underflowed3 = false;
+
+	// Reloads sample AUDF one cycle behind the CPU's view: a write landing
+	// two cycles before a fire still affects its reload, one cycle before
+	// doesn't (Acid800's 22c/23c change tests).
+	#shadowAudf1 = 0;
+	#shadowAudf2 = 0;
+	#shadowAudf3 = 0;
+	#shadowAudf4 = 0;
+
+	#out1 = 0;
+	#out2 = 0;
+	#out3 = 0;
+	#out4 = 0;
+
+	// AUDCTL bits
+	#usePoly9 = false;
+	#fastClock1 = false;
+	#fastClock3 = false;
+	#link12 = false;
+	#link34 = false;
+	// TODO: High-pass filter bits (0x04, 0x02)
+	#slowDivisor: 28 | 114 = 28;
+
+	#poly4 = new LinearFeedbackShiftRegister(0xc);
+	#poly5 = new LinearFeedbackShiftRegister(0x14);
+	#poly9 = new PolyCounter(5, 9);
+	#poly17 = new PolyCounter(5, 17);
+
+	// Serial output. A byte written to SEROUT waits in the holding register
+	// until the 10-bit shifter (start + 8 data + stop, LSB first) is empty,
+	// then transfers on a transmit-clock edge - raising the SEROR IRQ. The
+	// transmit clock is the selected timer's fire, two fires per bit (the
+	// output square wave's two edges). Init mode halts the shifter but
+	// does not clear it (Acid800 timertiming relies on pushing a byte
+	// through to reset the output state).
+	#serout: number | null = null; // holding register
+	#shiftData = 0; // remaining bits, next-out in bit 0
+	#shiftBitsLeft = 0; // 0 = shifter empty (SEROC's level)
+	#serialOutBit = 1; // the output data bit; idles at mark
+	#serialHalfBit = false; // divide-by-two phase within a bit cell
+
+	// Two-tone mode (SKCTL bit 3): the serial output line carries an FSK
+	// square wave instead of data levels - timer 1's tone for a 1 bit,
+	// timer 2's for a 0. A "used" timer fire (timer 2 always; timer 1
+	// only while the output data bit is 1 and force break is off) toggles
+	// the output flip-flop and resyncs both timers two cycles after the
+	// triggering timer's reload. The flip-flop itself isn't modeled until
+	// something can observe the line level; the resync is the part the
+	// timers (and Acid800) see.
+	#twoTone = false;
+	#forceBreak = false;
+
+	// SEROC (IRQST bit 3) is a level, not a latch: it directly reflects
+	// "not shifting" regardless of IRQEN (the enable only gates the IRQ
+	// line), and can't be acknowledged while the condition holds (Acid800
+	// pokey_seroc pins both the enabled and disabled reads). A byte
+	// waiting in the holding register doesn't count - complete stays
+	// active until shifting actually starts - and a shifter frozen by a
+	// stopped transmit clock or init mode also reads complete (Acid800
+	// serclock's external-clock check).
+	#serocLevel(irqst: number): number {
+		const shifting =
+			this.#shiftBitsLeft > 0 && this.#transmitClock !== 0 && !this.#initMode;
+		return shifting ? irqst | IRQ_SEROC : irqst & ~IRQ_SEROC;
+	}
+
+	// One step of the keyboard scan, run on each 15KHz tick while SKCTL bit
+	// 1 enables it: check the one key the counter addresses, and run the
+	// debounce state machine (AHRM 5.8).
+	#scanKeyboard(): void {
+		const keyboard = this.keyboard;
+		if (!keyboard) return;
+		const code = this.#scanCounter;
+		this.#scanCounter = (code + 1) & 0x3f;
+		keyboard.scan(code);
+		const down = keyboard.KR1;
+
+		// Control, Shift, and Break ride the KR2 line, latched as the
+		// counter passes their lines' codes ($00/$10/$30). Not debounced,
+		// no key sense, no overruns.
+		if (code === 0x00) {
+			this.#controlHeld = keyboard.KR2;
+		} else if (code === 0x10) {
+			this.#shiftHeld = keyboard.KR2;
+		} else if (code === 0x30) {
+			// Only the down transition is observable: the Break IRQ won't
+			// retrigger while held, and a press while the IRQ is disabled
+			// is lost for good.
+			if (keyboard.KR2 && !this.#breakHeld && this.#irqen & IRQ_BREAK) {
+				this.#irqst &= ~IRQ_BREAK;
+			}
+			this.#breakHeld = keyboard.KR2;
+		}
+
+		// With debounce (SKCTL bit 0) off, the compare always matches: the
+		// machine then effectively tests consecutive CODES instead of the
+		// same code on consecutive scans, which is why the keyboard barely
+		// works in that mode (the 5200 keypads depend on it).
+		const match = (this.#skctl & 0x01) === 0 || code === this.#scanCompare;
+		switch (this.#scanState) {
+			case 0: // key up
+				if (down) {
+					this.#scanCompare = code;
+					this.#scanState = 1;
+				}
+				break;
+			case 1: // debounce key down
+				if (match) {
+					if (down) {
+						this.#latchKey(code);
+						this.#scanState = 3;
+					} else {
+						this.#scanState = 0;
+					}
+				} else if (down) {
+					// A second key seen during the verify pass rejects the
+					// press - debounce is why two keys held at once never
+					// register.
+					this.#scanState = 0;
+				}
+				break;
+			case 3: // confirmed key down
+				if (match && !down) this.#scanState = 2;
+				break;
+			case 2: // debounce key up
+				if (match) {
+					if (down) {
+						this.#scanState = 3; // bounced back down
+					} else {
+						this.#keyHeld = false;
+						this.#scanState = 0;
+					}
+				}
+				break;
+		}
+	}
+
+	// A debounced key press registers: KBCODE latches the code with the
+	// Shift/Control bits as of now, the key sense asserts, the keyboard IRQ
+	// fires - and if the previous IRQ is still pending, that's an overrun
+	// (SKSTAT bit 6, cleared via SKRES).
+	#latchKey(code: number): void {
+		if ((this.#irqst & IRQ_KEYBOARD) === 0) this.#kbOverrun = true;
+		this.#kbcode =
+			code | (this.#shiftHeld ? 0x40 : 0) | (this.#controlHeld ? 0x80 : 0);
+		this.#keyHeld = true;
+		if (this.#irqen & IRQ_KEYBOARD) {
+			this.#irqst &= ~IRQ_KEYBOARD;
+		}
+	}
+
+	// Channel output update on a timer countdown: volume-only is handled at
+	// mix time; otherwise the 5-bit poly can mask the event, and the channel
+	// either toggles (square wave) or samples the selected polynomial.
+	#flip(current: number, ctl: number, ch: number): number {
+		const MASK_5 = 0x80; // 5-bit poly masks countdowns (0) or doesn't (1)
+		if (!(ctl & MASK_5) && (this.#poly5.register & ch) === 0) {
+			return current;
+		}
+
+		const FLIP = 0x20; // noise (0) or square wave (1)
+		if (ctl & FLIP) {
+			return 1 - current;
+		}
+
+		const USE_POLY_4 = 0x40; // 9/17-bit polynomial (0) or 4-bit (1)
+		const p =
+			ctl & USE_POLY_4
+				? this.#poly4.register & ch
+				: this.#usePoly9
+					? this.#poly9.register & ch
+					: this.#poly17.register & ch;
+
+		return p ? 1 : 0;
+	}
+
+	// An interrupt source fired: the IRQST latch only takes it while the
+	// source is enabled.
+	#raiseIrq(bit: number): void {
+		if (this.#irqen & bit) {
+			this.#irqst &= ~bit;
+		}
+	}
+
+	// The transmit clock source per SKCTL bits 4-6: %11x = timer 2,
+	// %01x/%10x = timer 4, %00x = external (no clock - the shifter never
+	// advances; Acid800 serclock pins all three).
+	get #transmitClock(): 0 | 2 | 4 {
+		const mode = (this.#skctl >> 4) & 0x07;
+		if (mode >= 6) return 2;
+		if (mode >= 2) return 4;
+		return 0;
+	}
+
+	// A "used" two-tone timer fired: toggle the FSK flip-flop and schedule
+	// the timer 1+2 resync - two cycles after the triggering timer's
+	// reload, which is fire+1 for the 1.79MHz pipeline and fire+2 for the
+	// slow clocks (where the delay is absorbed into the next tick anyway).
+	#twoToneFire(fast: boolean): void {
+		this.#delay.schedule(fast ? 1 : 2, OP_TWOTONE_RESYNC);
+	}
+
+	// Whether timer 1's fires drive the two-tone output: only for a 1
+	// data bit, and force break pins the data bit to 0.
+	get #twoToneUsesTimer1(): boolean {
+		return this.#serialOutBit === 1 && !this.#forceBreak;
+	}
+
+	// One transmit-clock edge (the selected timer fired). Two edges per
+	// bit cell - the output square wave's halves; the bit-cell phase
+	// restarts at each load, which happens on the first edge with the
+	// shifter empty and a byte waiting (Acid800 sertiming pins the load
+	// to the first clock edge after the SEROUT write).
+	#serialClockTick(): void {
+		if (this.#shiftBitsLeft > 0) {
+			this.#serialHalfBit = !this.#serialHalfBit;
+			if (!this.#serialHalfBit) {
+				// A full bit boundary: the current bit completes.
+				this.#shiftBitsLeft--;
+				if (this.#shiftBitsLeft === 0) {
+					// The stop bit shipped; the line idles at mark and the
+					// byte is done (SEROC's level goes complete).
+					this.#serialOutBit = 1;
+					this.serialOutByte?.(this.#lastShiftedByte);
+				} else {
+					this.#serialOutBit = this.#shiftData & 1;
+					this.#shiftData >>= 1;
+				}
+			}
+		}
+
+		if (this.#shiftBitsLeft === 0 && this.#serout !== null) {
+			// Load: holding register -> shifter. The start bit (0) goes out
+			// now; SEROR reports the holding register free.
+			this.#lastShiftedByte = this.#serout;
+			this.#shiftData = this.#serout | 0x100; // data LSB first, stop high
+			this.#shiftBitsLeft = 10;
+			this.#serialOutBit = 0;
+			this.#serialHalfBit = false;
+			this.#serout = null;
+			this.#raiseIrq(IRQ_SEROR);
+		}
+	}
+
+	#lastShiftedByte = 0;
+
+	// Reload values, in each channel's clock-domain ticks. The 1.79MHz
+	// periods carry the hardware's reload pipeline: N+4 for one byte, N+7
+	// linked; the slow clocks tick whole periods of N+1.
+	// Slow-clock reloads (the fast paths reload inside their pipelines).
+	#reload1(): number {
+		return this.#shadowAudf1 + 1;
+	}
+
+	#reload2(): number {
+		return this.#shadowAudf2 + 1;
+	}
+
+	#reload12(): number {
+		const n = this.#shadowAudf1 + this.#shadowAudf2 * 256;
+		return this.#fastClock1 ? n + 7 : n + 1;
+	}
+
+	#reload3(): number {
+		return this.#shadowAudf3 + 1;
+	}
+
+	#reload4(): number {
+		return this.#shadowAudf4 + 1;
+	}
+
+	#reload34(): number {
+		const n = this.#shadowAudf3 + this.#shadowAudf4 * 256;
+		return this.#fastClock3 ? n + 7 : n + 1;
+	}
 }
+
+// IRQEN/IRQST bits (only the ones modeled so far).
+const IRQ_BREAK = 0x80;
+const IRQ_KEYBOARD = 0x40;
+const IRQ_SEROR = 0x10;
+const IRQ_SEROC = 0x08;
+const IRQ_TIMER4 = 0x04;
+const IRQ_TIMER2 = 0x02;
+const IRQ_TIMER1 = 0x01;
+
+// SKSTAT bits (active low: 0 = condition present).
+const SKSTAT_KB_OVERRUN = 0x40;
+const SKSTAT_SHIFT_HELD = 0x08;
+const SKSTAT_KEY_HELD = 0x04;
+
+// AUDC bits
+const AUDC_VOLUME_ONLY = 0x10;
+
+// Delay-line ops: the timer fire pipelines (see the comments in `cycle`),
+// and the serial transmit-clock edge, which trails its timer's fire by
+// two cycles (Acid800 sertiming pins the load two cycles after the fire).
+const OP_COMMIT1 = 0x01;
+const OP_FIRE1 = 0x02;
+const OP_COMMIT3 = 0x04;
+const OP_FIRE3 = 0x08;
+const OP_FIRE2 = 0x10;
+const OP_FIRE4 = 0x20;
+const OP_SERIAL_TICK = 0x40;
+const OP_TWOTONE_RESYNC = 0x80;
 
 /**
  * The 9/17-bit polynomial counter: a right-shifting Fibonacci LFSR with XOR

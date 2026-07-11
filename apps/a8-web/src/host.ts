@@ -150,78 +150,6 @@ export interface RomOverrides {
 
 const NO_ROM_OVERRIDES: RomOverrides = { os: {}, basic: null, game: null };
 
-// Persisted-state keys (namespaced by storageName) - see persist.ts.
-const CONFIG_KEY = "config";
-const ROMS_KEY = "roms";
-const KBMODE_KEY = "keyboard-mode";
-const REALISTIC_SCAN_KEY = "realistic-key-scan";
-
-// How long a momentary trigger (palette, click) holds a control before its
-// auto-release - long enough for the OS to sense the key/button. Counted in
-// emulated frames so it's two frames whether real-time or in turbo.
-const PULSE_FRAMES = 2;
-// The mounted media is per-tab (sessionStorage only) - a fresh tab starts empty
-// rather than auto-booting the last session's image.
-const MEDIA_KEY = "media";
-
-/** This tab's persisted mounted media: the library ids in each slot. */
-interface PersistedMedia {
-	cart: string | null;
-	disk: string | null;
-	/** The live BASIC-disabled state (a boot turns it off without touching the
-	 *  saved config seed), so a resume matches the booted machine. */
-	basicDisabled: boolean;
-}
-
-// Coerce an untrusted persisted value into a PersistedMedia, or null if absent
-// or malformed (ids are resolved against the library lazily, on restore).
-function sanitizeMedia(value: unknown): PersistedMedia | null {
-	if (typeof value !== "object" || value === null) return null;
-	const v = value as Partial<PersistedMedia>;
-	return {
-		cart: typeof v.cart === "string" ? v.cart : null,
-		disk: typeof v.disk === "string" ? v.disk : null,
-		basicDisabled: Boolean(v.basicDisabled),
-	};
-}
-
-function romsEqual(a: RomOverrides, b: RomOverrides): boolean {
-	if (a.basic !== b.basic || a.game !== b.game) return false;
-	const slots = new Set([...Object.keys(a.os), ...Object.keys(b.os)]);
-	for (const slot of slots) {
-		if (a.os[slot as OsSlot] !== b.os[slot as OsSlot]) return false;
-	}
-	return true;
-}
-
-// Coerce a persisted/untrusted value into a RomOverrides shape; ids are
-// validated lazily at resolve time (a stale one falls back to the ranking).
-function sanitizeRoms(value: unknown): RomOverrides {
-	if (typeof value !== "object" || value === null) return NO_ROM_OVERRIDES;
-	const v = value as Partial<RomOverrides>;
-	return {
-		os:
-			v.os && typeof v.os === "object"
-				? (v.os as Partial<Record<OsSlot, string>>)
-				: {},
-		basic: typeof v.basic === "string" ? v.basic : null,
-		game: typeof v.game === "string" ? v.game : null,
-	};
-}
-
-/** Why a detected-but-not-loadable file can't be loaded (yet). */
-function unsupportedMessage(format: AtariFileFormat | null): string | null {
-	switch (format) {
-		case "os-rom-10k":
-		case "os-rom-16k":
-			return messages.errors.osRom;
-		case null:
-			return messages.errors.unrecognized;
-		default:
-			return null; // a cartridge, disk, or executable
-	}
-}
-
 /**
  * Owns the emulator's imperative lifetime - the live {@link Emulator}
  * instance (swapped on Load), the real-time present loop, audio, and the
@@ -231,6 +159,115 @@ function unsupportedMessage(format: AtariFileFormat | null): string | null {
  * touch Preact's render path.
  */
 export class EmulatorHost {
+	constructor({ model, audio, audioError }: HostConfig) {
+		this.#audio = audio;
+		this.#audioError = audioError ?? null;
+		this.#defaultModel = model;
+		// Start from the last persisted machine config (this tab's, else the
+		// last-used seed), falling back to a default for the requested model.
+		this.config.value = sanitizeSettings(
+			loadPersisted(CONFIG_KEY),
+			this.#defaultSettings(),
+		);
+		// This tab's mounted media (if any) is restored by create() once the
+		// library loads; its live BASIC state overrides the saved config seed so
+		// a resumed boot matches the machine it left.
+		this.#pendingMedia = sanitizeMedia(loadSession(MEDIA_KEY));
+		if (this.#pendingMedia) {
+			this.config.value = {
+				...this.config.value,
+				basicDisabled: this.#pendingMedia.basicDisabled,
+			};
+		}
+		this.staged.value = this.config.peek();
+		// Restore firmware picks (ids resolve lazily; a stale one falls back to
+		// the ranking).
+		this.appliedRoms.value = sanitizeRoms(loadPersisted(ROMS_KEY));
+		this.stagedRoms.value = this.appliedRoms.peek();
+		this.keyboardMode.value =
+			loadPersisted(KBMODE_KEY) === "positional" ? "positional" : "character";
+		this.realisticScan.value = loadPersisted(REALISTIC_SCAN_KEY) === "on";
+
+		// Key bindings: this tab's stored flat set, or empty until create()
+		// generates and persists the platform defaults (first run / cleared store).
+		const storedBindings = loadStoredBindings();
+		this.#bindingsStored = storedBindings !== undefined;
+		this.keyBindings.value = storedBindings ?? [];
+		// #emulator is built by create() once the initial firmware is fetched.
+		this.#keyboard = new Keyboard(
+			{
+				press: (command) => this.press(command),
+				release: (command) => this.release(command),
+				tap: (command) => this.dispatch(command),
+				releaseMatrix: () => this.releaseMatrix(),
+			},
+			() => this.keyboardMode.value,
+			storedBindings ?? [],
+		);
+
+		// The gamepad poller drives the joystick commands the same way; the
+		// emulator loop calls its poll() once per frame (wired in #makeEmulator).
+		this.#gamepads = new Gamepads({
+			press: (command) => this.press(command),
+			release: (command) => this.release(command),
+		});
+		// Mirror the pad set / port assignment into a signal for the panel.
+		this.#gamepads.onChange = () => {
+			this.gamepads.value = this.#gamepads.pads();
+		};
+		// Surface connect/disconnect as notices, with the assigned port.
+		this.#gamepads.onConnect = (name, port) => {
+			this.toast(messages.toasts.controllerConnected(name, port));
+		};
+		this.#gamepads.onDisconnect = (name) => {
+			this.toast(messages.toasts.controllerDisconnected(name));
+		};
+		// Apply the persisted (or default) bindings and the persisted
+		// per-device normalization profiles to the poller.
+		const gb = this.gamepadBindings.peek();
+		this.#gamepads.setBindings(gb.joystick, gb.console);
+		this.#gamepads.setProfiles(this.gamepadNormalize.peek());
+
+		// The audio context resumes/suspends asynchronously; track it.
+		if (audio) {
+			audio.context.addEventListener("statechange", () =>
+				this.#refreshAudioState(),
+			);
+			this.#refreshAudioState();
+		}
+
+		// Keep the status-bar attachment labels in sync with the config - the
+		// 400/800 BASIC slot depends on the model and whether BASIC is enabled.
+		// (Runs immediately, seeding the initial labels.)
+		this.config.subscribe(() => this.#refreshAttachments());
+	}
+
+	/**
+	 * Build a host and boot its first emulator. Async because the initial OS +
+	 * BASIC bytes are fetched here (the constructor stays synchronous and the
+	 * emulator can't be built until they're cached).
+	 */
+	static async create(config: HostConfig): Promise<EmulatorHost> {
+		const host = new EmulatorHost(config);
+		await host.#ensureFirmware();
+		await host.#restoreMedia();
+		// First run (or a cleared store): generate + persist the default bindings
+		// from the layout snapshot. Otherwise load the stored snapshot (only used to
+		// label the editor's live preview now - existing chords carry baked labels).
+		// The keyboard isn't attached until the UI mounts, so the brief empty-binding
+		// window is never live.
+		if (!host.#bindingsStored) {
+			const { bindings, layout } = await freshBindings(host.#isMac);
+			host.#applyBindings(bindings);
+			host.layoutLabels.value = layout;
+		} else {
+			host.layoutLabels.value = await ensureStoredLayout();
+		}
+		host.#emulator = host.#makeEmulator();
+		host.#wireLeds();
+		return host;
+	}
+
 	/**
 	 * What's attached, for the status bar: the cartridge-slot label (a cart
 	 * name, or "BASIC" when it occupies the 400/800 cart slot, or null) and a
@@ -348,9 +385,6 @@ export class EmulatorHost {
 	 */
 	readonly sidebar = signal<SidebarPanel | null>(null);
 
-	// Fetched ROM bytes, keyed by the resolved image's id - populated lazily
-	// before each (re)build so #makeEmulator can read them synchronously.
-	readonly #bytes = new Map<string, Uint8Array>();
 	// The firmware picks per slot, persisted. appliedRoms is what the running
 	// machine uses (an explicit pick, or the rank-resolved one #ensurePins pins in
 	// so it stays put across library changes); stagedRoms is the ROMs panel's
@@ -372,249 +406,6 @@ export class EmulatorHost {
 			applied.game?.id !== staged.game?.id
 		);
 	});
-	readonly #audio: AudioOutput | null;
-	readonly #audioError: string | null;
-	readonly #keyboard: Keyboard;
-	readonly #gamepads: Gamepads;
-	readonly #isMac = isMac();
-	// Whether key bindings were loaded from storage; if not, create() generates
-	// and persists the platform defaults (async - it resolves layout labels).
-	readonly #bindingsStored: boolean;
-	// The model a brand-new install starts from (and resets fall back to).
-	readonly #defaultModel: AtariModel;
-
-	// Assigned by create() before the host is handed out - the constructor can't
-	// await the initial firmware fetch.
-	#emulator!: Emulator;
-	// Bumped per reboot so a slow firmware fetch can't clobber a newer config.
-	#rebootToken = 0;
-	// Drops the PORTB watch feeding the 1200XL LEDs; re-pointed on each rebuild.
-	#unwatchLeds: (() => void) | null = null;
-	#keyInput: HTMLInputElement | null = null;
-	#bootImagePicker: (() => void) | null = null;
-	// What to do with the next file the shared picker yields (boot vs. attach).
-	#pendingPick: (file: File) => void = (file) => void this.loadFile(file);
-	#cpuTrace = false; // persists across reboots; reapplied to each emulator
-	#turboMode = false; // persists across reboots; reapplied to each emulator
-	// What's mounted, kept across reboots and re-applied by #makeEmulator. The
-	// cartridge slot and the disk drives are independent (a cart and a disk can
-	// coexist); #drives is indexed by drive number (0 = D1:), one slot for now.
-	// `sourceId` is the library entry the cart/disk came from, if any - used to
-	// persist what's mounted (and, for a disk, what `saveD1ToLibrary` writes back).
-	#cartridge: { cart: Cartridge; name: string; sourceId?: string } | null =
-		null;
-	#drives: ({ disk: AtrImage; name: string; sourceId?: string } | null)[] = [
-		null,
-	];
-	// Media to re-mount once the library is ready (set from sessionStorage in the
-	// constructor, consumed by create()/#restoreMedia). Null when nothing to do.
-	#pendingMedia: PersistedMedia | null = null;
-
-	/**
-	 * Build a host and boot its first emulator. Async because the initial OS +
-	 * BASIC bytes are fetched here (the constructor stays synchronous and the
-	 * emulator can't be built until they're cached).
-	 */
-	static async create(config: HostConfig): Promise<EmulatorHost> {
-		const host = new EmulatorHost(config);
-		await host.#ensureFirmware();
-		await host.#restoreMedia();
-		// First run (or a cleared store): generate + persist the default bindings
-		// from the layout snapshot. Otherwise load the stored snapshot (only used to
-		// label the editor's live preview now - existing chords carry baked labels).
-		// The keyboard isn't attached until the UI mounts, so the brief empty-binding
-		// window is never live.
-		if (!host.#bindingsStored) {
-			const { bindings, layout } = await freshBindings(host.#isMac);
-			host.#applyBindings(bindings);
-			host.layoutLabels.value = layout;
-		} else {
-			host.layoutLabels.value = await ensureStoredLayout();
-		}
-		host.#emulator = host.#makeEmulator();
-		host.#wireLeds();
-		return host;
-	}
-
-	constructor({ model, audio, audioError }: HostConfig) {
-		this.#audio = audio;
-		this.#audioError = audioError ?? null;
-		this.#defaultModel = model;
-		// Start from the last persisted machine config (this tab's, else the
-		// last-used seed), falling back to a default for the requested model.
-		this.config.value = sanitizeSettings(
-			loadPersisted(CONFIG_KEY),
-			this.#defaultSettings(),
-		);
-		// This tab's mounted media (if any) is restored by create() once the
-		// library loads; its live BASIC state overrides the saved config seed so
-		// a resumed boot matches the machine it left.
-		this.#pendingMedia = sanitizeMedia(loadSession(MEDIA_KEY));
-		if (this.#pendingMedia) {
-			this.config.value = {
-				...this.config.value,
-				basicDisabled: this.#pendingMedia.basicDisabled,
-			};
-		}
-		this.staged.value = this.config.peek();
-		// Restore firmware picks (ids resolve lazily; a stale one falls back to
-		// the ranking).
-		this.appliedRoms.value = sanitizeRoms(loadPersisted(ROMS_KEY));
-		this.stagedRoms.value = this.appliedRoms.peek();
-		this.keyboardMode.value =
-			loadPersisted(KBMODE_KEY) === "positional" ? "positional" : "character";
-		this.realisticScan.value = loadPersisted(REALISTIC_SCAN_KEY) === "on";
-
-		// Key bindings: this tab's stored flat set, or empty until create()
-		// generates and persists the platform defaults (first run / cleared store).
-		const storedBindings = loadStoredBindings();
-		this.#bindingsStored = storedBindings !== undefined;
-		this.keyBindings.value = storedBindings ?? [];
-		// #emulator is built by create() once the initial firmware is fetched.
-		this.#keyboard = new Keyboard(
-			{
-				press: (command) => this.press(command),
-				release: (command) => this.release(command),
-				tap: (command) => this.dispatch(command),
-				releaseMatrix: () => this.releaseMatrix(),
-			},
-			() => this.keyboardMode.value,
-			storedBindings ?? [],
-		);
-
-		// The gamepad poller drives the joystick commands the same way; the
-		// emulator loop calls its poll() once per frame (wired in #makeEmulator).
-		this.#gamepads = new Gamepads({
-			press: (command) => this.press(command),
-			release: (command) => this.release(command),
-		});
-		// Mirror the pad set / port assignment into a signal for the panel.
-		this.#gamepads.onChange = () => {
-			this.gamepads.value = this.#gamepads.pads();
-		};
-		// Surface connect/disconnect as notices, with the assigned port.
-		this.#gamepads.onConnect = (name, port) => {
-			this.toast(messages.toasts.controllerConnected(name, port));
-		};
-		this.#gamepads.onDisconnect = (name) => {
-			this.toast(messages.toasts.controllerDisconnected(name));
-		};
-		// Apply the persisted (or default) bindings and the persisted
-		// per-device normalization profiles to the poller.
-		const gb = this.gamepadBindings.peek();
-		this.#gamepads.setBindings(gb.joystick, gb.console);
-		this.#gamepads.setProfiles(this.gamepadNormalize.peek());
-
-		// The audio context resumes/suspends asynchronously; track it.
-		if (audio) {
-			audio.context.addEventListener("statechange", () =>
-				this.#refreshAudioState(),
-			);
-			this.#refreshAudioState();
-		}
-
-		// Keep the status-bar attachment labels in sync with the config - the
-		// 400/800 BASIC slot depends on the model and whether BASIC is enabled.
-		// (Runs immediately, seeding the initial labels.)
-		this.config.subscribe(() => this.#refreshAttachments());
-	}
-
-	// Recompute the status-bar attachment labels from the mounted slots and the
-	// running config. On the 400/800 an enabled BASIC occupies the cartridge
-	// slot (when no cart is mounted) and shows there like any cartridge; on
-	// XL/XE BASIC is internal and isn't shown.
-	#refreshAttachments(): void {
-		const { model, basicDisabled } = this.config.value;
-		// On the 400/800 an enabled BASIC is a real cartridge in the slot, so
-		// show the actual ROM image's name; on XL/XE BASIC is internal and the
-		// slot reflects only a real cartridge.
-		const basic =
-			!hasBuiltinBasic(model) && !basicDisabled
-				? (this.#pick(preferredBasicKeys())?.user.displayName ?? null)
-				: null;
-		this.attachments.value = {
-			cartridge: this.#cartridge?.name ?? basic,
-			drives: this.#drives.map((drive) => drive?.name ?? null),
-		};
-	}
-
-	// Persist this tab's mounted media (the library ids in each slot) plus the
-	// live BASIC state, so reloading the tab resumes the running machine. Only
-	// slots backed by a library entry persist; an id-less mount is dropped (it
-	// can't be reconstructed). Session-only - a fresh tab starts empty.
-	#saveMedia(): void {
-		saveSession(MEDIA_KEY, {
-			cart: this.#cartridge?.sourceId ?? null,
-			disk: this.#drives[0]?.sourceId ?? null,
-			basicDisabled: this.config.value.basicDisabled,
-		} satisfies PersistedMedia);
-	}
-
-	// Record a just-booted/attached library image in the recents history, then
-	// sweep transient (auto-added) images that have fallen off it - keeping any
-	// still mounted, so a resume never loses its backing blob.
-	#noteUsed(sourceId: string | undefined): void {
-		if (!sourceId) return;
-		touchRecent(sourceId);
-		const keep = new Set(recentIds.value);
-		if (this.#cartridge?.sourceId) keep.add(this.#cartridge.sourceId);
-		if (this.#drives[0]?.sourceId) keep.add(this.#drives[0].sourceId);
-		void sweepTransients(keep);
-	}
-
-	#mountsImage(id: string): boolean {
-		return this.#cartridge?.sourceId === id || this.#drives[0]?.sourceId === id;
-	}
-
-	// Re-mount the media persisted for this tab, resolving ids against the
-	// library; an image deleted since (or any read error) is silently skipped, so
-	// a stale pointer just yields an empty slot. Runs in create() after the
-	// library has loaded, before the first emulator is built.
-	async #restoreMedia(): Promise<void> {
-		const media = this.#pendingMedia;
-		this.#pendingMedia = null;
-		if (!media) return;
-		await readyLibrary();
-		if (media.disk) {
-			try {
-				const entry = getImage(media.disk);
-				if (entry) {
-					const bytes = await getImageBytes(media.disk);
-					const disk =
-						entry.derived.type === "xex"
-							? buildBootDisk(bytes)
-							: new AtrImage(bytes);
-					this.#drives[0] = {
-						disk,
-						name: entry.user.displayName,
-						sourceId: media.disk,
-					};
-				}
-			} catch {
-				// corrupt or missing blob - leave D1: empty
-			}
-		}
-		if (media.cart) {
-			try {
-				const entry = getImage(media.cart);
-				if (entry) {
-					const bytes = await getImageBytes(media.cart);
-					this.#cartridge = {
-						cart: createCartridge(bytes),
-						name: entry.user.displayName,
-						sourceId: media.cart,
-					};
-				}
-			} catch {
-				// corrupt or missing blob - leave the cart slot empty
-			}
-		}
-		this.#refreshAttachments();
-	}
-
-	#commandContext() {
-		return { emulator: this.#emulator, host: this };
-	}
 
 	/**
 	 * Activate a command from a momentary trigger (the palette, a click) - no
@@ -825,206 +616,6 @@ export class EmulatorHost {
 		saveNormalizeProfiles(next);
 	}
 
-	// The best-ranked built-in firmware present in the library for a list of
-	// keys (a built-in's image id is its firmware key).
-	// Resolve the best available firmware by rank, matching on the detected
-	// firmware identity - so an uploaded copy of a known ROM is picked just like
-	// the built-in one (a built-in's id is also its key).
-	#pick(keys: readonly FirmwareKey[]): ImageEntry | null {
-		for (const key of keys) {
-			const entry = libraryEntries.value.find((e) => e.firmwareKey === key);
-			if (entry) return entry;
-		}
-		return null;
-	}
-
-	// The OS + BASIC the running config wants, picked from the library by rank.
-	// BASIC is omitted when the machine doesn't wire it in (the 400/800 with the
-	// cartridge slot taken; the XL/XE "disable" is the OPTION-hold at boot).
-	#resolveFirmware(): {
-		os: ImageEntry | null;
-		basic: ImageEntry | null;
-		game: ImageEntry | null;
-	} {
-		return this.#resolveWith(this.appliedRoms.value);
-	}
-
-	// Resolve OS/BASIC/game for the running config under a given override set; an
-	// override wins over the ranking when its image is present (a missing one -
-	// e.g. a built-in dropped by a deploy - falls back to the ranking).
-	#resolveWith(roms: RomOverrides): {
-		os: ImageEntry | null;
-		basic: ImageEntry | null;
-		game: ImageEntry | null;
-	} {
-		const { model, tv, basicDisabled } = this.config.value;
-		// Built-in BASIC (xl/xe, xegs) is always loaded - its "disable" is the
-		// OPTION-hold. Cart BASIC (400/800, 1200xl) loads only when it takes the
-		// slot: enabled and no cartridge mounted.
-		const needBasic =
-			hasBuiltinBasic(model) || (!basicDisabled && this.#cartridge === null);
-		const osSlot = osSlotFor(model, tv);
-		return {
-			os:
-				this.#fromId(roms.os[osSlot]) ??
-				this.#pick(preferredOsKeys({ model, tv })),
-			basic: needBasic
-				? (this.#fromId(roms.basic) ?? this.#pick(preferredBasicKeys()))
-				: null,
-			game:
-				model === "xegs" ? (this.#fromId(roms.game) ?? this.#pickGame()) : null,
-		};
-	}
-
-	// Resolve an override to its library image - null when it doesn't resolve
-	// (no override, or one pointing at an image the library no longer has).
-	#fromId(id: string | null | undefined): ImageEntry | null {
-		return id ? (getImage(id) ?? null) : null;
-	}
-
-	// The XEGS game-slot image - any library image flagged for the game slot
-	// (the bundled one, or an upload the user has tagged).
-	#pickGame(): ImageEntry | null {
-		return (
-			libraryEntries.value.find((e) => e.user.slots?.includes("game")) ?? null
-		);
-	}
-
-	// Pin the resolved firmware per slot into the (persisted) prefs, so a later
-	// library change can't silently re-rank a slot that's already settled. A slot
-	// is (re)picked by rank only when its pref is empty or points at an image the
-	// library no longer has - "fill an empty slot, or replace a vanished one";
-	// importing a better ROM leaves a settled slot alone (pick it by hand instead).
-	#ensurePins(): void {
-		// Every OS slot (not just the running model's) gets pinned, so a slot the
-		// user hasn't booted into is just as stable against imports.
-		const osSlots: { slot: OsSlot; model: AtariModel; tv: "ntsc" | "pal" }[] = [
-			{ slot: "800-ntsc", model: "400/800", tv: "ntsc" },
-			{ slot: "800-pal", model: "400/800", tv: "pal" },
-			{ slot: "xlxe", model: "xl/xe", tv: "ntsc" },
-			{ slot: "1200xl", model: "1200xl", tv: "ntsc" },
-			{ slot: "xegs", model: "xegs", tv: "ntsc" },
-		];
-		const prev = this.appliedRoms.value;
-		const os = { ...prev.os };
-		let basic = prev.basic;
-		let game = prev.game;
-		let changed = false;
-
-		for (const s of osSlots) {
-			if (this.#fromId(os[s.slot])) continue; // settled + still available
-			const pick = this.#pick(preferredOsKeys({ model: s.model, tv: s.tv }));
-			if (pick) {
-				os[s.slot] = pick.id;
-				changed = true;
-			}
-		}
-		if (!this.#fromId(basic)) {
-			const pick = this.#pick(preferredBasicKeys());
-			if (pick) {
-				basic = pick.id;
-				changed = true;
-			}
-		}
-		if (!this.#fromId(game)) {
-			const pick = this.#pickGame();
-			if (pick) {
-				game = pick.id;
-				changed = true;
-			}
-		}
-
-		if (!changed) return;
-		const wasDirty = this.romsDirty.value; // staged-vs-applied, before we update
-		const next: RomOverrides = { os, basic, game };
-		this.appliedRoms.value = next;
-		if (!wasDirty) this.stagedRoms.value = next; // keep the panel synced
-		savePersisted(ROMS_KEY, next);
-	}
-
-	// Fetch (and cache) the bytes the running config's OS + BASIC need, so the
-	// next #makeEmulator can read them synchronously. Already-cached ROMs (the
-	// common reboot case) resolve immediately. Ensures the user library is loaded
-	// first so an override pointing at an upload resolves (resilient: an IDB
-	// failure just leaves built-ins).
-	async #ensureFirmware(): Promise<void> {
-		await readyLibrary();
-		this.#ensurePins();
-		const { os, basic, game } = this.#resolveFirmware();
-		await Promise.all(
-			[os, basic, game]
-				.filter((e): e is ImageEntry => e !== null)
-				.filter((e) => !this.#bytes.has(e.id))
-				.map(async (e) => {
-					this.#bytes.set(e.id, await getImageBytes(e.id));
-				}),
-		);
-	}
-
-	// Build an emulator for the running config + the mounted image. The OS and
-	// BASIC ROMs are picked from the library by the model's preference ranking.
-	// On the 800 the BASIC cart shares the slot, so it's present only when not
-	// disabled and no cartridge is mounted. The XL/XE always wire BASIC in (its
-	// "disable" is the OPTION-hold at boot).
-	#makeEmulator(): Emulator {
-		const { model, tv, tvAdapter, basicDisabled, memory, portbExtendedRam } =
-			this.config.value;
-		const xl = model !== "400/800";
-		const builtinBasic = hasBuiltinBasic(model);
-
-		const { os, basic, game } = this.#resolveFirmware();
-		if (!os) {
-			throw new Error(messages.errors.noCompatibleOs(model, tv.toUpperCase()));
-		}
-		// Bytes are cached by #ensureFirmware, which always runs before a build.
-		const osBytes = this.#bytes.get(os.id);
-		const basicBytes = basic ? this.#bytes.get(basic.id) : undefined;
-		const gameBytes = game ? this.#bytes.get(game.id) : undefined;
-		if (!osBytes) {
-			throw new Error(`firmware bytes missing for "${os.user.displayName}"`);
-		}
-
-		// On 400/800 & 1200XL, BASIC is an $A000 cartridge displaced by a real
-		// cart; on XL/XE & XEGS it's built in (banked, OPTION-hold to disable).
-		const cartridge =
-			this.#cartridge?.cart ??
-			(!builtinBasic && !basicDisabled && basicBytes
-				? createCartridge(basicBytes)
-				: undefined);
-
-		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
-		console.log(
-			`Firmware for ${model} ${tv.toUpperCase()}: OS "${os.user.displayName}"` +
-				(basic ? `, BASIC "${basic.user.displayName}"` : ", no BASIC"),
-		);
-
-		const emulator = new Emulator({
-			xl,
-			conventionalRamSize: memory,
-			...(portbExtendedRam && {
-				xeBankCount: (portbExtendedRam.size - 64) / 16,
-				separateAnticAccess: portbExtendedRam.antic,
-			}),
-			os: osBytes,
-			tvSystem: tv,
-			tvAdapter,
-			...(builtinBasic && basicBytes && { basic: basicBytes }),
-			...(builtinBasic && basicDisabled && { holdOption: true }),
-			...(model === "xegs" && gameBytes && { game: gameBytes }),
-			...(model === "xegs" && { keyboardSense: true }),
-			...(cartridge && { cartridge }),
-			...(this.#drives[0] && { disk: this.#drives[0].disk }),
-			...(this.#audio && { audio: this.#audio }),
-		});
-		emulator.setTrace(this.#cpuTrace);
-		emulator.setTurboMode(this.#turboMode);
-		emulator.machine.keyboard.attached.value = this.keyboardAttached.value;
-		// Sample the gamepad on every emulation-loop yield (see Emulator.afterYield)
-		// - the freshest read, right before the next scanlines poll the pins.
-		emulator.afterYield = () => this.#gamepads.poll();
-		return emulator;
-	}
-
 	/** The live emulator (swaps on reboot) - for the dev console. */
 	get emulator(): Emulator {
 		return this.#emulator;
@@ -1042,56 +633,6 @@ export class EmulatorHost {
 
 	clearCpuTrace(): void {
 		this.#emulator.clearTrace();
-	}
-
-	// Swap in a fresh emulator for the current config + attachment.
-	#rebuild(): void {
-		this.#emulator.stop();
-		this.#audio?.clear();
-		this.#heldComposed.clear();
-		this.#shiftCommandHeld = false;
-		this.#emulator = this.#makeEmulator();
-		this.#emulator.start();
-		this.running.value = true;
-		this.#wireLeds();
-		this.#keyInput?.focus();
-	}
-
-	// Re-point the LED watch at the current machine's PORTB. The 1200XL drives
-	// its two keyboard LEDs from PORTB bits 2 & 3 (active-low: 0 = lit); other
-	// models have none.
-	#wireLeds(): void {
-		this.#unwatchLeds?.();
-		this.#unwatchLeds = null;
-		if (this.config.value.model !== "1200xl") {
-			this.leds.value = null;
-			return;
-		}
-		// The connector's LED signals only fire on real level changes, so the
-		// bank-switch noise on the underlying PIA port never reaches us.
-		const panel = this.#emulator.machine.console;
-		this.#unwatchLeds = panel.watchLeds((led1, led2) => {
-			this.leds.value = [led1, led2];
-		});
-		this.leds.value = [panel.led1, panel.led2];
-	}
-
-	// Fetch whatever firmware the new config needs, then power-cycle into it.
-	// Async (the fetch), but the rebuild itself stays synchronous - so the old
-	// machine keeps running until the ROM is ready. Bails if a newer reboot
-	// superseded this one mid-fetch, and keeps the old machine on a fetch error.
-	async #reboot(): Promise<void> {
-		const token = ++this.#rebootToken;
-		try {
-			await this.#ensureFirmware();
-			if (token !== this.#rebootToken) return;
-			this.#rebuild();
-		} catch (error) {
-			this.toast(
-				error instanceof Error ? error.message : String(error),
-				"error",
-			);
-		}
 	}
 
 	start(): void {
@@ -2246,5 +1787,465 @@ export class EmulatorHost {
 			window.removeEventListener("pointerup", resume);
 			window.removeEventListener("keydown", resume);
 		};
+	}
+
+	// Fetched ROM bytes, keyed by the resolved image's id - populated lazily
+	// before each (re)build so #makeEmulator can read them synchronously.
+	readonly #bytes = new Map<string, Uint8Array>();
+	readonly #audio: AudioOutput | null;
+	readonly #audioError: string | null;
+	readonly #keyboard: Keyboard;
+	readonly #gamepads: Gamepads;
+	readonly #isMac = isMac();
+	// Whether key bindings were loaded from storage; if not, create() generates
+	// and persists the platform defaults (async - it resolves layout labels).
+	readonly #bindingsStored: boolean;
+	// The model a brand-new install starts from (and resets fall back to).
+	readonly #defaultModel: AtariModel;
+
+	// Assigned by create() before the host is handed out - the constructor can't
+	// await the initial firmware fetch.
+	#emulator!: Emulator;
+	// Bumped per reboot so a slow firmware fetch can't clobber a newer config.
+	#rebootToken = 0;
+	// Drops the PORTB watch feeding the 1200XL LEDs; re-pointed on each rebuild.
+	#unwatchLeds: (() => void) | null = null;
+	#keyInput: HTMLInputElement | null = null;
+	#bootImagePicker: (() => void) | null = null;
+	// What to do with the next file the shared picker yields (boot vs. attach).
+	#pendingPick: (file: File) => void = (file) => void this.loadFile(file);
+	#cpuTrace = false; // persists across reboots; reapplied to each emulator
+	#turboMode = false; // persists across reboots; reapplied to each emulator
+	// What's mounted, kept across reboots and re-applied by #makeEmulator. The
+	// cartridge slot and the disk drives are independent (a cart and a disk can
+	// coexist); #drives is indexed by drive number (0 = D1:), one slot for now.
+	// `sourceId` is the library entry the cart/disk came from, if any - used to
+	// persist what's mounted (and, for a disk, what `saveD1ToLibrary` writes back).
+	#cartridge: { cart: Cartridge; name: string; sourceId?: string } | null =
+		null;
+	#drives: ({ disk: AtrImage; name: string; sourceId?: string } | null)[] = [
+		null,
+	];
+	// Media to re-mount once the library is ready (set from sessionStorage in the
+	// constructor, consumed by create()/#restoreMedia). Null when nothing to do.
+	#pendingMedia: PersistedMedia | null = null;
+
+	// Recompute the status-bar attachment labels from the mounted slots and the
+	// running config. On the 400/800 an enabled BASIC occupies the cartridge
+	// slot (when no cart is mounted) and shows there like any cartridge; on
+	// XL/XE BASIC is internal and isn't shown.
+	#refreshAttachments(): void {
+		const { model, basicDisabled } = this.config.value;
+		// On the 400/800 an enabled BASIC is a real cartridge in the slot, so
+		// show the actual ROM image's name; on XL/XE BASIC is internal and the
+		// slot reflects only a real cartridge.
+		const basic =
+			!hasBuiltinBasic(model) && !basicDisabled
+				? (this.#pick(preferredBasicKeys())?.user.displayName ?? null)
+				: null;
+		this.attachments.value = {
+			cartridge: this.#cartridge?.name ?? basic,
+			drives: this.#drives.map((drive) => drive?.name ?? null),
+		};
+	}
+
+	// Persist this tab's mounted media (the library ids in each slot) plus the
+	// live BASIC state, so reloading the tab resumes the running machine. Only
+	// slots backed by a library entry persist; an id-less mount is dropped (it
+	// can't be reconstructed). Session-only - a fresh tab starts empty.
+	#saveMedia(): void {
+		saveSession(MEDIA_KEY, {
+			cart: this.#cartridge?.sourceId ?? null,
+			disk: this.#drives[0]?.sourceId ?? null,
+			basicDisabled: this.config.value.basicDisabled,
+		} satisfies PersistedMedia);
+	}
+
+	// Record a just-booted/attached library image in the recents history, then
+	// sweep transient (auto-added) images that have fallen off it - keeping any
+	// still mounted, so a resume never loses its backing blob.
+	#noteUsed(sourceId: string | undefined): void {
+		if (!sourceId) return;
+		touchRecent(sourceId);
+		const keep = new Set(recentIds.value);
+		if (this.#cartridge?.sourceId) keep.add(this.#cartridge.sourceId);
+		if (this.#drives[0]?.sourceId) keep.add(this.#drives[0].sourceId);
+		void sweepTransients(keep);
+	}
+
+	#mountsImage(id: string): boolean {
+		return this.#cartridge?.sourceId === id || this.#drives[0]?.sourceId === id;
+	}
+
+	// Re-mount the media persisted for this tab, resolving ids against the
+	// library; an image deleted since (or any read error) is silently skipped, so
+	// a stale pointer just yields an empty slot. Runs in create() after the
+	// library has loaded, before the first emulator is built.
+	async #restoreMedia(): Promise<void> {
+		const media = this.#pendingMedia;
+		this.#pendingMedia = null;
+		if (!media) return;
+		await readyLibrary();
+		if (media.disk) {
+			try {
+				const entry = getImage(media.disk);
+				if (entry) {
+					const bytes = await getImageBytes(media.disk);
+					const disk =
+						entry.derived.type === "xex"
+							? buildBootDisk(bytes)
+							: new AtrImage(bytes);
+					this.#drives[0] = {
+						disk,
+						name: entry.user.displayName,
+						sourceId: media.disk,
+					};
+				}
+			} catch {
+				// corrupt or missing blob - leave D1: empty
+			}
+		}
+		if (media.cart) {
+			try {
+				const entry = getImage(media.cart);
+				if (entry) {
+					const bytes = await getImageBytes(media.cart);
+					this.#cartridge = {
+						cart: createCartridge(bytes),
+						name: entry.user.displayName,
+						sourceId: media.cart,
+					};
+				}
+			} catch {
+				// corrupt or missing blob - leave the cart slot empty
+			}
+		}
+		this.#refreshAttachments();
+	}
+
+	#commandContext() {
+		return { emulator: this.#emulator, host: this };
+	}
+
+	// The best-ranked built-in firmware present in the library for a list of
+	// keys (a built-in's image id is its firmware key).
+	// Resolve the best available firmware by rank, matching on the detected
+	// firmware identity - so an uploaded copy of a known ROM is picked just like
+	// the built-in one (a built-in's id is also its key).
+	#pick(keys: readonly FirmwareKey[]): ImageEntry | null {
+		for (const key of keys) {
+			const entry = libraryEntries.value.find((e) => e.firmwareKey === key);
+			if (entry) return entry;
+		}
+		return null;
+	}
+
+	// The OS + BASIC the running config wants, picked from the library by rank.
+	// BASIC is omitted when the machine doesn't wire it in (the 400/800 with the
+	// cartridge slot taken; the XL/XE "disable" is the OPTION-hold at boot).
+	#resolveFirmware(): {
+		os: ImageEntry | null;
+		basic: ImageEntry | null;
+		game: ImageEntry | null;
+	} {
+		return this.#resolveWith(this.appliedRoms.value);
+	}
+
+	// Resolve OS/BASIC/game for the running config under a given override set; an
+	// override wins over the ranking when its image is present (a missing one -
+	// e.g. a built-in dropped by a deploy - falls back to the ranking).
+	#resolveWith(roms: RomOverrides): {
+		os: ImageEntry | null;
+		basic: ImageEntry | null;
+		game: ImageEntry | null;
+	} {
+		const { model, tv, basicDisabled } = this.config.value;
+		// Built-in BASIC (xl/xe, xegs) is always loaded - its "disable" is the
+		// OPTION-hold. Cart BASIC (400/800, 1200xl) loads only when it takes the
+		// slot: enabled and no cartridge mounted.
+		const needBasic =
+			hasBuiltinBasic(model) || (!basicDisabled && this.#cartridge === null);
+		const osSlot = osSlotFor(model, tv);
+		return {
+			os:
+				this.#fromId(roms.os[osSlot]) ??
+				this.#pick(preferredOsKeys({ model, tv })),
+			basic: needBasic
+				? (this.#fromId(roms.basic) ?? this.#pick(preferredBasicKeys()))
+				: null,
+			game:
+				model === "xegs" ? (this.#fromId(roms.game) ?? this.#pickGame()) : null,
+		};
+	}
+
+	// Resolve an override to its library image - null when it doesn't resolve
+	// (no override, or one pointing at an image the library no longer has).
+	#fromId(id: string | null | undefined): ImageEntry | null {
+		return id ? (getImage(id) ?? null) : null;
+	}
+
+	// The XEGS game-slot image - any library image flagged for the game slot
+	// (the bundled one, or an upload the user has tagged).
+	#pickGame(): ImageEntry | null {
+		return (
+			libraryEntries.value.find((e) => e.user.slots?.includes("game")) ?? null
+		);
+	}
+
+	// Pin the resolved firmware per slot into the (persisted) prefs, so a later
+	// library change can't silently re-rank a slot that's already settled. A slot
+	// is (re)picked by rank only when its pref is empty or points at an image the
+	// library no longer has - "fill an empty slot, or replace a vanished one";
+	// importing a better ROM leaves a settled slot alone (pick it by hand instead).
+	#ensurePins(): void {
+		// Every OS slot (not just the running model's) gets pinned, so a slot the
+		// user hasn't booted into is just as stable against imports.
+		const osSlots: { slot: OsSlot; model: AtariModel; tv: "ntsc" | "pal" }[] = [
+			{ slot: "800-ntsc", model: "400/800", tv: "ntsc" },
+			{ slot: "800-pal", model: "400/800", tv: "pal" },
+			{ slot: "xlxe", model: "xl/xe", tv: "ntsc" },
+			{ slot: "1200xl", model: "1200xl", tv: "ntsc" },
+			{ slot: "xegs", model: "xegs", tv: "ntsc" },
+		];
+		const prev = this.appliedRoms.value;
+		const os = { ...prev.os };
+		let basic = prev.basic;
+		let game = prev.game;
+		let changed = false;
+
+		for (const s of osSlots) {
+			if (this.#fromId(os[s.slot])) continue; // settled + still available
+			const pick = this.#pick(preferredOsKeys({ model: s.model, tv: s.tv }));
+			if (pick) {
+				os[s.slot] = pick.id;
+				changed = true;
+			}
+		}
+		if (!this.#fromId(basic)) {
+			const pick = this.#pick(preferredBasicKeys());
+			if (pick) {
+				basic = pick.id;
+				changed = true;
+			}
+		}
+		if (!this.#fromId(game)) {
+			const pick = this.#pickGame();
+			if (pick) {
+				game = pick.id;
+				changed = true;
+			}
+		}
+
+		if (!changed) return;
+		const wasDirty = this.romsDirty.value; // staged-vs-applied, before we update
+		const next: RomOverrides = { os, basic, game };
+		this.appliedRoms.value = next;
+		if (!wasDirty) this.stagedRoms.value = next; // keep the panel synced
+		savePersisted(ROMS_KEY, next);
+	}
+
+	// Fetch (and cache) the bytes the running config's OS + BASIC need, so the
+	// next #makeEmulator can read them synchronously. Already-cached ROMs (the
+	// common reboot case) resolve immediately. Ensures the user library is loaded
+	// first so an override pointing at an upload resolves (resilient: an IDB
+	// failure just leaves built-ins).
+	async #ensureFirmware(): Promise<void> {
+		await readyLibrary();
+		this.#ensurePins();
+		const { os, basic, game } = this.#resolveFirmware();
+		await Promise.all(
+			[os, basic, game]
+				.filter((e): e is ImageEntry => e !== null)
+				.filter((e) => !this.#bytes.has(e.id))
+				.map(async (e) => {
+					this.#bytes.set(e.id, await getImageBytes(e.id));
+				}),
+		);
+	}
+
+	// Build an emulator for the running config + the mounted image. The OS and
+	// BASIC ROMs are picked from the library by the model's preference ranking.
+	// On the 800 the BASIC cart shares the slot, so it's present only when not
+	// disabled and no cartridge is mounted. The XL/XE always wire BASIC in (its
+	// "disable" is the OPTION-hold at boot).
+	#makeEmulator(): Emulator {
+		const { model, tv, tvAdapter, basicDisabled, memory, portbExtendedRam } =
+			this.config.value;
+		const xl = model !== "400/800";
+		const builtinBasic = hasBuiltinBasic(model);
+
+		const { os, basic, game } = this.#resolveFirmware();
+		if (!os) {
+			throw new Error(messages.errors.noCompatibleOs(model, tv.toUpperCase()));
+		}
+		// Bytes are cached by #ensureFirmware, which always runs before a build.
+		const osBytes = this.#bytes.get(os.id);
+		const basicBytes = basic ? this.#bytes.get(basic.id) : undefined;
+		const gameBytes = game ? this.#bytes.get(game.id) : undefined;
+		if (!osBytes) {
+			throw new Error(`firmware bytes missing for "${os.user.displayName}"`);
+		}
+
+		// On 400/800 & 1200XL, BASIC is an $A000 cartridge displaced by a real
+		// cart; on XL/XE & XEGS it's built in (banked, OPTION-hold to disable).
+		const cartridge =
+			this.#cartridge?.cart ??
+			(!builtinBasic && !basicDisabled && basicBytes
+				? createCartridge(basicBytes)
+				: undefined);
+
+		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
+		console.log(
+			`Firmware for ${model} ${tv.toUpperCase()}: OS "${os.user.displayName}"` +
+				(basic ? `, BASIC "${basic.user.displayName}"` : ", no BASIC"),
+		);
+
+		const emulator = new Emulator({
+			xl,
+			conventionalRamSize: memory,
+			...(portbExtendedRam && {
+				xeBankCount: (portbExtendedRam.size - 64) / 16,
+				separateAnticAccess: portbExtendedRam.antic,
+			}),
+			os: osBytes,
+			tvSystem: tv,
+			tvAdapter,
+			...(builtinBasic && basicBytes && { basic: basicBytes }),
+			...(builtinBasic && basicDisabled && { holdOption: true }),
+			...(model === "xegs" && gameBytes && { game: gameBytes }),
+			...(model === "xegs" && { keyboardSense: true }),
+			...(cartridge && { cartridge }),
+			...(this.#drives[0] && { disk: this.#drives[0].disk }),
+			...(this.#audio && { audio: this.#audio }),
+		});
+		emulator.setTrace(this.#cpuTrace);
+		emulator.setTurboMode(this.#turboMode);
+		emulator.machine.keyboard.attached.value = this.keyboardAttached.value;
+		// Sample the gamepad on every emulation-loop yield (see Emulator.afterYield)
+		// - the freshest read, right before the next scanlines poll the pins.
+		emulator.afterYield = () => this.#gamepads.poll();
+		return emulator;
+	}
+
+	// Swap in a fresh emulator for the current config + attachment.
+	#rebuild(): void {
+		this.#emulator.stop();
+		this.#audio?.clear();
+		this.#heldComposed.clear();
+		this.#shiftCommandHeld = false;
+		this.#emulator = this.#makeEmulator();
+		this.#emulator.start();
+		this.running.value = true;
+		this.#wireLeds();
+		this.#keyInput?.focus();
+	}
+
+	// Re-point the LED watch at the current machine's PORTB. The 1200XL drives
+	// its two keyboard LEDs from PORTB bits 2 & 3 (active-low: 0 = lit); other
+	// models have none.
+	#wireLeds(): void {
+		this.#unwatchLeds?.();
+		this.#unwatchLeds = null;
+		if (this.config.value.model !== "1200xl") {
+			this.leds.value = null;
+			return;
+		}
+		// The connector's LED signals only fire on real level changes, so the
+		// bank-switch noise on the underlying PIA port never reaches us.
+		const panel = this.#emulator.machine.console;
+		this.#unwatchLeds = panel.watchLeds((led1, led2) => {
+			this.leds.value = [led1, led2];
+		});
+		this.leds.value = [panel.led1, panel.led2];
+	}
+
+	// Fetch whatever firmware the new config needs, then power-cycle into it.
+	// Async (the fetch), but the rebuild itself stays synchronous - so the old
+	// machine keeps running until the ROM is ready. Bails if a newer reboot
+	// superseded this one mid-fetch, and keeps the old machine on a fetch error.
+	async #reboot(): Promise<void> {
+		const token = ++this.#rebootToken;
+		try {
+			await this.#ensureFirmware();
+			if (token !== this.#rebootToken) return;
+			this.#rebuild();
+		} catch (error) {
+			this.toast(
+				error instanceof Error ? error.message : String(error),
+				"error",
+			);
+		}
+	}
+}
+
+// Persisted-state keys (namespaced by storageName) - see persist.ts.
+const CONFIG_KEY = "config";
+const ROMS_KEY = "roms";
+const KBMODE_KEY = "keyboard-mode";
+const REALISTIC_SCAN_KEY = "realistic-key-scan";
+
+// How long a momentary trigger (palette, click) holds a control before its
+// auto-release - long enough for the OS to sense the key/button. Counted in
+// emulated frames so it's two frames whether real-time or in turbo.
+const PULSE_FRAMES = 2;
+// The mounted media is per-tab (sessionStorage only) - a fresh tab starts empty
+// rather than auto-booting the last session's image.
+const MEDIA_KEY = "media";
+
+/** This tab's persisted mounted media: the library ids in each slot. */
+interface PersistedMedia {
+	cart: string | null;
+	disk: string | null;
+	/** The live BASIC-disabled state (a boot turns it off without touching the
+	 *  saved config seed), so a resume matches the booted machine. */
+	basicDisabled: boolean;
+}
+
+// Coerce an untrusted persisted value into a PersistedMedia, or null if absent
+// or malformed (ids are resolved against the library lazily, on restore).
+function sanitizeMedia(value: unknown): PersistedMedia | null {
+	if (typeof value !== "object" || value === null) return null;
+	const v = value as Partial<PersistedMedia>;
+	return {
+		cart: typeof v.cart === "string" ? v.cart : null,
+		disk: typeof v.disk === "string" ? v.disk : null,
+		basicDisabled: Boolean(v.basicDisabled),
+	};
+}
+
+function romsEqual(a: RomOverrides, b: RomOverrides): boolean {
+	if (a.basic !== b.basic || a.game !== b.game) return false;
+	const slots = new Set([...Object.keys(a.os), ...Object.keys(b.os)]);
+	for (const slot of slots) {
+		if (a.os[slot as OsSlot] !== b.os[slot as OsSlot]) return false;
+	}
+	return true;
+}
+
+// Coerce a persisted/untrusted value into a RomOverrides shape; ids are
+// validated lazily at resolve time (a stale one falls back to the ranking).
+function sanitizeRoms(value: unknown): RomOverrides {
+	if (typeof value !== "object" || value === null) return NO_ROM_OVERRIDES;
+	const v = value as Partial<RomOverrides>;
+	return {
+		os:
+			v.os && typeof v.os === "object"
+				? (v.os as Partial<Record<OsSlot, string>>)
+				: {},
+		basic: typeof v.basic === "string" ? v.basic : null,
+		game: typeof v.game === "string" ? v.game : null,
+	};
+}
+
+/** Why a detected-but-not-loadable file can't be loaded (yet). */
+function unsupportedMessage(format: AtariFileFormat | null): string | null {
+	switch (format) {
+		case "os-rom-10k":
+		case "os-rom-16k":
+			return messages.errors.osRom;
+		case null:
+			return messages.errors.unrecognized;
+		default:
+			return null; // a cartridge, disk, or executable
 	}
 }

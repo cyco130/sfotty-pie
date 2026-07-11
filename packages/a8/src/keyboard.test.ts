@@ -179,7 +179,7 @@ test("only a power cycle clears POKEY", () => {
 
 function makeAnticGtia() {
 	return new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 }
@@ -226,7 +226,7 @@ function makeMachine(model: "800" | "800XL" | "130XE") {
 // The dummy OS ROM never writes SKCTL, so enable the scan by hand like the
 // OS boot does, then advance enough for any debounced transition.
 function enableScan(machine: Atari) {
-	machine.write(SKSTAT_SKCTL, 0x03, ReadOptions.NONE);
+	machine.mmu.write(SKSTAT_SKCTL, 0x03, ReadOptions.NONE);
 }
 
 function runScan(machine: Atari, ticks = 200) {
@@ -238,8 +238,8 @@ test("the 800 Reset key drives the RNMI line, not the reset line", () => {
 
 	// Set up some PIA state: it must survive, since nothing pulses the
 	// 400/800 hardware reset line - the Reset key is only an NMI source.
-	machine.write(0xd302, 0x3c, ReadOptions.NONE); // PACTL: CA2 manual high, data register
-	machine.write(0xd300, 0xa5, ReadOptions.NONE); // PORTA output latch
+	machine.mmu.write(0xd302, 0x3c, ReadOptions.NONE); // PACTL: CA2 manual high, data register
+	machine.mmu.write(0xd300, 0xa5, ReadOptions.NONE); // PORTA output latch
 
 	const panel = machine.console;
 	panel.reset = true;
@@ -248,22 +248,22 @@ test("the 800 Reset key drives the RNMI line, not the reset line", () => {
 
 	panel.reset = false;
 	expect(machine.anticGtia.rnmi).toBe(false);
-	expect(machine.read(0xd302, ReadOptions.NONE)).toBe(0x3c);
+	expect(machine.mmu.read(0xd302, ReadOptions.NONE)).toBe(0x3c);
 });
 
 test("the XL Reset button resets components and holds the reset line", () => {
 	const machine = makeMachine("800XL");
-	machine.write(NMIEN, 0xc0, ReadOptions.NONE);
+	machine.mmu.write(NMIEN, 0xc0, ReadOptions.NONE);
 	expect(machine.anticGtia.vbiEnabled).toBe(true);
 
 	// Bank the OS ROM out (DDRB all outputs, then PORTB bit 0 low) and put a
 	// marker in the RAM underneath.
-	machine.write(0xd303, 0x00, ReadOptions.NONE);
-	machine.write(0xd301, 0xff, ReadOptions.NONE);
-	machine.write(0xd303, 0x04, ReadOptions.NONE);
-	machine.write(0xd301, 0xfe, ReadOptions.NONE);
-	machine.write(0xe000, 0x55, ReadOptions.NONE);
-	expect(machine.read(0xe000, ReadOptions.NONE)).toBe(0x55);
+	machine.mmu.write(0xd303, 0x00, ReadOptions.NONE);
+	machine.mmu.write(0xd301, 0xff, ReadOptions.NONE);
+	machine.mmu.write(0xd303, 0x04, ReadOptions.NONE);
+	machine.mmu.write(0xd301, 0xfe, ReadOptions.NONE);
+	machine.mmu.write(0xe000, 0x55, ReadOptions.NONE);
+	expect(machine.mmu.read(0xe000, ReadOptions.NONE)).toBe(0x55);
 
 	const panel = machine.console;
 	panel.reset = true;
@@ -273,7 +273,7 @@ test("the XL Reset button resets components and holds the reset line", () => {
 	expect(machine.anticGtia.vbiEnabled).toBe(false);
 	// So does the PIA: PORTB floats back to all-inputs ($FF), banking the OS
 	// ROM back in over the marker. The RAM itself survives the warm reset.
-	expect(machine.read(0xe000, ReadOptions.NONE)).toBe(0x00);
+	expect(machine.mmu.read(0xe000, ReadOptions.NONE)).toBe(0x00);
 
 	panel.reset = false;
 	expect(machine.resetAsserted).toBe(false);
@@ -283,34 +283,34 @@ test("console keys drive the CONSOL register (active low)", () => {
 	const machine = makeMachine("800");
 	const CONSOL = 0xd01f;
 	// Release the power-on written latch first, like the OS does.
-	machine.write(CONSOL, 0x08, ReadOptions.NONE);
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(7);
+	machine.mmu.write(CONSOL, 0x08, ReadOptions.NONE);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(7);
 
 	const panel = machine.console;
 	panel.option = true;
 	panel.start = true;
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(2);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(2);
 
 	panel.option = false;
-	expect(machine.read(CONSOL, ReadOptions.NONE)).toBe(6);
+	expect(machine.mmu.read(CONSOL, ReadOptions.NONE)).toBe(6);
 });
 
 test("a matrix key reaches POKEY through the machine's scan", () => {
 	const machine = makeMachine("800");
 	enableScan(machine);
-	machine.write(IRQEN_IRQST, 0x40, ReadOptions.NONE);
+	machine.mmu.write(IRQEN_IRQST, 0x40, ReadOptions.NONE);
 
 	machine.keyboard.pressKey(0x3f);
 	runScan(machine);
 	expect(machine.irq).toBe(true);
-	expect(machine.read(KBCODE, ReadOptions.NONE)).toBe(0x3f);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
+	expect(machine.mmu.read(KBCODE, ReadOptions.NONE)).toBe(0x3f);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
 
 	machine.keyboard.releaseKey(0x3f);
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0x04);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0x04);
 	// KBCODE holds the last key, like hardware.
-	expect(machine.read(KBCODE, ReadOptions.NONE)).toBe(0x3f);
+	expect(machine.mmu.read(KBCODE, ReadOptions.NONE)).toBe(0x3f);
 });
 
 test("the meta lines compose KBCODE and drive the senses", () => {
@@ -320,12 +320,12 @@ test("the meta lines compose KBCODE and drive the senses", () => {
 	// Shift held: the SKSTAT sense follows the line...
 	machine.keyboard.pressMetaKey(KEYBOARD_LINES.SHIFT);
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x08).toBe(0);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x08).toBe(0);
 
 	// ...and a key pressed while it's down scans with bit 6 set.
 	machine.keyboard.pressKey(0x3f);
 	runScan(machine);
-	expect(machine.read(KBCODE, ReadOptions.NONE)).toBe(0x7f);
+	expect(machine.mmu.read(KBCODE, ReadOptions.NONE)).toBe(0x7f);
 	machine.keyboard.releaseAll();
 	runScan(machine);
 
@@ -333,7 +333,7 @@ test("the meta lines compose KBCODE and drive the senses", () => {
 	machine.keyboard.pressMetaKey(KEYBOARD_LINES.CONTROL);
 	machine.keyboard.pressKey(0x3f);
 	runScan(machine);
-	expect(machine.read(KBCODE, ReadOptions.NONE)).toBe(0xbf);
+	expect(machine.mmu.read(KBCODE, ReadOptions.NONE)).toBe(0xbf);
 });
 
 test("three keys on a rectangle phantom the fourth corner", () => {
@@ -359,11 +359,11 @@ test("releaseAll clears keys and meta lines - the focus-loss backstop", () => {
 	machine.keyboard.pressKey(0x3f);
 	machine.keyboard.pressMetaKey(KEYBOARD_LINES.SHIFT);
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x0c).toBe(0);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x0c).toBe(0);
 
 	machine.keyboard.releaseAll();
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x0c).toBe(0x0c);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x0c).toBe(0x0c);
 });
 
 test("a held key survives a power cycle and re-latches once scanning resumes", () => {
@@ -371,17 +371,17 @@ test("a held key survives a power cycle and re-latches once scanning resumes", (
 	enableScan(machine);
 	machine.keyboard.pressKey(0x3f);
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
 
 	// The cold reset clears POKEY (SKCTL included - the scan stops until
 	// re-enabled, as the OS boot would). The finger is still on the key:
 	// once the scan runs again, it re-latches.
 	machine.console.powerCycle();
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0x04);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0x04);
 	enableScan(machine);
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
-	expect(machine.read(KBCODE, ReadOptions.NONE)).toBe(0x3f);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
+	expect(machine.mmu.read(KBCODE, ReadOptions.NONE)).toBe(0x3f);
 });
 
 test("a detached keyboard sends no response; reattaching restores it", () => {
@@ -392,16 +392,16 @@ test("a detached keyboard sends no response; reattaching restores it", () => {
 	// and releases the key sense (KBCODE keeps the last latch, as ever).
 	machine.keyboard.pressKey(0x3f);
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
 
 	machine.keyboard.attached.value = false;
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0x04);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0x04);
 
 	// Still held behind the unplugged cable: reattaching re-latches it.
 	machine.keyboard.attached.value = true;
 	runScan(machine);
-	expect(machine.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
+	expect(machine.mmu.read(SKSTAT_SKCTL, ReadOptions.NONE) & 0x04).toBe(0);
 });
 
 test("keyboardSense wires the presence line to TRIG2 on the XEGS", () => {
@@ -411,20 +411,20 @@ test("keyboardSense wires the presence line to TRIG2 on the XEGS", () => {
 		os: new Uint8Array(16384),
 		keyboardSense: true,
 	});
-	expect(xegs.read(TRIG2, ReadOptions.NONE)).toBe(1);
+	expect(xegs.mmu.read(TRIG2, ReadOptions.NONE)).toBe(1);
 
 	xegs.keyboard.attached.value = false;
-	expect(xegs.read(TRIG2, ReadOptions.NONE)).toBe(0);
+	expect(xegs.mmu.read(TRIG2, ReadOptions.NONE)).toBe(0);
 	xegs.keyboard.attached.value = true;
-	expect(xegs.read(TRIG2, ReadOptions.NONE)).toBe(1);
+	expect(xegs.mmu.read(TRIG2, ReadOptions.NONE)).toBe(1);
 
 	// The other XL/XE leave T2 disconnected: detaching changes nothing.
 	const xl = makeMachine("800XL");
 	xl.keyboard.attached.value = false;
-	expect(xl.read(TRIG2, ReadOptions.NONE)).toBe(1);
+	expect(xl.mmu.read(TRIG2, ReadOptions.NONE)).toBe(1);
 
 	// And without xl the option is ignored - T2 is joystick 2's trigger.
 	const early = new Atari({ os: new Uint8Array(10240), keyboardSense: true });
 	early.keyboard.attached.value = false;
-	expect(early.read(TRIG2, ReadOptions.NONE)).toBe(1);
+	expect(early.mmu.read(TRIG2, ReadOptions.NONE)).toBe(1);
 });

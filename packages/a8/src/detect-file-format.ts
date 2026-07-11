@@ -9,27 +9,6 @@ export type AtariFileFormat =
 	| "os-rom-16k"
 	| "xegs-rom-32k";
 
-// Filename extensions each detector accepts (the content check still confirms).
-// A format matches a named file only when its extension is in its list; a
-// nameless blob (e.g. a built-in served raw) matches on content alone.
-const ATR = ["atr"];
-const XEX = ["xex", "axe", "exe", "com", "obj", "bin", "obx"];
-// Raw ROM dumps: raw cartridges, OS ROMs, and the XEGS 32K dump.
-const RAW_ROM = ["rom", "bin", "raw"];
-const CAR = ["car"];
-
-const extMatcher = (exts: readonly string[]): RegExp =>
-	new RegExp(`\\.(?:${exts.join("|")})$`, "i");
-
-const ATR_RE = extMatcher(ATR);
-const XEX_RE = extMatcher(XEX);
-const RAW_ROM_RE = extMatcher(RAW_ROM);
-const CAR_RE = extMatcher(CAR);
-
-// The union of every accepted extension, derived from the lists above so it
-// can't drift out of sync.
-const KNOWN_RE = extMatcher([...new Set([...ATR, ...XEX, ...RAW_ROM, ...CAR])]);
-
 /**
  * Whether a filename's extension is one any detector accepts - a cheap,
  * name-only pre-filter (the content check still confirms the actual format). Use
@@ -111,6 +90,27 @@ export function detectFileFormat(
 
 	return null;
 }
+
+// Filename extensions each detector accepts (the content check still confirms).
+// A format matches a named file only when its extension is in its list; a
+// nameless blob (e.g. a built-in served raw) matches on content alone.
+const ATR = ["atr"];
+const XEX = ["xex", "axe", "exe", "com", "obj", "bin", "obx"];
+// Raw ROM dumps: raw cartridges, OS ROMs, and the XEGS 32K dump.
+const RAW_ROM = ["rom", "bin", "raw"];
+const CAR = ["car"];
+
+const extMatcher = (exts: readonly string[]): RegExp =>
+	new RegExp(`\\.(?:${exts.join("|")})$`, "i");
+
+const ATR_RE = extMatcher(ATR);
+const XEX_RE = extMatcher(XEX);
+const RAW_ROM_RE = extMatcher(RAW_ROM);
+const CAR_RE = extMatcher(CAR);
+
+// The union of every accepted extension, derived from the lists above so it
+// can't drift out of sync.
+const KNOWN_RE = extMatcher([...new Set([...ATR, ...XEX, ...RAW_ROM, ...CAR])]);
 
 function getRawCartType(
 	contents: Uint8Array,

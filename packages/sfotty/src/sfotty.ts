@@ -7,16 +7,30 @@ export { type SfottyOptions };
  * A cycle-exact NMOS 6502 CPU.
  *
  * This is a thin facade over the internal core: it exposes the host-facing
- * contract - registers, flags, input lines, `run()`/`reset()` - and nothing
+ * contract - registers, flags, input lines, `cycle()`/`reset()` - and nothing
  * else. The micro-op machinery the generated microcode calls into lives on
  * the core, which is unreachable from here, so inspecting a `Sfotty` (in a
  * debugger, or from a browser console) shows only real 6502 state.
  */
 export class Sfotty {
-	readonly #core: SfottyCore;
-
 	constructor(bus: Memory, options: SfottyOptions = {}) {
 		this.#core = new SfottyCore(bus, options);
+	}
+
+	/** Advance the CPU by exactly one clock cycle (one bus access). */
+	cycle(): void {
+		this.#core.cycle();
+	}
+
+	/**
+	 * Start the seven-cycle reset sequence (emulates the RES line). When `cold`
+	 * is true the registers, flags, and internal latches are first cleared to
+	 * the power-on state; a warm reset leaves them as-is. Also clears a CIM
+	 * crash. A new CPU already starts in this sequence (construction is a
+	 * power-on); call this to model a RES pulse at runtime.
+	 */
+	reset(cold: boolean): void {
+		this.#core.reset(cold);
 	}
 
 	/** The accumulator. */
@@ -120,32 +134,9 @@ export class Sfotty {
 	}
 
 	/**
-	 * Current microstate. A new CPU powers on into the cold-reset sequence
-	 * (construction is equivalent to `reset(true)`), so the first seven run()
-	 * calls carry out the reset and land at `DECODE`. Hosts that seed registers
-	 * directly instead (savestates, test harnesses) should also set
-	 * `state = DECODE` to skip it. `state === DECODE` means the next cycle
-	 * fetches an opcode, i.e. the CPU is at an instruction boundary.
-	 */
-	get state(): number {
-		return this.#core.state;
-	}
-	set state(value: number) {
-		this.#core.state = value;
-	}
-
-	/**
-	 * Set when the CPU crashes on a CIM (or, with `withoutUndocumented`, on any
-	 * undocumented opcode). It then repeats that cycle forever until reset.
-	 */
-	get crashed(): boolean {
-		return this.#core.crashed;
-	}
-
-	/**
 	 * The RDY input line. When the host pulls it false before a read cycle, that
 	 * cycle still issues its bus read but then stalls: nothing is mutated and
-	 * the next `run()` repeats the same read until RDY is true again. NMOS
+	 * the next `cycle()` repeats the same read until RDY is true again. NMOS
 	 * quirk: only read cycles honor RDY - write cycles complete regardless.
 	 */
 	get RDY(): boolean {
@@ -197,6 +188,19 @@ export class Sfotty {
 		this.#core.onFetch = value;
 	}
 
+	/**
+	 * Set when the CPU crashes on a CIM (or, with `withoutUndocumented`, on any
+	 * undocumented opcode). It then repeats that cycle forever until reset.
+	 */
+	get crashed(): boolean {
+		return this.#core.crashed;
+	}
+
+	/** Describe a microstate (defaults to the current one) for debugging. */
+	describeState(state: number = this.state): string {
+		return this.#core.describeState(state);
+	}
+
 	/** Pack the status flags into a byte. Bit 5 (unused) reads as 1; bit 4 is B. */
 	getP(): number {
 		return this.#core.getP();
@@ -207,24 +211,20 @@ export class Sfotty {
 		this.#core.setP(p);
 	}
 
-	/** Advance the CPU by exactly one clock cycle (one bus access). */
-	run(): void {
-		this.#core.run();
-	}
-
 	/**
-	 * Start the seven-cycle reset sequence (emulates the RES line). When `cold`
-	 * is true the registers, flags, and internal latches are first cleared to
-	 * the power-on state; a warm reset leaves them as-is. Also clears a CIM
-	 * crash. A new CPU already starts in this sequence (construction is a
-	 * power-on); call this to model a RES pulse at runtime.
+	 * Current microstate. A new CPU powers on into the cold-reset sequence
+	 * (construction is equivalent to `reset(true)`), so the first seven cycle()
+	 * calls carry out the reset and land at `DECODE`. Hosts that seed registers
+	 * directly instead (savestates, test harnesses) should also set
+	 * `state = DECODE` to skip it. `state === DECODE` means the next cycle
+	 * fetches an opcode, i.e. the CPU is at an instruction boundary.
 	 */
-	reset(cold: boolean): void {
-		this.#core.reset(cold);
+	get state(): number {
+		return this.#core.state;
+	}
+	set state(value: number) {
+		this.#core.state = value;
 	}
 
-	/** Describe a microstate (defaults to the current one) for debugging. */
-	describeState(state: number = this.state): string {
-		return this.#core.describeState(state);
-	}
+	readonly #core: SfottyCore;
 }

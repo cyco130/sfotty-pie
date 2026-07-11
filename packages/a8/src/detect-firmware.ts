@@ -43,6 +43,38 @@ export interface FirmwareInfo {
 	type: FirmwareType;
 }
 
+export function detectFirmware(rom: Uint8Array): FirmwareInfo | null {
+	let crc: number | undefined;
+
+	const found = KNOWN_FIRMWARE.find((f) => {
+		if (f.size !== rom.length) {
+			return false;
+		}
+
+		if (typeof f.check === "function") {
+			return f.check(rom);
+		}
+
+		if (crc === undefined) {
+			crc = computeCrc32(rom);
+		}
+
+		return crc === f.check;
+	});
+
+	if (!found) {
+		return null;
+	}
+
+	return {
+		key: found.key,
+		name: typeof found.name === "function" ? found.name(rom) : found.name,
+		origin: found.origin,
+		notes: found.notes,
+		type: found.type,
+	};
+}
+
 interface FirmwareDetectionInfo {
 	key: FirmwareKey;
 	size: number;
@@ -332,38 +364,6 @@ const KNOWN_FIRMWARE: FirmwareDetectionInfo[] = [
 
 function computeCrc32(rom: Uint8Array): number {
 	// crc32.buf returns a signed int32; `>>> 0` reinterprets it as the unsigned
-	// 32-bit value the constants below are written as.
+	// 32-bit value the KNOWN_FIRMWARE constants are written as.
 	return crc32.buf(rom) >>> 0;
-}
-
-export function detectFirmware(rom: Uint8Array): FirmwareInfo | null {
-	let crc: number | undefined;
-
-	const found = KNOWN_FIRMWARE.find((f) => {
-		if (f.size !== rom.length) {
-			return false;
-		}
-
-		if (typeof f.check === "function") {
-			return f.check(rom);
-		}
-
-		if (crc === undefined) {
-			crc = computeCrc32(rom);
-		}
-
-		return crc === f.check;
-	});
-
-	if (!found) {
-		return null;
-	}
-
-	return {
-		key: found.key,
-		name: typeof found.name === "function" ? found.name(rom) : found.name,
-		origin: found.origin,
-		notes: found.notes,
-		type: found.type,
-	};
 }

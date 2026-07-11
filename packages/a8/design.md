@@ -12,7 +12,7 @@ Accuracy is tracked against the Altirra **Acid800** conformance suite (see [Conf
 
 The host drives the machine one cycle at a time, mirroring how the CPU core is driven. `cycle()` (in [src/machine.ts](src/machine.ts)) runs the committed pre-work - ANTIC scheduling (`beforeCpu`) and the POKEY tick - then the bus phase (ANTIC DMA or the CPU) and the scanline render, and returns the POKEY audio level.
 
-A bus phase may **throw** - an interceptor suspending on a read/write/fetch, or a host breakpoint. The machine defines no sentinel and catches nothing; the throw is whatever the interceptor threw, the same host-defined-sentinel model as sfotty's traps. The host catches it around `cycle()`, resolves it (await input, service a debugger, ...), and calls `resumeCycle()` to finish the _same_ cycle.
+A bus phase may **throw** - an interceptor suspending on a read/write/fetch, or a host breakpoint. The machine defines no sentinel and catches nothing; the throw is whatever the interceptor threw, the same host-defined-sentinel model as sfotty's traps. The host catches it around `cycle()`, resolves it (await input, service a debugger, ...), and calls `cycle()` again to finish the _same_ cycle.
 
 Resumability is implemented as a three-phase machine:
 
@@ -20,9 +20,9 @@ Resumability is implemented as a three-phase machine:
 const PHASE = { IDLE: 0, BUS: 1, CPU: 2 } as const;
 ```
 
-`cycle()` runs the pre-work once, sets `#phase = BUS`, and enters `#runCycle()` - a fall-through switch that re-enters at the saved phase. The marker is advanced _before_ each throwable call, so a throw leaves it pointing at the phase to resume. The invariants that make this correct: `beforeCpu` and `pokey.cycle()` run exactly once per cycle (never on resume - the audio level is cached in `#audio`), and each bus phase performs its access before committing anything, so the retried access repeats nothing. `cycle()` guards against misuse (`cycle() called mid-cycle - use resumeCycle()`).
+`cycle()` is one fall-through switch entered at the saved `phase`: IDLE starts a fresh cycle (ANTIC scheduling, the POKEY tick), BUS/CPU resume a suspended one - the next `cycle()` call picks the same cycle up where it left off, so there is no separate resume entry point. The marker is advanced _before_ each throwable call, so a throw leaves it pointing at the phase to resume. The invariants that make this correct: the IDLE pre-work runs exactly once per cycle (never on resume), and each bus phase performs its access before committing anything, so the retried access repeats nothing. `phase` is public for debug consumers; hosts sample `machine.audio` (POKEY's level plus the console speaker) after each call.
 
-Between the phases, the machine copies ANTIC's NMI/RDY/HALT outputs onto the CPU: `RDY` models the WSYNC scanline stall (CPU still on the bus, re-reading), while `HALT` skips the CPU's `run()` entirely for an ANTIC DMA steal (CPU off the bus). These are separate mechanisms - don't conflate them.
+Between the phases, the machine copies ANTIC's NMI/RDY/HALT outputs onto the CPU: `RDY` models the WSYNC scanline stall (CPU still on the bus, re-reading), while `HALT` skips the CPU's `cycle()` entirely for an ANTIC DMA steal (CPU off the bus). These are separate mechanisms - don't conflate them.
 
 ## The bus and core-owned trapping
 
@@ -34,7 +34,7 @@ Built-in machine features use the same public trap machinery: the SIO handler is
 
 ## Chips
 
-- **[src/antic-gtia.ts](src/antic-gtia.ts)** - ANTIC and GTIA fused into one `AnticGtia` class, because they share cycle timing; GTIA effectively runs a fixed color-clock skew behind ANTIC (see the delay-line comments in the source). It owns display-list DMA, player/missile graphics (latched across the full visible region), the NMI/RDY/HALT lines, console-key and trigger inputs, the per-cycle scanline render (`beforeCpu`/`busCycle`/`afterCpu`), and a display-list disassembler gated on the `log` config option.
+- **[src/antic-gtia.ts](src/antic-gtia.ts)** - ANTIC and GTIA fused into one `AnticGtia` class, because they share cycle timing; GTIA effectively runs a fixed color-clock skew behind ANTIC (see the delay-line comments in the source). It owns display-list DMA, player/missile graphics (latched across the full visible region), the NMI/RDY/HALT lines, console-key and trigger inputs, the per-cycle scanline render (`beforeCpu`/`busPhase`/`afterCpu`), and a display-list disassembler gated on the `log` config option.
 - **[src/pokey.ts](src/pokey.ts)** - the four audio channels (an output level per cycle), keyboard scan, serial-port IRQs, SKSTAT.
 - **[src/pia.ts](src/pia.ts)** - the 6520: PORTA (joysticks), PORTB (joysticks on the 400/800; memory banking on XL/XE), IRQ lines.
 - The CPU is not in this package - it's the `Sfotty` core, driven through the bus.

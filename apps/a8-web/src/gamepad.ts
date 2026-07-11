@@ -19,84 +19,6 @@ export interface GamepadActions {
 	release(command: Command): void;
 }
 
-// Analog stick -> digital 8-way: axes are paired in order (0/1, 2/3) and each
-// pair goes through the shared radial reader (see radial-stick.ts). Thresholds
-// tuned for a spring-centred thumbstick; the OSD touch stick has its own.
-const STICK: RadialStickConfig = {
-	engage: 0.45,
-	release: 0.35,
-	sectorMargin: 0.1, // radians (~5.7 deg)
-};
-
-// The axis-halves each octant activates, as [axisOffset (0 = x, 1 = y), dir]. The
-// diagonals set both; the cardinals one. atan2(y, x) angle space, so +y is the
-// "positive" side of the odd axis (matching how axis-half bindings read).
-const OCTANT_HALVES: readonly (readonly (readonly [number, -1 | 1])[])[] = [
-	[[0, 1]], // 0: +x
-	[
-		[0, 1],
-		[1, 1],
-	], // 1: +x +y
-	[[1, 1]], // 2: +y
-	[
-		[0, -1],
-		[1, 1],
-	], // 3: -x +y
-	[[0, -1]], // 4: -x
-	[
-		[0, -1],
-		[1, -1],
-	], // 5: -x -y
-	[[1, -1]], // 6: -y
-	[
-		[0, 1],
-		[1, -1],
-	], // 7: +x -y
-];
-
-// The commands one joystick port actuates, indexed by Atari port (0-3). Ports
-// are filled in connection order - the first connected pad drives port 0, the
-// next port 1, and so on. (Not by gamepad.index: Chrome doesn't guarantee it
-// starts at 0, so getGamepads() can return a null slot ahead of the pad.)
-interface PortCommands {
-	up: Command;
-	down: Command;
-	left: Command;
-	right: Command;
-	trigger: Command;
-}
-
-const PORT_COMMANDS: readonly PortCommands[] = [
-	{
-		up: "PRESS_JOY0_UP",
-		down: "PRESS_JOY0_DOWN",
-		left: "PRESS_JOY0_LEFT",
-		right: "PRESS_JOY0_RIGHT",
-		trigger: "PRESS_JOY0_TRIGGER",
-	},
-	{
-		up: "PRESS_JOY1_UP",
-		down: "PRESS_JOY1_DOWN",
-		left: "PRESS_JOY1_LEFT",
-		right: "PRESS_JOY1_RIGHT",
-		trigger: "PRESS_JOY1_TRIGGER",
-	},
-	{
-		up: "PRESS_JOY2_UP",
-		down: "PRESS_JOY2_DOWN",
-		left: "PRESS_JOY2_LEFT",
-		right: "PRESS_JOY2_RIGHT",
-		trigger: "PRESS_JOY2_TRIGGER",
-	},
-	{
-		up: "PRESS_JOY3_UP",
-		down: "PRESS_JOY3_DOWN",
-		left: "PRESS_JOY3_LEFT",
-		right: "PRESS_JOY3_RIGHT",
-		trigger: "PRESS_JOY3_TRIGGER",
-	},
-];
-
 // A reference to a Standard Gamepad input: a button by index, or one half of an
 // axis (dir -1 = the negative side). This is the vocabulary a binding maps from.
 export type GamepadInput = { button: number } | { axis: number; dir: -1 | 1 };
@@ -146,59 +68,6 @@ export const DEFAULT_CONSOLE: readonly ConsoleBinding[] = [
 	{ input: { button: 11 }, command: "OPEN_FAVORITES" },
 ];
 
-// A port's digital state - the five senses we drive, as booleans.
-interface PortState {
-	up: boolean;
-	down: boolean;
-	left: boolean;
-	right: boolean;
-	trigger: boolean;
-}
-
-const CENTERED: PortState = {
-	up: false,
-	down: false,
-	left: false,
-	right: false,
-	trigger: false,
-};
-
-// Whether a Standard input is active: a pressed button, or an axis-half the
-// stick's octant lit up this poll (see `activeHalves`, passed in as a set of
-// `${axis}:${dir}` keys).
-function inputActive(
-	pad: PadView,
-	input: GamepadInput,
-	halves: ReadonlySet<string>,
-): boolean {
-	if ("button" in input) return pad.buttons[input.button]?.pressed ?? false;
-	return halves.has(`${input.axis}:${input.dir}`);
-}
-
-// Reduce a live pad to its digital port state by OR-ing every joystick binding
-// onto its role - so the D-pad and the stick both drive a direction, either one
-// active setting it. (This replaces the old "D-pad overrides the stick" rule; a
-// deadzone, not a priority, keeps a resting stick from fighting the D-pad.)
-function readPad(
-	pad: PadView,
-	joystick: readonly JoyBinding[],
-	halves: ReadonlySet<string>,
-): PortState {
-	const s: PortState = {
-		up: false,
-		down: false,
-		left: false,
-		right: false,
-		trigger: false,
-	};
-	for (const b of joystick) {
-		if (inputActive(pad, b.input, halves)) s[b.role] = true;
-	}
-	return s;
-}
-
-const NO_HALVES: ReadonlySet<string> = new Set();
-
 /**
  * A human display name for a pad: `gamepad.id` minus the vendor/product noise
  * (Chrome appends a parenthetical like "(STANDARD GAMEPAD Vendor: ... Product:
@@ -220,6 +89,66 @@ export interface PadInfo {
 	port: number | null; // assigned Atari port (0-3), or null when off
 }
 
+// The commands one joystick port actuates, indexed by Atari port (0-3). Ports
+// are filled in connection order - the first connected pad drives port 0, the
+// next port 1, and so on. (Not by gamepad.index: Chrome doesn't guarantee it
+// starts at 0, so getGamepads() can return a null slot ahead of the pad.)
+interface PortCommands {
+	up: Command;
+	down: Command;
+	left: Command;
+	right: Command;
+	trigger: Command;
+}
+
+const PORT_COMMANDS: readonly PortCommands[] = [
+	{
+		up: "PRESS_JOY0_UP",
+		down: "PRESS_JOY0_DOWN",
+		left: "PRESS_JOY0_LEFT",
+		right: "PRESS_JOY0_RIGHT",
+		trigger: "PRESS_JOY0_TRIGGER",
+	},
+	{
+		up: "PRESS_JOY1_UP",
+		down: "PRESS_JOY1_DOWN",
+		left: "PRESS_JOY1_LEFT",
+		right: "PRESS_JOY1_RIGHT",
+		trigger: "PRESS_JOY1_TRIGGER",
+	},
+	{
+		up: "PRESS_JOY2_UP",
+		down: "PRESS_JOY2_DOWN",
+		left: "PRESS_JOY2_LEFT",
+		right: "PRESS_JOY2_RIGHT",
+		trigger: "PRESS_JOY2_TRIGGER",
+	},
+	{
+		up: "PRESS_JOY3_UP",
+		down: "PRESS_JOY3_DOWN",
+		left: "PRESS_JOY3_LEFT",
+		right: "PRESS_JOY3_RIGHT",
+		trigger: "PRESS_JOY3_TRIGGER",
+	},
+];
+
+// A port's digital state - the five senses we drive, as booleans.
+interface PortState {
+	up: boolean;
+	down: boolean;
+	left: boolean;
+	right: boolean;
+	trigger: boolean;
+}
+
+const CENTERED: PortState = {
+	up: false,
+	down: false,
+	left: false,
+	right: false,
+	trigger: false,
+};
+
 /**
  * Polls the Gamepad API and drives the joystick commands. The Gamepad API has no
  * button/axis events - state is read by polling - so the emulation loop calls
@@ -238,46 +167,6 @@ export interface PadInfo {
  * unprofiled pads - see gamepad-normalize.ts).
  */
 export class Gamepads {
-	#actions: GamepadActions;
-	// The active bindings (data-driven; edited via setBindings).
-	#joystick: readonly JoyBinding[] = DEFAULT_JOYSTICK;
-	#console: readonly ConsoleBinding[] = DEFAULT_CONSOLE;
-	// Last-polled joystick state per port, so a poll emits only the changed edges.
-	#state: PortState[] = PORT_COMMANDS.map(() => CENTERED);
-	// Last-polled state of the port-0 console/meta buttons, parallel to #console.
-	#consoleState: boolean[] = DEFAULT_CONSOLE.map(() => false);
-	// Connected pads by gamepad.index -> id/mapping, from the connect events.
-	#pads = new Map<number, { id: string; mapping: string }>();
-	// Atari port -> the gamepad.index driving it (or null). The source of truth for
-	// who's which player; the UI edits it via setPort. Assignment is stable - a
-	// disconnect frees a port without reshuffling the survivors.
-	#portToIndex: (number | null)[] = PORT_COMMANDS.map(() => null);
-	// Per-stick hysteresis state, keyed by `${gamepad.index}:${pairBase}` so it
-	// follows the device, not the Atari port.
-	#sticks = new Map<string, RadialStickState>();
-	// Per-device normalization profiles by gamepad id (see gamepad-normalize.ts).
-	#profiles: Readonly<Record<string, NormalizeProfile>> = {};
-	// While suspended, poll() is a no-op - a full-screen surface (the game
-	// picker) is reading the pad itself and the machine must not see it.
-	#suspended = false;
-	// The first poll after a resume only records state, emitting no edges: a
-	// button still held from before (the one that closed the picker, a fire
-	// held into a boot) must not fire its command on re-entry.
-	#skipEdges = false;
-	#muteEdges = false;
-
-	/** Fired whenever the connected set or the assignment changes, so the host can
-	 *  mirror {@link pads} into a signal. */
-	onChange: (() => void) | undefined;
-
-	/** Fired when a pad connects, with its display name and the Atari port it
-	 *  was assigned (null = all ports taken). */
-	onConnect: ((name: string, port: number | null) => void) | undefined;
-
-	/** Fired when a pad disconnects, with its display name and the port it
-	 *  frees (null = it wasn't assigned). */
-	onDisconnect: ((name: string, port: number | null) => void) | undefined;
-
 	constructor(actions: GamepadActions) {
 		this.#actions = actions;
 	}
@@ -380,30 +269,6 @@ export class Gamepads {
 		this.#muteEdges = false;
 	}
 
-	// The axis-halves the pad's sticks light up this poll: each axis pair (0/1,
-	// 2/3, ...) through the radial reader. Returns `${axis}:${dir}` keys for
-	// inputActive.
-	#activeHalves(pad: PadView, index: number): ReadonlySet<string> {
-		const halves = new Set<string>();
-		const axes = pad.axes;
-		for (let base = 0; base + 1 < axes.length; base += 2) {
-			const x = axes[base] ?? 0;
-			const y = axes[base + 1] ?? 0;
-			const key = `${index}:${base}`;
-			let st = this.#sticks.get(key);
-			if (!st) {
-				st = initialStickState();
-				this.#sticks.set(key, st);
-			}
-			const k = readRadialStick(x, y, st, STICK);
-			if (k < 0) continue;
-			for (const [off, dir] of OCTANT_HALVES[k]!) {
-				halves.add(`${base + off}:${dir}`);
-			}
-		}
-		return halves;
-	}
-
 	/** Replace the per-device normalization profiles (keyed by gamepad id).
 	 *  Live: the next poll reads through them. */
 	setProfiles(profiles: Readonly<Record<string, NormalizeProfile>>): void {
@@ -434,6 +299,70 @@ export class Gamepads {
 		this.#joystick = joystick;
 		this.#console = console;
 		this.#consoleState = console.map(() => false);
+	}
+
+	/** Fired whenever the connected set or the assignment changes, so the host can
+	 *  mirror {@link pads} into a signal. */
+	onChange: (() => void) | undefined;
+
+	/** Fired when a pad connects, with its display name and the Atari port it
+	 *  was assigned (null = all ports taken). */
+	onConnect: ((name: string, port: number | null) => void) | undefined;
+
+	/** Fired when a pad disconnects, with its display name and the port it
+	 *  frees (null = it wasn't assigned). */
+	onDisconnect: ((name: string, port: number | null) => void) | undefined;
+
+	#actions: GamepadActions;
+	// The active bindings (data-driven; edited via setBindings).
+	#joystick: readonly JoyBinding[] = DEFAULT_JOYSTICK;
+	#console: readonly ConsoleBinding[] = DEFAULT_CONSOLE;
+	// Last-polled joystick state per port, so a poll emits only the changed edges.
+	#state: PortState[] = PORT_COMMANDS.map(() => CENTERED);
+	// Last-polled state of the port-0 console/meta buttons, parallel to #console.
+	#consoleState: boolean[] = DEFAULT_CONSOLE.map(() => false);
+	// Connected pads by gamepad.index -> id/mapping, from the connect events.
+	#pads = new Map<number, { id: string; mapping: string }>();
+	// Atari port -> the gamepad.index driving it (or null). The source of truth for
+	// who's which player; the UI edits it via setPort. Assignment is stable - a
+	// disconnect frees a port without reshuffling the survivors.
+	#portToIndex: (number | null)[] = PORT_COMMANDS.map(() => null);
+	// Per-stick hysteresis state, keyed by `${gamepad.index}:${pairBase}` so it
+	// follows the device, not the Atari port.
+	#sticks = new Map<string, RadialStickState>();
+	// Per-device normalization profiles by gamepad id (see gamepad-normalize.ts).
+	#profiles: Readonly<Record<string, NormalizeProfile>> = {};
+	// While suspended, poll() is a no-op - a full-screen surface (the game
+	// picker) is reading the pad itself and the machine must not see it.
+	#suspended = false;
+	// The first poll after a resume only records state, emitting no edges: a
+	// button still held from before (the one that closed the picker, a fire
+	// held into a boot) must not fire its command on re-entry.
+	#skipEdges = false;
+	#muteEdges = false;
+
+	// The axis-halves the pad's sticks light up this poll: each axis pair (0/1,
+	// 2/3, ...) through the radial reader. Returns `${axis}:${dir}` keys for
+	// inputActive.
+	#activeHalves(pad: PadView, index: number): ReadonlySet<string> {
+		const halves = new Set<string>();
+		const axes = pad.axes;
+		for (let base = 0; base + 1 < axes.length; base += 2) {
+			const x = axes[base] ?? 0;
+			const y = axes[base + 1] ?? 0;
+			const key = `${index}:${base}`;
+			let st = this.#sticks.get(key);
+			if (!st) {
+				st = initialStickState();
+				this.#sticks.set(key, st);
+			}
+			const k = readRadialStick(x, y, st, STICK);
+			if (k < 0) continue;
+			for (const [off, dir] of OCTANT_HALVES[k]!) {
+				halves.add(`${base + off}:${dir}`);
+			}
+		}
+		return halves;
 	}
 
 	// Diff a port's new joystick state against the last poll, pressing/releasing on
@@ -467,3 +396,74 @@ export class Gamepads {
 		else this.#actions.release(command);
 	}
 }
+
+// Analog stick -> digital 8-way: axes are paired in order (0/1, 2/3) and each
+// pair goes through the shared radial reader (see radial-stick.ts). Thresholds
+// tuned for a spring-centred thumbstick; the OSD touch stick has its own.
+const STICK: RadialStickConfig = {
+	engage: 0.45,
+	release: 0.35,
+	sectorMargin: 0.1, // radians (~5.7 deg)
+};
+
+// The axis-halves each octant activates, as [axisOffset (0 = x, 1 = y), dir]. The
+// diagonals set both; the cardinals one. atan2(y, x) angle space, so +y is the
+// "positive" side of the odd axis (matching how axis-half bindings read).
+const OCTANT_HALVES: readonly (readonly (readonly [number, -1 | 1])[])[] = [
+	[[0, 1]], // 0: +x
+	[
+		[0, 1],
+		[1, 1],
+	], // 1: +x +y
+	[[1, 1]], // 2: +y
+	[
+		[0, -1],
+		[1, 1],
+	], // 3: -x +y
+	[[0, -1]], // 4: -x
+	[
+		[0, -1],
+		[1, -1],
+	], // 5: -x -y
+	[[1, -1]], // 6: -y
+	[
+		[0, 1],
+		[1, -1],
+	], // 7: +x -y
+];
+
+// Whether a Standard input is active: a pressed button, or an axis-half the
+// stick's octant lit up this poll (see `activeHalves`, passed in as a set of
+// `${axis}:${dir}` keys).
+function inputActive(
+	pad: PadView,
+	input: GamepadInput,
+	halves: ReadonlySet<string>,
+): boolean {
+	if ("button" in input) return pad.buttons[input.button]?.pressed ?? false;
+	return halves.has(`${input.axis}:${input.dir}`);
+}
+
+// Reduce a live pad to its digital port state by OR-ing every joystick binding
+// onto its role - so the D-pad and the stick both drive a direction, either one
+// active setting it. (This replaces the old "D-pad overrides the stick" rule; a
+// deadzone, not a priority, keeps a resting stick from fighting the D-pad.)
+function readPad(
+	pad: PadView,
+	joystick: readonly JoyBinding[],
+	halves: ReadonlySet<string>,
+): PortState {
+	const s: PortState = {
+		up: false,
+		down: false,
+		left: false,
+		right: false,
+		trigger: false,
+	};
+	for (const b of joystick) {
+		if (inputActive(pad, b.input, halves)) s[b.role] = true;
+	}
+	return s;
+}
+
+const NO_HALVES: ReadonlySet<string> = new Set();

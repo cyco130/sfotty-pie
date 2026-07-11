@@ -30,21 +30,21 @@ test("Atarimax 1MB (42): the written address selects the bank, through the machi
 	machine.cartridge = createCartridge(stamp8k(car(42, 1024)), "test.car");
 
 	// Powers up with bank 127 mapped.
-	expect(machine.read(0xa000, NONE)).toBe(127);
+	expect(machine.mmu.read(0xa000, NONE)).toBe(127);
 
 	// Writing to $D500+n selects bank n (the value is irrelevant).
-	machine.write(0xd505, 0xea, NONE);
-	expect(machine.read(0xa000, NONE)).toBe(5);
-	expect(machine.read(0xa000, ReadOptions.DMA)).toBe(5);
+	machine.mmu.write(0xd505, 0xea, NONE);
+	expect(machine.mmu.read(0xa000, NONE)).toBe(5);
+	expect(machine.mmu.read(0xa000, ReadOptions.DMA)).toBe(5);
 
 	// A write with address bit 7 set ($D580+) disables: RAM shows through.
-	machine.write(0xd580, 0, NONE);
-	machine.write(0xa000, 0x99, NONE);
-	expect(machine.read(0xa000, NONE)).toBe(0x99);
+	machine.mmu.write(0xd580, 0, NONE);
+	machine.mmu.write(0xa000, 0x99, NONE);
+	expect(machine.mmu.read(0xa000, NONE)).toBe(0x99);
 
 	// Re-enabling maps the ROM back over the RAM.
-	machine.write(0xd503, 0, NONE);
-	expect(machine.read(0xa000, NONE)).toBe(3);
+	machine.mmu.write(0xd503, 0, NONE);
+	expect(machine.mmu.read(0xa000, NONE)).toBe(3);
 });
 
 test("XEGS 32 (12): value-selected $8000 bank, last bank fixed at $A000", () => {
@@ -187,27 +187,27 @@ test("Bounty Bob (18): in-window triggers switch banks, PEEK doesn't", () => {
 	machine.cartridge = createCartridge(image, "test.car");
 
 	// Power-on: banks 0 and 4, fixed tail.
-	expect(machine.read(0x8000, NONE)).toBe(0x40);
-	expect(machine.read(0x9000, NONE)).toBe(0x44);
-	expect(machine.read(0xa000, NONE)).toBe(0x77);
+	expect(machine.mmu.read(0x8000, NONE)).toBe(0x40);
+	expect(machine.mmu.read(0x9000, NONE)).toBe(0x44);
+	expect(machine.mmu.read(0xa000, NONE)).toBe(0x77);
 
 	// Reading $8FF7 switches the low window to bank 1 (and returns the
 	// outgoing bank's byte); the fast page tables must follow.
-	machine.read(0x8ff7, NONE);
-	expect(machine.read(0x8000, NONE)).toBe(0x41);
-	expect(machine.read(0x8000, ReadOptions.DMA)).toBe(0x41);
+	machine.mmu.read(0x8ff7, NONE);
+	expect(machine.mmu.read(0x8000, NONE)).toBe(0x41);
+	expect(machine.mmu.read(0x8000, ReadOptions.DMA)).toBe(0x41);
 
 	// $9FF8 switches the high window to image bank 6.
-	machine.read(0x9ff8, NONE);
-	expect(machine.read(0x9000, NONE)).toBe(0x46);
+	machine.mmu.read(0x9ff8, NONE);
+	expect(machine.mmu.read(0x9000, NONE)).toBe(0x46);
 
 	// A write access triggers too.
-	machine.write(0x8ff9, 0, NONE);
-	expect(machine.read(0x8000, NONE)).toBe(0x43);
+	machine.mmu.write(0x8ff9, 0, NONE);
+	expect(machine.mmu.read(0x8000, NONE)).toBe(0x43);
 
 	// A PEEK of a trigger address must not switch.
-	machine.read(0x9ff6, ReadOptions.PEEK);
-	expect(machine.read(0x9000, NONE)).toBe(0x46);
+	machine.mmu.read(0x9ff6, ReadOptions.PEEK);
+	expect(machine.mmu.read(0x9000, NONE)).toBe(0x46);
 });
 
 test("XL TRIG3 follows the cartridge sense (RD5) live", () => {
@@ -217,20 +217,20 @@ test("XL TRIG3 follows the cartridge sense (RD5) live", () => {
 	});
 	machine.cartridge = createCartridge(stamp8k(car(42, 1024)), "test.car");
 	const TRIG3 = 0xd013;
-	expect(machine.read(TRIG3, NONE)).toBe(1);
+	expect(machine.mmu.read(TRIG3, NONE)).toBe(1);
 
 	// Banking the cartridge out via CCTL drops RD5 - and TRIG3 with it.
-	machine.write(0xd580, 0, NONE);
-	expect(machine.read(TRIG3, NONE)).toBe(0);
-	machine.write(0xd503, 0, NONE);
-	expect(machine.read(TRIG3, NONE)).toBe(1);
+	machine.mmu.write(0xd580, 0, NONE);
+	expect(machine.mmu.read(TRIG3, NONE)).toBe(0);
+	machine.mmu.write(0xd503, 0, NONE);
+	expect(machine.mmu.read(TRIG3, NONE)).toBe(1);
 
 	// Pulling the cartridge reads 0; the accessor is the physical swap, so
 	// re-inserting the same cart keeps its bank state (still bank 3).
 	const cart = machine.cartridge;
 	machine.cartridge = undefined;
-	expect(machine.read(TRIG3, NONE)).toBe(0);
+	expect(machine.mmu.read(TRIG3, NONE)).toBe(0);
 	machine.cartridge = cart;
-	expect(machine.read(TRIG3, NONE)).toBe(1);
-	expect(machine.read(0xa000, NONE)).toBe(3);
+	expect(machine.mmu.read(TRIG3, NONE)).toBe(1);
+	expect(machine.mmu.read(0xa000, NONE)).toBe(3);
 });

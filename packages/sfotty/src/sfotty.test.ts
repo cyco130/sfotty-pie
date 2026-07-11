@@ -35,7 +35,7 @@ function load(ram: Ram, address: number, ...bytes: number[]): void {
  */
 function runInstruction(cpu: Sfotty): void {
 	do {
-		cpu.run();
+		cpu.cycle();
 	} while (cpu.state !== DECODE);
 }
 
@@ -103,7 +103,7 @@ describe("withoutUndocumented", () => {
 
 		// The opcode runs CIM's microcode: dummy reads of $FFFF/$FFFE for several
 		// cycles, then the crash on `cc--`. Every cycle stays bus-visible.
-		for (let i = 0; i < 10 && !cpu.crashed; i++) cpu.run();
+		for (let i = 0; i < 10 && !cpu.crashed; i++) cpu.cycle();
 
 		expect(cpu.crashed).toBe(true);
 		expect(cpu.A).toBe(0); // never loaded - the op did not run
@@ -118,7 +118,7 @@ describe("withoutUndocumented", () => {
 		jumpTo(cpu, 0x0200);
 
 		// Its real microcode dummy-reads for several cycles, then crashes on `cc--`.
-		for (let i = 0; i < 10 && !cpu.crashed; i++) cpu.run();
+		for (let i = 0; i < 10 && !cpu.crashed; i++) cpu.cycle();
 
 		expect(cpu.crashed).toBe(true);
 	});
@@ -132,7 +132,7 @@ describe("RDY", () => {
 		jumpTo(cpu, 0x0200);
 
 		cpu.RDY = false;
-		for (let i = 0; i < 3; i++) cpu.run();
+		for (let i = 0; i < 3; i++) cpu.cycle();
 
 		// State frozen at DECODE, PC unmoved - but the read was issued each cycle.
 		expect(cpu.state).toBe(DECODE);
@@ -141,7 +141,7 @@ describe("RDY", () => {
 
 		// Raising RDY lets the very next cycle complete the fetch.
 		cpu.RDY = true;
-		cpu.run();
+		cpu.cycle();
 		expect(cpu.PC).toBe(0x0201);
 		expect(cpu.state).not.toBe(DECODE);
 		expect(ram.reads[0x0200]).toBe(4);
@@ -155,13 +155,13 @@ describe("RDY", () => {
 		cpu.A = 0x42;
 
 		// Fetch + operand read with RDY high, leaving us on the write cycle.
-		cpu.run();
-		cpu.run();
+		cpu.cycle();
+		cpu.cycle();
 		expect(ram.writes[0x05]).toBe(0);
 
 		// The write cycle completes even though RDY is low.
 		cpu.RDY = false;
-		cpu.run();
+		cpu.cycle();
 		expect(ram.bytes[0x05]).toBe(0x42);
 		expect(ram.writes[0x05]).toBe(1);
 		expect(cpu.state).toBe(DECODE);
@@ -173,19 +173,19 @@ describe("RDY", () => {
 		const cpu = new Sfotty(ram);
 		jumpTo(cpu, 0x0200);
 
-		cpu.run(); // fetch the opcode (RDY high)
+		cpu.cycle(); // fetch the opcode (RDY high)
 
 		// Stall on the immediate-operand read; it re-reads $0201 each cycle.
 		cpu.RDY = false;
-		cpu.run();
-		cpu.run();
+		cpu.cycle();
+		cpu.cycle();
 		expect(ram.reads[0x0201]).toBe(2);
 		expect(cpu.A).toBe(0); // nothing consumed yet
 
 		// Change the byte under the stall, then release: the release read wins.
 		ram.bytes[0x0201] = 0x22;
 		cpu.RDY = true;
-		cpu.run();
+		cpu.cycle();
 		expect(cpu.A).toBe(0x22);
 		expect(cpu.state).toBe(DECODE);
 	});
@@ -199,7 +199,7 @@ describe("reset", () => {
 		const cpu = new Sfotty(ram);
 
 		// No reset() call - construction itself is the power-on.
-		for (let i = 0; i < 7; i++) cpu.run();
+		for (let i = 0; i < 7; i++) cpu.cycle();
 
 		expect(cpu.PC).toBe(0x0300);
 		expect(cpu.S).toBe(0xfd);
@@ -219,7 +219,7 @@ describe("reset", () => {
 		cpu.dFlag = true;
 
 		cpu.reset(true);
-		for (let i = 0; i < 7; i++) cpu.run();
+		for (let i = 0; i < 7; i++) cpu.cycle();
 
 		expect(cpu.PC).toBe(0x1234);
 		expect(cpu.S).toBe(0xfd); // 0 - 3, the canonical power-on value
@@ -240,9 +240,9 @@ describe("reset", () => {
 		const cpu = new Sfotty(ram);
 
 		cpu.reset(true);
-		for (let i = 0; i < 6; i++) cpu.run();
+		for (let i = 0; i < 6; i++) cpu.cycle();
 		expect(cpu.state).not.toBe(DECODE); // not done after six
-		cpu.run(); // seventh
+		cpu.cycle(); // seventh
 		expect(cpu.state).toBe(DECODE);
 		expect(cpu.PC).toBe(0x0300);
 	});
@@ -260,7 +260,7 @@ describe("reset", () => {
 		cpu.iFlag = false;
 
 		cpu.reset(false);
-		for (let i = 0; i < 7; i++) cpu.run();
+		for (let i = 0; i < 7; i++) cpu.cycle();
 
 		expect(cpu.PC).toBe(0x5678);
 		expect(cpu.S).toBe(0x7d); // 0x80 - 3
@@ -281,12 +281,12 @@ describe("reset", () => {
 		const cpu = new Sfotty(ram);
 		jumpTo(cpu, 0x0200);
 
-		for (let i = 0; i < 8 && !cpu.crashed; i++) cpu.run();
+		for (let i = 0; i < 8 && !cpu.crashed; i++) cpu.cycle();
 		expect(cpu.crashed).toBe(true);
 
 		cpu.reset(true);
 		expect(cpu.crashed).toBe(false);
-		for (let i = 0; i < 7; i++) cpu.run();
+		for (let i = 0; i < 7; i++) cpu.cycle();
 		expect(cpu.PC).toBe(0x0300);
 
 		runInstruction(cpu); // LDA #$55
@@ -301,12 +301,12 @@ describe("reset", () => {
 
 		cpu.reset(true);
 		cpu.RDY = false;
-		for (let i = 0; i < 20; i++) cpu.run(); // all stalled on the first read
+		for (let i = 0; i < 20; i++) cpu.cycle(); // all stalled on the first read
 		expect(cpu.state).not.toBe(DECODE);
 		expect(cpu.PC).toBe(0);
 
 		cpu.RDY = true;
-		for (let i = 0; i < 7; i++) cpu.run();
+		for (let i = 0; i < 7; i++) cpu.cycle();
 		expect(cpu.PC).toBe(0x0300);
 		expect(cpu.state).toBe(DECODE);
 	});

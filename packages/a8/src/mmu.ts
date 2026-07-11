@@ -60,63 +60,7 @@ export interface TrapOptions {
 	mask?: TrapMask;
 }
 
-const DEFAULT_MASK: TrapMask = { dummy: false };
-const EXECUTE_MASK: TrapMask = { sync: true, dummy: false };
-
-/** Compile a mask into require-set / require-clear bit patterns. */
-function compileMask(mask: TrapMask): { set: number; clear: number } {
-	let set = 0;
-	let clear = 0;
-	const apply = (flag: number, want: boolean | undefined) => {
-		if (want === true) set |= flag;
-		else if (want === false) clear |= flag;
-	};
-	apply(ReadOptions.SYNC, mask.sync);
-	apply(ReadOptions.DUMMY, mask.dummy);
-	apply(ReadOptions.DMA, mask.dma);
-	return { set, clear };
-}
-
-/** A registered trap: its compiled mask, the once flag, and the callback. */
-interface TrapEntry<F> {
-	set: number;
-	clear: number;
-	once: boolean;
-	fn: F;
-}
-
-/**
- * Remove an entry from a registry list, dropping the address key if empty.
- * Returns whether the entry was still registered (guards double removal:
- * a once-trap firing and its handle's remove() may both call this).
- */
-function removeEntry<F>(
-	map: Map<number, TrapEntry<F>[]>,
-	address: number,
-	entry: TrapEntry<F>,
-): boolean {
-	const list = map.get(address);
-	if (!list) return false;
-	const index = list.indexOf(entry);
-	if (index < 0) return false;
-	list.splice(index, 1);
-	if (list.length === 0) map.delete(address);
-	return true;
-}
-
-/**
- * A shared read-only 256-byte page of $FF - what an undriven or absent region
- * reads on XL/XE (the bus pull-ups). Wired into the fast page tables for
- * unmapped pages; never written (unmapped pages have no fast write entry).
- * TODO(floating-bus): 400/800 and some XE read the last bus value instead.
- */
-const FF_PAGE = new Uint8Array(256).fill(0xff);
-
 export class Ram implements Memory {
-	#memory: Uint8Array;
-	#base: number;
-	#views: Uint8Array[] = [];
-
 	constructor(size: number, base = 0) {
 		this.#memory = new Uint8Array(size);
 		this.#base = base;
@@ -151,14 +95,13 @@ export class Ram implements Memory {
 	get size(): number {
 		return this.#memory.length;
 	}
+
+	#memory: Uint8Array;
+	#base: number;
+	#views: Uint8Array[] = [];
 }
 
 export class Rom implements Memory {
-	#memory: Uint8Array;
-	#base: number;
-	#mask: number;
-	#views = new Map<number, Uint8Array>();
-
 	constructor(contents: Uint8Array, base: number, mask: number) {
 		this.#memory = contents;
 		this.#base = base;
@@ -193,6 +136,11 @@ export class Rom implements Memory {
 		void address;
 		void value;
 	}
+
+	#memory: Uint8Array;
+	#base: number;
+	#mask: number;
+	#views = new Map<number, Uint8Array>();
 }
 
 export interface MmuOptions {
@@ -225,7 +173,15 @@ export interface MmuOptions {
 	 * from the CPU. Can't be set when `xeBankCount` is greater than 32.
 	 */
 	separateAnticAccess: boolean;
+}
 
+/**
+ * The ROMs and chips the bus routes to - everything that needs the other
+ * components to exist. The machine constructs the Mmu first (so ANTIC and
+ * the CPU can take it as their bus), then calls {@link Mmu.connect} exactly
+ * once with these. Cartridges attach through {@link Mmu.setCartridge}.
+ */
+export interface MmuConnections {
 	/**
 	 * OS ROM contents.
 	 *
@@ -252,17 +208,21 @@ export interface MmuOptions {
 	 */
 	gameRom?: Uint8Array;
 
-	/**
-	 * Cartridge chip.
-	 */
-	cartridge?: Cartridge;
-
 	gtia: Memory;
 	pbi: Memory;
 	pokey: Memory;
 	pia: Pia;
 	antic: Memory;
 }
+
+export const unconnectedMemory: Memory = {
+	read() {
+		// TODO(floating-bus): undriven; $FF is the XL/XE pull-up.
+		return 0xff;
+	},
+
+	write() {},
+};
 
 export class Mmu implements Memory {
 	constructor(options: MmuOptions) {
@@ -271,15 +231,6 @@ export class Mmu implements Memory {
 			conventionalRamSize,
 			xeBankCount,
 			separateAnticAccess,
-			osRom,
-			basicRom,
-			gameRom,
-			cartridge,
-			gtia,
-			pbi,
-			pokey,
-			pia,
-			antic,
 		} = options;
 
 		if (
@@ -290,18 +241,8 @@ export class Mmu implements Memory {
 			throw new Error("Conventional RAM size must be 16, 48, or 64");
 		}
 
-		if (!portbBanking) {
-			if (xeBankCount) {
-				throw new Error("XE-compatible extended RAM requires PORTB banking");
-			}
-
-			if (basicRom) {
-				throw new Error("Built-in BASIC requires PORTB banking");
-			}
-
-			if (gameRom) {
-				throw new Error("Built-in game ROM requires PORTB banking");
-			}
+		if (!portbBanking && xeBankCount) {
+			throw new Error("XE-compatible extended RAM requires PORTB banking");
 		}
 
 		if (!Number.isInteger(xeBankCount) || xeBankCount < 0) {
@@ -322,18 +263,6 @@ export class Mmu implements Memory {
 			throw new Error(
 				"XE-compatible extended RAM cannot exceed 1024K (64 banks)",
 			);
-		}
-
-		if (osRom.length !== 10 * 1024 && osRom.length !== 16 * 1024) {
-			throw new Error("OS ROM size must be either 10K or 16K");
-		}
-
-		if (basicRom && basicRom.length !== 8 * 1024) {
-			throw new Error("BASIC ROM size must be 8K");
-		}
-
-		if (gameRom && gameRom.length !== 8 * 1024) {
-			throw new Error("Game ROM size must be 8K");
 		}
 
 		this.#ram = new Ram(conventionalRamSize * 1024);
@@ -367,6 +296,45 @@ export class Mmu implements Memory {
 		this.#separateAnticAccess = separateAnticAccess;
 		this.#portbBanking = portbBanking;
 
+		this.portbChanged = this.portbChanged.bind(this);
+	}
+
+	/**
+	 * Wire the ROMs and chips and build the page tables. Called exactly once,
+	 * after the chips exist - the two-phase construction lets ANTIC and the
+	 * CPU take the Mmu itself as their bus. The Mmu must not be used before
+	 * this.
+	 */
+	connect(connections: MmuConnections): void {
+		if (this.#pia) {
+			throw new Error("Mmu is already connected");
+		}
+
+		const { osRom, basicRom, gameRom, gtia, pbi, pokey, pia, antic } =
+			connections;
+
+		if (!this.#portbBanking) {
+			if (basicRom) {
+				throw new Error("Built-in BASIC requires PORTB banking");
+			}
+
+			if (gameRom) {
+				throw new Error("Built-in game ROM requires PORTB banking");
+			}
+		}
+
+		if (osRom.length !== 10 * 1024 && osRom.length !== 16 * 1024) {
+			throw new Error("OS ROM size must be either 10K or 16K");
+		}
+
+		if (basicRom && basicRom.length !== 8 * 1024) {
+			throw new Error("BASIC ROM size must be 8K");
+		}
+
+		if (gameRom && gameRom.length !== 8 * 1024) {
+			throw new Error("Game ROM size must be 8K");
+		}
+
 		this.#osRom =
 			osRom.length === 10 * 1024
 				? new Rom(osRom, 0xd800, 0x3fff)
@@ -380,40 +348,19 @@ export class Mmu implements Memory {
 			this.#gameRom = new Rom(gameRom, 0xa000, 0x1fff);
 		}
 
-		this.#cartridge = cartridge;
-
 		this.#gtia = gtia;
 		this.#pbi = pbi;
 		this.#pokey = pokey;
 		this.#pia = pia;
 		this.#antic = antic;
 
-		this.portbChanged = this.portbChanged.bind(this);
-		this.#unwatchPortbChanged = pia.portbOut.watch(this.portbChanged);
-
-		if (cartridge) {
-			this.#unwatchCartMapping = cartridge.mappingChanged.watch(
-				this.#cartMappingChanged,
-			);
-		}
+		pia.portbOut.watch(this.portbChanged);
 
 		// Sync derived banking state to the current PORTB instead of relying on
 		// the field defaults matching it. portbChanged rebuilds the page tables;
 		// rebuild explicitly too for the non-banking case, where it early-outs.
 		this.portbChanged();
 		this.#rebuildPageTables();
-	}
-
-	/**
-	 * Drop the PORTB watch. Call before discarding the bus - the host
-	 * reconfigures the machine by building a fresh `Mmu`, and without this
-	 * the dead bus keeps receiving PORTB changes from the shared PIA.
-	 */
-	dispose() {
-		this.#unwatchPortbChanged?.();
-		this.#unwatchPortbChanged = null;
-		this.#unwatchCartMapping?.();
-		this.#unwatchCartMapping = null;
 	}
 
 	/**
@@ -452,45 +399,6 @@ export class Mmu implements Memory {
 		this.#rebuildPageTables();
 	}
 
-	#ram: Ram;
-	#banks: Ram[];
-	#bankMask = 0;
-
-	#osRom: Rom;
-	#basicRom?: Rom;
-	#gameRom?: Rom;
-	#cartridge?: Cartridge;
-
-	#gtia: Memory;
-	#pbi: Memory;
-	#pokey: Memory;
-	#pia: Pia;
-	#antic: Memory;
-
-	#portbBanking: boolean;
-	#separateAnticAccess: boolean;
-
-	#bank = 0;
-	#cpuSeesExtendedRam = false;
-	#anticSeesExtendedRam = false;
-
-	#isSelfTestEnabled = false;
-	#isBasicRomEnabled = false;
-	#isGameRomEnabled = false;
-	#isOsRomEnabled = true;
-
-	/**
-	 * Whether the OS ROM is currently mapped at $D800-$FFFF (always true
-	 * without PORTB banking). OS entry-point traps key on this: with RAM
-	 * banked in under the OS, an address like SIOV holds the running
-	 * program's own code, not the OS routine the trap stands in for.
-	 */
-	get isOsRomMapped(): boolean {
-		return !this.#portbBanking || this.#isOsRomEnabled;
-	}
-
-	#unwatchPortbChanged: (() => void) | null = null;
-	#unwatchCartMapping: (() => void) | null = null;
 	portbChanged() {
 		if (!this.#portbBanking) return;
 
@@ -548,6 +456,149 @@ export class Mmu implements Memory {
 
 		this.#rebuildPageTables();
 	}
+
+	/**
+	 * Whether the OS ROM is currently mapped at $D800-$FFFF (always true
+	 * without PORTB banking). OS entry-point traps key on this: with RAM
+	 * banked in under the OS, an address like SIOV holds the running
+	 * program's own code, not the OS routine the trap stands in for.
+	 */
+	get isOsRomMapped(): boolean {
+		return !this.#portbBanking || this.#isOsRomEnabled;
+	}
+
+	// Last value driven on the data bus. Public so a chip that reads the bus
+	// without driving the address can see it - e.g. GTIA samples the bus on
+	// cycles where it expects ANTIC to drive the address via DMA; with that DMA
+	// disabled ANTIC doesn't drive, and GTIA reads whatever was last here.
+	//
+	// TODO(floating-bus): related but NOT the same thing. On 400/800 / some XE,
+	// *undriven* reads return the last bus value instead of $FF (see the
+	// floating-bus TODO markers), and the 800 splits a separate I/O bus. We
+	// might reuse busData for that, but it needs thought (two bus values; PEEK
+	// is already excluded in read() below).
+	busData = 0xff;
+
+	read(address: number, options: ReadOptions) {
+		// The fast path: a plain byte load off the page view. Trap handling
+		// lives entirely on the slow path - a page with any registered trap
+		// has a null fast entry, so the hot path never consults the
+		// registries. A PEEK on a fast page is naturally side-effect-free; it
+		// just must not disturb the bus value.
+		const fast =
+			options & ReadOptions.DMA
+				? this.#dmaReadFast[address >>> 8]
+				: this.#cpuReadFast[address >>> 8];
+		if (fast) {
+			const value = fast[address & 0xff]!;
+			if (!(options & ReadOptions.PEEK)) this.busData = value;
+			return value;
+		}
+		return this.#slowRead(address, options);
+	}
+
+	write(address: number, value: number, options: ReadOptions) {
+		this.busData = value;
+		const fast =
+			options & ReadOptions.DMA
+				? this.#dmaWriteFast[address >>> 8]
+				: this.#cpuWriteFast[address >>> 8];
+		if (fast) {
+			fast[address & 0xff] = value;
+			return;
+		}
+		this.#slowWrite(address, value, options);
+	}
+
+	/** Trap a data read, before the access; may return a substitute value. */
+	interceptRead(
+		address: number,
+		fn: ReadInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#add(this.#readInterceptors, address, fn, opts);
+	}
+
+	/** Watch a read after it resolves (its committed value). */
+	observeRead(
+		address: number,
+		fn: ReadObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#add(this.#readObservers, address, fn, opts);
+	}
+
+	/** Trap a write, before the store; return true to suppress it. */
+	interceptWrite(
+		address: number,
+		fn: WriteInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#add(this.#writeInterceptors, address, fn, opts);
+	}
+
+	/** Watch a write after it commits. */
+	observeWrite(
+		address: number,
+		fn: WriteObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.#add(this.#writeObservers, address, fn, opts);
+	}
+
+	/** Sugar: trap a committed opcode fetch (read masked to SYNC & !DUMMY). */
+	interceptExecute(
+		address: number,
+		fn: ExecuteInterceptor,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.interceptRead(address, (a) => fn(a), {
+			mask: EXECUTE_MASK,
+			once: opts?.once,
+		});
+	}
+
+	/** Sugar: watch a committed opcode fetch. */
+	observeExecute(
+		address: number,
+		fn: ExecuteObserver,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.observeRead(address, (a) => fn(a), {
+			mask: EXECUTE_MASK,
+			once: opts?.once,
+		});
+	}
+
+	#ram: Ram;
+	#banks: Ram[];
+	#bankMask = 0;
+
+	// Assigned in connect(); the Mmu is unusable before it.
+	#osRom!: Rom;
+	#basicRom?: Rom;
+	#gameRom?: Rom;
+	#cartridge?: Cartridge;
+
+	#gtia!: Memory;
+	#pbi!: Memory;
+	#pokey!: Memory;
+	#pia!: Pia;
+	#antic!: Memory;
+
+	#portbBanking: boolean;
+	#separateAnticAccess: boolean;
+
+	#bank = 0;
+	#cpuSeesExtendedRam = false;
+	#anticSeesExtendedRam = false;
+
+	#isSelfTestEnabled = false;
+	#isBasicRomEnabled = false;
+	#isGameRomEnabled = false;
+	#isOsRomEnabled = true;
+
+	#unwatchCartMapping: (() => void) | null = null;
 
 	// The page-dispatch table: for each of the 256 pages, fast read/write
 	// bytes plus a slow-path target, one set per bus master (the CPU, and
@@ -720,36 +771,6 @@ export class Mmu implements Memory {
 		}
 	}
 
-	// Last value driven on the data bus. Public so a chip that reads the bus
-	// without driving the address can see it - e.g. GTIA samples the bus on
-	// cycles where it expects ANTIC to drive the address via DMA; with that DMA
-	// disabled ANTIC doesn't drive, and GTIA reads whatever was last here.
-	//
-	// TODO(floating-bus): related but NOT the same thing. On 400/800 / some XE,
-	// *undriven* reads return the last bus value instead of $FF (see the
-	// floating-bus TODO markers), and the 800 splits a separate I/O bus. We
-	// might reuse busData for that, but it needs thought (two bus values; PEEK
-	// is already excluded in read() below).
-	busData = 0xff;
-
-	read(address: number, options: ReadOptions) {
-		// The fast path: a plain byte load off the page view. Trap handling
-		// lives entirely on the slow path - a page with any registered trap
-		// has a null fast entry, so the hot path never consults the
-		// registries. A PEEK on a fast page is naturally side-effect-free; it
-		// just must not disturb the bus value.
-		const fast =
-			options & ReadOptions.DMA
-				? this.#dmaReadFast[address >>> 8]
-				: this.#cpuReadFast[address >>> 8];
-		if (fast) {
-			const value = fast[address & 0xff]!;
-			if (!(options & ReadOptions.PEEK)) this.busData = value;
-			return value;
-		}
-		return this.#slowRead(address, options);
-	}
-
 	// Chip registers and trapped pages: the full pre-table access protocol.
 	#slowRead(address: number, options: ReadOptions): number {
 		// A PEEK (debugger/disassembler inspection) must not fire traps or
@@ -781,19 +802,6 @@ export class Mmu implements Memory {
 			}
 		}
 		return value;
-	}
-
-	write(address: number, value: number, options: ReadOptions) {
-		this.busData = value;
-		const fast =
-			options & ReadOptions.DMA
-				? this.#dmaWriteFast[address >>> 8]
-				: this.#cpuWriteFast[address >>> 8];
-		if (fast) {
-			fast[address & 0xff] = value;
-			return;
-		}
-		this.#slowWrite(address, value, options);
 	}
 
 	#slowWrite(address: number, value: number, options: ReadOptions): void {
@@ -929,73 +937,56 @@ export class Mmu implements Memory {
 			if (entry.once) this.#removeTrap(this.#writeObservers, address, entry);
 		}
 	}
-
-	/** Trap a data read, before the access; may return a substitute value. */
-	interceptRead(
-		address: number,
-		fn: ReadInterceptor,
-		opts?: TrapOptions,
-	): TrapHandle {
-		return this.#add(this.#readInterceptors, address, fn, opts);
-	}
-
-	/** Watch a read after it resolves (its committed value). */
-	observeRead(
-		address: number,
-		fn: ReadObserver,
-		opts?: TrapOptions,
-	): TrapHandle {
-		return this.#add(this.#readObservers, address, fn, opts);
-	}
-
-	/** Trap a write, before the store; return true to suppress it. */
-	interceptWrite(
-		address: number,
-		fn: WriteInterceptor,
-		opts?: TrapOptions,
-	): TrapHandle {
-		return this.#add(this.#writeInterceptors, address, fn, opts);
-	}
-
-	/** Watch a write after it commits. */
-	observeWrite(
-		address: number,
-		fn: WriteObserver,
-		opts?: TrapOptions,
-	): TrapHandle {
-		return this.#add(this.#writeObservers, address, fn, opts);
-	}
-
-	/** Sugar: trap a committed opcode fetch (read masked to SYNC & !DUMMY). */
-	interceptExecute(
-		address: number,
-		fn: ExecuteInterceptor,
-		opts?: { once?: boolean },
-	): TrapHandle {
-		return this.interceptRead(address, (a) => fn(a), {
-			mask: EXECUTE_MASK,
-			once: opts?.once,
-		});
-	}
-
-	/** Sugar: watch a committed opcode fetch. */
-	observeExecute(
-		address: number,
-		fn: ExecuteObserver,
-		opts?: { once?: boolean },
-	): TrapHandle {
-		return this.observeRead(address, (a) => fn(a), {
-			mask: EXECUTE_MASK,
-			once: opts?.once,
-		});
-	}
 }
 
-export const unconnectedMemory: Memory = {
-	read() {
-		// TODO(floating-bus): undriven; $FF is the XL/XE pull-up.
-		return 0xff;
-	},
+const DEFAULT_MASK: TrapMask = { dummy: false };
+const EXECUTE_MASK: TrapMask = { sync: true, dummy: false };
 
-	write() {},
-};
+/** Compile a mask into require-set / require-clear bit patterns. */
+function compileMask(mask: TrapMask): { set: number; clear: number } {
+	let set = 0;
+	let clear = 0;
+	const apply = (flag: number, want: boolean | undefined) => {
+		if (want === true) set |= flag;
+		else if (want === false) clear |= flag;
+	};
+	apply(ReadOptions.SYNC, mask.sync);
+	apply(ReadOptions.DUMMY, mask.dummy);
+	apply(ReadOptions.DMA, mask.dma);
+	return { set, clear };
+}
+
+/** A registered trap: its compiled mask, the once flag, and the callback. */
+interface TrapEntry<F> {
+	set: number;
+	clear: number;
+	once: boolean;
+	fn: F;
+}
+
+/**
+ * Remove an entry from a registry list, dropping the address key if empty.
+ * Returns whether the entry was still registered (guards double removal:
+ * a once-trap firing and its handle's remove() may both call this).
+ */
+function removeEntry<F>(
+	map: Map<number, TrapEntry<F>[]>,
+	address: number,
+	entry: TrapEntry<F>,
+): boolean {
+	const list = map.get(address);
+	if (!list) return false;
+	const index = list.indexOf(entry);
+	if (index < 0) return false;
+	list.splice(index, 1);
+	if (list.length === 0) map.delete(address);
+	return true;
+}
+
+/**
+ * A shared read-only 256-byte page of $FF - what an undriven or absent region
+ * reads on XL/XE (the bus pull-ups). Wired into the fast page tables for
+ * unmapped pages; never written (unmapped pages have no fast write entry).
+ * TODO(floating-bus): 400/800 and some XE read the last bus value instead.
+ */
+const FF_PAGE = new Uint8Array(256).fill(0xff);

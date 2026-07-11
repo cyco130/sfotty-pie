@@ -5,26 +5,6 @@ import type { Atari } from "./machine.ts";
 /** The OS SIO entry vector ($E459). */
 export const SIOV = 0xe459;
 
-// The Device Control Block
-const DDEVIC = 0x0300;
-const DUNIT = 0x0301;
-const DCOMND = 0x0302;
-const DSTATS = 0x0303;
-const DBUFLO = 0x0304;
-const DBUFHI = 0x0305;
-const DBYTLO = 0x0308;
-const DBYTHI = 0x0309;
-const DAUX1 = 0x030a;
-const DAUX2 = 0x030b;
-
-// SIO status codes
-const STATUS_OK = 0x01;
-const STATUS_TIMEOUT = 0x8a; // no device responded
-const STATUS_NAK = 0x8b; // device refused the command
-const STATUS_DEVICE_ERROR = 0x90; // controller reported an error
-
-const RTS = 0x60;
-
 export interface SioHandlerOptions {
 	machine: Atari;
 	cpu: Sfotty;
@@ -57,12 +37,12 @@ export function createSioHandler(
 ): (address: number) => number {
 	const { machine, cpu, getDisk } = options;
 
-	const peek = (address: number) => machine.read(address, ReadOptions.PEEK);
+	const peek = (address: number) => machine.mmu.read(address, ReadOptions.PEEK);
 
 	// Finish like SIO does: status into DSTATS and Y, N mirroring bit 7,
 	// then RTS back to the caller.
 	const complete = (status: number): number => {
-		machine.write(DSTATS, status, ReadOptions.NONE);
+		machine.mmu.write(DSTATS, status, ReadOptions.NONE);
 		cpu.Y = status;
 		cpu.nFlag = status >= 0x80;
 		cpu.zFlag = false;
@@ -87,7 +67,7 @@ export function createSioHandler(
 		const transfer = (data: ArrayLike<number>): number => {
 			const length = byteCount ? Math.min(byteCount, data.length) : data.length;
 			for (let i = 0; i < length; i++) {
-				machine.write((buffer + i) & 0xffff, data[i]!, ReadOptions.NONE);
+				machine.mmu.write((buffer + i) & 0xffff, data[i]!, ReadOptions.NONE);
 			}
 			return complete(STATUS_OK);
 		};
@@ -133,3 +113,23 @@ export function createSioHandler(
 		}
 	};
 }
+
+// The Device Control Block
+const DDEVIC = 0x0300;
+const DUNIT = 0x0301;
+const DCOMND = 0x0302;
+const DSTATS = 0x0303;
+const DBUFLO = 0x0304;
+const DBUFHI = 0x0305;
+const DBYTLO = 0x0308;
+const DBYTHI = 0x0309;
+const DAUX1 = 0x030a;
+const DAUX2 = 0x030b;
+
+// SIO status codes
+const STATUS_OK = 0x01;
+const STATUS_TIMEOUT = 0x8a; // no device responded
+const STATUS_NAK = 0x8b; // device refused the command
+const STATUS_DEVICE_ERROR = 0x90; // controller reported an error
+
+const RTS = 0x60;

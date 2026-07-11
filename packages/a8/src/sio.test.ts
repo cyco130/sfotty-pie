@@ -23,7 +23,7 @@ function makeMachine(model: "800" | "800XL" | "130XE" = "800") {
 
 function setup(disk?: AtrImage) {
 	const machine = makeMachine();
-	const cpu = new Sfotty(machine, { withoutUndocumented: false });
+	const cpu = new Sfotty(machine.mmu, { withoutUndocumented: false });
 	const handler = createSioHandler({
 		machine,
 		cpu,
@@ -43,15 +43,15 @@ function setDcb(
 		aux?: number;
 	},
 ) {
-	machine.write(0x0300, dcb.device ?? 0x31, ReadOptions.NONE);
-	machine.write(0x0301, dcb.unit ?? 1, ReadOptions.NONE);
-	machine.write(0x0302, dcb.command, ReadOptions.NONE);
-	machine.write(0x0304, dcb.buffer & 0xff, ReadOptions.NONE);
-	machine.write(0x0305, dcb.buffer >> 8, ReadOptions.NONE);
-	machine.write(0x0308, dcb.byteCount & 0xff, ReadOptions.NONE);
-	machine.write(0x0309, dcb.byteCount >> 8, ReadOptions.NONE);
-	machine.write(0x030a, (dcb.aux ?? 0) & 0xff, ReadOptions.NONE);
-	machine.write(0x030b, (dcb.aux ?? 0) >> 8, ReadOptions.NONE);
+	machine.mmu.write(0x0300, dcb.device ?? 0x31, ReadOptions.NONE);
+	machine.mmu.write(0x0301, dcb.unit ?? 1, ReadOptions.NONE);
+	machine.mmu.write(0x0302, dcb.command, ReadOptions.NONE);
+	machine.mmu.write(0x0304, dcb.buffer & 0xff, ReadOptions.NONE);
+	machine.mmu.write(0x0305, dcb.buffer >> 8, ReadOptions.NONE);
+	machine.mmu.write(0x0308, dcb.byteCount & 0xff, ReadOptions.NONE);
+	machine.mmu.write(0x0309, dcb.byteCount >> 8, ReadOptions.NONE);
+	machine.mmu.write(0x030a, (dcb.aux ?? 0) & 0xff, ReadOptions.NONE);
+	machine.mmu.write(0x030b, (dcb.aux ?? 0) >> 8, ReadOptions.NONE);
 }
 
 test("read sector fills the buffer and reports success", () => {
@@ -59,9 +59,9 @@ test("read sector fills the buffer and reports success", () => {
 	setDcb(machine, { command: 0x52, buffer: 0x2000, byteCount: 128, aux: 2 });
 
 	expect(handler(SIOV)).toBe(0x60); // RTS
-	expect(machine.read(0x2000, ReadOptions.NONE)).toBe(2);
-	expect(machine.read(0x207f, ReadOptions.NONE)).toBe(2);
-	expect(machine.read(DSTATS, ReadOptions.NONE)).toBe(0x01);
+	expect(machine.mmu.read(0x2000, ReadOptions.NONE)).toBe(2);
+	expect(machine.mmu.read(0x207f, ReadOptions.NONE)).toBe(2);
+	expect(machine.mmu.read(DSTATS, ReadOptions.NONE)).toBe(0x01);
 	expect(cpu.Y).toBe(0x01);
 	expect(cpu.nFlag).toBe(false);
 });
@@ -101,7 +101,7 @@ test("write sector stores bytes that read back", () => {
 	const { machine, cpu, handler } = setup(disk);
 
 	for (let i = 0; i < 128; i++) {
-		machine.write(0x2000 + i, (i + 1) & 0xff, ReadOptions.NONE);
+		machine.mmu.write(0x2000 + i, (i + 1) & 0xff, ReadOptions.NONE);
 	}
 	setDcb(machine, { command: 0x57, buffer: 0x2000, byteCount: 128, aux: 2 });
 
@@ -119,7 +119,7 @@ test("writes to a write-protected disk report a device error", () => {
 	const disk = new AtrImage(makeAtr(128, 4), { writeProtected: true });
 	const { machine, cpu, handler } = setup(disk);
 
-	machine.write(0x2000, 0xff, ReadOptions.NONE);
+	machine.mmu.write(0x2000, 0xff, ReadOptions.NONE);
 	setDcb(machine, { command: 0x57, buffer: 0x2000, byteCount: 128, aux: 2 });
 	handler(SIOV);
 
@@ -132,19 +132,19 @@ test("the status command reports density and write protection", () => {
 	const single = setup(new AtrImage(makeAtr(128, 4)));
 	setDcb(single.machine, { command: 0x53, buffer: 0x02ea, byteCount: 4 });
 	single.handler(SIOV);
-	expect(single.machine.read(0x02ea, ReadOptions.NONE)).toBe(0x00);
+	expect(single.machine.mmu.read(0x02ea, ReadOptions.NONE)).toBe(0x00);
 
 	// Double density sets the density bit.
 	const double = setup(new AtrImage(makeAtr(256, 4)));
 	setDcb(double.machine, { command: 0x53, buffer: 0x02ea, byteCount: 4 });
 	double.handler(SIOV);
-	expect(double.machine.read(0x02ea, ReadOptions.NONE)).toBe(0x20);
+	expect(double.machine.mmu.read(0x02ea, ReadOptions.NONE)).toBe(0x20);
 
 	// A protected disk sets the write-protect bit.
 	const locked = setup(new AtrImage(makeAtr(128, 4), { writeProtected: true }));
 	setDcb(locked.machine, { command: 0x53, buffer: 0x02ea, byteCount: 4 });
 	locked.handler(SIOV);
-	expect(locked.machine.read(0x02ea, ReadOptions.NONE)).toBe(0x08);
+	expect(locked.machine.mmu.read(0x02ea, ReadOptions.NONE)).toBe(0x08);
 });
 
 test("the trap fires on a real JSR through SIOV", () => {
@@ -153,19 +153,19 @@ test("the trap fires on a real JSR through SIOV", () => {
 	setDcb(machine, { command: 0x52, buffer: 0x2000, byteCount: 128, aux: 3 });
 
 	// JSR SIOV
-	machine.write(0x0600, 0x20, ReadOptions.NONE);
-	machine.write(0x0601, SIOV & 0xff, ReadOptions.NONE);
-	machine.write(0x0602, SIOV >> 8, ReadOptions.NONE);
+	machine.mmu.write(0x0600, 0x20, ReadOptions.NONE);
+	machine.mmu.write(0x0601, SIOV & 0xff, ReadOptions.NONE);
+	machine.mmu.write(0x0602, SIOV >> 8, ReadOptions.NONE);
 
 	cpu.reset(true);
-	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.run();
+	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.cycle();
 	cpu.PC = 0x0600;
 	cpu.S = 0xfd;
-	for (let i = 0; i < 60 && cpu.PC !== 0x0603; i++) cpu.run();
+	for (let i = 0; i < 60 && cpu.PC !== 0x0603; i++) cpu.cycle();
 
 	expect(cpu.PC).toBe(0x0603);
 	expect(cpu.Y).toBe(0x01);
-	expect(machine.read(0x2000, ReadOptions.NONE)).toBe(3);
+	expect(machine.mmu.read(0x2000, ReadOptions.NONE)).toBe(3);
 });
 
 test("the built-in trap only fires while the OS ROM is mapped", () => {
@@ -175,21 +175,21 @@ test("the built-in trap only fires while the OS ROM is mapped", () => {
 	const machine = makeMachine("800XL");
 	machine.insertDisk(new AtrImage(makeAtr(128, 4)));
 	setDcb(machine, { command: 0x52, buffer: 0x2000, byteCount: 128, aux: 2 });
-	expect(machine.read(SIOV, ReadOptions.SYNC)).toBe(0x60);
+	expect(machine.mmu.read(SIOV, ReadOptions.SYNC)).toBe(0x60);
 
 	// Bank the OS ROM out (PBCTL selects the DDR, all outputs, then the data
 	// register with bit 0 clear) and plant a byte in the RAM underneath.
-	machine.write(0xd303, 0x00, ReadOptions.NONE);
-	machine.write(0xd301, 0xff, ReadOptions.NONE);
-	machine.write(0xd303, 0x04, ReadOptions.NONE);
-	machine.write(0xd301, 0xfe, ReadOptions.NONE);
-	machine.write(SIOV, 0x42, ReadOptions.NONE);
+	machine.mmu.write(0xd303, 0x00, ReadOptions.NONE);
+	machine.mmu.write(0xd301, 0xff, ReadOptions.NONE);
+	machine.mmu.write(0xd303, 0x04, ReadOptions.NONE);
+	machine.mmu.write(0xd301, 0xfe, ReadOptions.NONE);
+	machine.mmu.write(SIOV, 0x42, ReadOptions.NONE);
 
 	// Turbo Basic XL keeps its interpreter under the OS: with the ROM banked
 	// out, the fetch must fall through to the program's own code.
-	expect(machine.read(SIOV, ReadOptions.SYNC)).toBe(0x42);
+	expect(machine.mmu.read(SIOV, ReadOptions.SYNC)).toBe(0x42);
 
 	// Banked back in, the trap serves SIO again.
-	machine.write(0xd301, 0xff, ReadOptions.NONE);
-	expect(machine.read(SIOV, ReadOptions.SYNC)).toBe(0x60);
+	machine.mmu.write(0xd301, 0xff, ReadOptions.NONE);
+	expect(machine.mmu.read(SIOV, ReadOptions.SYNC)).toBe(0x60);
 });

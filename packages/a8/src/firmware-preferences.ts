@@ -7,6 +7,25 @@ export interface FirmwareContext {
 	tv: "ntsc" | "pal";
 }
 
+/** OS firmware keys, best-first, for the given machine. */
+export function preferredOsKeys(ctx: FirmwareContext): readonly FirmwareKey[] {
+	switch (ctx.model) {
+		case "400/800":
+			return ctx.tv === "pal" ? OS_800_PAL : OS_800_NTSC;
+		case "1200xl":
+			return OS_1200XL;
+		case "xegs":
+			return OS_XEGS;
+		default: // xl/xe
+			return OS_XLXE;
+	}
+}
+
+/** BASIC firmware keys, best-first. */
+export function preferredBasicKeys(): readonly FirmwareKey[] {
+	return BASIC_PREFERENCE;
+}
+
 // OS firmware, best-first. The emulated machines (800 NTSC/PAL, and 800XL/130XE
 // -> the shared XL/XE list) and the not-yet-emulated 1200XL/XEGS each rank toward
 // their own native ROMs first, then the rest of the XL/XE-class OSes (which all
@@ -78,20 +97,6 @@ const OS_XEGS: readonly FirmwareKey[] = [
 	"os-b-ntsc-xformer",
 ];
 
-/** OS firmware keys, best-first, for the given machine. */
-export function preferredOsKeys(ctx: FirmwareContext): readonly FirmwareKey[] {
-	switch (ctx.model) {
-		case "400/800":
-			return ctx.tv === "pal" ? OS_800_PAL : OS_800_NTSC;
-		case "1200xl":
-			return OS_1200XL;
-		case "xegs":
-			return OS_XEGS;
-		default: // xl/xe
-			return OS_XLXE;
-	}
-}
-
 // BASIC firmware, best-first. Machine-independent (any BASIC runs on any
 // machine; XL/XE shipped rev C). The replacements rank below the real rev C but
 // above the buggier original revisions.
@@ -102,8 +107,3 @@ const BASIC_PREFERENCE: readonly FirmwareKey[] = [
 	"altirra-basic",
 	"atarixx-basic",
 ];
-
-/** BASIC firmware keys, best-first. */
-export function preferredBasicKeys(): readonly FirmwareKey[] {
-	return BASIC_PREFERENCE;
-}

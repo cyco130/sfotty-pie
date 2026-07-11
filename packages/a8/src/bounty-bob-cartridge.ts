@@ -20,14 +20,6 @@ import { Pulse } from "./signal.ts";
  * the access); PEEKs read without switching.
  */
 export class BountyBobCartridge implements Cartridge {
-	#rom: Uint8Array;
-	#bankLow = 0; // $8000-$8FFF: image bank 0-3
-	#bankHigh = 0; // $9000-$9FFF: image bank 4-7, stored as 0-3
-	#views = new Map<number, Uint8Array>();
-
-	/** See {@link Cartridge.mappingChanged}. */
-	readonly mappingChanged = new Pulse();
-
 	constructor(rom: Uint8Array) {
 		if (rom.length !== 40 * 1024) {
 			throw new Error(
@@ -45,31 +37,15 @@ export class BountyBobCartridge implements Cartridge {
 		return true;
 	}
 
-	// The ROM offset the address decodes to under the current banks.
-	#offset(address: number): number {
-		if (address < 0x9000) {
-			return this.#bankLow * 4096 + (address & 0x0fff);
-		}
-		if (address < 0xa000) {
-			return 16384 + this.#bankHigh * 4096 + (address & 0x0fff);
-		}
-		return 32768 + (address & 0x1fff);
-	}
+	/** See {@link Cartridge.mappingChanged}. */
+	readonly mappingChanged = new Pulse();
 
-	// Apply a trigger access ($xFF6-$xFF9 in either switching window).
-	#trigger(address: number): void {
-		const bank = address - 0x0ff6 - (address & 0xf000);
-		if (bank < 0 || bank > 3) return;
-		if (address < 0x9000) {
-			if (this.#bankLow === bank) return;
-			this.#bankLow = bank;
-		} else if (address < 0xa000) {
-			if (this.#bankHigh === bank) return;
-			this.#bankHigh = bank;
-		} else {
-			return;
+	reset(cold: boolean): void {
+		if (cold && (this.#bankLow !== 0 || this.#bankHigh !== 0)) {
+			this.#bankLow = 0;
+			this.#bankHigh = 0;
+			this.mappingChanged.emit();
 		}
-		this.mappingChanged.emit();
 	}
 
 	read(address: number, options: ReadOptions): number {
@@ -112,11 +88,35 @@ export class BountyBobCartridge implements Cartridge {
 		return view;
 	}
 
-	reset(cold: boolean): void {
-		if (cold && (this.#bankLow !== 0 || this.#bankHigh !== 0)) {
-			this.#bankLow = 0;
-			this.#bankHigh = 0;
-			this.mappingChanged.emit();
+	#rom: Uint8Array;
+	#bankLow = 0; // $8000-$8FFF: image bank 0-3
+	#bankHigh = 0; // $9000-$9FFF: image bank 4-7, stored as 0-3
+	#views = new Map<number, Uint8Array>();
+
+	// The ROM offset the address decodes to under the current banks.
+	#offset(address: number): number {
+		if (address < 0x9000) {
+			return this.#bankLow * 4096 + (address & 0x0fff);
 		}
+		if (address < 0xa000) {
+			return 16384 + this.#bankHigh * 4096 + (address & 0x0fff);
+		}
+		return 32768 + (address & 0x1fff);
+	}
+
+	// Apply a trigger access ($xFF6-$xFF9 in either switching window).
+	#trigger(address: number): void {
+		const bank = address - 0x0ff6 - (address & 0xf000);
+		if (bank < 0 || bank > 3) return;
+		if (address < 0x9000) {
+			if (this.#bankLow === bank) return;
+			this.#bankLow = bank;
+		} else if (address < 0xa000) {
+			if (this.#bankHigh === bank) return;
+			this.#bankHigh = bank;
+		} else {
+			return;
+		}
+		this.mappingChanged.emit();
 	}
 }

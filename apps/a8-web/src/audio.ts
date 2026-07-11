@@ -10,15 +10,6 @@ import processorUrl from "./audio-processor.ts?worker&url";
  * clock the timing master.
  */
 export class AudioOutput {
-	readonly context: AudioContext;
-	readonly #node: AudioWorkletNode;
-	readonly #gain: GainNode;
-
-	// Queue-depth accounting: samples sent minus samples consumed, the
-	// latter estimated from the audio clock.
-	#sent = 0;
-	#base = 0;
-
 	private constructor(
 		context: AudioContext,
 		node: AudioWorkletNode,
@@ -27,18 +18,6 @@ export class AudioOutput {
 		this.context = context;
 		this.#node = node;
 		this.#gain = gain;
-	}
-
-	/**
-	 * Mute at the output, not by withholding chunks - the emulator paces
-	 * itself off the audio clock, so the worklet must keep consuming.
-	 */
-	get muted(): boolean {
-		return this.#gain.gain.value === 0;
-	}
-
-	set muted(value: boolean) {
-		this.#gain.gain.value = value ? 0 : 1;
 	}
 
 	/** Create the context and worklet; null when Web Audio is unavailable. */
@@ -56,6 +35,8 @@ export class AudioOutput {
 		return new AudioOutput(context, node, gain);
 	}
 
+	readonly context: AudioContext;
+
 	/** True while the context runs - i.e. the audio clock is ticking. */
 	get running(): boolean {
 		return this.context.state === "running";
@@ -64,6 +45,18 @@ export class AudioOutput {
 	/** Resume the context; browsers require a user gesture for this. */
 	resume(): void {
 		if (!this.running) void this.context.resume();
+	}
+
+	/**
+	 * Mute at the output, not by withholding chunks - the emulator paces
+	 * itself off the audio clock, so the worklet must keep consuming.
+	 */
+	get muted(): boolean {
+		return this.#gain.gain.value === 0;
+	}
+
+	set muted(value: boolean) {
+		this.#gain.gain.value = value ? 0 : 1;
 	}
 
 	/** The estimated unplayed sample count. */
@@ -91,4 +84,12 @@ export class AudioOutput {
 		this.#sent = 0;
 		this.#base = this.context.currentTime;
 	}
+
+	readonly #node: AudioWorkletNode;
+	readonly #gain: GainNode;
+
+	// Queue-depth accounting: samples sent minus samples consumed, the
+	// latter estimated from the audio clock.
+	#sent = 0;
+	#base = 0;
 }

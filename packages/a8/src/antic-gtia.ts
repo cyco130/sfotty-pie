@@ -1,20 +1,10 @@
-import type { Memory } from "@sfotty-pie/sfotty";
+import { ReadOptions, type Memory } from "@sfotty-pie/sfotty";
 import { DelayLine } from "./delay-line.ts";
 import { Signal } from "./signal.ts";
 import {
 	NTSC_LINES_PER_FRAME,
 	PAL_LINES_PER_FRAME,
 } from "./timing-constants.ts";
-
-// NMI delay-line ops: the line drop two cycles after a rise, and the
-// delayed rise from a late NMIEN enable.
-const OP_NMI_DROP = 0x01;
-const OP_NMI_RISE = 0x02;
-
-interface AnticGtiaConfig {
-	dmaRead: (address: number) => number;
-	log: (message: string) => void;
-}
 
 /**
  * The video output chip variant. The CTIA (in early 400/800s) predates the
@@ -25,12 +15,23 @@ interface AnticGtiaConfig {
  */
 export type TvAdapter = "ctia" | "gtia";
 
+interface AnticGtiaConfig {
+	/** The bus ANTIC's DMA fetches read from - the machine passes its Mmu. */
+	bus: Pick<Memory, "read">;
+	log: (message: string) => void;
+}
+
 interface AnticGtiaOptions {
 	anticTvSystem: "ntsc" | "pal";
 	gtiaTvSystem: "ntsc" | "pal";
 	/** Default "gtia". */
 	tvAdapter?: TvAdapter;
 }
+
+// NMI delay-line ops: the line drop two cycles after a rise, and the
+// delayed rise from a late NMIEN enable.
+const OP_NMI_DROP = 0x01;
+const OP_NMI_RISE = 0x02;
 
 // What the GTIA color registers hold at power-on: a dark brown (hue $F,
 // minimum luminance). Observed behavior, not documented.
@@ -49,7 +50,7 @@ const POWER_ON_COLOR = 0xf0;
 // character glyph fetches sit one cycle later - three cycles after their
 // name fetches at 10/18/26 - and take 6. Both land the first pixel exactly
 // at the playfield start (HPOS 32/48/64). The delays below cover the trip
-// to the ANx bus (as a DelayLine delay scheduled from busCycle time,
+// to the ANx bus (as a DelayLine delay scheduled from busPhase time,
 // before the cycle's own two ticks, that is bus-lag + 1); GTIA's output
 // register (#anxHold) adds the final color clock.
 const ANX_BITMAP_DELAY = 8;
@@ -79,186 +80,470 @@ const COLOR_WRITE_DELAY = 2;
 const PRIOR_WRITE_DELAY = 4;
 
 export class AnticGtia implements Memory {
-	// NMIEN bits
-	vbiEnabled = false;
-	dliEnabled = false;
+	constructor({ bus, log }: AnticGtiaConfig, initialOptions: AnticGtiaOptions) {
+		this.#bus = bus;
+		this.#log = log;
 
-	// NMIST bits
-	res = true;
-	vbi = false;
-	dli = false;
+		this.anticLineCount =
+			initialOptions.anticTvSystem === "pal"
+				? PAL_LINES_PER_FRAME
+				: NTSC_LINES_PER_FRAME;
+		this.#gtiaPal = initialOptions.gtiaTvSystem === "pal" ? 0x1 : 0xf;
+		this.#gtiaModes = initialOptions.tvAdapter !== "ctia";
 
-	// VCOUNT
-	vcount = 0;
+		this.switchesIn.watch(() => this.#updateSwitchesOut());
+	}
 
-	// DMACTL bits
-	playfieldWidth: 0 | 1 | 2 | 3 = 0;
-	displayListDmaEnabled = false;
-	playerDmaEnabled = false;
-	missileDmaEnabled = false;
-	verticalPmResolution: 1 | 2 = 1;
+	beforeCpu(): void {
+		const i = this.hpos;
 
-	// DLIST address
-	displayListAddress = 0;
-	lastDisplayListAddress = 0;
-	#temp = 0;
+		this.#justLatched = 0;
 
-	hscrol = 0;
+		// NMI line events. The rise is processed after the drop so that a
+		// same-cycle race keeps the line up.
+		const nmiOps = this.#nmiDelay.cycle();
+		if (nmiOps & OP_NMI_DROP) {
+			this.nmi = false;
+		}
+		if (nmiOps & OP_NMI_RISE) {
+			this.nmi = true;
+			this.#nmiDelay.schedule(2, OP_NMI_DROP);
+		}
 
-	// Vertical scrolling (VSCROL + the display list's bit 5). The first
-	// line of a VS region starts the row counter at VSCROL; the first
-	// instruction after the region (its bit 5 clear) is the exit line and
-	// ends when the row counter reaches VSCROL - shorter *or longer* than
-	// the mode's natural height (the 4-bit counter wraps through 15).
-	// Acid800 antic_vscroll pins all of it, including the wrap.
-	vscrol = 0;
-	#vsRegion = false; // the previous mode line carried the VS bit
-	#vsExit = false; // the current instruction ends at VSCROL
+		if (i === 6) {
+			// The "is this the instruction's last scanline" decision is made
+			// here, one cycle before the NMIST latch - a VSCROL write
+			// completing by cycle 5 still changes it, a cycle later
+			// doesn't (antic_vscroldli pins both sides).
+			this.#lastLineArmed =
+				this.modeLineNo ===
+				(this.#vsExit ? this.vscrol : this.modeLineHeight - 1);
+		} else if (i === 7) {
+			// The NMIST status bits latch at cycle 7 - one cycle before the
+			// NMI line pull - whenever their event occurs; NMIEN only gates
+			// the pull, so software can poll NMIST with NMIs disabled. The
+			// DLI and VBI bits report the most recent event: each clears the
+			// other; NMIRES clears everything (but loses a same-cycle race).
+			// The cycle is pinned by Acid800's cycle-counted NMIST samples.
+			if (this.instruction & 0x80 && this.#lastLineArmed) {
+				this.dli = true;
+				this.vbi = false;
+				this.#justLatched |= 0x80;
+			}
 
-	// The current scanline is an instruction's first: display list and
-	// character-name DMA happen here. Distinct from modeLineNo === 0 - a
-	// VS entry starts the row counter at VSCROL on its first line.
-	#newInstruction = true;
+			if (this.vcount === 248) {
+				this.vbi = true;
+				// The VBI displaces a stale DLI latch entirely.
+				this.#justLatched = (this.#justLatched & ~0x80) | 0x40;
+				if (this.rnmi) {
+					this.res = true;
+					this.#justLatched |= 0x20;
+				}
+				this.dli = false;
+			}
 
-	// Armed at cycle 6: this scanline is its instruction's last. The DLI
-	// latch at cycle 7 uses this - a VSCROL write by cycle 5 still
-	// changes the decision, a cycle later doesn't (antic_vscroldli).
-	#lastLineArmed = false;
+			// Arm the cycle-8 pull with NMIEN as of now: a disable landing
+			// after this cycle is too late to block (set-dominant), while an
+			// enable landing before the pull still fires - both per Acid800.
+			this.#lineLatched = this.#justLatched;
+			this.#armedNmi =
+				(this.dliEnabled && !!(this.#lineLatched & 0x80)) ||
+				(this.vbiEnabled && !!(this.#lineLatched & 0x40)) ||
+				!!(this.#lineLatched & 0x20);
+		} else if (i === 8) {
+			// ANTIC pulls NMI at cycle 8, right after the display list and P/M
+			// DMA slots, and holds it for two cycles (8 and 9). Both cycles are
+			// free of DMA contention by design, so the CPU - whose edge
+			// detector samples inside run() - is always running (or
+			// WSYNC-stalled, which still ticks the detector) while the line is
+			// up. That's what makes the skip-run()-on-halt model safe.
+			if (this.#armedNmi) {
+				this.nmi = true;
+				this.#nmiDelay.schedule(2, OP_NMI_DROP);
+			}
+		}
 
-	// CHBASE
-	chbase = 0;
+		this.hpos++;
+		if (this.hpos === 114) {
+			this.hpos = 0;
 
-	// CHACTL: bit 0 blanks inverse-video chars, bit 1 inverts them, bit 2
-	// reflects character rows vertically.
-	chactl = 0;
+			this.vcount++;
+			if (this.vcount === 248) {
+				this.dli = false;
+			}
 
-	// PMBASE
-	pmbase = 0;
+			if (this.vcount === this.anticLineCount) {
+				this.vcount = 0;
+			}
 
-	// Memory scan counter
-	msc = 0;
+			// The row counter: an instruction ends when the counter reaches
+			// the line end - VSCROL (live) on a vertical-scroll exit line,
+			// height-1 otherwise. A non-match keeps counting through the
+			// 4-bit wrap (antic_vscroll's VSCROL-9-on-height-8 case). The
+			// counter only runs for display-region lines; the vertical
+			// blank closes any open instruction and the next one starts at
+			// the top of the next frame (a VS region spanning the blank
+			// continues there - antic_vscroll's last check).
+			if (this.vcount > 8 && this.vcount < 248) {
+				const lineEnd = this.#vsExit ? this.vscrol : this.modeLineHeight - 1;
+				if (this.modeLineNo === lineEnd) {
+					this.modeLineNo = 0;
+					this.#newInstruction = true;
+				} else {
+					this.modeLineNo = (this.modeLineNo + 1) & 15;
+					this.#newInstruction = false;
+				}
+			} else if (this.vcount === 248) {
+				this.modeLineNo = 0;
+				this.#newInstruction = true;
+				this.#vsExit = false;
+			}
+		}
 
-	// wsync
-	wsync = false;
-	// A WSYNC write landing while the stall is already armed (an RMW
-	// instruction's double write) pushes the release one cycle later.
-	wsyncLate = false;
+		if (this.waitingForVbi && this.vcount === 0) {
+			this.waitingForVbi = false;
+		}
 
-	// Internal
-	instruction: number = 0;
-	hires = false;
-	modeLineNo = 0;
-	modeLineHeight = 1;
-	charFetchRate = 0;
-	playfieldFetchRate = 0;
+		if (i === 0) {
+			// The line's DMA pattern: visibility and the instruction state are
+			// per-line inputs (mid-line register writes rebuild it too).
+			this.#dmaVisibleLine =
+				!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
+			if (
+				this.#lineFetchWidth &&
+				!this.#lineStopCycle &&
+				this.#dmaVisibleLine
+			) {
+				// No stop position matched this clock last line: it keeps
+				// running into this one on the same grid - a scanline is
+				// 114 cycles, so the phase shifts by -114 ≡ +6 mod 8
+				// (AHRM 4.12's abnormal DMA; Acid800 antic_hscrolbug).
+				this.#linePhase =
+					((this.#lineContinued
+						? this.#linePhase
+						: NAME_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3] +
+							this.#lineFetchShift) +
+						6) &
+					7;
+				this.#lineContinued = true;
+			} else {
+				// Normal case: the stop cleared the clock (or vertical
+				// blank does, unconditionally); the line starts un-armed.
+				this.#lineFetchWidth = 0;
+				this.#lineFetchShift = 0;
+				this.#lineContinued = false;
+				this.#linePhase = 0;
+			}
+			this.#lineStopCycle = 0;
+			this.#rebuildDmaPattern();
+		}
 
-	hpos: number = 0;
-	refreshPending = false;
+		// Request 9 refresh cycles every 4 cycles starting from 25
+		if (REFRESH_REQUEST[i]) {
+			this.refreshPending = true;
+		}
+
+		// The stalled fetch completes at cycle 104 (the next instruction's
+		// remaining cycles run from 105) - verified against Acid800's
+		// cycle-counted VCOUNT samples. A double-armed WSYNC completes one
+		// cycle later.
+		if (this.wsync && i === (this.wsyncLate ? 105 : 104)) {
+			this.wsync = false;
+			this.wsyncLate = false;
+		}
+
+		this.rdy = !this.wsync;
+
+		if (this.vcount === 8 && i === 1) {
+			this.lastDisplayListAddress = this.displayListAddress;
+		}
+
+		// The DMA fetch itself - a bus access - is busPhase's job; beforeCpu
+		// commits the cycle's scheduling without touching the bus.
+		this.#dmaHpos = i;
+	}
 
 	/**
-	 * The color registers in address order - COLPM0-3, COLPF0-3, COLBK
-	 * ($D012-$D01A). The indices double as the priority table's selector
-	 * bits (see the COLPM0..COLBK constants).
+	 * The ANTIC bus phase: perform this cycle's DMA action (display list,
+	 * P/M, character, or playfield fetch) or DRAM refresh, and set
+	 * {@link halt} for it. The per-cycle decision is one lookup in the line's
+	 * precomputed DMA pattern (see {@link buildDmaPattern}). Split out from
+	 * {@link beforeCpu} - which commits the cycle's scheduling without
+	 * touching the bus - so the read can be retried after a suspend without
+	 * re-advancing ANTIC's counters. Call once per cycle, between beforeCpu
+	 * and running the CPU.
 	 */
-	readonly colorRegisters = new Uint8Array(9).fill(POWER_ON_COLOR);
+	busPhase(): void {
+		const entry = this.#dmaPattern[this.#dmaHpos]!;
+		if (entry & (DMA_STOP_CHECK | DMA_DECODE_FIRST)) {
+			if (entry & DMA_DECODE_FIRST) {
+				// A carried-over playfield fetch overlapping the bus-free
+				// instruction re-decode slot: decode, then run the fetch.
+				this.#decodeInstruction();
+				this.#rebuildDmaPattern();
+			}
+			if (entry & DMA_STOP_CHECK) {
+				// The playfield stop position: clear the DMA clock. The
+				// slot sits at deadline + 1, so it samples before this
+				// cycle's CPU write can land - the write deadline. The
+				// cycle's own action (a trailing fetch) still runs off
+				// the pre-stop entry.
+				this.#lineStopCycle = this.#dmaHpos - 1;
+				this.#rebuildDmaPattern();
+			}
+		}
+		const action = entry & DMA_ACTION_MASK;
 
-	// P/M Horizontal positions
-	hposp0 = 0;
-	hposp1 = 0;
-	hposp2 = 0;
-	hposp3 = 0;
-	hposm0 = 0;
-	hposm1 = 0;
-	hposm2 = 0;
-	hposm3 = 0;
+		if (action === DMA_NONE) {
+			if (this.refreshPending) {
+				// DRAM refresh cycle
+				this.refreshPending = false;
+				this.halt = true;
+			} else {
+				this.halt = false;
+			}
+			return;
+		}
 
-	// P/M data. Accessors so any nonzero value - a register write, a DMA
-	// latch, or a direct poke - wakes the P/M pipeline out of its idle fast
-	// path (see #drawPlayerMissile). Zero writes can't break an idle state:
-	// idle already implies every latch is zero.
-	#grafP0 = 0;
-	#grafP1 = 0;
-	#grafP2 = 0;
-	#grafP3 = 0;
-	#grafM = 0;
-
-	get grafP0(): number {
-		return this.#grafP0;
+		this.halt = true;
+		switch (action) {
+			case DMA_MISSILE:
+				this.#fetchMissiles();
+				break;
+			case DMA_PLAYER:
+				this.#fetchPlayer(entry >> 8);
+				break;
+			case DMA_DL_FETCH:
+				this.instruction = this.#dmaRead(this.displayListAddress);
+				this.#incrementDisplayListAddress();
+				this.#decodeInstruction();
+				this.#rebuildDmaPattern();
+				break;
+			case DMA_DL_DECODE:
+				// A new instruction with display-list DMA off: the stale
+				// instruction re-decodes, but the bus is free.
+				this.#decodeInstruction();
+				this.#rebuildDmaPattern();
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_DL_LO:
+				this.#fetchDlArgLo();
+				break;
+			case DMA_DL_HI:
+				this.#fetchDlArgHi();
+				break;
+			case DMA_NAME:
+				this.#fetchName(entry >> 8);
+				break;
+			case DMA_GLYPH:
+				this.#fetchGlyph(entry >> 8);
+				break;
+			case DMA_BITMAP:
+				this.#fetchBitmap(entry >> 8);
+				break;
+			case DMA_REPLAY:
+				// Line-buffer replay: pixels flow but the bus is free - a
+				// pending refresh may use the cycle.
+				this.#replayBitmap(entry >> 8);
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_PF_SKIP:
+				// A masked load slot (playfield DMA disabled mid-line): MSC
+				// advances, the bus stays free, and the load takes the bus
+				// value (completed in afterCpu once the CPU has driven it).
+				this.#virtualLoad = entry;
+				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000);
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_GLYPH_VIRT:
+				// A dropped fetch past the DMA cutoff: the load still runs,
+				// from the bus (afterCpu completes it, like the phantom
+				// GRAF latch).
+				this.#virtualLoad = entry;
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_BITMAP_VIRT:
+				this.#virtualLoad = entry;
+				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000);
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			case DMA_PF_ARM: {
+				// The playfield DMA clock starts: latch the geometry the
+				// line's fetches will use (the slot samples the registers
+				// before this cycle's CPU write can land - the deadline).
+				const scrolled =
+					(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
+				let fetchWidth: number = this.playfieldWidth;
+				if (scrolled && fetchWidth < 3) fetchWidth++;
+				this.#lineFetchWidth = fetchWidth;
+				this.#lineFetchShift = scrolled ? this.hscrol >> 1 : 0;
+				this.#rebuildDmaPattern();
+				if (this.refreshPending) {
+					this.refreshPending = false;
+				} else {
+					this.halt = false;
+				}
+				break;
+			}
+		}
 	}
-	set grafP0(value: number) {
-		this.#grafP0 = value;
-		if (value) this.#pmIdle = false;
+
+	afterCpu(frame: Uint8Array, busData: number) {
+		if (this.#virtualLoad) {
+			const entry = this.#virtualLoad;
+			this.#virtualLoad = 0;
+			const index = entry >> 8;
+			const action = entry & DMA_ACTION_MASK;
+			if (action === DMA_GLYPH_VIRT) {
+				this.#emitGlyph(this.#buffer[index]!, busData);
+			} else if (action === DMA_BITMAP_VIRT) {
+				this.#buffer[index] = busData;
+				this.#emitBitmapPixels(busData);
+			} else {
+				// DMA_PF_SKIP: capture the bus into the line buffer (MSC
+				// already advanced in busPhase); the display stays off.
+				this.#buffer[index] = busData;
+			}
+		}
+
+		const pixels0 = this.#generateColor(0);
+
+		const pixels1 = this.#generateColor(1);
+
+		const left0 = pixels0 >> 8;
+		const right0 = pixels0 & 0xff;
+
+		const left1 = pixels1 >> 8;
+		const right1 = pixels1 & 0xff;
+
+		const i = this.hpos - 1;
+
+		const x = i - 17;
+		const y = this.vcount - 8;
+
+		if (y >= 0 && y < 240) {
+			if (x >= 0 && x < 94) {
+				const base = (x + y * 94) * 4;
+				frame[base] = left0;
+				frame[base + 1] = right0;
+				frame[base + 2] = left1;
+				frame[base + 3] = right1;
+			}
+
+			const isOddScanline = y & 1;
+
+			// GTIA has no window into ANTIC's DMA schedule: it takes the
+			// first halted cycle within horizontal blank to be the missile
+			// fetch, and the four cycles starting two later to be the player
+			// fetches. With P/M DMA on that reproduces the real slots
+			// (missile 0, players 2-5); with it off, a halted display-list
+			// fetch is mistaken for the missile slot and the loads shift -
+			// and a line with no halted HBLANK cycle loads nothing (AHRM;
+			// Acid800 phantomdma).
+			if (i === 0) {
+				this.#pmFetchCycle = -1;
+			}
+			if (this.#pmFetchCycle < 0 && this.halt && i < 17) {
+				this.#pmFetchCycle = i;
+			}
+			const pmSlot = this.#pmFetchCycle < 0 ? -1 : i - this.#pmFetchCycle;
+
+			// The GRAF registers latch the bus during the P/M fetch slots only
+			// when GRACTL enables it - with GRACTL off, direct GRAF writes
+			// persist (the GTIA collision tests rely on that). The latch runs for
+			// the whole visible region (scan lines 8-247 - the enclosing y < 240):
+			// an earlier cut at y < 224 froze player graphics over the bottom 16
+			// lines, which is invisible on NTSC but corrupts the lower HUD on PAL
+			// (its taller frame puts content there) - River Raid's bug.
+			if (pmSlot === 0 && this.enableMissiles) {
+				// VDELAY bits 0-3 delay each missile independently, but
+				// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
+				// latch each pair on its own: a delayed missile updates only
+				// on odd scanlines, exactly like the per-player logic below.
+				let m = this.grafM;
+				if (isOddScanline || !(this.vdelay & 0x01)) {
+					m = (m & ~0x03) | (busData & 0x03);
+				}
+				if (isOddScanline || !(this.vdelay & 0x02)) {
+					m = (m & ~0x0c) | (busData & 0x0c);
+				}
+				if (isOddScanline || !(this.vdelay & 0x04)) {
+					m = (m & ~0x30) | (busData & 0x30);
+				}
+				if (isOddScanline || !(this.vdelay & 0x08)) {
+					m = (m & ~0xc0) | (busData & 0xc0);
+				}
+				this.grafM = m;
+			}
+
+			if (this.enablePlayers) {
+				if (pmSlot === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
+					this.grafP0 = busData;
+				}
+
+				if (pmSlot === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
+					this.grafP1 = busData;
+				}
+
+				if (pmSlot === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
+					this.grafP2 = busData;
+				}
+
+				if (pmSlot === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
+					this.grafP3 = busData;
+				}
+			}
+		}
 	}
 
-	get grafP1(): number {
-		return this.#grafP1;
-	}
-	set grafP1(value: number) {
-		this.#grafP1 = value;
-		if (value) this.#pmIdle = false;
-	}
+	/** ANTIC's NMI output line. Copy to the CPU's NMI input every cycle. */
+	nmi = false;
 
-	get grafP2(): number {
-		return this.#grafP2;
-	}
-	set grafP2(value: number) {
-		this.#grafP2 = value;
-		if (value) this.#pmIdle = false;
-	}
+	/**
+	 * True when ANTIC owns the bus this cycle (DMA fetch or DRAM refresh): the
+	 * CPU is halted and `run()` must not be called. A WSYNC stall is different -
+	 * it pulls `rdy` low instead, and the CPU still runs, repeating its stalled
+	 * read on the bus every cycle.
+	 */
+	halt = false;
 
-	get grafP3(): number {
-		return this.#grafP3;
-	}
-	set grafP3(value: number) {
-		this.#grafP3 = value;
-		if (value) this.#pmIdle = false;
-	}
+	/** The RDY output line: false while a WSYNC stall is in effect. */
+	rdy = true;
 
-	get grafM(): number {
-		return this.#grafM;
-	}
-	set grafM(value: number) {
-		this.#grafM = value;
-		if (value) this.#pmIdle = false;
-	}
+	/**
+	 * The RNMI input line: the 400/800 Reset key (not wired up on XL/XE,
+	 * where the Reset button pulses the system reset line instead). Sampled
+	 * at the VBLANK NMI point - the reset NMI fires alongside the VBI, never
+	 * mid-frame - and cannot be masked through NMIEN; NMIST bit 5 reports it.
+	 */
+	rnmi = false;
 
-	// False while any P/M state could produce output or change: while true,
-	// #drawPlayerMissile is a no-op (all shift registers and GRAF latches are
-	// zero, so comparator loads only OR in zeros and the counter resets they
-	// perform are unobservable). Re-evaluated at each visible line start;
-	// cleared by the graf* setters.
-	#pmIdle = false;
-
-	// Collision registers
-	m0pf = 0;
-	m1pf = 0;
-	m2pf = 0;
-	m3pf = 0;
-
-	p0pf = 0;
-	p1pf = 0;
-	p2pf = 0;
-	p3pf = 0;
-
-	// The player collision latches power on all-set (minus the self bits);
-	// the playfield ones power on clear. Observed behavior (Altirra).
-	m0pl = 0x0f;
-	m1pl = 0x0f;
-	m2pl = 0x0f;
-	m3pl = 0x0f;
-
-	p0pl = 0x0e;
-	p1pl = 0x0d;
-	p2pl = 0x0b;
-	p3pl = 0x07;
-
-	prior = 0x0f;
-
-	vdelay = 0x0f;
-
-	// GRACTL bits
-	enablePlayers = false;
-	enableMissiles = false;
+	// Triggers (inputs, pulled up). On XL/XE the machine drives trig3 from the
+	// cartridge sense line (RD5): 1 = cartridge present, 0 = empty slot.
+	trig0 = 1;
+	trig1 = 1;
+	trig2 = 1;
+	trig3 = 1;
 
 	// The console switch lines S0-S3 (S0 = Start, S1 = Select, S2 = Option,
 	// S3 = speaker), as wire levels. switchesIn is the external drive (a
@@ -277,50 +562,7 @@ export class AnticGtia implements Memory {
 		this.switchesIn.value = (this.switchesIn.value & 0x08) | (value & 0x07);
 	}
 
-	forceConsole: number | null = null; // Option
 	consoleSpeaker = 0;
-	// The written CONSOL latch: bits 0-2 actively pull the (open-collector)
-	// switch lines low. It powers on all-set, so CONSOL reads 0 until the OS
-	// writes CONSOL.
-	consolWritten = 0x07;
-
-	// Triggers (inputs, pulled up). On XL/XE the machine drives trig3 from the
-	// cartridge sense line (RD5): 1 = cartridge present, 0 = empty slot.
-	trig0 = 1;
-	trig1 = 1;
-	trig2 = 1;
-	trig3 = 1;
-
-	anticLineCount: number;
-	#gtiaPal: number;
-	// False on a CTIA: PRIOR bits 6-7 are ignored - no special modes.
-	#gtiaModes = true;
-
-	constructor(
-		{ dmaRead, log }: AnticGtiaConfig,
-		initialOptions: AnticGtiaOptions,
-	) {
-		this.#dmaRead = dmaRead;
-		this.#log = log;
-
-		this.anticLineCount =
-			initialOptions.anticTvSystem === "pal"
-				? PAL_LINES_PER_FRAME
-				: NTSC_LINES_PER_FRAME;
-		this.#gtiaPal = initialOptions.gtiaTvSystem === "pal" ? 0x1 : 0xf;
-		this.#gtiaModes = initialOptions.tvAdapter !== "ctia";
-
-		this.switchesIn.watch(() => this.#updateSwitchesOut());
-	}
-
-	setOptions(options: AnticGtiaOptions) {
-		this.anticLineCount =
-			options.anticTvSystem === "pal"
-				? PAL_LINES_PER_FRAME
-				: NTSC_LINES_PER_FRAME;
-		this.#gtiaPal = options.gtiaTvSystem === "pal" ? 0x1 : 0xf;
-		this.#gtiaModes = options.tvAdapter !== "ctia";
-	}
 
 	reset(cold: boolean): void {
 		// ANTIC has a reset line, so it reinitializes on warm resets too. GTIA
@@ -331,178 +573,14 @@ export class AnticGtia implements Memory {
 		}
 	}
 
-	// The resolved S0-S3 line levels: the written CONSOL latch pulls bits 0-2
-	// low (open collector), the speaker drive pulls S3 low.
-	#updateSwitchesOut(): void {
-		const inLevels = this.switchesIn.value;
-		this.switchesOut.value =
-			(inLevels & ~this.consolWritten & 0x07) |
-			(this.consoleSpeaker ? 0 : inLevels & 0x08);
+	setOptions(options: AnticGtiaOptions) {
+		this.anticLineCount =
+			options.anticTvSystem === "pal"
+				? PAL_LINES_PER_FRAME
+				: NTSC_LINES_PER_FRAME;
+		this.#gtiaPal = options.gtiaTvSystem === "pal" ? 0x1 : 0xf;
+		this.#gtiaModes = options.tvAdapter !== "ctia";
 	}
-
-	// Keep the assignments in sync with the field initializers.
-	#resetAntic(): void {
-		// NMIEN
-		this.vbiEnabled = false;
-		this.dliEnabled = false;
-
-		// NMIST
-		this.res = true;
-		this.vbi = false;
-		this.dli = false;
-
-		this.vcount = 0;
-
-		// DMACTL
-		this.playfieldWidth = 0;
-		this.displayListDmaEnabled = false;
-		this.playerDmaEnabled = false;
-		this.missileDmaEnabled = false;
-		this.verticalPmResolution = 1;
-
-		this.displayListAddress = 0;
-		this.lastDisplayListAddress = 0;
-		this.#temp = 0;
-
-		this.hscrol = 0;
-		this.vscrol = 0;
-		this.#vsRegion = false;
-		this.#vsExit = false;
-		this.#newInstruction = true;
-		this.#lastLineArmed = false;
-		this.#pfFineDelay = 0;
-		this.chbase = 0;
-		this.chactl = 0;
-		this.pmbase = 0;
-		this.msc = 0;
-
-		this.wsync = false;
-		this.wsyncLate = false;
-
-		this.instruction = 0;
-		this.hires = false;
-		this.modeLineNo = 0;
-		this.modeLineHeight = 1;
-		this.charFetchRate = 0;
-		this.playfieldFetchRate = 0;
-
-		this.hpos = 0;
-		this.refreshPending = false;
-		this.waitingForVbi = false;
-
-		this.pfPixels.fill(0);
-		this.pfCounter = 0;
-		this.#anxLine.reset();
-		this.#anxDrain = 0;
-
-		// Output lines
-		this.nmi = false;
-		this.#nmiDelay.reset();
-		this.halt = false;
-		this.rdy = true;
-
-		this.#dmaVisibleLine = false;
-		this.#lineFetchWidth = 0;
-		this.#lineFetchShift = 0;
-		this.#lineStopCycle = 0;
-		this.#lineContinued = false;
-		this.#linePhase = 0;
-		this.#virtualLoad = 0;
-		this.#rebuildDmaPattern();
-	}
-
-	// Keep the assignments in sync with the field initializers. Inputs (console
-	// keys, triggers) reflect physical switches and are left alone.
-	#resetGtia(): void {
-		this.colorRegisters.fill(POWER_ON_COLOR);
-
-		this.hposp0 = 0;
-		this.hposp1 = 0;
-		this.hposp2 = 0;
-		this.hposp3 = 0;
-		this.hposm0 = 0;
-		this.hposm1 = 0;
-		this.hposm2 = 0;
-		this.hposm3 = 0;
-
-		this.grafP0 = 0;
-		this.grafP1 = 0;
-		this.grafP2 = 0;
-		this.grafP3 = 0;
-		this.grafM = 0;
-
-		this.m0pf = 0;
-		this.m1pf = 0;
-		this.m2pf = 0;
-		this.m3pf = 0;
-		this.p0pf = 0;
-		this.p1pf = 0;
-		this.p2pf = 0;
-		this.p3pf = 0;
-		this.m0pl = 0x0f;
-		this.m1pl = 0x0f;
-		this.m2pl = 0x0f;
-		this.m3pl = 0x0f;
-		this.p0pl = 0x0e;
-		this.p1pl = 0x0d;
-		this.p2pl = 0x0b;
-		this.p3pl = 0x07;
-
-		this.prior = 0x0f;
-		this.vdelay = 0x0f;
-		this.#pfPixelCache.fill(-1);
-
-		// GRACTL
-		this.enablePlayers = false;
-		this.enableMissiles = false;
-
-		this.consoleSpeaker = 0;
-		this.consolWritten = 0x07;
-		this.#updateSwitchesOut();
-
-		this.#sizeP0 = 1;
-		this.#sizeP0Counter = 0;
-		this.#shiftP0 = 0;
-		this.#sizeP1 = 1;
-		this.#sizeP1Counter = 0;
-		this.#shiftP1 = 0;
-		this.#sizeP2 = 1;
-		this.#sizeP2Counter = 0;
-		this.#shiftP2 = 0;
-		this.#sizeP3 = 1;
-		this.#sizeP3Counter = 0;
-		this.#shiftP3 = 0;
-		this.#sizeM0 = 1;
-		this.#sizeM0Counter = 0;
-		this.#shiftM0 = 0;
-		this.#sizeM1 = 1;
-		this.#sizeM1Counter = 0;
-		this.#shiftM1 = 0;
-		this.#sizeM2 = 1;
-		this.#sizeM2Counter = 0;
-		this.#shiftM2 = 0;
-		this.#sizeM3 = 1;
-		this.#sizeM3Counter = 0;
-		this.#shiftM3 = 0;
-
-		this.#pmFetchCycle = -1;
-
-		this.#posWrites.reset();
-		this.#sizeWrites.reset();
-		this.#grafWrites.reset();
-		this.#colorWrites.reset();
-		this.#priorWrites.reset();
-		this.#pendingGtiaWrites = 0;
-
-		this.#anxHold = 0;
-		this.#gtiaPixel = 0;
-		this.#gtiaPixelPrev = 0;
-		this.#gtiaBkMuted = false;
-		this.#gtiaPrevBkMuted = false;
-		this.#lineGtiaMode = 0;
-	}
-
-	#log: (message: string) => void;
 
 	read(address: number): number {
 		const high = address >> 8;
@@ -763,6 +841,69 @@ export class AnticGtia implements Memory {
 		}
 	}
 
+	// NMIEN bits
+	vbiEnabled = false;
+	dliEnabled = false;
+
+	// NMIST bits
+	res = true;
+	vbi = false;
+	dli = false;
+
+	// VCOUNT
+	vcount = 0;
+
+	// DMACTL bits
+	playfieldWidth: 0 | 1 | 2 | 3 = 0;
+	displayListDmaEnabled = false;
+	playerDmaEnabled = false;
+	missileDmaEnabled = false;
+	verticalPmResolution: 1 | 2 = 1;
+
+	// DLIST address
+	displayListAddress = 0;
+	lastDisplayListAddress = 0;
+
+	hscrol = 0;
+
+	// Vertical scrolling (VSCROL + the display list's bit 5). The first
+	// line of a VS region starts the row counter at VSCROL; the first
+	// instruction after the region (its bit 5 clear) is the exit line and
+	// ends when the row counter reaches VSCROL - shorter *or longer* than
+	// the mode's natural height (the 4-bit counter wraps through 15).
+	// Acid800 antic_vscroll pins all of it, including the wrap.
+	vscrol = 0;
+
+	// CHBASE
+	chbase = 0;
+
+	// CHACTL: bit 0 blanks inverse-video chars, bit 1 inverts them, bit 2
+	// reflects character rows vertically.
+	chactl = 0;
+
+	// PMBASE
+	pmbase = 0;
+
+	// Memory scan counter
+	msc = 0;
+
+	// wsync
+	wsync = false;
+	// A WSYNC write landing while the stall is already armed (an RMW
+	// instruction's double write) pushes the release one cycle later.
+	wsyncLate = false;
+
+	// Internal
+	instruction: number = 0;
+	hires = false;
+	modeLineNo = 0;
+	modeLineHeight = 1;
+	charFetchRate = 0;
+	playfieldFetchRate = 0;
+
+	hpos: number = 0;
+	refreshPending = false;
+
 	waitingForVbi = false;
 
 	// Per-fetch scratch: one byte's playfield codes, right to left;
@@ -770,6 +911,355 @@ export class AnticGtia implements Memory {
 	// 00: BK; 8..B: PF0..PF3; C..F: Hires 00..11
 	pfPixels = new Uint8Array(16);
 	pfCounter = 0;
+
+	/**
+	 * The color registers in address order - COLPM0-3, COLPF0-3, COLBK
+	 * ($D012-$D01A). The indices double as the priority table's selector
+	 * bits (see the COLPM0..COLBK constants).
+	 */
+	readonly colorRegisters = new Uint8Array(9).fill(POWER_ON_COLOR);
+
+	// P/M Horizontal positions
+	hposp0 = 0;
+	hposp1 = 0;
+	hposp2 = 0;
+	hposp3 = 0;
+	hposm0 = 0;
+	hposm1 = 0;
+	hposm2 = 0;
+	hposm3 = 0;
+
+	// P/M data. Accessors so any nonzero value - a register write, a DMA
+	// latch, or a direct poke - wakes the P/M pipeline out of its idle fast
+	// path (see #drawPlayerMissile). Zero writes can't break an idle state:
+	// idle already implies every latch is zero.
+	get grafP0(): number {
+		return this.#grafP0;
+	}
+	set grafP0(value: number) {
+		this.#grafP0 = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	get grafP1(): number {
+		return this.#grafP1;
+	}
+	set grafP1(value: number) {
+		this.#grafP1 = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	get grafP2(): number {
+		return this.#grafP2;
+	}
+	set grafP2(value: number) {
+		this.#grafP2 = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	get grafP3(): number {
+		return this.#grafP3;
+	}
+	set grafP3(value: number) {
+		this.#grafP3 = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	get grafM(): number {
+		return this.#grafM;
+	}
+	set grafM(value: number) {
+		this.#grafM = value;
+		if (value) this.#pmIdle = false;
+	}
+
+	// Collision registers
+	m0pf = 0;
+	m1pf = 0;
+	m2pf = 0;
+	m3pf = 0;
+
+	p0pf = 0;
+	p1pf = 0;
+	p2pf = 0;
+	p3pf = 0;
+
+	// The player collision latches power on all-set (minus the self bits);
+	// the playfield ones power on clear. Observed behavior (Altirra).
+	m0pl = 0x0f;
+	m1pl = 0x0f;
+	m2pl = 0x0f;
+	m3pl = 0x0f;
+
+	p0pl = 0x0e;
+	p1pl = 0x0d;
+	p2pl = 0x0b;
+	p3pl = 0x07;
+
+	prior = 0x0f;
+
+	vdelay = 0x0f;
+
+	// GRACTL bits
+	enablePlayers = false;
+	enableMissiles = false;
+
+	forceConsole: number | null = null; // Option
+	// The written CONSOL latch: bits 0-2 actively pull the (open-collector)
+	// switch lines low. It powers on all-set, so CONSOL reads 0 until the OS
+	// writes CONSOL.
+	consolWritten = 0x07;
+
+	anticLineCount: number;
+
+	disassemble() {
+		let pc = this.lastDisplayListAddress;
+		for (let i = 0; i < 240; i++) {
+			const instruction = this.#dmaRead(pc++);
+			const mode = instruction & 0xf;
+			let line =
+				(pc - 1).toString(16).padStart(4, "0") +
+				" " +
+				instruction.toString(16).padStart(2, "0") +
+				" " +
+				(instruction & 0x80 ? "DLI " : "    ");
+
+			if (mode === 0) {
+				// Blank
+				line += "BLANK " + String(((instruction & 0x70) >> 4) + 1);
+			} else if (mode === 1) {
+				// Jump
+				const address = this.#dmaRead(pc) + this.#dmaRead(pc + 1) * 256;
+				const addressStr = "$" + address.toString(16).padStart(4, "0");
+				if (instruction & 0x40) {
+					line += "JVB   " + addressStr;
+					this.#log(line);
+					break;
+				} else {
+					line += "JMP   " + addressStr;
+					pc = address;
+				}
+			} else {
+				// Normal mode
+				line += "MODE  " + mode.toString(16);
+				if (instruction & 0x40) {
+					const address =
+						"$" +
+						(this.#dmaRead(pc++) + this.#dmaRead(pc++) * 256)
+							.toString(16)
+							.padStart(4, "0");
+					line += " LMS " + address;
+				}
+			}
+
+			this.#log(line);
+		}
+	}
+
+	#temp = 0;
+
+	#vsRegion = false; // the previous mode line carried the VS bit
+	#vsExit = false; // the current instruction ends at VSCROL
+
+	// The current scanline is an instruction's first: display list and
+	// character-name DMA happen here. Distinct from modeLineNo === 0 - a
+	// VS entry starts the row counter at VSCROL on its first line.
+	#newInstruction = true;
+
+	// Armed at cycle 6: this scanline is its instruction's last. The DLI
+	// latch at cycle 7 uses this - a VSCROL write by cycle 5 still
+	// changes the decision, a cycle later doesn't (antic_vscroldli).
+	#lastLineArmed = false;
+
+	#grafP0 = 0;
+	#grafP1 = 0;
+	#grafP2 = 0;
+	#grafP3 = 0;
+	#grafM = 0;
+
+	// False while any P/M state could produce output or change: while true,
+	// #drawPlayerMissile is a no-op (all shift registers and GRAF latches are
+	// zero, so comparator loads only OR in zeros and the counter resets they
+	// perform are unobservable). Re-evaluated at each visible line start;
+	// cleared by the graf* setters.
+	#pmIdle = false;
+
+	#gtiaPal: number;
+	// False on a CTIA: PRIOR bits 6-7 are ignored - no special modes.
+	#gtiaModes = true;
+
+	// The resolved S0-S3 line levels: the written CONSOL latch pulls bits 0-2
+	// low (open collector), the speaker drive pulls S3 low.
+	#updateSwitchesOut(): void {
+		const inLevels = this.switchesIn.value;
+		this.switchesOut.value =
+			(inLevels & ~this.consolWritten & 0x07) |
+			(this.consoleSpeaker ? 0 : inLevels & 0x08);
+	}
+
+	// Keep the assignments in sync with the field initializers.
+	#resetAntic(): void {
+		// NMIEN
+		this.vbiEnabled = false;
+		this.dliEnabled = false;
+
+		// NMIST
+		this.res = true;
+		this.vbi = false;
+		this.dli = false;
+
+		this.vcount = 0;
+
+		// DMACTL
+		this.playfieldWidth = 0;
+		this.displayListDmaEnabled = false;
+		this.playerDmaEnabled = false;
+		this.missileDmaEnabled = false;
+		this.verticalPmResolution = 1;
+
+		this.displayListAddress = 0;
+		this.lastDisplayListAddress = 0;
+		this.#temp = 0;
+
+		this.hscrol = 0;
+		this.vscrol = 0;
+		this.#vsRegion = false;
+		this.#vsExit = false;
+		this.#newInstruction = true;
+		this.#lastLineArmed = false;
+		this.#pfFineDelay = 0;
+		this.chbase = 0;
+		this.chactl = 0;
+		this.pmbase = 0;
+		this.msc = 0;
+
+		this.wsync = false;
+		this.wsyncLate = false;
+
+		this.instruction = 0;
+		this.hires = false;
+		this.modeLineNo = 0;
+		this.modeLineHeight = 1;
+		this.charFetchRate = 0;
+		this.playfieldFetchRate = 0;
+
+		this.hpos = 0;
+		this.refreshPending = false;
+		this.waitingForVbi = false;
+
+		this.pfPixels.fill(0);
+		this.pfCounter = 0;
+		this.#anxLine.reset();
+		this.#anxDrain = 0;
+
+		// Output lines
+		this.nmi = false;
+		this.#nmiDelay.reset();
+		this.halt = false;
+		this.rdy = true;
+
+		this.#dmaVisibleLine = false;
+		this.#lineFetchWidth = 0;
+		this.#lineFetchShift = 0;
+		this.#lineStopCycle = 0;
+		this.#lineContinued = false;
+		this.#linePhase = 0;
+		this.#virtualLoad = 0;
+		this.#rebuildDmaPattern();
+	}
+
+	// Keep the assignments in sync with the field initializers. Inputs (console
+	// keys, triggers) reflect physical switches and are left alone.
+	#resetGtia(): void {
+		this.colorRegisters.fill(POWER_ON_COLOR);
+
+		this.hposp0 = 0;
+		this.hposp1 = 0;
+		this.hposp2 = 0;
+		this.hposp3 = 0;
+		this.hposm0 = 0;
+		this.hposm1 = 0;
+		this.hposm2 = 0;
+		this.hposm3 = 0;
+
+		this.grafP0 = 0;
+		this.grafP1 = 0;
+		this.grafP2 = 0;
+		this.grafP3 = 0;
+		this.grafM = 0;
+
+		this.m0pf = 0;
+		this.m1pf = 0;
+		this.m2pf = 0;
+		this.m3pf = 0;
+		this.p0pf = 0;
+		this.p1pf = 0;
+		this.p2pf = 0;
+		this.p3pf = 0;
+		this.m0pl = 0x0f;
+		this.m1pl = 0x0f;
+		this.m2pl = 0x0f;
+		this.m3pl = 0x0f;
+		this.p0pl = 0x0e;
+		this.p1pl = 0x0d;
+		this.p2pl = 0x0b;
+		this.p3pl = 0x07;
+
+		this.prior = 0x0f;
+		this.vdelay = 0x0f;
+		this.#pfPixelCache.fill(-1);
+
+		// GRACTL
+		this.enablePlayers = false;
+		this.enableMissiles = false;
+
+		this.consoleSpeaker = 0;
+		this.consolWritten = 0x07;
+		this.#updateSwitchesOut();
+
+		this.#sizeP0 = 1;
+		this.#sizeP0Counter = 0;
+		this.#shiftP0 = 0;
+		this.#sizeP1 = 1;
+		this.#sizeP1Counter = 0;
+		this.#shiftP1 = 0;
+		this.#sizeP2 = 1;
+		this.#sizeP2Counter = 0;
+		this.#shiftP2 = 0;
+		this.#sizeP3 = 1;
+		this.#sizeP3Counter = 0;
+		this.#shiftP3 = 0;
+		this.#sizeM0 = 1;
+		this.#sizeM0Counter = 0;
+		this.#shiftM0 = 0;
+		this.#sizeM1 = 1;
+		this.#sizeM1Counter = 0;
+		this.#shiftM1 = 0;
+		this.#sizeM2 = 1;
+		this.#sizeM2Counter = 0;
+		this.#shiftM2 = 0;
+		this.#sizeM3 = 1;
+		this.#sizeM3Counter = 0;
+		this.#shiftM3 = 0;
+
+		this.#pmFetchCycle = -1;
+
+		this.#posWrites.reset();
+		this.#sizeWrites.reset();
+		this.#grafWrites.reset();
+		this.#colorWrites.reset();
+		this.#priorWrites.reset();
+		this.#pendingGtiaWrites = 0;
+
+		this.#anxHold = 0;
+		this.#gtiaPixel = 0;
+		this.#gtiaPixelPrev = 0;
+		this.#gtiaBkMuted = false;
+		this.#gtiaPrevBkMuted = false;
+		this.#lineGtiaMode = 0;
+	}
+
+	#log: (message: string) => void;
 
 	// Playfield codes in flight from the ANTIC fetch to the GTIA paint (the
 	// ANx bus plus GTIA's output stage). Ticked once per color clock by
@@ -830,27 +1320,27 @@ export class AnticGtia implements Memory {
 	// is one comparison.
 	#applyPendingWrites(): void {
 		if (this.#pendingGtiaWrites === 0) return;
-		let w = this.#posWrites.tick();
+		let w = this.#posWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
 		}
-		w = this.#sizeWrites.tick();
+		w = this.#sizeWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
 		}
-		w = this.#grafWrites.tick();
+		w = this.#grafWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
 		}
-		w = this.#colorWrites.tick();
+		w = this.#colorWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
 		}
-		w = this.#priorWrites.tick();
+		w = this.#priorWrites.cycle();
 		if (w) {
 			this.#applyGtiaWrite((w >> 8) & 0xff, w & 0xff);
 			this.#pendingGtiaWrites--;
@@ -947,9 +1437,6 @@ export class AnticGtia implements Memory {
 		}
 	}
 
-	/** ANTIC's NMI output line. Copy to the CPU's NMI input every cycle. */
-	nmi = false;
-
 	// NMIST bits that latched during the current cycle's beforeCpu - a
 	// same-cycle NMIRES write must not clear them.
 	#justLatched = 0;
@@ -964,27 +1451,8 @@ export class AnticGtia implements Memory {
 	// schedules a delayed rise.
 	#nmiDelay = new DelayLine(8);
 
-	/**
-	 * The RNMI input line: the 400/800 Reset key (not wired up on XL/XE,
-	 * where the Reset button pulses the system reset line instead). Sampled
-	 * at the VBLANK NMI point - the reset NMI fires alongside the VBI, never
-	 * mid-frame - and cannot be masked through NMIEN; NMIST bit 5 reports it.
-	 */
-	rnmi = false;
-
-	/**
-	 * True when ANTIC owns the bus this cycle (DMA fetch or DRAM refresh): the
-	 * CPU is halted and `run()` must not be called. A WSYNC stall is different -
-	 * it pulls `rdy` low instead, and the CPU still runs, repeating its stalled
-	 * read on the bus every cycle.
-	 */
-	halt = false;
-
-	/** The RDY output line: false while a WSYNC stall is in effect. */
-	rdy = true;
-
-	// Carried from beforeCpu to busCycle: the cycle's hpos slot (captured
-	// before beforeCpu advances hpos), so busCycle needn't re-derive it off
+	// Carried from beforeCpu to busPhase: the cycle's hpos slot (captured
+	// before beforeCpu advances hpos), so busPhase needn't re-derive it off
 	// the already-advanced counter.
 	#dmaHpos = 0;
 
@@ -1084,436 +1552,14 @@ export class AnticGtia implements Memory {
 		return (line >> 1) & 0xff;
 	}
 
-	beforeCpu(): void {
-		const i = this.hpos;
-
-		this.#justLatched = 0;
-
-		// NMI line events. The rise is processed after the drop so that a
-		// same-cycle race keeps the line up.
-		const nmiOps = this.#nmiDelay.tick();
-		if (nmiOps & OP_NMI_DROP) {
-			this.nmi = false;
-		}
-		if (nmiOps & OP_NMI_RISE) {
-			this.nmi = true;
-			this.#nmiDelay.schedule(2, OP_NMI_DROP);
-		}
-
-		if (i === 6) {
-			// The "is this the instruction's last scanline" decision is made
-			// here, one cycle before the NMIST latch - a VSCROL write
-			// completing by cycle 5 still changes it, a cycle later
-			// doesn't (antic_vscroldli pins both sides).
-			this.#lastLineArmed =
-				this.modeLineNo ===
-				(this.#vsExit ? this.vscrol : this.modeLineHeight - 1);
-		} else if (i === 7) {
-			// The NMIST status bits latch at cycle 7 - one cycle before the
-			// NMI line pull - whenever their event occurs; NMIEN only gates
-			// the pull, so software can poll NMIST with NMIs disabled. The
-			// DLI and VBI bits report the most recent event: each clears the
-			// other; NMIRES clears everything (but loses a same-cycle race).
-			// The cycle is pinned by Acid800's cycle-counted NMIST samples.
-			if (this.instruction & 0x80 && this.#lastLineArmed) {
-				this.dli = true;
-				this.vbi = false;
-				this.#justLatched |= 0x80;
-			}
-
-			if (this.vcount === 248) {
-				this.vbi = true;
-				// The VBI displaces a stale DLI latch entirely.
-				this.#justLatched = (this.#justLatched & ~0x80) | 0x40;
-				if (this.rnmi) {
-					this.res = true;
-					this.#justLatched |= 0x20;
-				}
-				this.dli = false;
-			}
-
-			// Arm the cycle-8 pull with NMIEN as of now: a disable landing
-			// after this cycle is too late to block (set-dominant), while an
-			// enable landing before the pull still fires - both per Acid800.
-			this.#lineLatched = this.#justLatched;
-			this.#armedNmi =
-				(this.dliEnabled && !!(this.#lineLatched & 0x80)) ||
-				(this.vbiEnabled && !!(this.#lineLatched & 0x40)) ||
-				!!(this.#lineLatched & 0x20);
-		} else if (i === 8) {
-			// ANTIC pulls NMI at cycle 8, right after the display list and P/M
-			// DMA slots, and holds it for two cycles (8 and 9). Both cycles are
-			// free of DMA contention by design, so the CPU - whose edge
-			// detector samples inside run() - is always running (or
-			// WSYNC-stalled, which still ticks the detector) while the line is
-			// up. That's what makes the skip-run()-on-halt model safe.
-			if (this.#armedNmi) {
-				this.nmi = true;
-				this.#nmiDelay.schedule(2, OP_NMI_DROP);
-			}
-		}
-
-		this.hpos++;
-		if (this.hpos === 114) {
-			this.hpos = 0;
-
-			this.vcount++;
-			if (this.vcount === 248) {
-				this.dli = false;
-			}
-
-			if (this.vcount === this.anticLineCount) {
-				this.vcount = 0;
-			}
-
-			// The row counter: an instruction ends when the counter reaches
-			// the line end - VSCROL (live) on a vertical-scroll exit line,
-			// height-1 otherwise. A non-match keeps counting through the
-			// 4-bit wrap (antic_vscroll's VSCROL-9-on-height-8 case). The
-			// counter only runs for display-region lines; the vertical
-			// blank closes any open instruction and the next one starts at
-			// the top of the next frame (a VS region spanning the blank
-			// continues there - antic_vscroll's last check).
-			if (this.vcount > 8 && this.vcount < 248) {
-				const lineEnd = this.#vsExit ? this.vscrol : this.modeLineHeight - 1;
-				if (this.modeLineNo === lineEnd) {
-					this.modeLineNo = 0;
-					this.#newInstruction = true;
-				} else {
-					this.modeLineNo = (this.modeLineNo + 1) & 15;
-					this.#newInstruction = false;
-				}
-			} else if (this.vcount === 248) {
-				this.modeLineNo = 0;
-				this.#newInstruction = true;
-				this.#vsExit = false;
-			}
-		}
-
-		if (this.waitingForVbi && this.vcount === 0) {
-			this.waitingForVbi = false;
-		}
-
-		if (i === 0) {
-			// The line's DMA pattern: visibility and the instruction state are
-			// per-line inputs (mid-line register writes rebuild it too).
-			this.#dmaVisibleLine =
-				!this.waitingForVbi && this.vcount >= 8 && this.vcount < 248;
-			if (
-				this.#lineFetchWidth &&
-				!this.#lineStopCycle &&
-				this.#dmaVisibleLine
-			) {
-				// No stop position matched this clock last line: it keeps
-				// running into this one on the same grid - a scanline is
-				// 114 cycles, so the phase shifts by -114 ≡ +6 mod 8
-				// (AHRM 4.12's abnormal DMA; Acid800 antic_hscrolbug).
-				this.#linePhase =
-					((this.#lineContinued
-						? this.#linePhase
-						: NAME_FETCH_START[this.#lineFetchWidth as 1 | 2 | 3] +
-							this.#lineFetchShift) +
-						6) &
-					7;
-				this.#lineContinued = true;
-			} else {
-				// Normal case: the stop cleared the clock (or vertical
-				// blank does, unconditionally); the line starts un-armed.
-				this.#lineFetchWidth = 0;
-				this.#lineFetchShift = 0;
-				this.#lineContinued = false;
-				this.#linePhase = 0;
-			}
-			this.#lineStopCycle = 0;
-			this.#rebuildDmaPattern();
-		}
-
-		// Request 9 refresh cycles every 4 cycles starting from 25
-		if (REFRESH_REQUEST[i]) {
-			this.refreshPending = true;
-		}
-
-		// The stalled fetch completes at cycle 104 (the next instruction's
-		// remaining cycles run from 105) - verified against Acid800's
-		// cycle-counted VCOUNT samples. A double-armed WSYNC completes one
-		// cycle later.
-		if (this.wsync && i === (this.wsyncLate ? 105 : 104)) {
-			this.wsync = false;
-			this.wsyncLate = false;
-		}
-
-		this.rdy = !this.wsync;
-
-		if (this.vcount === 8 && i === 1) {
-			this.lastDisplayListAddress = this.displayListAddress;
-		}
-
-		// The DMA fetch itself - a bus access - is busCycle's job; beforeCpu
-		// commits the cycle's scheduling without touching the bus.
-		this.#dmaHpos = i;
-	}
-
-	/**
-	 * The ANTIC bus phase: perform this cycle's DMA action (display list,
-	 * P/M, character, or playfield fetch) or DRAM refresh, and set
-	 * {@link halt} for it. The per-cycle decision is one lookup in the line's
-	 * precomputed DMA pattern (see {@link buildDmaPattern}). Split out from
-	 * {@link beforeCpu} - which commits the cycle's scheduling without
-	 * touching the bus - so the read can be retried after a suspend without
-	 * re-advancing ANTIC's counters. Call once per cycle, between beforeCpu
-	 * and running the CPU.
-	 */
-	busCycle(): void {
-		const entry = this.#dmaPattern[this.#dmaHpos]!;
-		if (entry & (DMA_STOP_CHECK | DMA_DECODE_FIRST)) {
-			if (entry & DMA_DECODE_FIRST) {
-				// A carried-over playfield fetch overlapping the bus-free
-				// instruction re-decode slot: decode, then run the fetch.
-				this.#decodeInstruction();
-				this.#rebuildDmaPattern();
-			}
-			if (entry & DMA_STOP_CHECK) {
-				// The playfield stop position: clear the DMA clock. The
-				// slot sits at deadline + 1, so it samples before this
-				// cycle's CPU write can land - the write deadline. The
-				// cycle's own action (a trailing fetch) still runs off
-				// the pre-stop entry.
-				this.#lineStopCycle = this.#dmaHpos - 1;
-				this.#rebuildDmaPattern();
-			}
-		}
-		const action = entry & DMA_ACTION_MASK;
-
-		if (action === DMA_NONE) {
-			if (this.refreshPending) {
-				// DRAM refresh cycle
-				this.refreshPending = false;
-				this.halt = true;
-			} else {
-				this.halt = false;
-			}
-			return;
-		}
-
-		this.halt = true;
-		switch (action) {
-			case DMA_MISSILE:
-				this.#fetchMissiles();
-				break;
-			case DMA_PLAYER:
-				this.#fetchPlayer(entry >> 8);
-				break;
-			case DMA_DL_FETCH:
-				this.instruction = this.#dmaRead(this.displayListAddress);
-				this.#incrementDisplayListAddress();
-				this.#decodeInstruction();
-				this.#rebuildDmaPattern();
-				break;
-			case DMA_DL_DECODE:
-				// A new instruction with display-list DMA off: the stale
-				// instruction re-decodes, but the bus is free.
-				this.#decodeInstruction();
-				this.#rebuildDmaPattern();
-				if (this.refreshPending) {
-					this.refreshPending = false;
-				} else {
-					this.halt = false;
-				}
-				break;
-			case DMA_DL_LO:
-				this.#fetchDlArgLo();
-				break;
-			case DMA_DL_HI:
-				this.#fetchDlArgHi();
-				break;
-			case DMA_NAME:
-				this.#fetchName(entry >> 8);
-				break;
-			case DMA_GLYPH:
-				this.#fetchGlyph(entry >> 8);
-				break;
-			case DMA_BITMAP:
-				this.#fetchBitmap(entry >> 8);
-				break;
-			case DMA_REPLAY:
-				// Line-buffer replay: pixels flow but the bus is free - a
-				// pending refresh may use the cycle.
-				this.#replayBitmap(entry >> 8);
-				if (this.refreshPending) {
-					this.refreshPending = false;
-				} else {
-					this.halt = false;
-				}
-				break;
-			case DMA_PF_SKIP:
-				// A masked load slot (playfield DMA disabled mid-line): MSC
-				// advances, the bus stays free, and the load takes the bus
-				// value (completed in afterCpu once the CPU has driven it).
-				this.#virtualLoad = entry;
-				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000);
-				if (this.refreshPending) {
-					this.refreshPending = false;
-				} else {
-					this.halt = false;
-				}
-				break;
-			case DMA_GLYPH_VIRT:
-				// A dropped fetch past the DMA cutoff: the load still runs,
-				// from the bus (afterCpu completes it, like the phantom
-				// GRAF latch).
-				this.#virtualLoad = entry;
-				if (this.refreshPending) {
-					this.refreshPending = false;
-				} else {
-					this.halt = false;
-				}
-				break;
-			case DMA_BITMAP_VIRT:
-				this.#virtualLoad = entry;
-				this.msc = ((this.msc + 1) & 0x0fff) | (this.msc & 0xf000);
-				if (this.refreshPending) {
-					this.refreshPending = false;
-				} else {
-					this.halt = false;
-				}
-				break;
-			case DMA_PF_ARM: {
-				// The playfield DMA clock starts: latch the geometry the
-				// line's fetches will use (the slot samples the registers
-				// before this cycle's CPU write can land - the deadline).
-				const scrolled =
-					(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
-				let fetchWidth: number = this.playfieldWidth;
-				if (scrolled && fetchWidth < 3) fetchWidth++;
-				this.#lineFetchWidth = fetchWidth;
-				this.#lineFetchShift = scrolled ? this.hscrol >> 1 : 0;
-				this.#rebuildDmaPattern();
-				if (this.refreshPending) {
-					this.refreshPending = false;
-				} else {
-					this.halt = false;
-				}
-				break;
-			}
-		}
-	}
-
 	// The cycle GTIA took for this line's missile fetch: the first halted
 	// cycle within horizontal blank, or -1 while none has occurred yet.
 	#pmFetchCycle = -1;
 
-	// A virtual/masked load slot from busCycle awaiting the bus value the
+	// A virtual/masked load slot from busPhase awaiting the bus value the
 	// CPU drives during the slot cycle (Acid800 virtdma pins the capture
 	// point via a timed LDA's operand byte).
 	#virtualLoad = 0;
-
-	afterCpu(frame: Uint8Array, busData: number) {
-		if (this.#virtualLoad) {
-			const entry = this.#virtualLoad;
-			this.#virtualLoad = 0;
-			const index = entry >> 8;
-			const action = entry & DMA_ACTION_MASK;
-			if (action === DMA_GLYPH_VIRT) {
-				this.#emitGlyph(this.#buffer[index]!, busData);
-			} else if (action === DMA_BITMAP_VIRT) {
-				this.#buffer[index] = busData;
-				this.#emitBitmapPixels(busData);
-			} else {
-				// DMA_PF_SKIP: capture the bus into the line buffer (MSC
-				// already advanced in busCycle); the display stays off.
-				this.#buffer[index] = busData;
-			}
-		}
-
-		const pixels0 = this.#generateColor(0);
-
-		const pixels1 = this.#generateColor(1);
-
-		const left0 = pixels0 >> 8;
-		const right0 = pixels0 & 0xff;
-
-		const left1 = pixels1 >> 8;
-		const right1 = pixels1 & 0xff;
-
-		const i = this.hpos - 1;
-
-		const x = i - 17;
-		const y = this.vcount - 8;
-
-		if (y >= 0 && y < 240) {
-			if (x >= 0 && x < 94) {
-				const base = (x + y * 94) * 4;
-				frame[base] = left0;
-				frame[base + 1] = right0;
-				frame[base + 2] = left1;
-				frame[base + 3] = right1;
-			}
-
-			const isOddScanline = y & 1;
-
-			// GTIA has no window into ANTIC's DMA schedule: it takes the
-			// first halted cycle within horizontal blank to be the missile
-			// fetch, and the four cycles starting two later to be the player
-			// fetches. With P/M DMA on that reproduces the real slots
-			// (missile 0, players 2-5); with it off, a halted display-list
-			// fetch is mistaken for the missile slot and the loads shift -
-			// and a line with no halted HBLANK cycle loads nothing (AHRM;
-			// Acid800 phantomdma).
-			if (i === 0) {
-				this.#pmFetchCycle = -1;
-			}
-			if (this.#pmFetchCycle < 0 && this.halt && i < 17) {
-				this.#pmFetchCycle = i;
-			}
-			const pmSlot = this.#pmFetchCycle < 0 ? -1 : i - this.#pmFetchCycle;
-
-			// The GRAF registers latch the bus during the P/M fetch slots only
-			// when GRACTL enables it - with GRACTL off, direct GRAF writes
-			// persist (the GTIA collision tests rely on that). The latch runs for
-			// the whole visible region (scan lines 8-247 - the enclosing y < 240):
-			// an earlier cut at y < 224 froze player graphics over the bottom 16
-			// lines, which is invisible on NTSC but corrupts the lower HUD on PAL
-			// (its taller frame puts content there) - River Raid's bug.
-			if (pmSlot === 0 && this.enableMissiles) {
-				// VDELAY bits 0-3 delay each missile independently, but
-				// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
-				// latch each pair on its own: a delayed missile updates only
-				// on odd scanlines, exactly like the per-player logic below.
-				let m = this.grafM;
-				if (isOddScanline || !(this.vdelay & 0x01)) {
-					m = (m & ~0x03) | (busData & 0x03);
-				}
-				if (isOddScanline || !(this.vdelay & 0x02)) {
-					m = (m & ~0x0c) | (busData & 0x0c);
-				}
-				if (isOddScanline || !(this.vdelay & 0x04)) {
-					m = (m & ~0x30) | (busData & 0x30);
-				}
-				if (isOddScanline || !(this.vdelay & 0x08)) {
-					m = (m & ~0xc0) | (busData & 0xc0);
-				}
-				this.grafM = m;
-			}
-
-			if (this.enablePlayers) {
-				if (pmSlot === 2 && (isOddScanline || !(this.vdelay & 0x10))) {
-					this.grafP0 = busData;
-				}
-
-				if (pmSlot === 3 && (isOddScanline || !(this.vdelay & 0x20))) {
-					this.grafP1 = busData;
-				}
-
-				if (pmSlot === 4 && (isOddScanline || !(this.vdelay & 0x40))) {
-					this.grafP2 = busData;
-				}
-
-				if (pmSlot === 5 && (isOddScanline || !(this.vdelay & 0x80))) {
-					this.grafP3 = busData;
-				}
-			}
-		}
-	}
 
 	// Packed (left << 8) | right pixel pairs per playfield code, for the
 	// common pixel: no P/M active, no GTIA special mode. In that case the
@@ -1754,7 +1800,7 @@ export class AnticGtia implements Memory {
 			pixel = 0;
 		} else {
 			this.#anxDrain--;
-			pixel = this.#anxLine.tick();
+			pixel = this.#anxLine.cycle();
 		}
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
@@ -2452,53 +2498,25 @@ export class AnticGtia implements Memory {
 		this.displayListAddress = hi | lo;
 	}
 
-	#dmaRead: (address: number) => number;
+	#bus: Pick<Memory, "read">;
+
+	#dmaRead(address: number): number {
+		return this.#bus.read(address, ReadOptions.DMA);
+	}
 
 	#buffer = new Uint8Array(48);
+}
 
-	disassemble() {
-		let pc = this.lastDisplayListAddress;
-		for (let i = 0; i < 240; i++) {
-			const instruction = this.#dmaRead(pc++);
-			const mode = instruction & 0xf;
-			let line =
-				(pc - 1).toString(16).padStart(4, "0") +
-				" " +
-				instruction.toString(16).padStart(2, "0") +
-				" " +
-				(instruction & 0x80 ? "DLI " : "    ");
-
-			if (mode === 0) {
-				// Blank
-				line += "BLANK " + String(((instruction & 0x70) >> 4) + 1);
-			} else if (mode === 1) {
-				// Jump
-				const address = this.#dmaRead(pc) + this.#dmaRead(pc + 1) * 256;
-				const addressStr = "$" + address.toString(16).padStart(4, "0");
-				if (instruction & 0x40) {
-					line += "JVB   " + addressStr;
-					this.#log(line);
-					break;
-				} else {
-					line += "JMP   " + addressStr;
-					pc = address;
-				}
-			} else {
-				// Normal mode
-				line += "MODE  " + mode.toString(16);
-				if (instruction & 0x40) {
-					const address =
-						"$" +
-						(this.#dmaRead(pc++) + this.#dmaRead(pc++) * 256)
-							.toString(16)
-							.padStart(4, "0");
-					line += " LMS " + address;
-				}
-			}
-
-			this.#log(line);
-		}
-	}
+/** The priority selector mask for a source combination. Exported for tests. */
+export function prioritySelector(
+	prior: number,
+	pfClass: number,
+	p: number,
+	p5: boolean,
+): number {
+	return PRIORITY_TABLE[
+		(prior & 0x3f) | (pfClass << 6) | (p << 9) | (p5 ? 1 << 13 : 0)
+	]!;
 }
 
 // Per-playfield-width tables, indexed by DMACTL width bits (0 = off,
@@ -2519,7 +2537,7 @@ const NAME_FETCH_START = [0, 26, 18, 10] as const;
 const REFRESH_REQUEST = new Uint8Array(114);
 for (let c = 25; c <= 57; c += 4) REFRESH_REQUEST[c] = 1;
 
-// DMA action codes for the per-line pattern table: busCycle dispatches on
+// DMA action codes for the per-line pattern table: busPhase dispatches on
 // `pattern[cycle] & 0xff`, with the action's argument (player number or
 // line-buffer index) in the high byte.
 const DMA_NONE = 0;
@@ -2538,7 +2556,7 @@ const DMA_GLYPH_VIRT = 12; // dropped glyph fetch: loads from the bus
 const DMA_BITMAP_VIRT = 13; // dropped bitmap fetch: loads from the bus
 const DMA_PF_ARM = 14; // the playfield start latch (deadline + 1)
 
-// Flag bits riding on top of a cycle's action (busCycle handles them
+// Flag bits riding on top of a cycle's action (busPhase handles them
 // before dispatching the action itself).
 const DMA_ACTION_MASK = 0x3f;
 const DMA_DECODE_FIRST = 0x40; // re-decode the instruction, then the action
@@ -2563,10 +2581,10 @@ const VIRTUAL_DMA_CUTOFF = 106;
 /**
  * Build a scanline's DMA pattern from a state key. A line's whole pattern is
  * a pure function of rarely-changing state, so patterns are computed once
- * and cached (see #rebuildDmaPattern for the key layout); busCycle then
+ * and cached (see #rebuildDmaPattern for the key layout); busPhase then
  * reduces to one table lookup per cycle. DRAM refresh is deliberately NOT in
  * the table - the pending-refresh flag is live, sequential state (a blocked
- * request slides to the next free cycle), and stays in busCycle.
+ * request slides to the next free cycle), and stays in busPhase.
  */
 function buildDmaPattern(key: number): Uint16Array {
 	const pattern = new Uint16Array(114);
@@ -2944,16 +2962,4 @@ for (let prior = 0; prior < 64; prior++) {
 			}
 		}
 	}
-}
-
-/** The priority selector mask for a source combination. Exported for tests. */
-export function prioritySelector(
-	prior: number,
-	pfClass: number,
-	p: number,
-	p5: boolean,
-): number {
-	return PRIORITY_TABLE[
-		(prior & 0x3f) | (pfClass << 6) | (p << 9) | (p5 ? 1 << 13 : 0)
-	]!;
 }

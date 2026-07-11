@@ -54,7 +54,7 @@ async function runSample(name: string, options: RunOptions = {}) {
 
 	let cycles = 0;
 	while (exitCode === null && !sfotty.crashed && cycles++ < 5_000_000) {
-		sfotty.run();
+		sfotty.cycle();
 	}
 	return { stdout, exitCode, crashed: sfotty.crashed };
 }

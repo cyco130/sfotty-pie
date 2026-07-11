@@ -32,12 +32,6 @@ export interface ConsolePanelWiring {
  * a bare `Console` would clash with the global console's type.)
  */
 export class ConsolePanel {
-	readonly #gtia: AnticGtia;
-	readonly #pia: Pia | undefined;
-	readonly #setReset: (pressed: boolean) => void;
-	readonly #powerCycle: () => void;
-	#resetPressed = false;
-
 	constructor(wiring: ConsolePanelWiring) {
 		this.#gtia = wiring.gtia;
 		this.#pia = wiring.pia;
@@ -88,12 +82,6 @@ export class ConsolePanel {
 		this.#setSwitch(0x04, pressed);
 	}
 
-	// A pressed button pulls its (open-collector) GTIA switch line low.
-	#setSwitch(bit: number, pressed: boolean): void {
-		const switches = this.#gtia.switchesIn;
-		switches.value = pressed ? switches.value & ~bit : switches.value | bit;
-	}
-
 	/** LED 1 (1200XL): true = lit (PB2 pulled low). Never lit on machines
 	 *  without the LED wires. */
 	get led1(): boolean {
@@ -124,4 +112,16 @@ export class ConsolePanel {
 			callback(led1, led2);
 		});
 	}
+
+	// A pressed button pulls its (open-collector) GTIA switch line low.
+	#setSwitch(bit: number, pressed: boolean): void {
+		const switches = this.#gtia.switchesIn;
+		switches.value = pressed ? switches.value & ~bit : switches.value | bit;
+	}
+
+	readonly #gtia: AnticGtia;
+	readonly #pia: Pia | undefined;
+	readonly #setReset: (pressed: boolean) => void;
+	readonly #powerCycle: () => void;
+	#resetPressed = false;
 }

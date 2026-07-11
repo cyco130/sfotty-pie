@@ -216,7 +216,7 @@ async function main() {
 	// and load PC from the reset vector already copied into RAM.
 	while (!sfotty.crashed && maxCycles--) {
 		try {
-			sfotty.run();
+			sfotty.cycle();
 		} catch (error) {
 			if (error instanceof BreakError) {
 				sfotty.PC = (sfotty.PC + 1) & 0xffff;

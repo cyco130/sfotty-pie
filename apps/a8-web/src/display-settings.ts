@@ -204,17 +204,6 @@ export function defaultDisplaySettings(): DisplaySettings {
 	};
 }
 
-// Crop anchors (see the module comment): the playfield centre in absolute
-// hi-res pixels and the display centre in vcount, minus each axis's buffer
-// origin.
-const BUFFER_ORIGIN_X = 68;
-const PLAYFIELD_CENTER = 256;
-const BUFFER_ORIGIN_Y = 8;
-const DISPLAY_CENTER = 128;
-
-const clampEven = (value: number, min: number, max: number) =>
-	Math.min(max, Math.max(min, Math.floor(value / 2) * 2));
-
 /** An overscan value clamped to the legal range (even, within min/max). */
 export function sanitizeOverscan(overscan: OverscanSettings): OverscanSettings {
 	return {
@@ -226,9 +215,6 @@ export function sanitizeOverscan(overscan: OverscanSettings): OverscanSettings {
 		),
 	};
 }
-
-const clamp = (value: number, min: number, max: number) =>
-	Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min;
 
 /** Palette parameters clamped to sane slider ranges. The pot (hueStep) goes
  *  all the way to 0 like the real one - NTSC degenerates into bands there,
@@ -269,7 +255,7 @@ export interface CropRect {
 }
 
 /** The frame-buffer crop for an overscan setting: centred on the standard
- *  playfield/display (not the buffer), per the anchors above. */
+ *  playfield/display (not the buffer), per the anchors below. */
 export function overscanCrop(overscan: OverscanSettings): CropRect {
 	const { width, height } = sanitizeOverscan(overscan);
 	return {
@@ -279,3 +265,17 @@ export function overscanCrop(overscan: OverscanSettings): CropRect {
 		height,
 	};
 }
+
+// Crop anchors (see the module comment): the playfield centre in absolute
+// hi-res pixels and the display centre in vcount, minus each axis's buffer
+// origin.
+const BUFFER_ORIGIN_X = 68;
+const PLAYFIELD_CENTER = 256;
+const BUFFER_ORIGIN_Y = 8;
+const DISPLAY_CENTER = 128;
+
+const clampEven = (value: number, min: number, max: number) =>
+	Math.min(max, Math.max(min, Math.floor(value / 2) * 2));
+
+const clamp = (value: number, min: number, max: number) =>
+	Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min;

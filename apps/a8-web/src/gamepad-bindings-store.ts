@@ -16,42 +16,16 @@ import { loadPersisted, savePersisted } from "./persist.ts";
 // (remap + analog conditioning for non-standard pads) is a separate store, keyed
 // by gamepad id, applied ahead of these bindings.
 export const GAMEPAD_BINDINGS_KEY = "gamepad-bindings";
-const VERSION = 2;
 
 export interface GamepadBindings {
 	joystick: JoyBinding[];
 	console: ConsoleBinding[];
 }
 
-interface Stored extends GamepadBindings {
-	v: number;
-}
-
 /** The default binding set (fresh copies of the code defaults, so edits don't
  *  mutate the shared constants). */
 export function defaultGamepadBindings(): GamepadBindings {
 	return { joystick: [...DEFAULT_JOYSTICK], console: [...DEFAULT_CONSOLE] };
-}
-
-/**
- * v1 -> v2: OPEN_FAVORITES joined the default console layer on R3. The store
- * is user-owned, so instead of resetting it, append the new default - unless
- * the user already binds that button or that command. Exported for tests.
- */
-export function migrateV1(stored: GamepadBindings): GamepadBindings {
-	const taken = stored.console.some(
-		(b) =>
-			b.command === "OPEN_FAVORITES" ||
-			("button" in b.input && b.input.button === 11),
-	);
-	if (taken) return stored;
-	return {
-		...stored,
-		console: [
-			...stored.console,
-			{ input: { button: 11 }, command: "OPEN_FAVORITES" },
-		],
-	};
 }
 
 /** The persisted binding set - migrated forward if from an older version - or
@@ -81,4 +55,31 @@ export function saveGamepadBindings(bindings: GamepadBindings): void {
 		v: VERSION,
 		...bindings,
 	} satisfies Stored);
+}
+
+/**
+ * v1 -> v2: OPEN_FAVORITES joined the default console layer on R3. The store
+ * is user-owned, so instead of resetting it, append the new default - unless
+ * the user already binds that button or that command. Exported for tests.
+ */
+export function migrateV1(stored: GamepadBindings): GamepadBindings {
+	const taken = stored.console.some(
+		(b) =>
+			b.command === "OPEN_FAVORITES" ||
+			("button" in b.input && b.input.button === 11),
+	);
+	if (taken) return stored;
+	return {
+		...stored,
+		console: [
+			...stored.console,
+			{ input: { button: 11 }, command: "OPEN_FAVORITES" },
+		],
+	};
+}
+
+const VERSION = 2;
+
+interface Stored extends GamepadBindings {
+	v: number;
 }

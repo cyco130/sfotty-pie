@@ -5,26 +5,6 @@ import type { Atari } from "./machine.ts";
 /** The OS SIO entry vector ($E459). */
 export const SIOV = 0xe459;
 
-// The Device Control Block
-const DDEVIC = 0x0300;
-const DUNIT = 0x0301;
-const DCOMND = 0x0302;
-const DSTATS = 0x0303;
-const DBUFLO = 0x0304;
-const DBUFHI = 0x0305;
-const DBYTLO = 0x0308;
-const DBYTHI = 0x0309;
-const DAUX1 = 0x030a;
-const DAUX2 = 0x030b;
-
-// SIO status codes
-const STATUS_OK = 0x01;
-const STATUS_TIMEOUT = 0x8a; // no device responded
-const STATUS_NAK = 0x8b; // device refused the command
-const STATUS_DEVICE_ERROR = 0x90; // controller reported an error
-
-const RTS = 0x60;
-
 export interface SioHandlerOptions {
 	machine: Atari;
 	cpu: Sfotty;
@@ -133,3 +113,23 @@ export function createSioHandler(
 		}
 	};
 }
+
+// The Device Control Block
+const DDEVIC = 0x0300;
+const DUNIT = 0x0301;
+const DCOMND = 0x0302;
+const DSTATS = 0x0303;
+const DBUFLO = 0x0304;
+const DBUFHI = 0x0305;
+const DBYTLO = 0x0308;
+const DBYTHI = 0x0309;
+const DAUX1 = 0x030a;
+const DAUX2 = 0x030b;
+
+// SIO status codes
+const STATUS_OK = 0x01;
+const STATUS_TIMEOUT = 0x8a; // no device responded
+const STATUS_NAK = 0x8b; // device refused the command
+const STATUS_DEVICE_ERROR = 0x90; // controller reported an error
+
+const RTS = 0x60;

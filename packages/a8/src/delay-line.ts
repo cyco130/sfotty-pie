@@ -23,10 +23,6 @@
  * the ring size.
  */
 export class DelayLine {
-	#slots: Uint32Array;
-	#mask: number;
-	#cursor = 0;
-
 	/** `size` must be a power of two (the cursor wraps by masking). */
 	constructor(size: number = 16) {
 		if (size <= 0 || (size & (size - 1)) !== 0) {
@@ -69,4 +65,8 @@ export class DelayLine {
 		this.#slots.fill(0);
 		this.#cursor = 0;
 	}
+
+	#slots: Uint32Array;
+	#mask: number;
+	#cursor = 0;
 }

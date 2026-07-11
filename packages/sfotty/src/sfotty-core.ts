@@ -30,16 +30,6 @@ export interface SfottyOptions {
 }
 
 /**
- * The unstable "magic constant" ORed into A by undocumented opcodes $8B (ANE)
- * and $AB (LXA). On the real hardware, it is chip- and temperature-dependent
- * with some dependency on the RDY line so no value is universally correct. We
- * use $EE to match the SingleStepTests' expected results.
- *
- * $FF, $FE, and $00 are other commonly reported values.
- */
-const ANE_MAGIC = 0xee;
-
-/**
  * The CPU core implementation. Package-internal: hosts use the `Sfotty`
  * facade from [sfotty.ts](./sfotty.ts), which exposes only the host-facing
  * contract. Everything here is reachable by the generated step functions -
@@ -47,96 +37,6 @@ const ANE_MAGIC = 0xee;
  * class*, but the class itself is never exported from the package.
  */
 export class SfottyCore {
-	// Programmer-visible registers (8-bit, except the 16-bit PC).
-	A = 0;
-	X = 0;
-	Y = 0;
-	S = 0;
-	PC = 0;
-
-	// Status flags, stored discretely and assembled in getP()/setP().
-	cFlag = false;
-	zFlag = false;
-	iFlag = false;
-	dFlag = false;
-	vFlag = false;
-	nFlag = false;
-	// The B flag. Unlike the others it isn't a real register bit - it only exists
-	// in the status byte pushed to the stack, where it's 1 for a software push
-	// (BRK/PHP) and 0 for a hardware interrupt (IRQ/NMI). `decode` sets it: true on
-	// a normal fetch, false when it forces the interrupt sequence. setP() ignores
-	// it (B is discarded on a pull), so it's read back only via getP().
-	bFlag = true;
-
-	// Internal latches.
-	#dr = 0; // Data latch; also the zero-page pointer for indirect modes.
-	#al = 0; // Address latch, low byte.
-	#ah = 0; // Address latch, high byte.
-	#crossed = false; // Page-boundary-crossed flag, set by ar+=x?/ar+=y?.
-	#offset = 0; // Branch offset, stashed before the fetch cycle clobbers DR.
-	#branchFixup = 0; // PCH adjustment (-1/0/+1) pending after a branch page cross.
-
-	/**
-	 * Current microstate. Starts at RESET: a new CPU powers on into the cold
-	 * reset sequence (construction is equivalent to `reset(true)`), so the first
-	 * seven run() calls carry out the reset and land at DECODE. Hosts that seed
-	 * registers directly instead (savestates, test harnesses) should also set
-	 * `state = DECODE` to skip it.
-	 */
-	state = RESET;
-
-	/**
-	 * Set when the CPU crashes on a CIM (or, with `withoutUndocumented`, on any
-	 * undocumented opcode). It then repeats that cycle forever until reset.
-	 */
-	crashed = false;
-
-	/**
-	 * The RDY input line. When the host pulls it false before a read cycle, that
-	 * cycle still issues its bus read but then stalls: no register is mutated and
-	 * `state` does not advance, so the next `run()` repeats the same read until
-	 * RDY is true again. NMOS quirk: only read cycles honor RDY - write cycles
-	 * complete regardless.
-	 */
-	RDY = true;
-
-	/**
-	 * The IRQ input line (positive logic here: `true` = asserted). Level-sensitive
-	 * - while it is asserted and the I flag is clear, an IRQ is recognized at an
-	 * instruction boundary. The host must wired-OR all its IRQ sources into this
-	 * single boolean.
-	 */
-	IRQ = false;
-
-	/**
-	 * The NMI input line (positive logic here: `true` = asserted). Edge-triggered
-	 * - a false->true transition latches a pending NMI, serviced at the next
-	 * instruction boundary regardless of the I flag. The host must wired-OR all
-	 * its NMI sources into this single boolean, and must hold the line asserted
-	 * for several cycles until the CPU acknowledges it.
-	 */
-	NMI = false;
-
-	/**
-	 * Optional hook fired at each committed opcode fetch (`SYNC & !DUMMY`), with
-	 * the opcode's address, just after the fetch commits. It is *not* fired on the
-	 * dummy fetch that precedes an interrupt, nor on RDY-stalled re-fetches, so it
-	 * sees each executed instruction exactly once. Hosts use it for tracing /
-	 * instruction-level debugging; it is a post-commit notification and must not
-	 * throw (use an execute interceptor on the bus to suspend at a fetch). Leave
-	 * undefined for zero overhead.
-	 */
-	onFetch: ((pc: number) => void) | undefined = undefined;
-
-	#nmiPrev = false; // For edge detection of NMI.
-	#nmiPending = false; // Set when an NMI is latched, cleared when serviced.
-	#interruptDetected = false; // Combined NMI/IRQ detect, recomputed each cycle; opPoll latches it one cycle later (the two-cycles-before-decode delay).
-	#interruptPending = false; // When set, decode will enter the interrupt sequence instead of the opcode's normal microcode.
-
-	readonly #bus: Memory;
-	readonly #withoutDecimal: boolean;
-	readonly #microcode: Step[];
-
 	constructor(bus: Memory, options: SfottyOptions = {}) {
 		this.#bus = bus;
 		this.#withoutDecimal = options.withoutDecimal ?? false;
@@ -144,30 +44,6 @@ export class SfottyCore {
 			(options.withoutUndocumented ?? false)
 				? MICROCODE_CRASH_UNDOCUMENTED
 				: MICROCODE;
-	}
-
-	/** Pack the status flags into a byte. Bit 5 (unused) reads as 1; bit 4 is B. */
-	getP(): number {
-		return (
-			(this.nFlag ? 0x80 : 0) |
-			(this.vFlag ? 0x40 : 0) |
-			0x20 |
-			(this.bFlag ? 0x10 : 0) |
-			(this.dFlag ? 0x08 : 0) |
-			(this.iFlag ? 0x04 : 0) |
-			(this.zFlag ? 0x02 : 0) |
-			(this.cFlag ? 0x01 : 0)
-		);
-	}
-
-	/** Unpack a status byte into the flags. Bits 4 and 5 are ignored. */
-	setP(p: number): void {
-		this.nFlag = (p & 0x80) !== 0;
-		this.vFlag = (p & 0x40) !== 0;
-		this.dFlag = (p & 0x08) !== 0;
-		this.iFlag = (p & 0x04) !== 0;
-		this.zFlag = (p & 0x02) !== 0;
-		this.cFlag = (p & 0x01) !== 0;
 	}
 
 	/** Advance the CPU by exactly one clock cycle (one bus access). */
@@ -186,7 +62,7 @@ export class SfottyCore {
 	/**
 	 * Start the reset sequence (emulates the RES line). Puts the CPU into a
 	 * dedicated seven-cycle sequence that decrements S three times, sets I, and
-	 * reads the reset vector at $FFFC/$FFFD into PC - so the next seven run()
+	 * reads the reset vector at $FFFC/$FFFD into PC - so the next seven cycle()
 	 * calls carry out the reset and land back at DECODE. Timing is not exact (no
 	 * reset-pulse-too-short modeling). When `cold` is true (power-on) the
 	 * registers, flags, and internal latches are first cleared to a known state
@@ -224,35 +100,69 @@ export class SfottyCore {
 		this.state = RESET;
 	}
 
-	/**
-	 * The bus read choke point - issues the single read. RDY is not handled here:
-	 * each read op issues the read through this method and then, if RDY is low,
-	 * bails without mutating state (so the bus still sees the read every stalled
-	 * cycle). A throw from the bus propagates out, before any register changes.
-	 * @internal
-	 */
-	#read(address: number, options: ReadOptions): number {
-		// A non-committing dummy cycle (the DUMMY table is keyed by microstate)
-		// marks its read so traps can tell it from a real access. SPECULATIVE
-		// cycles (the indexed page-cross read) are dummy only when `crossed`.
-		// opReadDecode's own interrupt/stall DUMMY is passed in `options`.
-		if (DUMMY[this.state] || (this.#crossed && SPECULATIVE[this.state])) {
-			options |= ReadOptions.DUMMY;
-		}
-		return this.#bus.read(address, options);
-	}
+	// Programmer-visible registers (8-bit, except the 16-bit PC).
+	A = 0;
+	X = 0;
+	Y = 0;
+	S = 0;
+	PC = 0;
+
+	// Status flags, stored discretely and assembled in getP()/setP().
+	cFlag = false;
+	zFlag = false;
+	iFlag = false;
+	dFlag = false;
+	vFlag = false;
+	nFlag = false;
+	// The B flag. Unlike the others it isn't a real register bit - it only exists
+	// in the status byte pushed to the stack, where it's 1 for a software push
+	// (BRK/PHP) and 0 for a hardware interrupt (IRQ/NMI). `decode` sets it: true on
+	// a normal fetch, false when it forces the interrupt sequence. setP() ignores
+	// it (B is discarded on a pull), so it's read back only via getP().
+	bFlag = true;
 
 	/**
-	 * The bus write choke point. Writes ignore RDY entirely (NMOS quirk), so this
-	 * never stalls. The DUMMY table (keyed by microstate) marks the non-committing
-	 * write-back cycle of a read-modify-write instruction, so traps can tell it
-	 * from the real store. Writes are never SPECULATIVE - only reads cross pages.
-	 * @internal
+	 * The RDY input line. When the host pulls it false before a read cycle, that
+	 * cycle still issues its bus read but then stalls: no register is mutated and
+	 * `state` does not advance, so the next `cycle()` repeats the same read until
+	 * RDY is true again. NMOS quirk: only read cycles honor RDY - write cycles
+	 * complete regardless.
 	 */
-	#write(address: number, value: number): void {
-		const options = DUMMY[this.state] ? ReadOptions.DUMMY : ReadOptions.NONE;
-		this.#bus.write(address, value, options);
-	}
+	RDY = true;
+
+	/**
+	 * The IRQ input line (positive logic here: `true` = asserted). Level-sensitive
+	 * - while it is asserted and the I flag is clear, an IRQ is recognized at an
+	 * instruction boundary. The host must wired-OR all its IRQ sources into this
+	 * single boolean.
+	 */
+	IRQ = false;
+
+	/**
+	 * The NMI input line (positive logic here: `true` = asserted). Edge-triggered
+	 * - a false->true transition latches a pending NMI, serviced at the next
+	 * instruction boundary regardless of the I flag. The host must wired-OR all
+	 * its NMI sources into this single boolean, and must hold the line asserted
+	 * for several cycles until the CPU acknowledges it.
+	 */
+	NMI = false;
+
+	/**
+	 * Optional hook fired at each committed opcode fetch (`SYNC & !DUMMY`), with
+	 * the opcode's address, just after the fetch commits. It is *not* fired on the
+	 * dummy fetch that precedes an interrupt, nor on RDY-stalled re-fetches, so it
+	 * sees each executed instruction exactly once. Hosts use it for tracing /
+	 * instruction-level debugging; it is a post-commit notification and must not
+	 * throw (use an execute interceptor on the bus to suspend at a fetch). Leave
+	 * undefined for zero overhead.
+	 */
+	onFetch: ((pc: number) => void) | undefined = undefined;
+
+	/**
+	 * Set when the CPU crashes on a CIM (or, with `withoutUndocumented`, on any
+	 * undocumented opcode). It then repeats that cycle forever until reset.
+	 */
+	crashed = false;
 
 	/**
 	 * Human-readable description of a microstate, for logging/debugging - e.g.
@@ -271,6 +181,30 @@ export class SfottyCore {
 			return `<invalid state ${state}>`;
 		}
 		return `${instruction.mnemonic} ${instruction.mode} - cycle ${cycle + 1}`;
+	}
+
+	/** Pack the status flags into a byte. Bit 5 (unused) reads as 1; bit 4 is B. */
+	getP(): number {
+		return (
+			(this.nFlag ? 0x80 : 0) |
+			(this.vFlag ? 0x40 : 0) |
+			0x20 |
+			(this.bFlag ? 0x10 : 0) |
+			(this.dFlag ? 0x08 : 0) |
+			(this.iFlag ? 0x04 : 0) |
+			(this.zFlag ? 0x02 : 0) |
+			(this.cFlag ? 0x01 : 0)
+		);
+	}
+
+	/** Unpack a status byte into the flags. Bits 4 and 5 are ignored. */
+	setP(p: number): void {
+		this.nFlag = (p & 0x80) !== 0;
+		this.vFlag = (p & 0x40) !== 0;
+		this.dFlag = (p & 0x08) !== 0;
+		this.iFlag = (p & 0x04) !== 0;
+		this.zFlag = (p & 0x02) !== 0;
+		this.cFlag = (p & 0x01) !== 0;
 	}
 
 	// --- Micro-op implementations (called by the microcode table) -------------
@@ -529,22 +463,6 @@ export class SfottyCore {
 	/** `sax` (SAX): stage A & X for the write; does not affect flags. @internal */
 	opSax(): void {
 		this.#dr = this.A & this.X;
-	}
-
-	/**
-	 * Shared store-high logic for the unstable SHA/SHX/SHY/SHS group: the value
-	 * written is `reg & (baseHigh + 1)`, and on a page cross the store address's
-	 * high byte is corrupted to that value. Runs after `?ah++`, so on a cross AH
-	 * already holds `baseHigh + 1`.
-	 */
-	#storeHigh(reg: number): void {
-		if (this.#crossed) {
-			const value = reg & this.#ah;
-			this.#ah = value;
-			this.#dr = value;
-		} else {
-			this.#dr = reg & ((this.#ah + 1) & 0xff);
-		}
 	}
 
 	/** `sha` (SHA/AHX): store A & X & (H+1) - unstable. @internal */
@@ -1091,7 +1009,7 @@ export class SfottyCore {
 	 * `pc+=dr?`: add the signed branch offset to PCL (8-bit), leaving PCH for the
 	 * fix-up cycle. Returns whether a page boundary was crossed (so the caller
 	 * takes that extra cycle, whose dummy read sees the un-fixed address). The
-	 * offset comes from {@link opStashOffset}, since the fetch in this cycle has
+	 * offset comes from `#stashOffset`, since the fetch in this cycle has
 	 * already overwritten DR.
 	 * @internal
 	 */
@@ -1106,11 +1024,6 @@ export class SfottyCore {
 	/** `pch=fix`: apply the pending PCH adjustment after a branch page cross. @internal */
 	opFixPch(): void {
 		this.PC = (this.PC + (this.#branchFixup << 8)) & 0xffff;
-	}
-
-	/** Stash DR as the branch offset before the next cycle's fetch overwrites it. */
-	#stashOffset(): void {
-		this.#offset = this.#dr;
 	}
 
 	/** `cc?` (BCC): branch taken if carry clear. @internal */
@@ -1161,6 +1074,83 @@ export class SfottyCore {
 		return this.vFlag;
 	}
 
+	/**
+	 * Current microstate. Starts at RESET: a new CPU powers on into the cold
+	 * reset sequence (construction is equivalent to `reset(true)`), so the first
+	 * seven cycle() calls carry out the reset and land at DECODE. Hosts that seed
+	 * registers directly instead (savestates, test harnesses) should also set
+	 * `state = DECODE` to skip it.
+	 */
+	state = RESET;
+
+	// Internal latches.
+	#dr = 0; // Data latch; also the zero-page pointer for indirect modes.
+	#al = 0; // Address latch, low byte.
+	#ah = 0; // Address latch, high byte.
+	#crossed = false; // Page-boundary-crossed flag, set by ar+=x?/ar+=y?.
+	#offset = 0; // Branch offset, stashed before the fetch cycle clobbers DR.
+	#branchFixup = 0; // PCH adjustment (-1/0/+1) pending after a branch page cross.
+
+	#nmiPrev = false; // For edge detection of NMI.
+	#nmiPending = false; // Set when an NMI is latched, cleared when serviced.
+	#interruptDetected = false; // Combined NMI/IRQ detect, recomputed each cycle; opPoll latches it one cycle later (the two-cycles-before-decode delay).
+	#interruptPending = false; // When set, decode will enter the interrupt sequence instead of the opcode's normal microcode.
+
+	readonly #bus: Memory;
+	readonly #withoutDecimal: boolean;
+	readonly #microcode: Step[];
+
+	/**
+	 * The bus read choke point - issues the single read. RDY is not handled here:
+	 * each read op issues the read through this method and then, if RDY is low,
+	 * bails without mutating state (so the bus still sees the read every stalled
+	 * cycle). A throw from the bus propagates out, before any register changes.
+	 * @internal
+	 */
+	#read(address: number, options: ReadOptions): number {
+		// A non-committing dummy cycle (the DUMMY table is keyed by microstate)
+		// marks its read so traps can tell it from a real access. SPECULATIVE
+		// cycles (the indexed page-cross read) are dummy only when `crossed`.
+		// opReadDecode's own interrupt/stall DUMMY is passed in `options`.
+		if (DUMMY[this.state] || (this.#crossed && SPECULATIVE[this.state])) {
+			options |= ReadOptions.DUMMY;
+		}
+		return this.#bus.read(address, options);
+	}
+
+	/**
+	 * The bus write choke point. Writes ignore RDY entirely (NMOS quirk), so this
+	 * never stalls. The DUMMY table (keyed by microstate) marks the non-committing
+	 * write-back cycle of a read-modify-write instruction, so traps can tell it
+	 * from the real store. Writes are never SPECULATIVE - only reads cross pages.
+	 * @internal
+	 */
+	#write(address: number, value: number): void {
+		const options = DUMMY[this.state] ? ReadOptions.DUMMY : ReadOptions.NONE;
+		this.#bus.write(address, value, options);
+	}
+
+	/**
+	 * Shared store-high logic for the unstable SHA/SHX/SHY/SHS group: the value
+	 * written is `reg & (baseHigh + 1)`, and on a page cross the store address's
+	 * high byte is corrupted to that value. Runs after `?ah++`, so on a cross AH
+	 * already holds `baseHigh + 1`.
+	 */
+	#storeHigh(reg: number): void {
+		if (this.#crossed) {
+			const value = reg & this.#ah;
+			this.#ah = value;
+			this.#dr = value;
+		} else {
+			this.#dr = reg & ((this.#ah + 1) & 0xff);
+		}
+	}
+
+	/** Stash DR as the branch offset before the next cycle's fetch overwrites it. */
+	#stashOffset(): void {
+		this.#offset = this.#dr;
+	}
+
 	/** Compare a register with DR, setting C, Z, N. */
 	#compare(register: number): void {
 		const diff = register - this.#dr;
@@ -1179,6 +1169,16 @@ export class SfottyCore {
 		return (this.#ah << 8) | this.#al;
 	}
 }
+
+/**
+ * The unstable "magic constant" ORed into A by undocumented opcodes $8B (ANE)
+ * and $AB (LXA). On the real hardware, it is chip- and temperature-dependent
+ * with some dependency on the RDY line so no value is universally correct. We
+ * use $EE to match the SingleStepTests' expected results.
+ *
+ * $FF, $FE, and $00 are other commonly reported values.
+ */
+const ANE_MAGIC = 0xee;
 
 function inc16(n: number): number {
 	return (n + 1) & 0xffff;

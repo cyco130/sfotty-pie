@@ -26,9 +26,6 @@ const GAIN = 3.208855047816406e32;
 const STAGES = COEFFICIENTS.length / 2;
 
 export class AntiAliasFilter {
-	#s1 = new Float64Array(STAGES);
-	#s2 = new Float64Array(STAGES);
-
 	apply(value: number): number {
 		const s1 = this.#s1;
 		const s2 = this.#s2;
@@ -49,4 +46,7 @@ export class AntiAliasFilter {
 		this.#s1.fill(0);
 		this.#s2.fill(0);
 	}
+
+	#s1 = new Float64Array(STAGES);
+	#s2 = new Float64Array(STAGES);
 }

@@ -87,45 +87,6 @@ export interface PadView {
 	readonly axes: readonly number[];
 }
 
-// The D-pad buttons each hat position activates (diagonals two, cardinals
-// one), indexed by position 0-7 clockwise from up.
-const HAT_DPAD: readonly (readonly number[])[] = [
-	[DPAD_UP],
-	[DPAD_UP, DPAD_RIGHT],
-	[DPAD_RIGHT],
-	[DPAD_DOWN, DPAD_RIGHT],
-	[DPAD_DOWN],
-	[DPAD_DOWN, DPAD_LEFT],
-	[DPAD_LEFT],
-	[DPAD_UP, DPAD_LEFT],
-];
-
-// 0 at rest, 1 at the anchor, linear in between, clamped - 0 when the raw
-// value sits on the other side of rest (or the anchor is degenerate).
-function toward(raw: number, rest: number, at: number): number {
-	const span = at - rest;
-	if (span === 0) return 0;
-	const t = (raw - rest) / span;
-	return t <= 0 ? 0 : Math.min(t, 1);
-}
-
-function readButtonSource(
-	source: ButtonSource,
-	pad: PadView,
-): { pressed: boolean; value: number } {
-	if ("button" in source) {
-		const b = pad.buttons[source.button];
-		return { pressed: b?.pressed ?? false, value: b?.value ?? 0 };
-	}
-	const { axis, rest, pressed } = source.axisButton;
-	const raw = pad.axes[axis] ?? rest;
-	// Active when closer to the observed pressed value than to rest.
-	return {
-		pressed: Math.abs(raw - pressed) < Math.abs(raw - rest),
-		value: toward(raw, rest, pressed),
-	};
-}
-
 /** The hat position matching `raw`, or -1 for centred / unrecognized. */
 export function hatPosition(hat: HatSource, raw: number): number {
 	for (let p = 0; p < hat.values.length; p++) {
@@ -136,8 +97,6 @@ export function hatPosition(hat: HatSource, raw: number): number {
 	}
 	return -1;
 }
-
-const UNPRESSED = { pressed: false, value: 0 };
 
 /**
  * The Standard-shaped view of a pad. Without a profile this is the pad
@@ -212,6 +171,47 @@ export function normalize(pad: PadView, profile?: NormalizeProfile): PadView {
 	return { buttons, axes };
 }
 
+// The D-pad buttons each hat position activates (diagonals two, cardinals
+// one), indexed by position 0-7 clockwise from up.
+const HAT_DPAD: readonly (readonly number[])[] = [
+	[DPAD_UP],
+	[DPAD_UP, DPAD_RIGHT],
+	[DPAD_RIGHT],
+	[DPAD_DOWN, DPAD_RIGHT],
+	[DPAD_DOWN],
+	[DPAD_DOWN, DPAD_LEFT],
+	[DPAD_LEFT],
+	[DPAD_UP, DPAD_LEFT],
+];
+
+// 0 at rest, 1 at the anchor, linear in between, clamped - 0 when the raw
+// value sits on the other side of rest (or the anchor is degenerate).
+function toward(raw: number, rest: number, at: number): number {
+	const span = at - rest;
+	if (span === 0) return 0;
+	const t = (raw - rest) / span;
+	return t <= 0 ? 0 : Math.min(t, 1);
+}
+
+function readButtonSource(
+	source: ButtonSource,
+	pad: PadView,
+): { pressed: boolean; value: number } {
+	if ("button" in source) {
+		const b = pad.buttons[source.button];
+		return { pressed: b?.pressed ?? false, value: b?.value ?? 0 };
+	}
+	const { axis, rest, pressed } = source.axisButton;
+	const raw = pad.axes[axis] ?? rest;
+	// Active when closer to the observed pressed value than to rest.
+	return {
+		pressed: Math.abs(raw - pressed) < Math.abs(raw - rest),
+		value: toward(raw, rest, pressed),
+	};
+}
+
+const UNPRESSED = { pressed: false, value: 0 };
+
 // --- Calibration classifier -----------------------------------------------
 
 /** One calibration observation: the raw pad sampled while the user holds the
@@ -250,10 +250,6 @@ export function deviates(
 	return now.axes.some((v, i) => Math.abs(v - (rest.axes[i] ?? 0)) >= 0.5);
 }
 
-// An axis must move at least this far from its rest value to count as the
-// step's dominant change (below it, it's stick wobble or noise).
-const CLASSIFY_AXIS_MIN = 0.3;
-
 /** What moved in one step relative to rest: a newly-pressed raw button wins;
  *  otherwise the axis that moved farthest (if far enough); otherwise nothing.
  *  Used by the classifier and by the mapping editor's capture assist. */
@@ -280,6 +276,66 @@ export function dominantChange(
 	}
 	return best;
 }
+
+/**
+ * Build a normalization profile from calibration samples: diff each step
+ * against rest, then decide the source shapes. Directions that press raw
+ * buttons become D-pad sources; directions that move axes become Standard
+ * axes 0/1 (anchored at the observed rest/full-push values, so inversion and
+ * range fall out) - unless perpendicular directions move the *same* axis,
+ * which is the stepped-hat signature. The trigger becomes Standard button 0,
+ * as a raw button or a button-like axis.
+ */
+export function classify(samples: CalibrationSet): NormalizeProfile {
+	const profile: NormalizeProfile = { buttons: {}, axes: {} };
+	const rest = samples.rest;
+
+	const dirs = {
+		up: samples.up && dominantChange(rest, samples.up),
+		down: samples.down && dominantChange(rest, samples.down),
+		left: samples.left && dominantChange(rest, samples.left),
+		right: samples.right && dominantChange(rest, samples.right),
+	};
+	const DPAD = {
+		up: DPAD_UP,
+		down: DPAD_DOWN,
+		left: DPAD_LEFT,
+		right: DPAD_RIGHT,
+	} as const;
+
+	// Button-shaped directions map straight onto the D-pad.
+	for (const dir of ["up", "down", "left", "right"] as const) {
+		const change = dirs[dir];
+		if (change && "button" in change) {
+			profile.buttons[DPAD[dir]] = { button: change.button };
+		}
+	}
+
+	// Axis-shaped directions: a hat when perpendicular directions share an
+	// axis; otherwise each plane pairs onto a Standard axis.
+	const hat = detectHat(dirs);
+	if (hat) {
+		profile.hat = hat;
+	} else {
+		const x = axisSourceFrom(dirs.left, dirs.right, rest);
+		if (x) profile.axes[0] = x;
+		const y = axisSourceFrom(dirs.up, dirs.down, rest);
+		if (y) profile.axes[1] = y;
+	}
+
+	// The trigger -> Standard button 0.
+	const trigger = buttonSourceFrom(
+		samples.trigger && dominantChange(rest, samples.trigger),
+		rest,
+	);
+	if (trigger) profile.buttons[0] = trigger;
+
+	return profile;
+}
+
+// An axis must move at least this far from its rest value to count as the
+// step's dominant change (below it, it's stick wobble or noise).
+const CLASSIFY_AXIS_MIN = 0.3;
 
 // Fit the observed hat positions to the linear ladder value = a + b * position
 // (the SDL-style encoding is exactly linear). A good fit fills in the
@@ -386,60 +442,4 @@ function buttonSourceFrom(
 			pressed: change.value,
 		},
 	};
-}
-
-/**
- * Build a normalization profile from calibration samples: diff each step
- * against rest, then decide the source shapes. Directions that press raw
- * buttons become D-pad sources; directions that move axes become Standard
- * axes 0/1 (anchored at the observed rest/full-push values, so inversion and
- * range fall out) - unless perpendicular directions move the *same* axis,
- * which is the stepped-hat signature. The trigger becomes Standard button 0,
- * as a raw button or a button-like axis.
- */
-export function classify(samples: CalibrationSet): NormalizeProfile {
-	const profile: NormalizeProfile = { buttons: {}, axes: {} };
-	const rest = samples.rest;
-
-	const dirs = {
-		up: samples.up && dominantChange(rest, samples.up),
-		down: samples.down && dominantChange(rest, samples.down),
-		left: samples.left && dominantChange(rest, samples.left),
-		right: samples.right && dominantChange(rest, samples.right),
-	};
-	const DPAD = {
-		up: DPAD_UP,
-		down: DPAD_DOWN,
-		left: DPAD_LEFT,
-		right: DPAD_RIGHT,
-	} as const;
-
-	// Button-shaped directions map straight onto the D-pad.
-	for (const dir of ["up", "down", "left", "right"] as const) {
-		const change = dirs[dir];
-		if (change && "button" in change) {
-			profile.buttons[DPAD[dir]] = { button: change.button };
-		}
-	}
-
-	// Axis-shaped directions: a hat when perpendicular directions share an
-	// axis; otherwise each plane pairs onto a Standard axis.
-	const hat = detectHat(dirs);
-	if (hat) {
-		profile.hat = hat;
-	} else {
-		const x = axisSourceFrom(dirs.left, dirs.right, rest);
-		if (x) profile.axes[0] = x;
-		const y = axisSourceFrom(dirs.up, dirs.down, rest);
-		if (y) profile.axes[1] = y;
-	}
-
-	// The trigger -> Standard button 0.
-	const trigger = buttonSourceFrom(
-		samples.trigger && dominantChange(rest, samples.trigger),
-		rest,
-	);
-	if (trigger) profile.buttons[0] = trigger;
-
-	return profile;
 }

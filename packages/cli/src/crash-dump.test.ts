@@ -22,7 +22,7 @@ describe("crashDump", () => {
 
 		let cycles = 0;
 		while (!cpu.crashed && cycles++ < 100) {
-			cpu.run();
+			cpu.cycle();
 		}
 		expect(cpu.crashed).toBe(true);
 

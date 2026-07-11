@@ -40,60 +40,6 @@ import { Signal } from "./signal.ts";
  * (inputs), CA2 = motor control and CB2 = command (outputs).
  */
 export class Pia implements Memory {
-	/**
-	 * The port A external input pins (1 = open/pulled up, 0 = pulled low).
-	 * On the Atari these are joysticks 0 (low nibble) and 1 (high).
-	 */
-	readonly portaIn = new Signal(0xff);
-
-	/**
-	 * The port B external input pins. On the Atari these are joysticks 2/3
-	 * (400/800 only - nothing external connects to port B on XL/XE).
-	 */
-	readonly portbIn = new Signal(0xff);
-
-	/** The port A pin levels (DDR-aware, external pulls included). */
-	readonly portaOut = new Signal(0xff);
-
-	/**
-	 * The port B pin levels (DDR-aware, external pulls included). On the
-	 * Atari XL/XE this is what PORTB memory banking watches.
-	 */
-	readonly portbOut = new Signal(0xff);
-
-	// Control line inputs (pulled up when unconnected).
-	readonly ca1In = new Signal(true);
-	readonly ca2In = new Signal(true);
-	readonly cb1In = new Signal(true);
-	readonly cb2In = new Signal(true);
-
-	// Control line outputs.
-	readonly ca2Out = new Signal(true);
-	readonly cb2Out = new Signal(true);
-
-	/** The IRQA output line (true = asserted). */
-	irqA = false;
-	/** The IRQB output line (true = asserted). */
-	irqB = false;
-
-	#outA = 0;
-	#ddrA = 0;
-	#ctrlA = 0;
-
-	#outB = 0;
-	#ddrB = 0;
-	#ctrlB = 0;
-
-	// The CA2/CB2 *pin* level (driven in output modes, external in input
-	// mode) and the pending-edge latch: a rising pin edge in any output mode
-	// except pulse latches it; a falling edge or pulse mode clears it; and
-	// entering input mode converts it into the IRQ2 status bit. Pinned by
-	// Acid800 pia_irq's transition tables (ported below as unit tests).
-	#ca2Pin = true;
-	#ca2Pending = false;
-	#cb2Pin = true;
-	#cb2Pending = false;
-
 	constructor() {
 		this.portaIn.watch(() => this.#updatePortaOut());
 		this.portbIn.watch(() => this.#updatePortbOut());
@@ -141,12 +87,6 @@ export class Pia implements Memory {
 		});
 	}
 
-	// An active transition: rising when the edge-select bit is set, falling
-	// otherwise. (Signal watchers only fire on real changes.)
-	#activeEdge(old: boolean, value: boolean, risingSelect: number): boolean {
-		return risingSelect ? !old && value : old && !value;
-	}
-
 	/**
 	 * Advance the strobe timing one machine cycle: ends a one-cycle CA2/CB2
 	 * pulse (output mode 01). The Atari OS doesn't use pulse mode, but the
@@ -155,6 +95,63 @@ export class Pia implements Memory {
 	cycle(): void {
 		if ((this.#ctrlA & 0x38) === 0x28) this.ca2Out.value = true;
 		if ((this.#ctrlB & 0x38) === 0x28) this.cb2Out.value = true;
+	}
+
+	/**
+	 * The port A external input pins (1 = open/pulled up, 0 = pulled low).
+	 * On the Atari these are joysticks 0 (low nibble) and 1 (high).
+	 */
+	readonly portaIn = new Signal(0xff);
+
+	/**
+	 * The port B external input pins. On the Atari these are joysticks 2/3
+	 * (400/800 only - nothing external connects to port B on XL/XE).
+	 */
+	readonly portbIn = new Signal(0xff);
+
+	/** The port A pin levels (DDR-aware, external pulls included). */
+	readonly portaOut = new Signal(0xff);
+
+	/**
+	 * The port B pin levels (DDR-aware, external pulls included). On the
+	 * Atari XL/XE this is what PORTB memory banking watches.
+	 */
+	readonly portbOut = new Signal(0xff);
+
+	// Control line inputs (pulled up when unconnected).
+	readonly ca1In = new Signal(true);
+	readonly ca2In = new Signal(true);
+	readonly cb1In = new Signal(true);
+	readonly cb2In = new Signal(true);
+
+	// Control line outputs.
+	readonly ca2Out = new Signal(true);
+	readonly cb2Out = new Signal(true);
+
+	/** The IRQA output line (true = asserted). */
+	irqA = false;
+	/** The IRQB output line (true = asserted). */
+	irqB = false;
+
+	// The 6520 has a reset pin, so it reinitializes on warm resets too: all
+	// six registers clear (on XL/XE this is what banks the OS ROM and BASIC
+	// back in: DDRB clears, so PORTB floats to all-inputs and reads $FF).
+	// The control outputs float back high and the IRQ lines drop. The input
+	// pins reflect physical lines and are left alone.
+	reset(cold: boolean): void {
+		void cold;
+		this.#outA = this.#outB = 0;
+		this.#ddrA = this.#ddrB = 0;
+		this.#ctrlA = this.#ctrlB = 0;
+		this.ca2Out.value = true;
+		this.cb2Out.value = true;
+		this.#ca2Pending = this.#cb2Pending = false;
+		this.#ca2Pin = this.ca2In.value; // input mode: the pin is external
+		this.#cb2Pin = this.cb2In.value;
+		this.#updateIrqA();
+		this.#updateIrqB();
+		this.#updatePortaOut();
+		this.#updatePortbOut();
 	}
 
 	read(address: number, options: ReadOptions = ReadOptions.NONE): number {
@@ -253,25 +250,28 @@ export class Pia implements Memory {
 		}
 	}
 
-	// The 6520 has a reset pin, so it reinitializes on warm resets too: all
-	// six registers clear (on XL/XE this is what banks the OS ROM and BASIC
-	// back in: DDRB clears, so PORTB floats to all-inputs and reads $FF).
-	// The control outputs float back high and the IRQ lines drop. The input
-	// pins reflect physical lines and are left alone.
-	reset(cold: boolean): void {
-		void cold;
-		this.#outA = this.#outB = 0;
-		this.#ddrA = this.#ddrB = 0;
-		this.#ctrlA = this.#ctrlB = 0;
-		this.ca2Out.value = true;
-		this.cb2Out.value = true;
-		this.#ca2Pending = this.#cb2Pending = false;
-		this.#ca2Pin = this.ca2In.value; // input mode: the pin is external
-		this.#cb2Pin = this.cb2In.value;
-		this.#updateIrqA();
-		this.#updateIrqB();
-		this.#updatePortaOut();
-		this.#updatePortbOut();
+	#outA = 0;
+	#ddrA = 0;
+	#ctrlA = 0;
+
+	#outB = 0;
+	#ddrB = 0;
+	#ctrlB = 0;
+
+	// The CA2/CB2 *pin* level (driven in output modes, external in input
+	// mode) and the pending-edge latch: a rising pin edge in any output mode
+	// except pulse latches it; a falling edge or pulse mode clears it; and
+	// entering input mode converts it into the IRQ2 status bit. Pinned by
+	// Acid800 pia_irq's transition tables (ported below as unit tests).
+	#ca2Pin = true;
+	#ca2Pending = false;
+	#cb2Pin = true;
+	#cb2Pending = false;
+
+	// An active transition: rising when the edge-select bit is set, falling
+	// otherwise. (Signal watchers only fire on real changes.)
+	#activeEdge(old: boolean, value: boolean, risingSelect: number): boolean {
+		return risingSelect ? !old && value : old && !value;
 	}
 
 	// Output bits read back the latch; input bits read as 1 (pulled up).

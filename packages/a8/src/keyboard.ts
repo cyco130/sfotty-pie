@@ -23,6 +23,8 @@ export const KEYBOARD_LINES = { CONTROL: 0, SHIFT: 2, BREAK: 6 } as const;
  * Break.
  */
 export class Keyboard {
+	// Host facade
+
 	/**
 	 * Whether the keyboard is plugged in. Detached, the matrix sends no
 	 * response: every scan reads open lines, so POKEY sees all keys up. On
@@ -32,59 +34,6 @@ export class Keyboard {
 	 * gone, not the fingers.
 	 */
 	readonly attached = new Signal(true);
-
-	#keys = new Array<boolean>(0x40).fill(false);
-	#metaKeys = new Array<boolean>(8).fill(false);
-	#metaCount = 0;
-
-	// Sense-line levels per scan address, rebuilt on any key change:
-	// #kr1[code] for the 8x8 matrix, #kr2[output line] for the KR2 line
-	// (it reads the same for all eight codes on an output line).
-	#kr1 = new Array<boolean>(0x40).fill(false);
-	#kr2 = new Array<boolean>(0x08).fill(false);
-
-	// Union-find over the conductor nodes: output lines 0-7, sense lines
-	// 8-15, KR2 16. Pressed keys are the edges.
-	#nodes = new Uint8Array(17);
-
-	#find(node: number): number {
-		while (this.#nodes[node] !== node) {
-			node = this.#nodes[node]!;
-		}
-		return node;
-	}
-
-	#union(a: number, b: number): void {
-		this.#nodes[this.#find(a)] = this.#find(b);
-	}
-
-	// Rebuild #kr1 and #kr2: connect every pressed key's lines, then read
-	// each scan address as "are its two lines in the same component".
-	#rescan() {
-		for (let node = 0; node < 17; node++) {
-			this.#nodes[node] = node;
-		}
-
-		for (let key = 0; key < 0x40; key++) {
-			if (this.#keys[key]) {
-				this.#union(key >> 3, 8 + (key & 0x07));
-			}
-		}
-		for (let line = 0; line < 8; line++) {
-			if (this.#metaKeys[line]) {
-				this.#union(line, 16);
-			}
-		}
-
-		for (let key = 0; key < 0x40; key++) {
-			this.#kr1[key] = this.#find(key >> 3) === this.#find(8 + (key & 0x07));
-		}
-		for (let line = 0; line < 8; line++) {
-			this.#kr2[line] = this.#find(line) === this.#find(16);
-		}
-	}
-
-	// Host facade
 
 	/** Press a matrix key. `code` is the 6-bit scan code - the raw matrix
 	 *  position, no Shift/Ctrl bits (those are meta lines, see
@@ -165,5 +114,56 @@ export class Keyboard {
 		// eight codes on that line (Control asserts it for all of $00-$07,
 		// Shift for $10-$17, Break for $30-$37).
 		this.KR2 = this.#kr2[line]!;
+	}
+
+	#keys = new Array<boolean>(0x40).fill(false);
+	#metaKeys = new Array<boolean>(8).fill(false);
+	#metaCount = 0;
+
+	// Sense-line levels per scan address, rebuilt on any key change:
+	// #kr1[code] for the 8x8 matrix, #kr2[output line] for the KR2 line
+	// (it reads the same for all eight codes on an output line).
+	#kr1 = new Array<boolean>(0x40).fill(false);
+	#kr2 = new Array<boolean>(0x08).fill(false);
+
+	// Union-find over the conductor nodes: output lines 0-7, sense lines
+	// 8-15, KR2 16. Pressed keys are the edges.
+	#nodes = new Uint8Array(17);
+
+	#find(node: number): number {
+		while (this.#nodes[node] !== node) {
+			node = this.#nodes[node]!;
+		}
+		return node;
+	}
+
+	#union(a: number, b: number): void {
+		this.#nodes[this.#find(a)] = this.#find(b);
+	}
+
+	// Rebuild #kr1 and #kr2: connect every pressed key's lines, then read
+	// each scan address as "are its two lines in the same component".
+	#rescan() {
+		for (let node = 0; node < 17; node++) {
+			this.#nodes[node] = node;
+		}
+
+		for (let key = 0; key < 0x40; key++) {
+			if (this.#keys[key]) {
+				this.#union(key >> 3, 8 + (key & 0x07));
+			}
+		}
+		for (let line = 0; line < 8; line++) {
+			if (this.#metaKeys[line]) {
+				this.#union(line, 16);
+			}
+		}
+
+		for (let key = 0; key < 0x40; key++) {
+			this.#kr1[key] = this.#find(key >> 3) === this.#find(8 + (key & 0x07));
+		}
+		for (let line = 0; line < 8; line++) {
+			this.#kr2[line] = this.#find(line) === this.#find(16);
+		}
 	}
 }

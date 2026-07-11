@@ -124,46 +124,6 @@ export interface MachineConfig {
  * bindings) is entirely the host's business.
  */
 export class Atari {
-	// The host surface: connectors (devices plug in) and the built-in
-	// controls (the console panel; the cartridge accessor below).
-	readonly joysticks: readonly JoystickConnector[];
-	readonly console: ConsolePanel;
-	readonly keyboard: Keyboard;
-
-	get cartridge(): Cartridge | undefined {
-		return this.#cartridge;
-	}
-	set cartridge(cart: Cartridge | undefined) {
-		this.#setCartridge(cart);
-	}
-
-	// Internal components
-	readonly cpu: Sfotty;
-	readonly anticGtia: AnticGtia;
-	readonly pia: Pia;
-	readonly pokey: Pokey;
-	readonly mmu: Mmu;
-
-	readonly #xl: boolean;
-	#resetHeld = false;
-	// The D1: disk image served by the built-in trap-based SIO; undefined = no
-	// disk (SIO times out and the OS moves on). Set via insertDisk.
-	#disk: AtrImage | undefined;
-	/**
-	 * The framebuffer the machine renders into (376x240 Atari color bytes),
-	 * updated by each cycle's render phase. Reassign only at a frame
-	 * boundary (e.g. swapping targets for tear-free double-buffering), or
-	 * the in-progress frame tears.
-	 */
-	frame: Uint8Array = new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT);
-
-	/**
-	 * The cycle phase machine's continuation marker - one of {@link PHASE}.
-	 * IDLE between cycles, BUS/CPU while a cycle is suspended mid-phase.
-	 * Public for debug consumers; treat as read-only.
-	 */
-	phase: number = PHASE.IDLE;
-
 	constructor(config: MachineConfig) {
 		const { os, basic, game, log } = config;
 		const xl = config.xl ?? false;
@@ -250,6 +210,215 @@ export class Atari {
 			this.mmu.isOsRomMapped ? sioHandler(address) : undefined,
 		);
 	}
+
+	// The host surface: connectors (devices plug in) and the built-in
+	// controls (the console panel; the cartridge accessor below).
+	readonly joysticks: readonly JoystickConnector[];
+	readonly console: ConsolePanel;
+	readonly keyboard: Keyboard;
+
+	get cartridge(): Cartridge | undefined {
+		return this.#cartridge;
+	}
+	set cartridge(cart: Cartridge | undefined) {
+		this.#setCartridge(cart);
+	}
+
+	/**
+	 * Insert (or replace) the D1: disk image the built-in SIO serves. Pass it
+	 * before booting a disk; with none inserted, SIO requests time out and the
+	 * OS falls through to its other boot sources.
+	 */
+	insertDisk(disk: AtrImage): void {
+		this.#disk = disk;
+	}
+
+	/**
+	 * Eject the D1: disk. Safe to call on a running machine: SIO requests then
+	 * time out and the OS falls through to its other boot sources.
+	 */
+	ejectDisk(): void {
+		this.#disk = undefined;
+	}
+
+	/**
+	 * Run one whole machine cycle: ANTIC scheduling (`beforeCpu`, commits) + the
+	 * POKEY tick, then the bus phase (ANTIC's DMA fetch or the CPU's access) and
+	 * the render. Sample {@link audio} afterwards for POKEY's output level.
+	 *
+	 * A bus phase may **throw** - an interceptor suspending on a read/write/fetch,
+	 * or a host's own breakpoint signal. This method does not catch it: the throw
+	 * propagates with the cycle frozen at that phase. The host catches whatever
+	 * it threw, resolves it (await input, clear a breakpoint, ...), and calls
+	 * cycle() again - the call picks up the *same* suspended cycle where it left
+	 * off rather than starting a new one. Idempotent by construction: each bus
+	 * phase does its access before any commit, so a throw unwinds clean and the
+	 * retried access repeats nothing.
+	 */
+	cycle(): void {
+		// The phase machine: a fall-through switch entered at the saved
+		// phase - IDLE starts a fresh cycle, BUS/CPU resume a suspended one.
+		// The marker is set to the current phase *before* each throwable
+		// call, so a throw leaves it pointing where to resume.
+		switch (this.phase) {
+			case PHASE.IDLE:
+				this.anticGtia.beforeCpu();
+				this.pokey.cycle();
+				this.pia.cycle();
+				this.phase = PHASE.BUS;
+
+			// falls through
+			case PHASE.BUS:
+				this.anticGtia.busPhase(); // ANTIC DMA read - may throw
+				this.cpu.NMI = this.anticGtia.nmi;
+				// The CPU sees the wire-ORed /IRQ line as of the end of the
+				// previous cycle: the open-collector line settles across a
+				// phase boundary, one cycle of propagation the 6502 never
+				// sees around (Acid800 pokey_irqtiming pins the total
+				// IRQST-to-acknowledge latency this produces).
+				this.cpu.IRQ = this.#irqLine;
+				this.cpu.RDY = this.anticGtia.rdy;
+				this.phase = PHASE.CPU;
+
+			// falls through
+			case PHASE.CPU:
+				if (this.resetAsserted) this.cpu.reset(false);
+				else if (!this.anticGtia.halt) this.cpu.cycle(); // may throw
+				this.anticGtia.afterCpu(this.frame, this.mmu.busData);
+				this.#irqLine = this.irq;
+				this.phase = PHASE.IDLE;
+		}
+	}
+
+	/**
+	 * The framebuffer the machine renders into (376x240 Atari color bytes),
+	 * updated by each cycle's render phase. Reassign only at a frame
+	 * boundary (e.g. swapping targets for tear-free double-buffering), or
+	 * the in-progress frame tears.
+	 */
+	frame: Uint8Array = new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT);
+
+	/**
+	 * The audio level as summed on the board, as of the last cycle: POKEY's
+	 * output ({@link Pokey.audio}, normalized to 0-1) plus the console
+	 * speaker line (0 or 1), so the range is 0-2 with one unit per source.
+	 * The host samples this after each cycle and applies its own gain. Equal
+	 * source weighting is provisional until the analog audio path (amplifier
+	 * stages, saturation) is modeled.
+	 */
+	get audio(): number {
+		return this.pokey.audio / 60 + this.anticGtia.consoleSpeaker;
+	}
+
+	/**
+	 * The cycle phase machine's continuation marker - one of {@link PHASE}.
+	 * IDLE between cycles, BUS/CPU while a cycle is suspended mid-phase.
+	 * Public for debug consumers; treat as read-only.
+	 */
+	phase: number = PHASE.IDLE;
+
+	/**
+	 * True while the Reset key holds the XL/XE system reset line (the
+	 * {@link console} connector's reset signal). The host must keep the CPU
+	 * in reset - `cpu.reset(false)` instead of `run()` - every cycle while
+	 * this is set. Always false on the 800, whose Reset key is an NMI
+	 * instead.
+	 */
+	get resetAsserted(): boolean {
+		return this.#resetHeld;
+	}
+
+	/**
+	 * The IRQ output line: POKEY and the PIA's two IRQ outputs, wire-ORed
+	 * like the hardware. Copy to the CPU's IRQ input every cycle.
+	 */
+	get irq(): boolean {
+		return this.pokey.irq || this.pia.irqA || this.pia.irqB;
+	}
+
+	/**
+	 * Trap a memory access. Interceptors run before the access and may
+	 * short-circuit it (return a substitute read value / true to suppress a
+	 * write); observers run after and only watch. Both phases are additive and
+	 * run last-registered-first; the first interceptor to return a value wins.
+	 * An optional `mask` filters by access flags (default `{ dummy: false }`);
+	 * `interceptExecute`/`observeExecute` are sugar for a read masked to a
+	 * committed opcode fetch. Each returns a handle to unregister. A committed
+	 * opcode fetch can't repeat under a WSYNC stall (the stall re-fetch is
+	 * DUMMY), so execute traps fire once. See [traps](../../notes.local/traps.md).
+	 */
+	interceptExecute(
+		address: number,
+		fn: ExecuteInterceptor,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.mmu.interceptExecute(address, fn, opts);
+	}
+
+	observeExecute(
+		address: number,
+		fn: ExecuteObserver,
+		opts?: { once?: boolean },
+	): TrapHandle {
+		return this.mmu.observeExecute(address, fn, opts);
+	}
+
+	interceptRead(
+		address: number,
+		fn: ReadInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.mmu.interceptRead(address, fn, opts);
+	}
+
+	observeRead(
+		address: number,
+		fn: ReadObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.mmu.observeRead(address, fn, opts);
+	}
+
+	interceptWrite(
+		address: number,
+		fn: WriteInterceptor,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.mmu.interceptWrite(address, fn, opts);
+	}
+
+	observeWrite(
+		address: number,
+		fn: WriteObserver,
+		opts?: TrapOptions,
+	): TrapHandle {
+		return this.mmu.observeWrite(address, fn, opts);
+	}
+
+	/**
+	 * Optional hook fired at each committed opcode fetch, with the opcode's
+	 * address - for tracing / instruction-level debugging. Forwarded to the
+	 * CPU's `onFetch`; see {@link Sfotty.onFetch} for the exact semantics.
+	 */
+	get onInstruction(): ((pc: number) => void) | undefined {
+		return this.cpu.onFetch;
+	}
+	set onInstruction(fn: ((pc: number) => void) | undefined) {
+		this.cpu.onFetch = fn;
+	}
+
+	// Internal components
+	readonly cpu: Sfotty;
+	readonly anticGtia: AnticGtia;
+	readonly pia: Pia;
+	readonly pokey: Pokey;
+	readonly mmu: Mmu;
+
+	readonly #xl: boolean;
+	#resetHeld = false;
+	// The D1: disk image served by the built-in trap-based SIO; undefined = no
+	// disk (SIO times out and the OS moves on). Set via insertDisk.
+	#disk: AtrImage | undefined;
 
 	// Create and wire the joystick connectors: two jacks on the XL/XE, four
 	// on the 400/800 (ports 2/3 live on PIA port B). Connector signals are
@@ -355,176 +524,8 @@ export class Atari {
 		this.pokey.reset(cold);
 	}
 
-	/**
-	 * The audio level as summed on the board, as of the last cycle: POKEY's
-	 * output ({@link Pokey.audio}, normalized to 0-1) plus the console
-	 * speaker line (0 or 1), so the range is 0-2 with one unit per source.
-	 * The host samples this after each cycle and applies its own gain. Equal
-	 * source weighting is provisional until the analog audio path (amplifier
-	 * stages, saturation) is modeled.
-	 */
-	get audio(): number {
-		return this.pokey.audio / 60 + this.anticGtia.consoleSpeaker;
-	}
-
-	/**
-	 * Optional hook fired at each committed opcode fetch, with the opcode's
-	 * address - for tracing / instruction-level debugging. Forwarded to the
-	 * CPU's `onFetch`; see {@link Sfotty.onFetch} for the exact semantics.
-	 */
-	get onInstruction(): ((pc: number) => void) | undefined {
-		return this.cpu.onFetch;
-	}
-	set onInstruction(fn: ((pc: number) => void) | undefined) {
-		this.cpu.onFetch = fn;
-	}
-
-	/**
-	 * Run one whole machine cycle: ANTIC scheduling (`beforeCpu`, commits) + the
-	 * POKEY tick, then the bus phase (ANTIC's DMA fetch or the CPU's access) and
-	 * the render. Sample {@link audio} afterwards for POKEY's output level.
-	 *
-	 * A bus phase may **throw** - an interceptor suspending on a read/write/fetch,
-	 * or a host's own breakpoint signal. This method does not catch it: the throw
-	 * propagates with the cycle frozen at that phase. The host catches whatever
-	 * it threw, resolves it (await input, clear a breakpoint, ...), and calls
-	 * cycle() again - the call picks up the *same* suspended cycle where it left
-	 * off rather than starting a new one. Idempotent by construction: each bus
-	 * phase does its access before any commit, so a throw unwinds clean and the
-	 * retried access repeats nothing.
-	 */
-	cycle(): void {
-		// The phase machine: a fall-through switch entered at the saved
-		// phase - IDLE starts a fresh cycle, BUS/CPU resume a suspended one.
-		// The marker is set to the current phase *before* each throwable
-		// call, so a throw leaves it pointing where to resume.
-		switch (this.phase) {
-			case PHASE.IDLE:
-				this.anticGtia.beforeCpu();
-				this.pokey.cycle();
-				this.pia.cycle();
-				this.phase = PHASE.BUS;
-
-			// falls through
-			case PHASE.BUS:
-				this.anticGtia.busPhase(); // ANTIC DMA read - may throw
-				this.cpu.NMI = this.anticGtia.nmi;
-				// The CPU sees the wire-ORed /IRQ line as of the end of the
-				// previous cycle: the open-collector line settles across a
-				// phase boundary, one cycle of propagation the 6502 never
-				// sees around (Acid800 pokey_irqtiming pins the total
-				// IRQST-to-acknowledge latency this produces).
-				this.cpu.IRQ = this.#irqLine;
-				this.cpu.RDY = this.anticGtia.rdy;
-				this.phase = PHASE.CPU;
-
-			// falls through
-			case PHASE.CPU:
-				if (this.resetAsserted) this.cpu.reset(false);
-				else if (!this.anticGtia.halt) this.cpu.cycle(); // may throw
-				this.anticGtia.afterCpu(this.frame, this.mmu.busData);
-				this.#irqLine = this.irq;
-				this.phase = PHASE.IDLE;
-		}
-	}
-
 	// The /IRQ line as sampled at the end of the last completed cycle.
 	#irqLine = false;
-
-	/**
-	 * The IRQ output line: POKEY and the PIA's two IRQ outputs, wire-ORed
-	 * like the hardware. Copy to the CPU's IRQ input every cycle.
-	 */
-	get irq(): boolean {
-		return this.pokey.irq || this.pia.irqA || this.pia.irqB;
-	}
-
-	/**
-	 * True while the Reset key holds the XL/XE system reset line (the
-	 * {@link console} connector's reset signal). The host must keep the CPU
-	 * in reset - `cpu.reset(false)` instead of `run()` - every cycle while
-	 * this is set. Always false on the 800, whose Reset key is an NMI
-	 * instead.
-	 */
-	get resetAsserted(): boolean {
-		return this.#resetHeld;
-	}
-
-	/**
-	 * Trap a memory access. Interceptors run before the access and may
-	 * short-circuit it (return a substitute read value / true to suppress a
-	 * write); observers run after and only watch. Both phases are additive and
-	 * run last-registered-first; the first interceptor to return a value wins.
-	 * An optional `mask` filters by access flags (default `{ dummy: false }`);
-	 * `interceptExecute`/`observeExecute` are sugar for a read masked to a
-	 * committed opcode fetch. Each returns a handle to unregister. A committed
-	 * opcode fetch can't repeat under a WSYNC stall (the stall re-fetch is
-	 * DUMMY), so execute traps fire once. See [traps](../../notes.local/traps.md).
-	 */
-	interceptExecute(
-		address: number,
-		fn: ExecuteInterceptor,
-		opts?: { once?: boolean },
-	): TrapHandle {
-		return this.mmu.interceptExecute(address, fn, opts);
-	}
-
-	observeExecute(
-		address: number,
-		fn: ExecuteObserver,
-		opts?: { once?: boolean },
-	): TrapHandle {
-		return this.mmu.observeExecute(address, fn, opts);
-	}
-
-	interceptRead(
-		address: number,
-		fn: ReadInterceptor,
-		opts?: TrapOptions,
-	): TrapHandle {
-		return this.mmu.interceptRead(address, fn, opts);
-	}
-
-	observeRead(
-		address: number,
-		fn: ReadObserver,
-		opts?: TrapOptions,
-	): TrapHandle {
-		return this.mmu.observeRead(address, fn, opts);
-	}
-
-	interceptWrite(
-		address: number,
-		fn: WriteInterceptor,
-		opts?: TrapOptions,
-	): TrapHandle {
-		return this.mmu.interceptWrite(address, fn, opts);
-	}
-
-	observeWrite(
-		address: number,
-		fn: WriteObserver,
-		opts?: TrapOptions,
-	): TrapHandle {
-		return this.mmu.observeWrite(address, fn, opts);
-	}
-
-	/**
-	 * Insert (or replace) the D1: disk image the built-in SIO serves. Pass it
-	 * before booting a disk; with none inserted, SIO requests time out and the
-	 * OS falls through to its other boot sources.
-	 */
-	insertDisk(disk: AtrImage): void {
-		this.#disk = disk;
-	}
-
-	/**
-	 * Eject the D1: disk. Safe to call on a running machine: SIO requests then
-	 * time out and the OS falls through to its other boot sources.
-	 */
-	ejectDisk(): void {
-		this.#disk = undefined;
-	}
 
 	#cartridge: Cartridge | undefined;
 	#unwatchCartMapping: (() => void) | undefined;

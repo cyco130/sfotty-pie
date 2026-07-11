@@ -4,38 +4,6 @@ import type { Sfotty } from "./sfotty.ts";
 /** A side-effect-free byte reader (read with {@link ReadOptions.PEEK}). */
 export type PeekReader = (address: number) => number;
 
-interface Entry {
-	mnemonic: string;
-	mode: string;
-}
-
-// Opcode -> mnemonic/mode, indexed by opcode for O(1) lookup.
-const TABLE: Entry[] = [];
-for (const inst of NMOS_INSTRUCTIONS) {
-	TABLE[inst.opcode] = { mnemonic: inst.mnemonic, mode: inst.mode };
-}
-
-// Operand byte count per addressing mode.
-const OPERAND_BYTES: Record<string, number> = {
-	imp: 0,
-	acc: 0,
-	imm: 1,
-	zpg: 1,
-	zpx: 1,
-	zpy: 1,
-	inx: 1,
-	iny: 1,
-	rel: 1,
-	abs: 2,
-	abx: 2,
-	aby: 2,
-	ind: 2,
-};
-
-function hex(value: number, width: number): string {
-	return value.toString(16).toUpperCase().padStart(width, "0");
-}
-
 export interface Disassembly {
 	/** Rendered instruction, e.g. `LDA $0411,X`. */
 	text: string;
@@ -144,4 +112,36 @@ export function traceLine(cpu: Sfotty, read: PeekReader, pc = cpu.PC): string {
 		`A=${hex(cpu.A, 2)} X=${hex(cpu.X, 2)} Y=${hex(cpu.Y, 2)} ` +
 		`S=${hex(cpu.S, 2)} P=${hex(p, 2)} ${flags}`
 	);
+}
+
+interface Entry {
+	mnemonic: string;
+	mode: string;
+}
+
+// Opcode -> mnemonic/mode, indexed by opcode for O(1) lookup.
+const TABLE: Entry[] = [];
+for (const inst of NMOS_INSTRUCTIONS) {
+	TABLE[inst.opcode] = { mnemonic: inst.mnemonic, mode: inst.mode };
+}
+
+// Operand byte count per addressing mode.
+const OPERAND_BYTES: Record<string, number> = {
+	imp: 0,
+	acc: 0,
+	imm: 1,
+	zpg: 1,
+	zpx: 1,
+	zpy: 1,
+	inx: 1,
+	iny: 1,
+	rel: 1,
+	abs: 2,
+	abx: 2,
+	aby: 2,
+	ind: 2,
+};
+
+function hex(value: number, width: number): string {
+	return value.toString(16).toUpperCase().padStart(width, "0");
 }

@@ -9,15 +9,6 @@ import type { Atari } from "./machine.ts";
 // optional trace hook - so both the boot CLI and the Acid800 conformance runner
 // share this exact run loop and trap wiring.
 
-const RTS = 0x60; // the substitute opcode an execute interceptor returns
-const CH = 0x02fc; // POKEY keyboard code, polled by key-input routines
-const CIOV = 0xe456; // CIO entry - HATABS is set up by the first call
-const BLKBDV = 0xe471; // Memo Pad ("blackboard") entry: nothing left to run
-
-// Thrown by the GETBYT trap when no input is buffered: the run loop awaits the
-// input source and resumes the same (un-advanced) cycle.
-const NEED_INPUT = Symbol("need-input");
-
 /**
  * A source of console input for E: GETBYT. `read` returns the next raw input
  * byte (ATASCII-ish; a `0x0A` newline is mapped to the Atari EOL) or `undefined`
@@ -57,15 +48,6 @@ export interface RunResult {
 }
 
 export class Headless {
-	readonly #machine: Atari;
-	readonly #output: (byte: number) => void;
-	readonly #input: InputSource | undefined;
-	readonly #keys: number[];
-	readonly #limit: number;
-
-	#done = false;
-	#editorTrapped = false;
-
 	constructor(config: HeadlessConfig) {
 		this.#machine = config.machine;
 		this.#output = config.output;
@@ -97,6 +79,15 @@ export class Headless {
 		}
 		return { cycles, reachedLimit: cycles >= this.#limit };
 	}
+
+	readonly #machine: Atari;
+	readonly #output: (byte: number) => void;
+	readonly #input: InputSource | undefined;
+	readonly #keys: number[];
+	readonly #limit: number;
+
+	#done = false;
+	#editorTrapped = false;
 
 	// Advance one machine cycle, awaiting input across a GETBYT suspend and
 	// resuming the same cycle (retrying through a spurious wakeup) - cycle()
@@ -202,3 +193,12 @@ export class Headless {
 		return 0;
 	}
 }
+
+const RTS = 0x60; // the substitute opcode an execute interceptor returns
+const CH = 0x02fc; // POKEY keyboard code, polled by key-input routines
+const CIOV = 0xe456; // CIO entry - HATABS is set up by the first call
+const BLKBDV = 0xe471; // Memo Pad ("blackboard") entry: nothing left to run
+
+// Thrown by the GETBYT trap when no input is buffered: the run loop awaits the
+// input source and resumes the same (un-advanced) cycle.
+const NEED_INPUT = Symbol("need-input");

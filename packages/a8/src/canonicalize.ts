@@ -47,6 +47,98 @@ export interface CanonicalPiece {
 	kind: ImageKind;
 }
 
+/**
+ * Re-canonicalize a cartridge image under CART type `cartType`: a raw dump
+ * gets the 16-byte header written, an existing `.car` gets its header
+ * rebuilt (type and checksum both refreshed). This is the pick-the-mapper /
+ * change-the-mapper primitive; the header is part of content identity, so
+ * callers must treat the result as a new image (new hash). Throws when the
+ * type is unknown or the ROM size doesn't match it; unimplemented and 5200
+ * types are allowed - recording a known-but-unsupported mapper is valid.
+ */
+export function withCartType(image: Uint8Array, cartType: number): Uint8Array {
+	const type = CART_TYPES[cartType];
+	if (!type) {
+		throw new Error(`Unknown cartridge type #${cartType}`);
+	}
+	const isCar =
+		image[0] === 0x43 && // 'C'
+		image[1] === 0x41 && // 'A'
+		image[2] === 0x52 && // 'R'
+		image[3] === 0x54; // 'T'
+	const rom = isCar ? image.subarray(16) : image;
+	if (rom.length !== type.size * 1024) {
+		throw new Error(
+			`Cartridge type #${cartType} (${type.name}) needs ${type.size}K, ` +
+				`got ${rom.length} bytes`,
+		);
+	}
+	return concat(cartHeader(cartType, rom), rom);
+}
+
+/**
+ * Canonicalize `source` into one or more canonical images. Throws on an
+ * unrecognized format (the caller decides how to surface that).
+ */
+export function canonicalize(
+	source: Uint8Array,
+	fileName?: string,
+): CanonicalPiece[] {
+	const format: AtariFileFormat | null = detectFileFormat(source, fileName);
+	switch (format) {
+		case "raw-cart-8k-8000-9fff":
+		case "raw-cart-8k-a000-bfff":
+		case "raw-cart-16k":
+			return [cartPiece(source, RAW_CART_TYPE[format]!, 0, source.length)];
+		case "cart":
+			return [carPiece(source)];
+		case "os-rom-10k":
+			return [osPiece(source, 10, 0, source.length)];
+		case "os-rom-16k":
+			return [osPiece(source, 16, 0, source.length)];
+		case "xex":
+			return [
+				{
+					from: 0,
+					to: source.length,
+					header: EMPTY,
+					bytes: source,
+					kind: { type: "xex" },
+				},
+			];
+		case "atr":
+			return [diskPiece(source)];
+		case "xegs-rom-32k":
+			return [
+				cartPiece(source, 1, 0, XEGS_GAME_END, "game"),
+				cartPiece(source, 1, XEGS_GAME_END, XEGS_BASIC_END, "basic"),
+				osPiece(source, 16, XEGS_BASIC_END, XEGS_OS_END, "os"),
+			];
+		case null:
+			// A raw-ROM-named (or nameless) dump whose size matches at least one
+			// CART type is a cartridge of unknown mapper - kept raw until the
+			// user picks a type, which writes the header and completes the
+			// canonicalization.
+			if (
+				(!fileName || hasRawRomExtension(fileName)) &&
+				source.length >= 2048 &&
+				source.length % 1024 === 0 &&
+				cartTypesForSize(source.length / 1024).length > 0
+			) {
+				return [
+					{
+						from: 0,
+						to: source.length,
+						header: EMPTY,
+						bytes: source,
+						kind: { type: "unknown-rom" },
+					},
+				];
+			}
+			throw new Error("Unrecognized image format");
+	}
+}
+
 const EMPTY = new Uint8Array(0);
 
 // XEGS internal ROM layout: [8K built-in game][8K BASIC][16K XL/XE OS].
@@ -165,96 +257,4 @@ function diskPiece(source: Uint8Array): CanonicalPiece {
 		bytes: source,
 		kind: { type: "disk", sectorSize, sectors },
 	};
-}
-
-/**
- * Re-canonicalize a cartridge image under CART type `cartType`: a raw dump
- * gets the 16-byte header written, an existing `.car` gets its header
- * rebuilt (type and checksum both refreshed). This is the pick-the-mapper /
- * change-the-mapper primitive; the header is part of content identity, so
- * callers must treat the result as a new image (new hash). Throws when the
- * type is unknown or the ROM size doesn't match it; unimplemented and 5200
- * types are allowed - recording a known-but-unsupported mapper is valid.
- */
-export function withCartType(image: Uint8Array, cartType: number): Uint8Array {
-	const type = CART_TYPES[cartType];
-	if (!type) {
-		throw new Error(`Unknown cartridge type #${cartType}`);
-	}
-	const isCar =
-		image[0] === 0x43 && // 'C'
-		image[1] === 0x41 && // 'A'
-		image[2] === 0x52 && // 'R'
-		image[3] === 0x54; // 'T'
-	const rom = isCar ? image.subarray(16) : image;
-	if (rom.length !== type.size * 1024) {
-		throw new Error(
-			`Cartridge type #${cartType} (${type.name}) needs ${type.size}K, ` +
-				`got ${rom.length} bytes`,
-		);
-	}
-	return concat(cartHeader(cartType, rom), rom);
-}
-
-/**
- * Canonicalize `source` into one or more canonical images. Throws on an
- * unrecognized format (the caller decides how to surface that).
- */
-export function canonicalize(
-	source: Uint8Array,
-	fileName?: string,
-): CanonicalPiece[] {
-	const format: AtariFileFormat | null = detectFileFormat(source, fileName);
-	switch (format) {
-		case "raw-cart-8k-8000-9fff":
-		case "raw-cart-8k-a000-bfff":
-		case "raw-cart-16k":
-			return [cartPiece(source, RAW_CART_TYPE[format]!, 0, source.length)];
-		case "cart":
-			return [carPiece(source)];
-		case "os-rom-10k":
-			return [osPiece(source, 10, 0, source.length)];
-		case "os-rom-16k":
-			return [osPiece(source, 16, 0, source.length)];
-		case "xex":
-			return [
-				{
-					from: 0,
-					to: source.length,
-					header: EMPTY,
-					bytes: source,
-					kind: { type: "xex" },
-				},
-			];
-		case "atr":
-			return [diskPiece(source)];
-		case "xegs-rom-32k":
-			return [
-				cartPiece(source, 1, 0, XEGS_GAME_END, "game"),
-				cartPiece(source, 1, XEGS_GAME_END, XEGS_BASIC_END, "basic"),
-				osPiece(source, 16, XEGS_BASIC_END, XEGS_OS_END, "os"),
-			];
-		case null:
-			// A raw-ROM-named (or nameless) dump whose size matches at least one
-			// CART type is a cartridge of unknown mapper - kept raw until the
-			// user picks a type, which writes the header and completes the
-			// canonicalization.
-			if (
-				(!fileName || hasRawRomExtension(fileName)) &&
-				source.length >= 2048 &&
-				source.length % 1024 === 0 &&
-				cartTypesForSize(source.length / 1024).length > 0
-			) {
-				return [
-					{
-						from: 0,
-						to: source.length,
-						header: EMPTY,
-						bytes: source,
-						kind: { type: "unknown-rom" },
-					},
-				];
-			}
-			throw new Error("Unrecognized image format");
-	}
 }

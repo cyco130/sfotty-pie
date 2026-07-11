@@ -7,45 +7,6 @@ import {
 	resolveBinding,
 } from "./key-bindings.ts";
 
-// While the key-binding editor is capturing a combo, the window-level global
-// resolver stands down so the chord (e.g. Cmd+K) is captured, not dispatched.
-let capturingKeys = false;
-export function setCapturingKeys(active: boolean): void {
-	capturingKeys = active;
-}
-
-// A key event's target is a real text field (or other keyboard-driven control)
-// whose own key handling - typing, cursor keys, option navigation - we must not
-// preempt. The offscreen emulator input is included: while it's focused the input
-// handler already owns the key, so the window-level guard stands down.
-function isEditable(target: EventTarget | null): boolean {
-	if (!(target instanceof HTMLElement)) return false;
-	if (target.isContentEditable) return true;
-	const tag = target.tagName;
-	return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-}
-
-/**
- * The command a Character-mode key event produces. The character channel wins
- * first: a key that types a printable ATASCII character (no Ctrl/Alt/Cmd) types
- * it - layout-aware, shadowing the bare/Shift character-key bindings. Everything
- * else falls through to `bindings`: modified combos (Ctrl resolves positionally),
- * named keys, and keys with no ATASCII character (ş, €) - which a binding can
- * still claim. Dead keys yield nothing; composition delivers the glyph instead.
- */
-export function characterModeCommand(
-	bindings: Binding[],
-	e: KeyEventLike,
-): Command | undefined {
-	if (e.ctrl || e.alt || e.meta) return resolveBinding(bindings, e)?.command;
-	if (e.key === "Dead") return undefined;
-	if (e.key.length === 1) {
-		const command = charCommand(e.key, e.shift);
-		if (command) return command;
-	}
-	return resolveBinding(bindings, e)?.command;
-}
-
 /**
  * How the keyboard actuates commands. A physical key is sustained: `press` on
  * key-down, `release` on key-up. `tap` is momentary (a composed character) - it
@@ -71,22 +32,6 @@ export interface KeyboardActions {
  * `compositionend`.
  */
 export class Keyboard {
-	#actions: KeyboardActions;
-	#getMode: () => KeyboardMode;
-
-	// The active bindings (one flat set), as loaded/persisted by the host.
-	#bindings: Binding[] = [];
-	// The `scope: "global"` subset, resolved by the window handler (so a global
-	// binding is never shadowed by a more-specific machine binding on the same key).
-	#globalBindings: Binding[] = [];
-
-	// Physical keys (event.code) currently holding a POKEY matrix key (one shared
-	// register, released only when the set empties).
-	#matrixHeld = new Set<string>();
-	// Physical keys holding a non-matrix sustained command (its own key-up releases
-	// it): console buttons, Reset, joystick, the Shift keys.
-	#held = new Map<string, Command>();
-
 	constructor(
 		actions: KeyboardActions,
 		getMode: () => KeyboardMode,
@@ -161,6 +106,22 @@ export class Keyboard {
 		for (const command of this.#held.values()) this.#actions.release(command);
 		this.#held.clear();
 	}
+
+	#actions: KeyboardActions;
+	#getMode: () => KeyboardMode;
+
+	// The active bindings (one flat set), as loaded/persisted by the host.
+	#bindings: Binding[] = [];
+	// The `scope: "global"` subset, resolved by the window handler (so a global
+	// binding is never shadowed by a more-specific machine binding on the same key).
+	#globalBindings: Binding[] = [];
+
+	// Physical keys (event.code) currently holding a POKEY matrix key (one shared
+	// register, released only when the set empties).
+	#matrixHeld = new Set<string>();
+	// Physical keys holding a non-matrix sustained command (its own key-up releases
+	// it): console buttons, Reset, joystick, the Shift keys.
+	#held = new Map<string, Command>();
 
 	// A keyboard event reduced to identity + modifier states. AltGr's false Ctrl
 	// (Windows reports it as Ctrl+Alt) is excluded so it stays character input.
@@ -237,4 +198,43 @@ export class Keyboard {
 			if (command) this.#actions.tap(command);
 		}
 	}
+}
+
+/**
+ * The command a Character-mode key event produces. The character channel wins
+ * first: a key that types a printable ATASCII character (no Ctrl/Alt/Cmd) types
+ * it - layout-aware, shadowing the bare/Shift character-key bindings. Everything
+ * else falls through to `bindings`: modified combos (Ctrl resolves positionally),
+ * named keys, and keys with no ATASCII character (ş, €) - which a binding can
+ * still claim. Dead keys yield nothing; composition delivers the glyph instead.
+ */
+export function characterModeCommand(
+	bindings: Binding[],
+	e: KeyEventLike,
+): Command | undefined {
+	if (e.ctrl || e.alt || e.meta) return resolveBinding(bindings, e)?.command;
+	if (e.key === "Dead") return undefined;
+	if (e.key.length === 1) {
+		const command = charCommand(e.key, e.shift);
+		if (command) return command;
+	}
+	return resolveBinding(bindings, e)?.command;
+}
+
+// While the key-binding editor is capturing a combo, the window-level global
+// resolver stands down so the chord (e.g. Cmd+K) is captured, not dispatched.
+let capturingKeys = false;
+export function setCapturingKeys(active: boolean): void {
+	capturingKeys = active;
+}
+
+// A key event's target is a real text field (or other keyboard-driven control)
+// whose own key handling - typing, cursor keys, option navigation - we must not
+// preempt. The offscreen emulator input is included: while it's focused the input
+// handler already owns the key, so the window-level guard stands down.
+function isEditable(target: EventTarget | null): boolean {
+	if (!(target instanceof HTMLElement)) return false;
+	if (target.isContentEditable) return true;
+	const tag = target.tagName;
+	return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }

@@ -77,6 +77,461 @@ export interface CartType {
 	): number;
 }
 
+/** Whether CART type `cartType` can run: its scheme is implemented (a
+ *  RomCartridge mapping or a custom implementation) and it isn't 5200-only.
+ *  Unsupported types can still be recorded in a `.car` header - they just
+ *  can't boot or attach. */
+export function isCartTypeSupported(cartType: number): boolean {
+	const type = CART_TYPES[cartType];
+	return (
+		!!type &&
+		(!!type.initialMapping || !!type.create) &&
+		type.machine !== "5200"
+	);
+}
+
+/** One choice in a cartridge-type picker. */
+export interface CartTypeOption {
+	cartType: number;
+	name: string;
+	machine: CartType["machine"];
+	/** See {@link isCartTypeSupported}. */
+	supported: boolean;
+}
+
+/**
+ * Every CART type whose ROM size matches `sizeKB`, for a type picker:
+ * supported types before unsupported (unimplemented schemes, 5200 carts -
+ * listed so a known type can still be recorded; the UI marks them and
+ * refuses to boot them), each group ordered by real-world likelihood.
+ */
+export function cartTypesForSize(sizeKB: number): CartTypeOption[] {
+	const options: CartTypeOption[] = [];
+	for (const [key, type] of Object.entries(CART_TYPES)) {
+		if (type.size !== sizeKB) continue;
+		options.push({
+			cartType: Number(key),
+			name: type.name,
+			machine: type.machine,
+			supported: isCartTypeSupported(Number(key)),
+		});
+	}
+	const rank = (option: CartTypeOption) =>
+		LIKELIHOOD_RANK.get(option.cartType) ?? Infinity;
+	options.sort(
+		(a, b) =>
+			Number(b.supported) - Number(a.supported) ||
+			rank(a) - rank(b) ||
+			a.cartType - b.cartType,
+	);
+	return options;
+}
+
+/**
+ * Best-guess CART type for a raw dump, or null when no heuristic applies.
+ * Size-unique types are certain. Otherwise the *position* of a plausible
+ * boot trailer (the $BFFA-$BFFF vectors of whichever bank boots at $A000)
+ * picks the scheme family, and prevalence picks the member:
+ *
+ * - trailer at the end of the image: the XEGS shape (last bank fixed at
+ *   $A000); at 1MB, Atarimax-old boots bank 127 and far outnumbers XEGS 1MB.
+ * - trailer at the end of the first 8K: the 8K-window-at-$A000 shape
+ *   (Williams, Atarimax).
+ * - trailer at the end of the first 16K's upper half: the 16K-window shape
+ *   (MegaCart).
+ * - a 64/128K image with no plausible trailer may be a scrambled Atrax
+ *   dump: descramble and re-check bank 0.
+ */
+export function suggestCartType(bytes: Uint8Array): number | null {
+	if (bytes.length < 2048 || bytes.length % 1024 !== 0) return null;
+	const sizeKB = bytes.length / 1024;
+
+	const bySize: Record<number, number> = {
+		2: 57,
+		4: 58, // three candidates, but the standard 4K dwarfs the others
+		40: 18, // Bounty Bob is the only 40K cart
+		4096: 63,
+		32768: 65,
+		65536: 66,
+		131072: 62,
+	};
+	const unique = bySize[sizeKB];
+	if (unique !== undefined) return unique;
+
+	const endTrailer: Record<number, number> = {
+		32: 12,
+		64: 13,
+		128: 14,
+		256: 23,
+		512: 24,
+		1024: 42,
+	};
+	const firstBankTrailer: Record<number, number> = {
+		32: 22,
+		64: 8,
+		128: 41,
+		1024: 75,
+	};
+	const megacartTrailer: Record<number, number> = {
+		32: 27,
+		64: 28,
+		128: 29,
+		256: 30,
+		512: 31,
+		1024: 32,
+		2048: 64,
+	};
+
+	if (hasPlausibleTrailer(bytes.subarray(bytes.length - 8192))) {
+		const type = endTrailer[sizeKB];
+		if (type !== undefined) return type;
+	}
+	if (hasPlausibleTrailer(bytes.subarray(0, 8192))) {
+		const type = firstBankTrailer[sizeKB];
+		if (type !== undefined) return type;
+	}
+	if (
+		bytes.length >= 16384 &&
+		hasPlausibleTrailer(bytes.subarray(8192, 16384))
+	) {
+		const type = megacartTrailer[sizeKB];
+		if (type !== undefined) return type;
+	}
+
+	// Scrambled Atrax dumps boot bank 0; descramble and look for its trailer.
+	if (sizeKB === 128) {
+		if (
+			hasPlausibleTrailer(
+				descramble(bytes, ATRAX_ADDR, ATRAX_DATA).subarray(0, 8192),
+			)
+		) {
+			return 68;
+		}
+		if (
+			hasPlausibleTrailer(
+				descramble(bytes, [...ATRAX_SDX_ADDR, 16], ATRAX_SDX_DATA).subarray(
+					0,
+					8192,
+				),
+			)
+		) {
+			return 49;
+		}
+	}
+	if (
+		sizeKB === 64 &&
+		hasPlausibleTrailer(
+			descramble(bytes, ATRAX_SDX_ADDR, ATRAX_SDX_DATA).subarray(0, 8192),
+		)
+	) {
+		return 48;
+	}
+
+	return null;
+}
+
+/**
+ * What the machine needs from whatever is plugged into the cartridge slot.
+ * {@link RomCartridge} - a plain `.car`/raw ROM image - is the shipped
+ * implementation; special hardware (an RTime-8, a passthrough cart with its
+ * own slot) can implement this directly.
+ *
+ * `read`/`write` (from {@link Memory}) receive the cartridge address ranges:
+ * $8000-$BFFF for whatever areas the cartridge claims, and $D500-$D5FF for
+ * the control region.
+ */
+export interface Cartridge extends AtariMemory {
+	/** Whether the cartridge currently decodes $8000-$9FFF. */
+	readonly has8000To9fff: boolean;
+	/** Whether the cartridge currently decodes $A000-$BFFF. */
+	readonly hasA000ToBfff: boolean;
+	reset(cold: boolean): void;
+	/**
+	 * Fires after anything changes which addresses the cartridge decodes or
+	 * what bytes they map. The MMU watches it to rebuild its page tables; on
+	 * XL/XE the machine watches it to keep the cartridge sense (RD5 -> GTIA
+	 * TRIG3) live. Implementations must emit on every mapping change (bank
+	 * switches included) and on a mapping-restoring reset. Results of the
+	 * inherited {@link AtariMemory.pageView} must stay valid until it fires;
+	 * the MMU only consults pageView for pages inside a claimed area.
+	 */
+	readonly mappingChanged: Pulse;
+}
+
+/**
+ * The raw ROM bytes for a built-in (PORTB-banked) 8K slot - XL/XE BASIC or the
+ * XEGS game. Raw ROM passes through unchanged; a standard-8K `.car` (CART
+ * type 1, the canonical form for an $A000 8K image) is unwrapped to its ROM.
+ * Any other `.car` (a banked or wrong-size cartridge) is rejected: it can't
+ * stand in for an internal 8K ROM. This lets a host hand the machine canonical
+ * `.car` bytes for these slots without unwrapping them itself.
+ */
+export function builtinSlotRom(bytes: Uint8Array): Uint8Array {
+	const isCar =
+		bytes[0] === 0x43 && // 'C'
+		bytes[1] === 0x41 && // 'A'
+		bytes[2] === 0x52 && // 'R'
+		bytes[3] === 0x54; // 'T'
+	if (!isCar) return bytes;
+
+	const type =
+		(((bytes[4] ?? 0) << 24) |
+			((bytes[5] ?? 0) << 16) |
+			((bytes[6] ?? 0) << 8) |
+			(bytes[7] ?? 0)) >>>
+		0;
+	const rom = bytes.subarray(CART_HEADER_SIZE);
+	if (type !== 1 || rom.length !== 8192) {
+		throw new Error(
+			`built-in 8K slot needs a standard-8K cartridge (CART type 1); ` +
+				`got type ${type} of ${rom.length} bytes`,
+		);
+	}
+	return rom;
+}
+
+/**
+ * Create a cartridge from an image file (raw ROM or `.car`). The chokepoint
+ * for cartridge construction: types with a custom implementation (a
+ * {@link CartType.create} hook - Bounty Bob today; passthrough SDX and
+ * RAM/flash carts eventually) dispatch to it, everything else is a
+ * {@link RomCartridge}.
+ */
+export function createCartridge(
+	fileContents: Uint8Array,
+	fileName?: string,
+): Cartridge {
+	const isCar =
+		fileContents[0] === 0x43 && // 'C'
+		fileContents[1] === 0x41 && // 'A'
+		fileContents[2] === 0x52 && // 'R'
+		fileContents[3] === 0x54; // 'T'
+	if (isCar) {
+		const typeNo =
+			(((fileContents[4] ?? 0) << 24) |
+				((fileContents[5] ?? 0) << 16) |
+				((fileContents[6] ?? 0) << 8) |
+				(fileContents[7] ?? 0)) >>>
+			0;
+		const type = CART_TYPES[typeNo];
+		if (type?.create) {
+			if (type.size * 1024 !== fileContents.length - 16) {
+				throw new Error(
+					`Wrong cartridge size (expected ${type.size * 1024 + 16} found ${fileContents.length})`,
+				);
+			}
+			return type.create(fileContents.subarray(16));
+		}
+	}
+	return new RomCartridge(fileContents, fileName);
+}
+
+/**
+ * A ROM-image cartridge: raw 8K/16K dumps or the `.car` container, with the
+ * bank-switching schemes from `CART_TYPES`. The declarative
+ * {@link CartridgeMapping} is normalized into `#slots` - one ROM byte offset
+ * (or -1 for "reads $FF") per 2K slot of $8000-$BFFF - so every access is a
+ * single indexed lookup regardless of the type's bank granularity.
+ */
+export class RomCartridge implements Cartridge {
+	constructor(fileContents: Uint8Array, fileName?: string) {
+		const format = detectFileFormat(fileContents, fileName);
+
+		switch (format) {
+			case "raw-cart-8k-8000-9fff":
+				this.#type = CART_TYPES[21]!;
+				this.#rom = fileContents;
+				break;
+
+			case "raw-cart-8k-a000-bfff":
+				this.#type = CART_TYPES[1]!;
+				this.#rom = fileContents;
+				break;
+
+			case "raw-cart-16k":
+				this.#type = CART_TYPES[2]!;
+				this.#rom = fileContents;
+				break;
+
+			case "cart":
+				{
+					const b4 = fileContents[4];
+					const b5 = fileContents[5];
+					const b6 = fileContents[6];
+					const b7 = fileContents[7];
+
+					if (
+						b4 === undefined ||
+						b5 === undefined ||
+						b6 === undefined ||
+						b7 === undefined
+					) {
+						throw new Error("Cartridge image is corrupt");
+					}
+
+					const typeNo = (b4 << 24) | (b5 << 16) | (b6 << 8) | b7;
+					const type = CART_TYPES[typeNo];
+					if (!type) {
+						throw new Error(`Unsupported cartridge type #${typeNo}`);
+					}
+
+					if (!type.initialMapping) {
+						throw new Error(
+							`Cartridge type #${typeNo} (${type.name}) is not supported yet`,
+						);
+					}
+
+					if (type.size * 1024 !== fileContents.length - 16) {
+						throw new Error(
+							`Wrong cartridge size (expected ${type.size * 1024 + 16} found ${fileContents.length})`,
+						);
+					}
+
+					// TODO: Check checksum
+
+					this.#type = type;
+					this.#rom = fileContents.subarray(16);
+				}
+				break;
+
+			default:
+				throw new Error("Unsupported cartridge image format");
+		}
+
+		if (this.#type.prepare) {
+			this.#rom = this.#type.prepare(this.#rom);
+		}
+		this.#applyMapping(this.#type.initialMapping!);
+	}
+
+	get has8000To9fff(): boolean {
+		return this.#mapping.area8000 !== "ram";
+	}
+
+	get hasA000ToBfff(): boolean {
+		return this.#mapping.areaA000 !== "ram";
+	}
+
+	/** See {@link Cartridge.mappingChanged}. */
+	readonly mappingChanged = new Pulse();
+
+	reset(cold: boolean) {
+		if (cold) {
+			this.#applyMapping(this.#type.initialMapping!);
+			this.mappingChanged.emit();
+		}
+	}
+
+	/**
+	 * A 256-byte view of the ROM as currently banked at `page` (addresses
+	 * `page << 8` up), for the MMU's fast page tables - or `null` when the
+	 * bank at that position is unmapped or points past the image (reads
+	 * $FF). Only meaningful for pages inside an area the mapping covers
+	 * (check {@link has8000To9fff} / {@link hasA000ToBfff} first). Banks are
+	 * 2K/4K/8K, so a page never straddles two banks.
+	 */
+	pageView(page: number): Uint8Array | null {
+		const offset = this.#slots[(page - 0x80) >> 3]!;
+		if (offset < 0) return null;
+		const pageOffset = offset + ((page & 0x07) << 8);
+		if (pageOffset + 0x100 > this.#rom.length) return null;
+		let view = this.#views.get(pageOffset);
+		if (!view) {
+			view = this.#rom.subarray(pageOffset, pageOffset + 0x100);
+			this.#views.set(pageOffset, view);
+		}
+		return view;
+	}
+
+	read(address: number, options: ReadOptions): number {
+		if (address >= 0xd500 && address <= 0xd5ff) {
+			// Both hooks are pure, so a PEEK (debugger inspection) can take the
+			// controlRead value and simply discard the mapping change - matters
+			// for access-triggered carts like OSS, which switch on reads too.
+			// The value is decoded before the switch applies.
+			const value =
+				this.#type.controlRead?.(address, this.#mapping, this.#rom) ?? 0xff;
+			const mapping = this.#type.control?.(address, null, this.#mapping);
+			if (mapping && !(options & ReadOptions.PEEK)) {
+				this.#applyMapping(mapping);
+				this.mappingChanged.emit();
+			}
+			return value;
+		}
+
+		const slot = (address - 0x8000) >> 11;
+		if (slot < 0 || slot > 7) {
+			throw new Error(`Invalid cartridge memory address ${address}`);
+		}
+		const offset = this.#slots[slot]!;
+		// TODO(floating-bus): an unmapped or out-of-range cart read is undriven;
+		// $FF is the XL/XE pull-up.
+		if (offset < 0) {
+			return 0xff;
+		}
+		return this.#rom[offset + (address & 0x7ff)] ?? 0xff;
+	}
+
+	write(address: number, value: number): void {
+		if (address >= 0xd500 && address <= 0xd5ff) {
+			const mapping = this.#type.control?.(address, value, this.#mapping);
+			if (mapping) {
+				this.#applyMapping(mapping);
+				this.mappingChanged.emit();
+			}
+			return;
+		}
+
+		// Writes into the ROM areas do nothing (for now).
+	}
+
+	#rom: Uint8Array;
+	#type: CartType;
+	#mapping!: CartridgeMapping; // set via #applyMapping in the constructor
+
+	// The normalized mapping: for each 2K slot of $8000-$BFFF, the ROM byte
+	// offset it maps, or -1 for unmapped (reads $FF, and covers "ram" slots,
+	// which the MMU never routes here anyway).
+	#slots = new Int32Array(8).fill(-1);
+
+	#views = new Map<number, Uint8Array>();
+
+	// Install a mapping: keep the declarative form (for the area getters) and
+	// normalize it into #slots. This is the only place the AreaMapping shapes
+	// (one 8K bank, two 4K, four 2K, "ram") are interpreted.
+	#applyMapping(mapping: CartridgeMapping): void {
+		this.#mapping = mapping;
+		this.#normalizeArea(mapping.area8000, 0);
+		this.#normalizeArea(mapping.areaA000, 4);
+	}
+
+	#normalizeArea(area: AreaMapping, firstSlot: number): void {
+		if (area === "ram") {
+			this.#slots.fill(-1, firstSlot, firstSlot + 4);
+		} else if (!Array.isArray(area)) {
+			// One 8K bank.
+			for (let i = 0; i < 4; i++) {
+				this.#slots[firstSlot + i] =
+					area === null ? -1 : area * 8192 + i * 2048;
+			}
+		} else if (area.length === 2) {
+			// Two 4K banks.
+			for (let i = 0; i < 2; i++) {
+				const bank = area[i]!;
+				this.#slots[firstSlot + i * 2] = bank === null ? -1 : bank * 4096;
+				this.#slots[firstSlot + i * 2 + 1] =
+					bank === null ? -1 : bank * 4096 + 2048;
+			}
+		} else {
+			// Four 2K banks.
+			for (let i = 0; i < 4; i++) {
+				const bank = area[i]!;
+				this.#slots[firstSlot + i] = bank === null ? -1 : bank * 2048;
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Shared control schemes. Every factory below implements a scheme from
 // cart.txt (external.local has a copy) and returns a complete CartType;
@@ -1106,28 +1561,6 @@ export const CART_TYPES: Record<number, CartType> = {
 	}),
 };
 
-/** Whether CART type `cartType` can run: its scheme is implemented (a
- *  RomCartridge mapping or a custom implementation) and it isn't 5200-only.
- *  Unsupported types can still be recorded in a `.car` header - they just
- *  can't boot or attach. */
-export function isCartTypeSupported(cartType: number): boolean {
-	const type = CART_TYPES[cartType];
-	return (
-		!!type &&
-		(!!type.initialMapping || !!type.create) &&
-		type.machine !== "5200"
-	);
-}
-
-/** One choice in a cartridge-type picker. */
-export interface CartTypeOption {
-	cartType: number;
-	name: string;
-	machine: CartType["machine"];
-	/** See {@link isCartTypeSupported}. */
-	supported: boolean;
-}
-
 // Rough real-world prevalence of dumps per scheme, most common first - the
 // type picker's default ordering (a per-image suggestion can still trump
 // it). Hand-maintained judgment, not data: the standards, then the big game
@@ -1169,34 +1602,6 @@ const LIKELIHOOD_RANK = new Map(
 	CART_TYPE_LIKELIHOOD.map((type, index) => [type, index]),
 );
 
-/**
- * Every CART type whose ROM size matches `sizeKB`, for a type picker:
- * supported types before unsupported (unimplemented schemes, 5200 carts -
- * listed so a known type can still be recorded; the UI marks them and
- * refuses to boot them), each group ordered by real-world likelihood.
- */
-export function cartTypesForSize(sizeKB: number): CartTypeOption[] {
-	const options: CartTypeOption[] = [];
-	for (const [key, type] of Object.entries(CART_TYPES)) {
-		if (type.size !== sizeKB) continue;
-		options.push({
-			cartType: Number(key),
-			name: type.name,
-			machine: type.machine,
-			supported: isCartTypeSupported(Number(key)),
-		});
-	}
-	const rank = (option: CartTypeOption) =>
-		LIKELIHOOD_RANK.get(option.cartType) ?? Infinity;
-	options.sort(
-		(a, b) =>
-			Number(b.supported) - Number(a.supported) ||
-			rank(a) - rank(b) ||
-			a.cartType - b.cartType,
-	);
-	return options;
-}
-
 // A plausible boot trailer at the end of an 8K bank slice: the mandatory
 // zero byte at the $BFFC position and an init vector inside the cartridge
 // space (or the $FFxx "no init" form).
@@ -1206,409 +1611,4 @@ function hasPlausibleTrailer(bank: Uint8Array): boolean {
 	return (init & 0xff00) === 0xff00 || (init >= 0x8000 && init < 0xc000);
 }
 
-/**
- * Best-guess CART type for a raw dump, or null when no heuristic applies.
- * Size-unique types are certain. Otherwise the *position* of a plausible
- * boot trailer (the $BFFA-$BFFF vectors of whichever bank boots at $A000)
- * picks the scheme family, and prevalence picks the member:
- *
- * - trailer at the end of the image: the XEGS shape (last bank fixed at
- *   $A000); at 1MB, Atarimax-old boots bank 127 and far outnumbers XEGS 1MB.
- * - trailer at the end of the first 8K: the 8K-window-at-$A000 shape
- *   (Williams, Atarimax).
- * - trailer at the end of the first 16K's upper half: the 16K-window shape
- *   (MegaCart).
- * - a 64/128K image with no plausible trailer may be a scrambled Atrax
- *   dump: descramble and re-check bank 0.
- */
-export function suggestCartType(bytes: Uint8Array): number | null {
-	if (bytes.length < 2048 || bytes.length % 1024 !== 0) return null;
-	const sizeKB = bytes.length / 1024;
-
-	const bySize: Record<number, number> = {
-		2: 57,
-		4: 58, // three candidates, but the standard 4K dwarfs the others
-		40: 18, // Bounty Bob is the only 40K cart
-		4096: 63,
-		32768: 65,
-		65536: 66,
-		131072: 62,
-	};
-	const unique = bySize[sizeKB];
-	if (unique !== undefined) return unique;
-
-	const endTrailer: Record<number, number> = {
-		32: 12,
-		64: 13,
-		128: 14,
-		256: 23,
-		512: 24,
-		1024: 42,
-	};
-	const firstBankTrailer: Record<number, number> = {
-		32: 22,
-		64: 8,
-		128: 41,
-		1024: 75,
-	};
-	const megacartTrailer: Record<number, number> = {
-		32: 27,
-		64: 28,
-		128: 29,
-		256: 30,
-		512: 31,
-		1024: 32,
-		2048: 64,
-	};
-
-	if (hasPlausibleTrailer(bytes.subarray(bytes.length - 8192))) {
-		const type = endTrailer[sizeKB];
-		if (type !== undefined) return type;
-	}
-	if (hasPlausibleTrailer(bytes.subarray(0, 8192))) {
-		const type = firstBankTrailer[sizeKB];
-		if (type !== undefined) return type;
-	}
-	if (
-		bytes.length >= 16384 &&
-		hasPlausibleTrailer(bytes.subarray(8192, 16384))
-	) {
-		const type = megacartTrailer[sizeKB];
-		if (type !== undefined) return type;
-	}
-
-	// Scrambled Atrax dumps boot bank 0; descramble and look for its trailer.
-	if (sizeKB === 128) {
-		if (
-			hasPlausibleTrailer(
-				descramble(bytes, ATRAX_ADDR, ATRAX_DATA).subarray(0, 8192),
-			)
-		) {
-			return 68;
-		}
-		if (
-			hasPlausibleTrailer(
-				descramble(bytes, [...ATRAX_SDX_ADDR, 16], ATRAX_SDX_DATA).subarray(
-					0,
-					8192,
-				),
-			)
-		) {
-			return 49;
-		}
-	}
-	if (
-		sizeKB === 64 &&
-		hasPlausibleTrailer(
-			descramble(bytes, ATRAX_SDX_ADDR, ATRAX_SDX_DATA).subarray(0, 8192),
-		)
-	) {
-		return 48;
-	}
-
-	return null;
-}
-
-/**
- * What the machine needs from whatever is plugged into the cartridge slot.
- * {@link RomCartridge} - a plain `.car`/raw ROM image - is the shipped
- * implementation; special hardware (an RTime-8, a passthrough cart with its
- * own slot) can implement this directly.
- *
- * `read`/`write` (from {@link Memory}) receive the cartridge address ranges:
- * $8000-$BFFF for whatever areas the cartridge claims, and $D500-$D5FF for
- * the control region.
- */
-export interface Cartridge extends AtariMemory {
-	/** Whether the cartridge currently decodes $8000-$9FFF. */
-	readonly has8000To9fff: boolean;
-	/** Whether the cartridge currently decodes $A000-$BFFF. */
-	readonly hasA000ToBfff: boolean;
-	reset(cold: boolean): void;
-	/**
-	 * Fires after anything changes which addresses the cartridge decodes or
-	 * what bytes they map. The MMU watches it to rebuild its page tables; on
-	 * XL/XE the machine watches it to keep the cartridge sense (RD5 -> GTIA
-	 * TRIG3) live. Implementations must emit on every mapping change (bank
-	 * switches included) and on a mapping-restoring reset. Results of the
-	 * inherited {@link AtariMemory.pageView} must stay valid until it fires;
-	 * the MMU only consults pageView for pages inside a claimed area.
-	 */
-	readonly mappingChanged: Pulse;
-}
-
 const CART_HEADER_SIZE = 16;
-
-/**
- * The raw ROM bytes for a built-in (PORTB-banked) 8K slot - XL/XE BASIC or the
- * XEGS game. Raw ROM passes through unchanged; a standard-8K `.car` (CART
- * type 1, the canonical form for an $A000 8K image) is unwrapped to its ROM.
- * Any other `.car` (a banked or wrong-size cartridge) is rejected: it can't
- * stand in for an internal 8K ROM. This lets a host hand the machine canonical
- * `.car` bytes for these slots without unwrapping them itself.
- */
-export function builtinSlotRom(bytes: Uint8Array): Uint8Array {
-	const isCar =
-		bytes[0] === 0x43 && // 'C'
-		bytes[1] === 0x41 && // 'A'
-		bytes[2] === 0x52 && // 'R'
-		bytes[3] === 0x54; // 'T'
-	if (!isCar) return bytes;
-
-	const type =
-		(((bytes[4] ?? 0) << 24) |
-			((bytes[5] ?? 0) << 16) |
-			((bytes[6] ?? 0) << 8) |
-			(bytes[7] ?? 0)) >>>
-		0;
-	const rom = bytes.subarray(CART_HEADER_SIZE);
-	if (type !== 1 || rom.length !== 8192) {
-		throw new Error(
-			`built-in 8K slot needs a standard-8K cartridge (CART type 1); ` +
-				`got type ${type} of ${rom.length} bytes`,
-		);
-	}
-	return rom;
-}
-
-/**
- * Create a cartridge from an image file (raw ROM or `.car`). The chokepoint
- * for cartridge construction: types with a custom implementation (a
- * {@link CartType.create} hook - Bounty Bob today; passthrough SDX and
- * RAM/flash carts eventually) dispatch to it, everything else is a
- * {@link RomCartridge}.
- */
-export function createCartridge(
-	fileContents: Uint8Array,
-	fileName?: string,
-): Cartridge {
-	const isCar =
-		fileContents[0] === 0x43 && // 'C'
-		fileContents[1] === 0x41 && // 'A'
-		fileContents[2] === 0x52 && // 'R'
-		fileContents[3] === 0x54; // 'T'
-	if (isCar) {
-		const typeNo =
-			(((fileContents[4] ?? 0) << 24) |
-				((fileContents[5] ?? 0) << 16) |
-				((fileContents[6] ?? 0) << 8) |
-				(fileContents[7] ?? 0)) >>>
-			0;
-		const type = CART_TYPES[typeNo];
-		if (type?.create) {
-			if (type.size * 1024 !== fileContents.length - 16) {
-				throw new Error(
-					`Wrong cartridge size (expected ${type.size * 1024 + 16} found ${fileContents.length})`,
-				);
-			}
-			return type.create(fileContents.subarray(16));
-		}
-	}
-	return new RomCartridge(fileContents, fileName);
-}
-
-/**
- * A ROM-image cartridge: raw 8K/16K dumps or the `.car` container, with the
- * bank-switching schemes from `CART_TYPES`. The declarative
- * {@link CartridgeMapping} is normalized into `#slots` - one ROM byte offset
- * (or -1 for "reads $FF") per 2K slot of $8000-$BFFF - so every access is a
- * single indexed lookup regardless of the type's bank granularity.
- */
-export class RomCartridge implements Cartridge {
-	#rom: Uint8Array;
-	#type: CartType;
-	#mapping!: CartridgeMapping; // set via #applyMapping in the constructor
-
-	// The normalized mapping: for each 2K slot of $8000-$BFFF, the ROM byte
-	// offset it maps, or -1 for unmapped (reads $FF, and covers "ram" slots,
-	// which the MMU never routes here anyway).
-	#slots = new Int32Array(8).fill(-1);
-
-	/** See {@link Cartridge.mappingChanged}. */
-	readonly mappingChanged = new Pulse();
-
-	constructor(fileContents: Uint8Array, fileName?: string) {
-		const format = detectFileFormat(fileContents, fileName);
-
-		switch (format) {
-			case "raw-cart-8k-8000-9fff":
-				this.#type = CART_TYPES[21]!;
-				this.#rom = fileContents;
-				break;
-
-			case "raw-cart-8k-a000-bfff":
-				this.#type = CART_TYPES[1]!;
-				this.#rom = fileContents;
-				break;
-
-			case "raw-cart-16k":
-				this.#type = CART_TYPES[2]!;
-				this.#rom = fileContents;
-				break;
-
-			case "cart":
-				{
-					const b4 = fileContents[4];
-					const b5 = fileContents[5];
-					const b6 = fileContents[6];
-					const b7 = fileContents[7];
-
-					if (
-						b4 === undefined ||
-						b5 === undefined ||
-						b6 === undefined ||
-						b7 === undefined
-					) {
-						throw new Error("Cartridge image is corrupt");
-					}
-
-					const typeNo = (b4 << 24) | (b5 << 16) | (b6 << 8) | b7;
-					const type = CART_TYPES[typeNo];
-					if (!type) {
-						throw new Error(`Unsupported cartridge type #${typeNo}`);
-					}
-
-					if (!type.initialMapping) {
-						throw new Error(
-							`Cartridge type #${typeNo} (${type.name}) is not supported yet`,
-						);
-					}
-
-					if (type.size * 1024 !== fileContents.length - 16) {
-						throw new Error(
-							`Wrong cartridge size (expected ${type.size * 1024 + 16} found ${fileContents.length})`,
-						);
-					}
-
-					// TODO: Check checksum
-
-					this.#type = type;
-					this.#rom = fileContents.subarray(16);
-				}
-				break;
-
-			default:
-				throw new Error("Unsupported cartridge image format");
-		}
-
-		if (this.#type.prepare) {
-			this.#rom = this.#type.prepare(this.#rom);
-		}
-		this.#applyMapping(this.#type.initialMapping!);
-	}
-
-	// Install a mapping: keep the declarative form (for the area getters) and
-	// normalize it into #slots. This is the only place the AreaMapping shapes
-	// (one 8K bank, two 4K, four 2K, "ram") are interpreted.
-	#applyMapping(mapping: CartridgeMapping): void {
-		this.#mapping = mapping;
-		this.#normalizeArea(mapping.area8000, 0);
-		this.#normalizeArea(mapping.areaA000, 4);
-	}
-
-	#normalizeArea(area: AreaMapping, firstSlot: number): void {
-		if (area === "ram") {
-			this.#slots.fill(-1, firstSlot, firstSlot + 4);
-		} else if (!Array.isArray(area)) {
-			// One 8K bank.
-			for (let i = 0; i < 4; i++) {
-				this.#slots[firstSlot + i] =
-					area === null ? -1 : area * 8192 + i * 2048;
-			}
-		} else if (area.length === 2) {
-			// Two 4K banks.
-			for (let i = 0; i < 2; i++) {
-				const bank = area[i]!;
-				this.#slots[firstSlot + i * 2] = bank === null ? -1 : bank * 4096;
-				this.#slots[firstSlot + i * 2 + 1] =
-					bank === null ? -1 : bank * 4096 + 2048;
-			}
-		} else {
-			// Four 2K banks.
-			for (let i = 0; i < 4; i++) {
-				const bank = area[i]!;
-				this.#slots[firstSlot + i] = bank === null ? -1 : bank * 2048;
-			}
-		}
-	}
-
-	get has8000To9fff(): boolean {
-		return this.#mapping.area8000 !== "ram";
-	}
-
-	get hasA000ToBfff(): boolean {
-		return this.#mapping.areaA000 !== "ram";
-	}
-
-	#views = new Map<number, Uint8Array>();
-
-	/**
-	 * A 256-byte view of the ROM as currently banked at `page` (addresses
-	 * `page << 8` up), for the MMU's fast page tables - or `null` when the
-	 * bank at that position is unmapped or points past the image (reads
-	 * $FF). Only meaningful for pages inside an area the mapping covers
-	 * (check {@link has8000To9fff} / {@link hasA000ToBfff} first). Banks are
-	 * 2K/4K/8K, so a page never straddles two banks.
-	 */
-	pageView(page: number): Uint8Array | null {
-		const offset = this.#slots[(page - 0x80) >> 3]!;
-		if (offset < 0) return null;
-		const pageOffset = offset + ((page & 0x07) << 8);
-		if (pageOffset + 0x100 > this.#rom.length) return null;
-		let view = this.#views.get(pageOffset);
-		if (!view) {
-			view = this.#rom.subarray(pageOffset, pageOffset + 0x100);
-			this.#views.set(pageOffset, view);
-		}
-		return view;
-	}
-
-	read(address: number, options: ReadOptions): number {
-		if (address >= 0xd500 && address <= 0xd5ff) {
-			// Both hooks are pure, so a PEEK (debugger inspection) can take the
-			// controlRead value and simply discard the mapping change - matters
-			// for access-triggered carts like OSS, which switch on reads too.
-			// The value is decoded before the switch applies.
-			const value =
-				this.#type.controlRead?.(address, this.#mapping, this.#rom) ?? 0xff;
-			const mapping = this.#type.control?.(address, null, this.#mapping);
-			if (mapping && !(options & ReadOptions.PEEK)) {
-				this.#applyMapping(mapping);
-				this.mappingChanged.emit();
-			}
-			return value;
-		}
-
-		const slot = (address - 0x8000) >> 11;
-		if (slot < 0 || slot > 7) {
-			throw new Error(`Invalid cartridge memory address ${address}`);
-		}
-		const offset = this.#slots[slot]!;
-		// TODO(floating-bus): an unmapped or out-of-range cart read is undriven;
-		// $FF is the XL/XE pull-up.
-		if (offset < 0) {
-			return 0xff;
-		}
-		return this.#rom[offset + (address & 0x7ff)] ?? 0xff;
-	}
-
-	write(address: number, value: number): void {
-		if (address >= 0xd500 && address <= 0xd5ff) {
-			const mapping = this.#type.control?.(address, value, this.#mapping);
-			if (mapping) {
-				this.#applyMapping(mapping);
-				this.mappingChanged.emit();
-			}
-			return;
-		}
-
-		// Writes into the ROM areas do nothing (for now).
-	}
-
-	reset(cold: boolean) {
-		if (cold) {
-			this.#applyMapping(this.#type.initialMapping!);
-			this.mappingChanged.emit();
-		}
-	}
-}

@@ -9,8 +9,6 @@ import type { JoystickConnector } from "./joystick-connector.ts";
  * avoiding them is the caller's business.
  */
 export class Joystick {
-	readonly #connector: JoystickConnector;
-
 	constructor(connector: JoystickConnector) {
 		this.#connector = connector;
 	}
@@ -47,4 +45,6 @@ export class Joystick {
 	set trigger(pressed: boolean) {
 		this.#connector.triggerIn.value = !pressed;
 	}
+
+	readonly #connector: JoystickConnector;
 }

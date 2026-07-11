@@ -75,6 +75,26 @@ export interface PaletteOptions {
 export type PalettePrimaries = "srgb" | "ntsc1953" | "smpteC" | "ebu";
 export type OutputGamut = "srgb" | "display-p3";
 
+/** The NTSC GTIA palette (defaults preserved when `options` is omitted). */
+export function buildNtscPalette(options: PaletteOptions = {}): Uint32Array {
+	return buildPalette(NTSC_DEFAULTS, options);
+}
+
+/** The PAL GTIA palette (defaults preserved when `options` is omitted). */
+export function buildPalPalette(options: PaletteOptions = {}): Uint32Array {
+	return buildPalette(PAL_DEFAULTS, options);
+}
+
+/** The palette for a TV standard (defaults to NTSC). */
+export function paletteFor(
+	tvSystem: "ntsc" | "pal" = "ntsc",
+	options: PaletteOptions = {},
+): Uint32Array {
+	return tvSystem === "pal"
+		? buildPalPalette(options)
+		: buildNtscPalette(options);
+}
+
 interface ResolvedOptions extends Required<PaletteOptions> {
 	/** The chroma phase for a hue (1-15), in degrees. */
 	angleFor: (hue: number, options: Required<PaletteOptions>) => number;
@@ -332,26 +352,6 @@ function buildPalette(
 	}
 
 	return palette;
-}
-
-/** The NTSC GTIA palette (defaults preserved when `options` is omitted). */
-export function buildNtscPalette(options: PaletteOptions = {}): Uint32Array {
-	return buildPalette(NTSC_DEFAULTS, options);
-}
-
-/** The PAL GTIA palette (defaults preserved when `options` is omitted). */
-export function buildPalPalette(options: PaletteOptions = {}): Uint32Array {
-	return buildPalette(PAL_DEFAULTS, options);
-}
-
-/** The palette for a TV standard (defaults to NTSC). */
-export function paletteFor(
-	tvSystem: "ntsc" | "pal" = "ntsc",
-	options: PaletteOptions = {},
-): Uint32Array {
-	return tvSystem === "pal"
-		? buildPalPalette(options)
-		: buildNtscPalette(options);
 }
 
 function channel(value: number, invGamma: number): number {

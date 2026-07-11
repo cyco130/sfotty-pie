@@ -7,7 +7,7 @@ import { Atari } from "./machine.ts";
 // actually runs this cycle (halt stays false).
 function quietMachine(): Atari {
 	const machine = new Atari({ os: new Uint8Array(10240) });
-	machine.write(0x0600, 0xea, ReadOptions.NONE); // NOP
+	machine.mmu.write(0x0600, 0xea, ReadOptions.NONE); // NOP
 	machine.cpu.PC = 0x0600;
 	machine.cpu.state = DECODE;
 	machine.anticGtia.vcount = 0; // not a visible display line
@@ -67,14 +67,14 @@ test("a mid-scanline color register write paints from color clock 2w+1", () => {
 	// One mode E + LMS line of solid PF2 pixels, then JVB.
 	const machine = new Atari({ os: new Uint8Array(10240) });
 	const dl = [0x4e, 0x00, 0x30, 0x41, 0x00, 0x20];
-	dl.forEach((b, i) => machine.write(0x2000 + i, b, ReadOptions.NONE));
+	dl.forEach((b, i) => machine.mmu.write(0x2000 + i, b, ReadOptions.NONE));
 	for (let i = 0; i < 40; i++) {
-		machine.write(0x3000 + i, 0xff, ReadOptions.NONE);
+		machine.mmu.write(0x3000 + i, 0xff, ReadOptions.NONE);
 	}
-	machine.write(0xd402, 0x00, ReadOptions.NONE); // DLISTL
-	machine.write(0xd403, 0x20, ReadOptions.NONE); // DLISTH
-	machine.write(0xd400, 0x22, ReadOptions.NONE); // DMACTL: normal + DL
-	machine.write(0xd018, 0x0e, ReadOptions.NONE); // COLPF2 white
+	machine.mmu.write(0xd402, 0x00, ReadOptions.NONE); // DLISTL
+	machine.mmu.write(0xd403, 0x20, ReadOptions.NONE); // DLISTH
+	machine.mmu.write(0xd400, 0x22, ReadOptions.NONE); // DMACTL: normal + DL
+	machine.mmu.write(0xd018, 0x0e, ReadOptions.NONE); // COLPF2 white
 
 	// Rewrite COLPF2 during machine cycle w of the mode line: the new
 	// color must paint from color clock 2w+1 - frame x = 4(w-17)+2. One
@@ -90,7 +90,7 @@ test("a mid-scanline color register write paints from color clock 2w+1", () => {
 	) {
 		machine.cycle();
 	}
-	machine.write(0xd018, 0x34, ReadOptions.NONE);
+	machine.mmu.write(0xd018, 0x34, ReadOptions.NONE);
 	while (anticGtia.vcount === 8 && guard++ < 300000) machine.cycle();
 
 	const row = machine.frame.subarray(0, 376);
@@ -100,7 +100,7 @@ test("a mid-scanline color register write paints from color clock 2w+1", () => {
 
 test("color registers ignore luminance bit 0", () => {
 	const machine = quietMachine();
-	machine.write(0xd016, 0x35, ReadOptions.NONE); // COLPF0, odd luminance
+	machine.mmu.write(0xd016, 0x35, ReadOptions.NONE); // COLPF0, odd luminance
 	for (let i = 0; i < 8; i++) machine.cycle(); // let the write reach GTIA
 	expect(machine.anticGtia.colorRegisters[4]).toBe(0x34);
 });
@@ -117,10 +117,10 @@ test("repositioning an in-flight player onto the beam retriggers and merges", ()
 	// kernels (RastaConverter output).
 	const spanFor = (rewrite: boolean) => {
 		const machine = new Atari({ os: new Uint8Array(10240) });
-		machine.write(0xd00a, 0x03, ReadOptions.NONE); // SIZEP2 quad
-		machine.write(0xd002, 0x22, ReadOptions.NONE); // HPOSP2
-		machine.write(0xd00f, 0x38, ReadOptions.NONE); // GRAFP2
-		machine.write(0xd014, 0x46, ReadOptions.NONE); // COLPM2
+		machine.mmu.write(0xd00a, 0x03, ReadOptions.NONE); // SIZEP2 quad
+		machine.mmu.write(0xd002, 0x22, ReadOptions.NONE); // HPOSP2
+		machine.mmu.write(0xd00f, 0x38, ReadOptions.NONE); // GRAFP2
+		machine.mmu.write(0xd014, 0x46, ReadOptions.NONE); // COLPM2
 		const { anticGtia } = machine;
 		let guard = 0;
 		while (
@@ -129,7 +129,7 @@ test("repositioning an in-flight player onto the beam retriggers and merges", ()
 		) {
 			machine.cycle();
 		}
-		if (rewrite) machine.write(0xd002, 0x27, ReadOptions.NONE);
+		if (rewrite) machine.mmu.write(0xd002, 0x27, ReadOptions.NONE);
 		while (anticGtia.vcount === 20 && guard++ < 300000) machine.cycle();
 		const row = machine.frame.subarray(12 * 376, 13 * 376);
 		const px = [];
@@ -142,8 +142,8 @@ test("repositioning an in-flight player onto the beam retriggers and merges", ()
 
 test("the machine ticks the PIA: a CA2 read pulse ends after one cycle", () => {
 	const machine = quietMachine();
-	machine.write(0xd302, 0x2c, ReadOptions.NONE); // PACTL: CA2 pulse mode
-	machine.read(0xd300, ReadOptions.NONE); // the PORTA read fires the strobe
+	machine.mmu.write(0xd302, 0x2c, ReadOptions.NONE); // PACTL: CA2 pulse mode
+	machine.mmu.read(0xd300, ReadOptions.NONE); // the PORTA read fires the strobe
 	expect(machine.pia.ca2Out.value).toBe(false);
 
 	machine.cycle();

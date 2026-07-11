@@ -314,7 +314,7 @@ async function calibratePad(host: EmulatorHost, index?: number): Promise<void> {
  */
 export function installDevConsole(host: EmulatorHost): void {
 	const peek = (address: number) =>
-		host.emulator.machine.read(address & 0xffff, ReadOptions.PEEK);
+		host.emulator.machine.mmu.read(address & 0xffff, ReadOptions.PEEK);
 
 	const a8 = {
 		get emulator() {
@@ -328,7 +328,7 @@ export function installDevConsole(host: EmulatorHost): void {
 		},
 		peek,
 		poke: (address: number, value: number) =>
-			host.emulator.machine.write(
+			host.emulator.machine.mmu.write(
 				address & 0xffff,
 				value & 0xff,
 				ReadOptions.NONE,

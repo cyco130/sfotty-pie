@@ -1,4 +1,4 @@
-import type { Memory } from "@sfotty-pie/sfotty";
+import { ReadOptions, type Memory } from "@sfotty-pie/sfotty";
 import { DelayLine } from "./delay-line.ts";
 import { Signal } from "./signal.ts";
 import {
@@ -12,7 +12,8 @@ const OP_NMI_DROP = 0x01;
 const OP_NMI_RISE = 0x02;
 
 interface AnticGtiaConfig {
-	dmaRead: (address: number) => number;
+	/** The bus ANTIC's DMA fetches read from - the machine passes its Mmu. */
+	bus: Pick<Memory, "read">;
 	log: (message: string) => void;
 }
 
@@ -296,11 +297,8 @@ export class AnticGtia implements Memory {
 	// False on a CTIA: PRIOR bits 6-7 are ignored - no special modes.
 	#gtiaModes = true;
 
-	constructor(
-		{ dmaRead, log }: AnticGtiaConfig,
-		initialOptions: AnticGtiaOptions,
-	) {
-		this.#dmaRead = dmaRead;
+	constructor({ bus, log }: AnticGtiaConfig, initialOptions: AnticGtiaOptions) {
+		this.#bus = bus;
 		this.#log = log;
 
 		this.anticLineCount =
@@ -2452,7 +2450,11 @@ export class AnticGtia implements Memory {
 		this.displayListAddress = hi | lo;
 	}
 
-	#dmaRead: (address: number) => number;
+	#bus: Pick<Memory, "read">;
+
+	#dmaRead(address: number): number {
+		return this.#bus.read(address, ReadOptions.DMA);
+	}
 
 	#buffer = new Uint8Array(48);
 

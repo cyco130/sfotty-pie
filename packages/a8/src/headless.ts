@@ -178,8 +178,8 @@ export class Headless {
 		const table = this.#findHandler(0x45); // 'E'
 		if (table === 0) return;
 		const word = (off: number) =>
-			this.#machine.read(table + off, ReadOptions.NONE) |
-			(this.#machine.read(table + off + 1, ReadOptions.NONE) << 8);
+			this.#machine.mmu.read(table + off, ReadOptions.NONE) |
+			(this.#machine.mmu.read(table + off + 1, ReadOptions.NONE) << 8);
 		const getByte = (word(4) + 1) & 0xffff;
 		const putByte = (word(6) + 1) & 0xffff;
 		this.#machine.interceptExecute(getByte, () => this.#editorGetByte());
@@ -190,12 +190,12 @@ export class Headless {
 	// [name, table-lo, table-hi], terminated by a zero name.
 	#findHandler(device: number): number {
 		for (let addr = 0x031a; addr < 0x033f; addr += 3) {
-			const name = this.#machine.read(addr, ReadOptions.NONE);
+			const name = this.#machine.mmu.read(addr, ReadOptions.NONE);
 			if (name === 0) break;
 			if (name === device) {
 				return (
-					this.#machine.read(addr + 1, ReadOptions.NONE) |
-					(this.#machine.read(addr + 2, ReadOptions.NONE) << 8)
+					this.#machine.mmu.read(addr + 1, ReadOptions.NONE) |
+					(this.#machine.mmu.read(addr + 2, ReadOptions.NONE) << 8)
 				);
 			}
 		}

@@ -87,7 +87,7 @@ if (!xl && !cartridge && !filePath) {
 if (cartridge) machine.cartridge = cartridge;
 if (disk) machine.insertDisk(disk);
 
-const peek = (address: number) => machine.read(address, ReadOptions.PEEK);
+const peek = (address: number) => machine.mmu.read(address, ReadOptions.PEEK);
 
 function hex(value: number, width: number): string {
 	return value.toString(16).toUpperCase().padStart(width, "0");

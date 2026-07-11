@@ -1,4 +1,4 @@
-import { ReadOptions, Sfotty, type Memory } from "@sfotty-pie/sfotty";
+import { Sfotty } from "@sfotty-pie/sfotty";
 import { AnticGtia, type TvAdapter } from "./antic-gtia.ts";
 import type { AtrImage } from "./atr.ts";
 import {
@@ -123,7 +123,7 @@ export interface MachineConfig {
  * mapping host keys to matrix codes or joystick lines (layouts, special key
  * bindings) is entirely the host's business.
  */
-export class Atari implements Memory {
+export class Atari {
 	// The host surface: connectors (devices plug in) and the built-in
 	// controls (the console panel; the cartridge accessor below).
 	readonly joysticks: readonly JoystickConnector[];
@@ -171,11 +171,19 @@ export class Atari implements Memory {
 
 		const tvSystem = config.tvSystem ?? "ntsc";
 
-		// The dmaRead closure reads #bus lazily, resolving the chip/bus
-		// construction cycle.
+		// The Mmu is built first - bare geometry, no chips - so ANTIC and the
+		// CPU can take it as their bus; connect() below wires the ROMs and
+		// chip select routing once the chips exist.
+		this.mmu = new Mmu({
+			portbBanking: xl,
+			conventionalRamSize: config.conventionalRamSize ?? (xl ? 64 : 48),
+			xeBankCount: config.xeBankCount ?? 0,
+			separateAnticAccess: config.separateAnticAccess ?? false,
+		});
+
 		this.anticGtia = new AnticGtia(
 			{
-				dmaRead: (address) => this.mmu.read(address, ReadOptions.DMA),
+				bus: this.mmu,
 				log: log ?? (() => {}),
 			},
 			{
@@ -188,11 +196,7 @@ export class Atari implements Memory {
 		this.pia = new Pia();
 		this.pokey = new Pokey();
 
-		this.mmu = new Mmu({
-			portbBanking: xl,
-			conventionalRamSize: config.conventionalRamSize ?? (xl ? 64 : 48),
-			xeBankCount: config.xeBankCount ?? 0,
-			separateAnticAccess: config.separateAnticAccess ?? false,
+		this.mmu.connect({
 			osRom: os,
 			// XL/XE: built-in BASIC and game, banked in via PORTB - each accepts a
 			// raw 8K ROM or a standard-8K `.car` (unwrapped here).
@@ -226,10 +230,10 @@ export class Atari implements Memory {
 		// 400/800 - through the same accessor.
 		this.#setCartridge(undefined);
 
-		// The machine is its own bus (it implements Memory), so the CPU reads and
-		// writes through the trap-aware Mmu. Constructed last, once the MMU is
-		// wired. Powers on into the reset sequence like real hardware.
-		this.cpu = new Sfotty(this);
+		// The CPU reads and writes through the trap-aware Mmu directly.
+		// Constructed last, once the bus is wired. Powers on into the reset
+		// sequence like real hardware.
+		this.cpu = new Sfotty(this.mmu);
 
 		// Built-in SIO high-level emulation: a JSR through SIOV is trapped and
 		// served from the inserted D1: image (no serial hardware emulated). Wired
@@ -342,19 +346,6 @@ export class Atari implements Memory {
 		});
 	}
 
-	/** The last value driven on the data bus (see {@link Mmu.busData}). */
-	get busData(): number {
-		return this.mmu.busData;
-	}
-
-	read(address: number, options: ReadOptions): number {
-		return this.mmu.read(address, options);
-	}
-
-	write(address: number, value: number, options: ReadOptions): void {
-		this.mmu.write(address, value, options);
-	}
-
 	// Reset the components. Reached only through the console connector: the
 	// power switch resets cold, the XL/XE Reset key warm.
 	#reset(cold: boolean): void {
@@ -431,7 +422,7 @@ export class Atari implements Memory {
 			case PHASE.CPU:
 				if (this.resetAsserted) this.cpu.reset(false);
 				else if (!this.anticGtia.halt) this.cpu.cycle(); // may throw
-				this.anticGtia.afterCpu(this.frame, this.busData);
+				this.anticGtia.afterCpu(this.frame, this.mmu.busData);
 				this.#irqLine = this.irq;
 				this.phase = PHASE.IDLE;
 		}

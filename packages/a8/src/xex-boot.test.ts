@@ -52,7 +52,7 @@ test("booting the disk loads and runs the executable", () => {
 	for (let sector = 1; sector <= 3; sector++) {
 		const data = disk.readSector(sector)!;
 		for (let i = 0; i < data.length; i++) {
-			machine.write(
+			machine.mmu.write(
 				0x0700 + (sector - 1) * 128 + i,
 				data[i]!,
 				ReadOptions.NONE,
@@ -62,15 +62,15 @@ test("booting the disk loads and runs the executable", () => {
 
 	// Mid-boot OS state: COLDST set, BOOT? not yet recorded. The loader must
 	// flip these before running game code.
-	machine.write(0x0244, 0xff, ReadOptions.NONE);
-	machine.write(0x09, 0, ReadOptions.NONE);
+	machine.mmu.write(0x0244, 0xff, ReadOptions.NONE);
+	machine.mmu.write(0x09, 0, ReadOptions.NONE);
 
 	cpu.RDY = true;
 	cpu.reset(true);
 	for (let i = 0; i < 20 && cpu.state !== DECODE; i++) cpu.cycle();
 	cpu.PC =
-		machine.read(0x0704, ReadOptions.NONE) |
-		(machine.read(0x0705, ReadOptions.NONE) << 8);
+		machine.mmu.read(0x0704, ReadOptions.NONE) |
+		(machine.mmu.read(0x0705, ReadOptions.NONE) << 8);
 	cpu.S = 0xfd;
 
 	// Run until the executable spins at its RUNAD target. Check at
@@ -86,19 +86,19 @@ test("booting the disk loads and runs the executable", () => {
 	expect(cpu.PC).toBe(0x3013);
 
 	// The data chunk arrived...
-	expect(machine.read(0x2000, ReadOptions.NONE)).toBe(0x11);
-	expect(machine.read(0x2001, ReadOptions.NONE)).toBe(0x22);
-	expect(machine.read(0x2002, ReadOptions.NONE)).toBe(0x33);
+	expect(machine.mmu.read(0x2000, ReadOptions.NONE)).toBe(0x11);
+	expect(machine.mmu.read(0x2001, ReadOptions.NONE)).toBe(0x22);
+	expect(machine.mmu.read(0x2002, ReadOptions.NONE)).toBe(0x33);
 	// ...INITAD ran exactly once, and RUNAD ran.
-	expect(machine.read(0x3100, ReadOptions.NONE)).toBe(1);
-	expect(machine.read(0x3101, ReadOptions.NONE)).toBe(1);
+	expect(machine.mmu.read(0x3100, ReadOptions.NONE)).toBe(1);
+	expect(machine.mmu.read(0x3101, ReadOptions.NONE)).toBe(1);
 	// The loader presented a completed disk boot before running game code
 	// (BOOT? = disk, COLDST clear), so a game that restarts itself through
 	// the OS warmstart isn't cold-rebooted into the loader (Bruce Lee).
-	expect(machine.read(0x09, ReadOptions.NONE)).toBe(1);
-	expect(machine.read(0x0244, ReadOptions.NONE)).toBe(0);
+	expect(machine.mmu.read(0x09, ReadOptions.NONE)).toBe(1);
+	expect(machine.mmu.read(0x0244, ReadOptions.NONE)).toBe(0);
 	// ...and defaulted DOSINI to the OS cold start, so a Reset with no game
 	// hook re-boots the disk instead of re-entering the spent loader.
-	expect(machine.read(0x0c, ReadOptions.NONE)).toBe(0x77);
-	expect(machine.read(0x0d, ReadOptions.NONE)).toBe(0xe4);
+	expect(machine.mmu.read(0x0c, ReadOptions.NONE)).toBe(0x77);
+	expect(machine.mmu.read(0x0d, ReadOptions.NONE)).toBe(0xe4);
 });

@@ -40,7 +40,7 @@ const POWER_ON_READS = [
 
 test("GTIA read registers match the documented power-on state", () => {
 	const ag = new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 
@@ -54,7 +54,7 @@ test("GTIA read registers match the documented power-on state", () => {
 
 test("writing CONSOL releases the switch lines", () => {
 	const ag = new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 
@@ -67,7 +67,7 @@ test("writing CONSOL releases the switch lines", () => {
 
 function makeAnticGtia() {
 	return new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 }
@@ -209,7 +209,7 @@ test("a JVB display list reloads its target every frame", () => {
 	dlist.forEach((b, i) => (ram[0x2c00 + i] = b));
 
 	const ag = new AnticGtia(
-		{ dmaRead: (address) => ram[address]!, log: () => {} },
+		{ bus: { read: (address) => ram[address]! }, log: () => {} },
 		{ anticTvSystem: "ntsc", gtiaTvSystem: "ntsc" },
 	);
 	ag.write(0xd402, 0x00); // DLISTL
@@ -260,7 +260,7 @@ test("VCOUNT increments at cycle 111 and rolls over a cycle late", () => {
 
 test("the PAL VCOUNT overflow window reads $9C", () => {
 	const ag = new AnticGtia(
-		{ dmaRead: () => 0, log: () => {} },
+		{ bus: { read: () => 0 }, log: () => {} },
 		{ anticTvSystem: "pal", gtiaTvSystem: "pal" },
 	);
 

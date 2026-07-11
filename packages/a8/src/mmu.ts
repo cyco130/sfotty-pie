@@ -225,7 +225,15 @@ export interface MmuOptions {
 	 * from the CPU. Can't be set when `xeBankCount` is greater than 32.
 	 */
 	separateAnticAccess: boolean;
+}
 
+/**
+ * The ROMs and chips the bus routes to - everything that needs the other
+ * components to exist. The machine constructs the Mmu first (so ANTIC and
+ * the CPU can take it as their bus), then calls {@link Mmu.connect} exactly
+ * once with these. Cartridges attach through {@link Mmu.setCartridge}.
+ */
+export interface MmuConnections {
 	/**
 	 * OS ROM contents.
 	 *
@@ -252,11 +260,6 @@ export interface MmuOptions {
 	 */
 	gameRom?: Uint8Array;
 
-	/**
-	 * Cartridge chip.
-	 */
-	cartridge?: Cartridge;
-
 	gtia: Memory;
 	pbi: Memory;
 	pokey: Memory;
@@ -271,15 +274,6 @@ export class Mmu implements Memory {
 			conventionalRamSize,
 			xeBankCount,
 			separateAnticAccess,
-			osRom,
-			basicRom,
-			gameRom,
-			cartridge,
-			gtia,
-			pbi,
-			pokey,
-			pia,
-			antic,
 		} = options;
 
 		if (
@@ -290,18 +284,8 @@ export class Mmu implements Memory {
 			throw new Error("Conventional RAM size must be 16, 48, or 64");
 		}
 
-		if (!portbBanking) {
-			if (xeBankCount) {
-				throw new Error("XE-compatible extended RAM requires PORTB banking");
-			}
-
-			if (basicRom) {
-				throw new Error("Built-in BASIC requires PORTB banking");
-			}
-
-			if (gameRom) {
-				throw new Error("Built-in game ROM requires PORTB banking");
-			}
+		if (!portbBanking && xeBankCount) {
+			throw new Error("XE-compatible extended RAM requires PORTB banking");
 		}
 
 		if (!Number.isInteger(xeBankCount) || xeBankCount < 0) {
@@ -322,18 +306,6 @@ export class Mmu implements Memory {
 			throw new Error(
 				"XE-compatible extended RAM cannot exceed 1024K (64 banks)",
 			);
-		}
-
-		if (osRom.length !== 10 * 1024 && osRom.length !== 16 * 1024) {
-			throw new Error("OS ROM size must be either 10K or 16K");
-		}
-
-		if (basicRom && basicRom.length !== 8 * 1024) {
-			throw new Error("BASIC ROM size must be 8K");
-		}
-
-		if (gameRom && gameRom.length !== 8 * 1024) {
-			throw new Error("Game ROM size must be 8K");
 		}
 
 		this.#ram = new Ram(conventionalRamSize * 1024);
@@ -367,6 +339,45 @@ export class Mmu implements Memory {
 		this.#separateAnticAccess = separateAnticAccess;
 		this.#portbBanking = portbBanking;
 
+		this.portbChanged = this.portbChanged.bind(this);
+	}
+
+	/**
+	 * Wire the ROMs and chips and build the page tables. Called exactly once,
+	 * after the chips exist - the two-phase construction lets ANTIC and the
+	 * CPU take the Mmu itself as their bus. The Mmu must not be used before
+	 * this.
+	 */
+	connect(connections: MmuConnections): void {
+		if (this.#pia) {
+			throw new Error("Mmu is already connected");
+		}
+
+		const { osRom, basicRom, gameRom, gtia, pbi, pokey, pia, antic } =
+			connections;
+
+		if (!this.#portbBanking) {
+			if (basicRom) {
+				throw new Error("Built-in BASIC requires PORTB banking");
+			}
+
+			if (gameRom) {
+				throw new Error("Built-in game ROM requires PORTB banking");
+			}
+		}
+
+		if (osRom.length !== 10 * 1024 && osRom.length !== 16 * 1024) {
+			throw new Error("OS ROM size must be either 10K or 16K");
+		}
+
+		if (basicRom && basicRom.length !== 8 * 1024) {
+			throw new Error("BASIC ROM size must be 8K");
+		}
+
+		if (gameRom && gameRom.length !== 8 * 1024) {
+			throw new Error("Game ROM size must be 8K");
+		}
+
 		this.#osRom =
 			osRom.length === 10 * 1024
 				? new Rom(osRom, 0xd800, 0x3fff)
@@ -380,22 +391,13 @@ export class Mmu implements Memory {
 			this.#gameRom = new Rom(gameRom, 0xa000, 0x1fff);
 		}
 
-		this.#cartridge = cartridge;
-
 		this.#gtia = gtia;
 		this.#pbi = pbi;
 		this.#pokey = pokey;
 		this.#pia = pia;
 		this.#antic = antic;
 
-		this.portbChanged = this.portbChanged.bind(this);
 		this.#unwatchPortbChanged = pia.portbOut.watch(this.portbChanged);
-
-		if (cartridge) {
-			this.#unwatchCartMapping = cartridge.mappingChanged.watch(
-				this.#cartMappingChanged,
-			);
-		}
 
 		// Sync derived banking state to the current PORTB instead of relying on
 		// the field defaults matching it. portbChanged rebuilds the page tables;
@@ -456,16 +458,17 @@ export class Mmu implements Memory {
 	#banks: Ram[];
 	#bankMask = 0;
 
-	#osRom: Rom;
+	// Assigned in connect(); the Mmu is unusable before it.
+	#osRom!: Rom;
 	#basicRom?: Rom;
 	#gameRom?: Rom;
 	#cartridge?: Cartridge;
 
-	#gtia: Memory;
-	#pbi: Memory;
-	#pokey: Memory;
-	#pia: Pia;
-	#antic: Memory;
+	#gtia!: Memory;
+	#pbi!: Memory;
+	#pokey!: Memory;
+	#pia!: Pia;
+	#antic!: Memory;
 
 	#portbBanking: boolean;
 	#separateAnticAccess: boolean;

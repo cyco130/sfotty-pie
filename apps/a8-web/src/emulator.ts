@@ -115,7 +115,7 @@ export class Emulator {
 	// delay, RAM clears) collapse and the ring spans real control flow.
 	#recentPcs = new Int32Array(LOOP_WINDOW).fill(-1);
 	readonly #peek = (address: number): number =>
-		this.machine.read(address & 0xffff, ReadOptions.PEEK);
+		this.machine.mmu.read(address & 0xffff, ReadOptions.PEEK);
 
 	// Record one committed-fetch instruction, skipping a PC seen in the last
 	// LOOP_WINDOW records so tight loops collapse. Wired to the machine's

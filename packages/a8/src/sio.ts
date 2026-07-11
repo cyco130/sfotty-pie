@@ -57,12 +57,12 @@ export function createSioHandler(
 ): (address: number) => number {
 	const { machine, cpu, getDisk } = options;
 
-	const peek = (address: number) => machine.read(address, ReadOptions.PEEK);
+	const peek = (address: number) => machine.mmu.read(address, ReadOptions.PEEK);
 
 	// Finish like SIO does: status into DSTATS and Y, N mirroring bit 7,
 	// then RTS back to the caller.
 	const complete = (status: number): number => {
-		machine.write(DSTATS, status, ReadOptions.NONE);
+		machine.mmu.write(DSTATS, status, ReadOptions.NONE);
 		cpu.Y = status;
 		cpu.nFlag = status >= 0x80;
 		cpu.zFlag = false;
@@ -87,7 +87,7 @@ export function createSioHandler(
 		const transfer = (data: ArrayLike<number>): number => {
 			const length = byteCount ? Math.min(byteCount, data.length) : data.length;
 			for (let i = 0; i < length; i++) {
-				machine.write((buffer + i) & 0xffff, data[i]!, ReadOptions.NONE);
+				machine.mmu.write((buffer + i) & 0xffff, data[i]!, ReadOptions.NONE);
 			}
 			return complete(STATUS_OK);
 		};

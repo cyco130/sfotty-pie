@@ -147,13 +147,38 @@ test("status over the wire reports density and protection", () => {
 });
 
 test("an unknown command is NAKed; an unclaimed ID gets silence", () => {
-	const { sendCommand, receive } = rig(new AtrImage(makeAtr(128, 4)));
+	const { drive, sendCommand, receive } = rig(new AtrImage(makeAtr(128, 4)));
 
-	sendCommand(0x31, 0x3f, 0, 0); // high-speed poll: stock drive NAKs
+	sendCommand(0x31, 0x20, 0, 0); // no such command
+	expect(receive(1)).toEqual([0x4e]);
+
+	drive.highSpeedIndex = undefined; // stock drive: NAK the $3F poll too
+	sendCommand(0x31, 0x3f, 0, 0);
 	expect(receive(1)).toEqual([0x4e]);
 
 	sendCommand(0x32, 0x52, 2, 0); // D2:, not attached
 	expect(receive(1, 60_000)).toEqual([]);
+});
+
+test("US Doubler high speed: the $3F poll, then a whole read at the rate", () => {
+	const { pokey, sendCommand, receive } = rig(new AtrImage(makeAtr(128, 4)));
+
+	// Poll at standard speed: Complete plus the divisor as a data frame.
+	sendCommand(0x31, 0x3f, 0, 0);
+	expect(receive(2 + 1 + 1)).toEqual([0x41, 0x43, 9, sioChecksum([9])]);
+
+	// Reprogram the computer to the polled divisor (9: ~56 kbaud, 2.9x
+	// the standard rate) and run a full read: the drive follows the
+	// command frame's clock, US Doubler style, so every response byte
+	// comes back at the new rate.
+	pokey.write(AUDF3, 9);
+	sendCommand(0x31, 0x52, 2, 0);
+	const bytes = receive(2 + 128 + 1);
+	expect(bytes[0]).toBe(0x41);
+	expect(bytes[1]).toBe(0x43);
+	const data = bytes.slice(2, 130);
+	expect(new Set(data)).toEqual(new Set([2]));
+	expect(bytes[130]).toBe(sioChecksum(data));
 });
 
 test("a corrupted command frame gets silence", () => {

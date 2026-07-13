@@ -148,6 +148,9 @@ export const commands = {
 		label: "KEY_BINDINGS_RESET",
 		run: ({ host }) => void host.resetKeyBindings(),
 	},
+	// Read the host clipboard and type it into the machine through the OS
+	// keyboard trap. Must run within a user gesture (key binding, palette pick).
+	PASTE_TEXT: { label: "PASTE_TEXT", run: ({ host }) => host.pasteText() },
 
 	// Audio.
 	AUDIO_MUTE: { label: "AUDIO_MUTE", run: ({ host }) => host.setMuted(true) },

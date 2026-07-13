@@ -3,6 +3,7 @@ import { DECODE, ReadOptions, Sfotty } from "@sfotty-pie/sfotty";
 import { makeAtr } from "./atr-fixture.ts";
 import { AtrImage } from "./atr.ts";
 import { Atari } from "./machine.ts";
+import { recognizableOs } from "./os-fixture.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
 
 const DSTATS = 0x0303;
@@ -16,7 +17,7 @@ function makeMachine(model: "800" | "800XL" | "130XE" = "800") {
 	return new Atari({
 		xl: model !== "800",
 		...(model === "130XE" && { xeBankCount: 4, separateAnticAccess: true }),
-		os: new Uint8Array(model === "800" ? 10240 : 16384),
+		os: recognizableOs(model === "800" ? 10240 : 16384),
 		basic,
 	});
 }

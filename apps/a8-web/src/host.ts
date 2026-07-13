@@ -73,6 +73,7 @@ import {
 	saveBindings,
 	saveLayoutPref,
 } from "./key-bindings-store.ts";
+import { GLYPH_TO_ATASCII } from "./keyboard-docs.ts";
 import { Keyboard } from "./keyboard.ts";
 import {
 	clampRam,
@@ -693,6 +694,25 @@ export class EmulatorHost {
 
 	toggleRealisticScan(): void {
 		this.setRealisticScan(!this.realisticScan.value);
+	}
+
+	/** Read the host clipboard and type it into the machine through the OS
+	 *  K: trap (see the machine's `paste`). Must run within a user gesture -
+	 *  the paste key binding or a palette pick - for the clipboard read to
+	 *  be allowed. */
+	pasteText(): void {
+		if (!this.#emulator.machine.pasteSupported) {
+			this.toast(messages.errors.pasteUnsupported, "warning");
+			return;
+		}
+		navigator.clipboard
+			.readText()
+			.then((text) => {
+				const count = this.#emulator.machine.paste(text, GLYPH_TO_ATASCII);
+				if (count > 0) this.toast(messages.toasts.pasted(count));
+				else this.toast(messages.errors.nothingToPaste, "warning");
+			})
+			.catch(() => this.toast(messages.errors.clipboardUnavailable, "warning"));
 	}
 
 	/** Plug or unplug the keyboard. Detached, the matrix sends no response,

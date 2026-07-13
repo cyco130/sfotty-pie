@@ -19,6 +19,7 @@ import { Keyboard } from "./keyboard.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
+import { detectOsVectors, OsTraps } from "./os-traps.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
@@ -195,20 +196,30 @@ export class Atari {
 		// sequence like real hardware.
 		this.cpu = new Sfotty(this.mmu);
 
-		// Built-in SIO high-level emulation: a JSR through SIOV is trapped and
-		// served from the inserted D1: image (no serial hardware emulated). Wired
-		// once; insertDisk swaps the image the handler reads. Only fires while
-		// the OS ROM is mapped: with RAM banked in under the OS, $E459 is the
-		// running program's own code (Turbo Basic XL keeps its interpreter
-		// there), so the fetch must fall through to it.
-		const sioHandler = createSioHandler({
-			machine: this,
-			cpu: this.cpu,
-			getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
-		});
-		this.interceptExecute(SIOV, (address) =>
-			this.mmu.isOsRomMapped ? sioHandler(address) : undefined,
-		);
+		// OS-level traps install only on a recognized OS ROM shape (the
+		// well-known vector rows must hold JMPs) - an unrecognized image is a
+		// custom ROM and runs pure hardware, no traps at all.
+		const vectors = detectOsVectors(os);
+		if (vectors) {
+			// Built-in SIO high-level emulation: a JSR through SIOV is trapped and
+			// served from the inserted D1: image (no serial hardware emulated). Wired
+			// once; insertDisk swaps the image the handler reads. Only fires while
+			// the OS ROM is mapped: with RAM banked in under the OS, $E459 is the
+			// running program's own code (Turbo Basic XL keeps its interpreter
+			// there), so the fetch must fall through to it.
+			const sioHandler = createSioHandler({
+				machine: this,
+				cpu: this.cpu,
+				getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
+			});
+			this.interceptExecute(SIOV, (address) =>
+				this.mmu.isOsRomMapped ? sioHandler(address) : undefined,
+			);
+
+			// Boot milestones, the CIO-init chain, and the K: get-byte trap
+			// that delivers paste() text.
+			this.#osTraps = new OsTraps({ machine: this, cpu: this.cpu, vectors });
+		}
 	}
 
 	// The host surface: connectors (devices plug in) and the built-in
@@ -239,6 +250,48 @@ export class Atari {
 	 */
 	ejectDisk(): void {
 		this.#disk = undefined;
+	}
+
+	/**
+	 * Queue text to be typed into the machine. Delivered through a trap on
+	 * the OS K: handler's get-byte routine: each OS keyboard read returns the
+	 * next character (converted to ATASCII), so the real E: handler still
+	 * does the echoing, line editing, and hand-off to the caller - a listing
+	 * pasted at the BASIC prompt appears on screen and tokenizes exactly as
+	 * if typed, as fast as the machine consumes it. Reaches any program that
+	 * reads the keyboard through the OS (E:, K:, CIO); one polling the
+	 * hardware directly won't see it. Queued text survives until read; a
+	 * cold or warm start drops it. No-op when {@link pasteSupported} is
+	 * false.
+	 *
+	 * Translation: LF/CR/CRLF become EOL, `~` toggles inverse video (an EOL
+	 * turns it back off), `{ddd}`/`{$hh}` emit a byte (0-255), an optional
+	 * `glyphs` map translates Unicode characters (Atari graphics glyphs,
+	 * international charset) to their ATASCII codes, and ASCII $20-$7F
+	 * passes through (backtick excepted - it has no ATASCII counterpart);
+	 * anything else is dropped. Every emitted control code except EOL gets
+	 * an ESC prefix, so the screen editor displays it instead of performing
+	 * it.
+	 *
+	 * Returns the number of ATASCII bytes queued (0 when unsupported).
+	 */
+	paste(text: string, glyphs?: ReadonlyMap<string, number>): number {
+		return this.#osTraps?.paste(text, glyphs) ?? 0;
+	}
+
+	/** Drop any queued {@link paste} text. */
+	cancelPaste(): void {
+		this.#osTraps?.cancelPaste();
+	}
+
+	/**
+	 * Whether OS-level traps - {@link paste} included - are available: true
+	 * when the OS ROM was recognized at construction (every stock OS and the
+	 * bundled replacements are), false on a custom ROM, which runs pure
+	 * hardware.
+	 */
+	get pasteSupported(): boolean {
+		return this.#osTraps !== undefined;
 	}
 
 	/**
@@ -419,6 +472,8 @@ export class Atari {
 	// The D1: disk image served by the built-in trap-based SIO; undefined = no
 	// disk (SIO times out and the OS moves on). Set via insertDisk.
 	#disk: AtrImage | undefined;
+	// The OS trap framework; undefined on an unrecognized (custom) OS ROM.
+	#osTraps: OsTraps | undefined;
 
 	// Create and wire the joystick connectors: two jacks on the XL/XE, four
 	// on the 400/800 (ports 2/3 live on PIA port B). Connector signals are

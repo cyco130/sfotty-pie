@@ -528,6 +528,10 @@ export const messages = {
 		cart5200: "Atari 5200 cartridges can't run on this machine.",
 		audioUnavailable: "Audio is unavailable in this browser.",
 		audioUnavailableReason: (reason: string) => `Audio unavailable: ${reason}`,
+		clipboardUnavailable:
+			"Couldn't read the clipboard (denied or unsupported).",
+		nothingToPaste: "Nothing pasteable in the clipboard.",
+		pasteUnsupported: "Paste needs a recognized OS ROM.",
 		noWritableDisk: "No writable disk in D1: to download.",
 		noDiskToSave: "No disk in D1: to save.",
 		notLibraryDisk: "Only a disk attached from the library can be saved.",
@@ -568,6 +572,8 @@ export const messages = {
 		keyboardAttached: (attached: boolean): string =>
 			attached ? "Keyboard attached" : "Keyboard detached",
 		keyBindingsReset: "Key bindings reset to defaults",
+		pasted: (count: number): string =>
+			`Pasting ${count} character${count === 1 ? "" : "s"}`,
 		saving: (name: string) => `Saving (${name})`,
 		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
@@ -604,6 +610,7 @@ export const labels = {
 	KEYBOARD_ATTACH: "Keyboard: Attach",
 	KEYBOARD_DETACH: "Keyboard: Detach (an XEGS senses the absence)",
 	KEY_BINDINGS_RESET: "Keyboard: Reset key bindings to defaults",
+	PASTE_TEXT: "Keyboard: Paste text from the clipboard",
 	AUDIO_MUTE: "Audio: Mute",
 	AUDIO_UNMUTE: "Audio: Unmute",
 	AUDIO_TOGGLE: "Audio: Toggle",

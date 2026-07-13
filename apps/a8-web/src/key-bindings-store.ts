@@ -99,7 +99,8 @@ export async function ensureStoredLayout(): Promise<Map<string, string>> {
 // v3: + the global Cmd/Alt+K -> OPEN_PALETTE binding and the `scope` field.
 // v4: letter app-shortcuts (palette, the Alt/Ctrl+letter aliases) anchored to
 //     the produced letter via the layout, not the QWERTY position.
-const VERSION = 4;
+// v5: + the global Cmd/Alt+V -> PASTE_TEXT binding.
+const VERSION = 5;
 
 interface Stored {
 	v: number;

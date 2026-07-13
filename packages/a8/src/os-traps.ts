@@ -176,6 +176,12 @@ export function textToAtascii(
 // (no ESC prefix on control codes), e.g. {!125}.
 const BYTE_ESCAPE = /^\{(!?)(\$[0-9a-f]{1,2}|[0-9]{1,3})\}/i;
 
+/**
+ * How paste text is delivered; see {@link Atari.pasteMode} for the
+ * user-facing contract.
+ */
+export type PasteMode = "k" | "ch";
+
 export interface OsTrapsOptions {
 	machine: Atari;
 	cpu: Sfotty;
@@ -227,22 +233,56 @@ export class OsTraps {
 		machine.observeExecute(this.#vectors.cioInit, () => {
 			if (osMapped()) this.#armCioReady();
 		});
+		// CH-injection paste: a consumer signals "key taken" by writing $FF
+		// ("no key") back to CH - the seek point for the next character. The
+		// consumer translates a key *after* that consume-store, so this is
+		// also the moment its inverse-video state becomes current.
+		machine.observeWrite(CH, (_address, value) => {
+			if (value === NO_KEY) {
+				this.#chTranslatingInverse = this.#chInverse;
+				this.#stuffCh();
+			}
+		});
+		// While a CH paste is in flight, the translation-state cells are
+		// served at read time instead of being written (nothing to save or
+		// restore, and no phase errors): SHFLOK reads 0 (plain letter codes
+		// mean lowercase), INVFLG reads the being-translated character's
+		// inverse bit, and NOCLIK reads 1 (no key click).
+		machine.interceptRead(SHFLOK, () => (this.#chActive ? 0 : undefined));
+		machine.interceptRead(INVFLG, () =>
+			this.#chActive ? this.#chTranslatingInverse : undefined,
+		);
+		machine.interceptRead(NOCLIK, () => (this.#chActive ? 1 : undefined));
+		// The paste ends on the first CH *read* after the queue drained: the
+		// final character's translation reads the flags after the last $FF
+		// consume-store, and the consumer's next CH poll provably comes after
+		// that translation is done.
+		machine.observeRead(CH, () => {
+			if (this.#chDeactivatePending) this.#chDeactivate();
+		});
 	}
 
 	/**
-	 * Queue text for delivery through the K: paste trap; see
-	 * {@link Atari.paste} for the contract. Returns the byte count queued.
+	 * Queue text for paste delivery; see {@link Atari.paste} for the
+	 * contract. Returns the byte count queued.
 	 */
 	paste(text: string, glyphs?: ReadonlyMap<string, number>): number {
 		const codes = textToAtascii(text, glyphs);
 		for (const code of codes) this.#pasteQueue.push(code);
+		// CH mode has no read to trap: prime the pump if CH sits empty (a
+		// pending real key gets consumed first and its $FF write seeks on).
+		if (codes.length > 0 && this.#peek(CH) === NO_KEY) this.#stuffCh();
 		return codes.length;
 	}
 
 	/** Drop any queued paste text. */
 	cancelPaste(): void {
 		this.#pasteQueue.length = 0;
+		this.#chDeactivate();
 	}
+
+	/** The paste delivery mode; see {@link Atari.pasteMode}. */
+	pasteMode: PasteMode = "k";
 
 	readonly #machine: Atari;
 	readonly #cpu: Sfotty;
@@ -251,6 +291,13 @@ export class OsTraps {
 	// A CIOINV run whose return trap hasn't fired yet (don't arm twice).
 	#cioArmed = false;
 	#keyboardTrapped = false;
+	// A CH paste in flight: the read intercepts on SHFLOK/INVFLG/NOCLIK are
+	// serving. #chInverse is the inverse-video bit of the key currently in
+	// CH; #chTranslatingInverse the bit of the consumed key being translated.
+	#chActive = false;
+	#chDeactivatePending = false;
+	#chInverse = 0;
+	#chTranslatingInverse = 0;
 
 	// A start of either temperature is a user-visible fresh slate: whatever
 	// was queued belongs to the previous session. Also re-open the CIOINV
@@ -258,6 +305,7 @@ export class OsTraps {
 	#bootStarted(): void {
 		this.#pasteQueue.length = 0;
 		this.#cioArmed = false;
+		this.#chDeactivate();
 	}
 
 	// CIO initialization has begun: arm a one-shot trap at the address its
@@ -301,6 +349,7 @@ export class OsTraps {
 	// K:-direct readers just get the character). A committed opcode fetch
 	// can't repeat under a WSYNC stall, so the pop is safe here.
 	#keyboardGet(): number | undefined {
+		if (this.pasteMode !== "k") return undefined;
 		if (!this.#machine.mmu.isOsRomMapped) return undefined;
 		if (this.#pasteQueue.length === 0) return undefined;
 		// Forced read (ICAX1Z bit 0): the get-byte returns EOL without touching
@@ -316,6 +365,48 @@ export class OsTraps {
 		this.#machine.mmu.write(ATACHR, char, ReadOptions.NONE);
 		this.#machine.mmu.write(DSTAT, 1, ReadOptions.NONE);
 		return RTS;
+	}
+
+	// CH-injection delivery: write the next character's key code straight
+	// into CH, like the keyboard IRQ handler does for a real key. Reaches
+	// anything that polls CH - the OS K: wait included. The read intercepts
+	// (see the constructor) serve SHFLOK/INVFLG/NOCLIK while the paste is
+	// in flight, so case, inverse video, and click silence come out right
+	// without touching memory. Bytes with no matching key are skipped.
+	#stuffCh(): void {
+		if (this.pasteMode !== "ch") return;
+		while (this.#pasteQueue.length > 0) {
+			const char = this.#pasteQueue.shift()!;
+			let key = ATASCII_TO_KEY.get(char);
+			let inverse = 0;
+			if (key === undefined && char >= 0x80) {
+				// An inverse printable: its plain half's key, INVFLG set.
+				key = ATASCII_TO_KEY.get(char & 0x7f);
+				inverse = 0x80;
+			}
+			if (key === undefined) continue;
+			this.#chActive = true;
+			this.#chDeactivatePending = false;
+			this.#chInverse = inverse;
+			// Mirror the keyboard IRQ's full protocol: the code lands in CH1
+			// as well as CH. AltirraOS's keyboard chain discards CH codes
+			// while CH1 still holds its power-on $FF ("no key ever pressed").
+			this.#poke(CH1, key);
+			this.#poke(CH, key);
+			return;
+		}
+		// Drained: stand down on the consumer's next CH poll (see the
+		// observer in the constructor for why not right here).
+		if (this.#chActive) this.#chDeactivatePending = true;
+	}
+
+	#chDeactivate(): void {
+		this.#chActive = false;
+		this.#chDeactivatePending = false;
+	}
+
+	#poke(address: number, value: number): void {
+		this.#machine.mmu.write(address, value, ReadOptions.NONE);
 	}
 
 	#peek(address: number): number {
@@ -334,9 +425,51 @@ const LDY_ABS = 0xac;
 
 // OS locations the K: trap touches.
 const CH = 0x02fc; // the keyboard-IRQ-to-handler hand-off cell the wait polls
+const CH1 = 0x02f2; // the prior key code, kept by the IRQ for debounce/repeat
+const NO_KEY = 0xff; // CH's "no key pending" value
 const ICAX1Z = 0x2a; // zero-page IOCB AUX1 - bit 0 is forced read
 const DSTAT = 0x4c; // display/keyboard handler status
 const ATACHR = 0x02fb; // the returned character, as the screen editor reads it
+const SHFLOK = 0x02be; // shift/caps lock state ($00 none, $40 caps, $80 ctrl)
+const INVFLG = 0x02b6; // inverse-video flag, EORed onto translated characters
+const NOCLIK = 0x02db; // nonzero = key click disabled (XL OSes)
+
+// ATASCII -> the composed key code CH holds (scan code, bit 6 = Shift,
+// bit 7 = Ctrl), per the standard OS keyboard translation - generated from
+// the a8-web keyboard reference (keyboard-docs.ts), first key wins.
+// Inverse-video characters have no single key and are absent (the CH
+// consumer's own inverse state decides that), as are the pseudo codes.
+// prettier-ignore
+const ATASCII_TO_KEY = new Map<number, number>([
+	[0x00, 0xa0], [0x01, 0xbf], [0x02, 0x95], [0x03, 0x92], [0x04, 0xba],
+	[0x05, 0xaa], [0x06, 0xb8], [0x07, 0xbd], [0x08, 0xb9], [0x09, 0x8d],
+	[0x0a, 0x81], [0x0b, 0x85], [0x0c, 0x80], [0x0d, 0xa5], [0x0e, 0xa3],
+	[0x0f, 0x88], [0x10, 0x8a], [0x11, 0xaf], [0x12, 0xa8], [0x13, 0xbe],
+	[0x14, 0xad], [0x15, 0x8b], [0x16, 0x90], [0x17, 0xae], [0x18, 0x96],
+	[0x19, 0xab], [0x1a, 0x97], [0x1b, 0x1c], [0x1c, 0x8e], [0x1d, 0x8f],
+	[0x1e, 0x86], [0x1f, 0x87], [0x20, 0x21], [0x21, 0x5f], [0x22, 0x5e],
+	[0x23, 0x5a], [0x24, 0x58], [0x25, 0x5d], [0x26, 0x5b], [0x27, 0x73],
+	[0x28, 0x70], [0x29, 0x72], [0x2a, 0x07], [0x2b, 0x06], [0x2c, 0x20],
+	[0x2d, 0x0e], [0x2e, 0x22], [0x2f, 0x26], [0x30, 0x32], [0x31, 0x1f],
+	[0x32, 0x1e], [0x33, 0x1a], [0x34, 0x18], [0x35, 0x1d], [0x36, 0x1b],
+	[0x37, 0x33], [0x38, 0x35], [0x39, 0x30], [0x3a, 0x42], [0x3b, 0x02],
+	[0x3c, 0x36], [0x3d, 0x0f], [0x3e, 0x37], [0x3f, 0x66], [0x40, 0x75],
+	[0x41, 0x7f], [0x42, 0x55], [0x43, 0x52], [0x44, 0x7a], [0x45, 0x6a],
+	[0x46, 0x78], [0x47, 0x7d], [0x48, 0x79], [0x49, 0x4d], [0x4a, 0x41],
+	[0x4b, 0x45], [0x4c, 0x40], [0x4d, 0x65], [0x4e, 0x63], [0x4f, 0x48],
+	[0x50, 0x4a], [0x51, 0x6f], [0x52, 0x68], [0x53, 0x7e], [0x54, 0x6d],
+	[0x55, 0x4b], [0x56, 0x50], [0x57, 0x6e], [0x58, 0x56], [0x59, 0x6b],
+	[0x5a, 0x57], [0x5b, 0x60], [0x5c, 0x46], [0x5d, 0x62], [0x5e, 0x47],
+	[0x5f, 0x4e], [0x60, 0xa2], [0x61, 0x3f], [0x62, 0x15], [0x63, 0x12],
+	[0x64, 0x3a], [0x65, 0x2a], [0x66, 0x38], [0x67, 0x3d], [0x68, 0x39],
+	[0x69, 0x0d], [0x6a, 0x01], [0x6b, 0x05], [0x6c, 0x00], [0x6d, 0x25],
+	[0x6e, 0x23], [0x6f, 0x08], [0x70, 0x0a], [0x71, 0x2f], [0x72, 0x28],
+	[0x73, 0x3e], [0x74, 0x2d], [0x75, 0x0b], [0x76, 0x10], [0x77, 0x2e],
+	[0x78, 0x16], [0x79, 0x2b], [0x7a, 0x17], [0x7b, 0x82], [0x7c, 0x4f],
+	[0x7d, 0x76], [0x7e, 0x34], [0x7f, 0x2c], [0x9b, 0x0c], [0x9c, 0x74],
+	[0x9d, 0x77], [0x9e, 0xac], [0x9f, 0x6c], [0xfd, 0x9e], [0xfe, 0xb4],
+	[0xff, 0xb7],
+]);
 
 // How far from the get-byte entry the CH poll may sit (every checked OS
 // polls at entry + $0B to + $12).

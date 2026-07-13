@@ -41,6 +41,14 @@ export function PasteView({ host }: { host: EmulatorHost }) {
 			>
 				{messages.paste.send}
 			</button>
+			<label class="flex items-center gap-2 text-xs text-neutral-400">
+				<input
+					type="checkbox"
+					checked={host.pasteChMode.value}
+					onChange={(event) => host.setPasteChMode(event.currentTarget.checked)}
+				/>
+				{messages.paste.chMode}
+			</label>
 		</div>
 	);
 }

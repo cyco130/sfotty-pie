@@ -152,6 +152,12 @@ export const commands = {
 	// keyboard trap. Must run within a user gesture (key binding, palette pick).
 	// Touch devices use the OSD's paste view instead (clipboard-API-free).
 	PASTE_TEXT: { label: "PASTE_TEXT", run: ({ host }) => host.pasteText() },
+	// Paste delivery: the K: handler trap (default) vs key codes injected
+	// into CH ($02FC / 764) for programs that poll it directly.
+	PASTE_MODE_TOGGLE: {
+		label: "PASTE_MODE_TOGGLE",
+		run: ({ host }) => host.togglePasteChMode(),
+	},
 
 	// Audio.
 	AUDIO_MUTE: { label: "AUDIO_MUTE", run: ({ host }) => host.setMuted(true) },

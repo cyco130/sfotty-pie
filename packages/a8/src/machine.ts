@@ -19,7 +19,7 @@ import { Keyboard } from "./keyboard.ts";
 import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
-import { detectOsVectors, OsTraps } from "./os-traps.ts";
+import { detectOsVectors, OsTraps, type PasteMode } from "./os-traps.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
@@ -283,6 +283,26 @@ export class Atari {
 	/** Drop any queued {@link paste} text. */
 	cancelPaste(): void {
 		this.#osTraps?.cancelPaste();
+	}
+
+	/**
+	 * How {@link paste} text is delivered. `"k"` (default): the K: get-byte
+	 * trap serves one character per OS keyboard read - the screen editor's
+	 * echo and editing work, but only programs reading the keyboard through
+	 * the OS see it. `"ch"`: inject each character's key code straight into
+	 * CH ($02FC), like the keyboard IRQ handler does, advancing when the
+	 * consumer writes $FF ("no key") back - reaches programs that poll CH
+	 * directly. While a CH paste is in flight, read intercepts serve the
+	 * translation state without touching memory - SHFLOK reads 0, INVFLG
+	 * follows each character's inverse bit, and NOCLIK reads 1 (key click
+	 * silenced) - so case and inverse video survive the OS translation;
+	 * characters with no matching key are skipped.
+	 */
+	get pasteMode(): PasteMode {
+		return this.#osTraps?.pasteMode ?? "k";
+	}
+	set pasteMode(mode: PasteMode) {
+		if (this.#osTraps) this.#osTraps.pasteMode = mode;
 	}
 
 	/**

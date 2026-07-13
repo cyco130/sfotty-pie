@@ -188,6 +188,9 @@ export class EmulatorHost {
 		this.keyboardMode.value =
 			loadPersisted(KBMODE_KEY) === "positional" ? "positional" : "character";
 		this.realisticScan.value = loadPersisted(REALISTIC_SCAN_KEY) === "on";
+		this.pasteChMode.value = loadPersisted(PASTE_MODE_KEY) === "ch";
+		this.osdForced.value = loadPersisted(OSD_KEY) === "on";
+		if (audio) audio.muted = loadPersisted(MUTED_KEY) === "on";
 
 		// Key bindings: this tab's stored flat set, or empty until create()
 		// generates and persists the platform defaults (first run / cleared store).
@@ -388,7 +391,7 @@ export class EmulatorHost {
 
 	/**
 	 * Show the on-screen controls even without a touch pointer (the OSD shows
-	 * itself on coarse-pointer devices regardless). Session-only; toggled by
+	 * itself on coarse-pointer devices regardless). Persisted; toggled by
 	 * the OSD_TOGGLE command - handy for the paste editor and for exercising
 	 * the touch UI on desktop.
 	 */
@@ -396,6 +399,7 @@ export class EmulatorHost {
 
 	toggleOsd(): void {
 		this.osdForced.value = !this.osdForced.value;
+		savePersisted(OSD_KEY, this.osdForced.value ? "on" : "off");
 	}
 
 	// The firmware picks per slot, persisted. appliedRoms is what the running
@@ -721,6 +725,24 @@ export class EmulatorHost {
 		else this.toast(messages.errors.nothingToPaste, "warning");
 	}
 
+	/**
+	 * Paste delivery mode, mirrored onto the machine (and re-applied on a
+	 * rebuild): false = the default K: handler trap, true = CH ($02FC)
+	 * injection for programs that poll the key code directly. Persisted.
+	 */
+	readonly pasteChMode = signal(false);
+
+	setPasteChMode(ch: boolean): void {
+		this.pasteChMode.value = ch;
+		savePersisted(PASTE_MODE_KEY, ch ? "ch" : "k");
+		this.#emulator.machine.pasteMode = ch ? "ch" : "k";
+	}
+
+	togglePasteChMode(): void {
+		this.setPasteChMode(!this.pasteChMode.value);
+		this.toast(messages.toasts.pasteMode(this.pasteChMode.value));
+	}
+
 	/** Read the host clipboard and type it into the machine (see
 	 *  {@link typeText}). Must run within a user gesture - the paste key
 	 *  binding or a palette pick - for the clipboard read to be allowed. */
@@ -790,6 +812,7 @@ export class EmulatorHost {
 	setMuted(muted: boolean): void {
 		if (!this.#audio) return;
 		this.#audio.muted = muted;
+		savePersisted(MUTED_KEY, muted ? "on" : "off");
 		this.#refreshAudioState();
 	}
 
@@ -2165,6 +2188,7 @@ export class EmulatorHost {
 		emulator.setTrace(this.#cpuTrace);
 		emulator.setTurboMode(this.#turboMode);
 		emulator.machine.keyboard.attached.value = this.keyboardAttached.value;
+		emulator.machine.pasteMode = this.pasteChMode.value ? "ch" : "k";
 		// Sample the gamepad on every emulation-loop yield (see Emulator.afterYield)
 		// - the freshest read, right before the next scanlines poll the pins.
 		emulator.afterYield = () => this.#gamepads.poll();
@@ -2227,6 +2251,9 @@ const CONFIG_KEY = "config";
 const ROMS_KEY = "roms";
 const KBMODE_KEY = "keyboard-mode";
 const REALISTIC_SCAN_KEY = "realistic-key-scan";
+const PASTE_MODE_KEY = "paste-mode";
+const OSD_KEY = "osd-forced";
+const MUTED_KEY = "audio-muted";
 
 // How long a momentary trigger (palette, click) holds a control before its
 // auto-release - long enough for the OS to sense the key/button. Counted in

@@ -92,6 +92,8 @@ export const messages = {
 	bottomBar: {
 		cartridge: "Cart:",
 		crashed: "CPU crashed (CIM)",
+		keyboardDetached: "Keyboard detached",
+		attachKeyboard: "Click to attach the keyboard",
 	},
 
 	sidebar: {
@@ -123,6 +125,7 @@ export const messages = {
 	paste: {
 		placeholder: "Type or paste text to send to the Atari…",
 		send: "Type it in",
+		chMode: "Inject into CH (764) instead of the K: handler",
 	},
 
 	// The controllers panel: a live view of connected gamepads for diagnosis and
@@ -581,6 +584,8 @@ export const messages = {
 		keyBindingsReset: "Key bindings reset to defaults",
 		pasted: (count: number): string =>
 			`Pasting ${count} character${count === 1 ? "" : "s"}`,
+		pasteMode: (ch: boolean): string =>
+			`Paste mode: ${ch ? "CH (764) injection" : "K: handler"}`,
 		saving: (name: string) => `Saving (${name})`,
 		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
@@ -618,6 +623,7 @@ export const labels = {
 	KEYBOARD_DETACH: "Keyboard: Detach (an XEGS senses the absence)",
 	KEY_BINDINGS_RESET: "Keyboard: Reset key bindings to defaults",
 	PASTE_TEXT: "Keyboard: Paste text from the clipboard",
+	PASTE_MODE_TOGGLE: "Keyboard: Toggle paste mode (K: handler / CH injection)",
 	AUDIO_MUTE: "Audio: Mute",
 	AUDIO_UNMUTE: "Audio: Unmute",
 	AUDIO_TOGGLE: "Audio: Toggle",

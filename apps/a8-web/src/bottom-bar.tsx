@@ -30,7 +30,17 @@ export function BottomBar({ host }: { host: EmulatorHost }) {
 					<span class={leds[1] ? "text-red-500" : "text-neutral-700"}>L2</span>
 				</div>
 			)}
-			<div class="flex min-w-0 flex-1 items-center justify-end">
+			<div class="flex min-w-0 flex-1 items-center justify-end gap-4">
+				{!host.keyboardAttached.value && (
+					<button
+						type="button"
+						class="truncate text-amber-500 hover:underline"
+						title={messages.bottomBar.attachKeyboard}
+						onClick={() => host.setKeyboardAttached(true)}
+					>
+						{messages.bottomBar.keyboardDetached}
+					</button>
+				)}
 				{crashed && (
 					<span class="truncate font-semibold text-red-500">
 						{messages.bottomBar.crashed}

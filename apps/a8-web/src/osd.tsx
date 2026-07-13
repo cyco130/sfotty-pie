@@ -5,6 +5,7 @@ import type { EmulatorHost } from "./host.ts";
 import { Icon, type IconName } from "./icon.tsx";
 import { messages } from "./messages.ts";
 import { KeyboardView } from "./osd-keyboard.tsx";
+import { PasteView } from "./osd-paste.tsx";
 import {
 	initialStickState,
 	readRadialStick,
@@ -14,7 +15,7 @@ import { storageName } from "./storage.ts";
 
 const LEFTY_KEY = storageName("osd", "lefty");
 
-type OsdView = "stick" | "keyboard" | "off";
+type OsdView = "stick" | "keyboard" | "paste" | "off";
 
 /** True while the primary pointer is touch (a phone/tablet, not a mouse). */
 function useCoarsePointer(): boolean {
@@ -65,7 +66,7 @@ function TriggerButton({ host }: { host: EmulatorHost }) {
 		<button
 			type="button"
 			aria-label="Fire"
-			class="aspect-square w-[22vw] touch-none rounded-full bg-red-600/40 select-none active:bg-red-600/70"
+			class="aspect-square w-[min(22vw,8rem)] touch-none rounded-full bg-red-600/40 select-none active:bg-red-600/70"
 			onTouchStart={(e) => {
 				e.preventDefault();
 				host.press("PRESS_JOY0_TRIGGER");
@@ -146,11 +147,16 @@ function JoystickStick({ host }: { host: EmulatorHost }) {
 	}
 
 	return (
-		<div class="relative aspect-square w-[40vw]">
+		// The stick diameter, clamped so it stops scaling on wide viewports;
+		// the knob's size, home position, and throw all derive from it.
+		<div
+			class="relative aspect-square w-(--stick)"
+			style={{ "--stick": "min(40vw, 13rem)" }}
+		>
 			<div
-				class="pointer-events-none absolute top-[10vw] left-[10vw] size-[20vw] rounded-full bg-slate-200/50"
+				class="pointer-events-none absolute top-[calc(var(--stick)/4)] left-[calc(var(--stick)/4)] size-[calc(var(--stick)/2)] rounded-full bg-slate-200/50"
 				style={{
-					transform: `translate(${knob.x * 10}vw, ${knob.y * 10}vw)`,
+					transform: `translate(calc(${knob.x} * var(--stick) / 4), calc(${knob.y} * var(--stick) / 4))`,
 				}}
 			/>
 			<div
@@ -230,6 +236,7 @@ function ViewToggle({
 		<div class="flex gap-1 rounded-sm bg-neutral-800 p-0.5">
 			{tab("stick", "joystick", messages.osd.joystickControls)}
 			{tab("keyboard", "keyboard", messages.osd.keyboard)}
+			{tab("paste", "clipboard", messages.osd.pasteText)}
 			{tab("off", "chevron-down", messages.osd.hideControls)}
 		</div>
 	);
@@ -237,9 +244,9 @@ function ViewToggle({
 
 /**
  * The on-screen controls for touch devices. A persistent top bar (Power + a
- * joystick/keyboard view toggle) sits over a body that swaps between the
- * joystick view (a row of console keys over a fire button and analog stick,
- * with a left-hander swap) and the on-screen keyboard. Shown only when the
+ * view toggle) sits over a body that swaps between the joystick view (a row
+ * of console keys over a fire button and analog stick, with a left-hander
+ * swap), the on-screen keyboard, and the paste editor. Shown only when the
  * primary pointer is coarse and the menu is closed (the menu becomes a top
  * bar on mobile and needs the room).
  */
@@ -251,14 +258,14 @@ export function Osd({ host }: { host: EmulatorHost }) {
 	);
 	const [view, setView] = useState<OsdView>("stick");
 
-	if (!coarse || panelOpen) return null;
+	if ((!coarse && !host.osdForced.value) || panelOpen) return null;
 
 	const fire = <TriggerButton host={host} />;
 	const stick = <JoystickStick host={host} />;
 
 	return (
 		<div class="flex shrink-0 flex-col gap-2 bg-neutral-900/80 p-2 select-none">
-			<div class="flex items-center justify-between">
+			<div class="mx-auto flex w-full max-w-xl items-center justify-between">
 				<div class="flex gap-1">
 					<PowerButton host={host} />
 					<ResetButton host={host} />
@@ -268,8 +275,10 @@ export function Osd({ host }: { host: EmulatorHost }) {
 
 			{view === "keyboard" && <KeyboardView host={host} />}
 
+			{view === "paste" && <PasteView host={host} />}
+
 			{view === "stick" && (
-				<>
+				<div class="mx-auto flex w-full max-w-xl flex-col gap-2">
 					<div class="flex gap-1">
 						<HoldButton host={host} command="PRESS_OPTION" label="Option" />
 						<HoldButton host={host} command="PRESS_SELECT" label="Select" />
@@ -295,7 +304,7 @@ export function Osd({ host }: { host: EmulatorHost }) {
 						</button>
 						{lefty ? fire : stick}
 					</div>
-				</>
+				</div>
 			)}
 		</div>
 	);

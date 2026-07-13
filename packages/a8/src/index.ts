@@ -20,6 +20,7 @@ export {
 	type CartTypeOption,
 } from "./cartridge.ts";
 export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
+export { textToAtascii, type PasteMode } from "./os-traps.ts";
 export { buildBootDisk } from "./xex-boot.ts";
 export {
 	detectFileFormat,

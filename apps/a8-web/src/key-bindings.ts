@@ -334,6 +334,15 @@ const macBindings: Binding[] = [
 		scope: "global",
 		anchor: "letter",
 	},
+	// Cmd+V pastes clipboard text into the machine. Bound (not left to the
+	// browser's native paste) so it's remappable like everything else.
+	{
+		on: "KeyV",
+		meta: true,
+		command: "PASTE_TEXT",
+		scope: "global",
+		anchor: "letter",
+	},
 	// Cmd+-/Cmd+= -> Shift+Clear / insert-line (see editKeys).
 	...editKeys({ meta: true }),
 	// Option+Arrow -> F1-F4 (+ Ctrl/Shift). Option (not plain Alt) avoids the
@@ -364,6 +373,15 @@ const winBindings: Binding[] = [
 		on: "KeyK",
 		alt: true,
 		command: "OPEN_PALETTE",
+		scope: "global",
+		anchor: "letter",
+	},
+	// Alt+V pastes clipboard text into the machine (Ctrl+V is the Atari's own
+	// Ctrl+V, so the browser paste chord can't serve).
+	{
+		on: "KeyV",
+		alt: true,
+		command: "PASTE_TEXT",
 		scope: "global",
 		anchor: "letter",
 	},

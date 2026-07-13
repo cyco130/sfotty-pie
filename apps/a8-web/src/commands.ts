@@ -148,6 +148,16 @@ export const commands = {
 		label: "KEY_BINDINGS_RESET",
 		run: ({ host }) => void host.resetKeyBindings(),
 	},
+	// Read the host clipboard and type it into the machine through the OS
+	// keyboard trap. Must run within a user gesture (key binding, palette pick).
+	// Touch devices use the OSD's paste view instead (clipboard-API-free).
+	PASTE_TEXT: { label: "PASTE_TEXT", run: ({ host }) => host.pasteText() },
+	// Paste delivery: the K: handler trap (default) vs key codes injected
+	// into CH ($02FC / 764) for programs that poll it directly.
+	PASTE_MODE_TOGGLE: {
+		label: "PASTE_MODE_TOGGLE",
+		run: ({ host }) => host.togglePasteChMode(),
+	},
 
 	// Audio.
 	AUDIO_MUTE: { label: "AUDIO_MUTE", run: ({ host }) => host.setMuted(true) },
@@ -198,6 +208,9 @@ export const commands = {
 		label: "TOGGLE_FULLSCREEN",
 		run: ({ host }) => host.toggleFullscreen(),
 	},
+	// Show the touch on-screen controls without a touch pointer (they show
+	// themselves on touch devices) - for the paste editor and OSD testing.
+	OSD_TOGGLE: { label: "OSD_TOGGLE", run: ({ host }) => host.toggleOsd() },
 
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: { label: "BOOT_IMAGE", run: ({ host }) => host.pickBootImage() },

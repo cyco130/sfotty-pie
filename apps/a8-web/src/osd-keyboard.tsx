@@ -189,7 +189,7 @@ export function KeyboardView({ host }: { host: EmulatorHost }) {
 	const onLayer = () => setLayer((l) => (l === "abc" ? "sym" : "abc"));
 
 	return (
-		<div class="flex flex-col gap-1 select-none">
+		<div class="mx-auto flex w-full max-w-xl flex-col gap-1 select-none">
 			{allRows.map(({ keys, slim }, i) => (
 				<KeyRow
 					key={i}

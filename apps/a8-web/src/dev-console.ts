@@ -22,6 +22,7 @@ import {
 	withStore,
 } from "./images/db.ts";
 import { sha256Hex } from "./images/hash.ts";
+import { GLYPH_TO_ATASCII } from "./keyboard-docs.ts";
 import {
 	addImage,
 	getImage,
@@ -62,6 +63,9 @@ export function installDevConsole(host: EmulatorHost): void {
 				value & 0xff,
 				ReadOptions.NONE,
 			),
+		// Type text into the machine through the OS K: trap (a8.paste("LIST\n")).
+		paste: (text: string) =>
+			host.emulator.machine.paste(text, GLYPH_TO_ATASCII),
 		disasm: (address: number, count = 16) => {
 			let pc = address & 0xffff;
 			const lines: string[] = [];

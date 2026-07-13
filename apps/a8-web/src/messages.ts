@@ -92,6 +92,8 @@ export const messages = {
 	bottomBar: {
 		cartridge: "Cart:",
 		crashed: "CPU crashed (CIM)",
+		keyboardDetached: "Keyboard detached",
+		attachKeyboard: "Click to attach the keyboard",
 	},
 
 	sidebar: {
@@ -117,6 +119,13 @@ export const messages = {
 		titleSettings: "Settings",
 		titlePalette: "Commands",
 		titleKeys: "Shortcuts",
+	},
+
+	// The OSD's paste view: free-form text typed into the machine on send.
+	paste: {
+		placeholder: "Type or paste text to send to the Atari…",
+		send: "Type it in",
+		chMode: "Inject into CH (764) instead of the K: handler",
 	},
 
 	// The controllers panel: a live view of connected gamepads for diagnosis and
@@ -517,6 +526,7 @@ export const messages = {
 	osd: {
 		joystickControls: "Joystick controls",
 		keyboard: "Keyboard",
+		pasteText: "Paste text",
 		hideControls: "Hide controls",
 		swapSides: "Swap stick and fire sides",
 	},
@@ -528,6 +538,10 @@ export const messages = {
 		cart5200: "Atari 5200 cartridges can't run on this machine.",
 		audioUnavailable: "Audio is unavailable in this browser.",
 		audioUnavailableReason: (reason: string) => `Audio unavailable: ${reason}`,
+		clipboardUnavailable:
+			"Couldn't read the clipboard (denied or unsupported).",
+		nothingToPaste: "Nothing pasteable in the clipboard.",
+		pasteUnsupported: "Paste needs a recognized OS ROM.",
 		noWritableDisk: "No writable disk in D1: to download.",
 		noDiskToSave: "No disk in D1: to save.",
 		notLibraryDisk: "Only a disk attached from the library can be saved.",
@@ -568,6 +582,10 @@ export const messages = {
 		keyboardAttached: (attached: boolean): string =>
 			attached ? "Keyboard attached" : "Keyboard detached",
 		keyBindingsReset: "Key bindings reset to defaults",
+		pasted: (count: number): string =>
+			`Pasting ${count} character${count === 1 ? "" : "s"}`,
+		pasteMode: (ch: boolean): string =>
+			`Paste mode: ${ch ? "CH (764) injection" : "K: handler"}`,
 		saving: (name: string) => `Saving (${name})`,
 		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
@@ -604,6 +622,8 @@ export const labels = {
 	KEYBOARD_ATTACH: "Keyboard: Attach",
 	KEYBOARD_DETACH: "Keyboard: Detach (an XEGS senses the absence)",
 	KEY_BINDINGS_RESET: "Keyboard: Reset key bindings to defaults",
+	PASTE_TEXT: "Keyboard: Paste text from the clipboard",
+	PASTE_MODE_TOGGLE: "Keyboard: Toggle paste mode (K: handler / CH injection)",
 	AUDIO_MUTE: "Audio: Mute",
 	AUDIO_UNMUTE: "Audio: Unmute",
 	AUDIO_TOGGLE: "Audio: Toggle",
@@ -623,6 +643,7 @@ export const labels = {
 	RESET_TAB_SETTINGS: "Settings: Reset this tab to saved settings",
 	RESET_DEFAULT_SETTINGS: "Settings: Reset all settings to defaults",
 	TOGGLE_FULLSCREEN: "View: Toggle full screen",
+	OSD_TOGGLE: "View: Toggle on-screen controls",
 	BOOT_IMAGE: "Media: Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Media: Attach a disk to D1:…",
 	DETACH_D1: "Media: Detach the disk from D1:",

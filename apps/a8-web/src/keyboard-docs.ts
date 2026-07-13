@@ -1072,6 +1072,23 @@ export const FUNCTIONS = {
 // A key into the FUNCTIONS table above.
 export type FunctionRef = keyof typeof FUNCTIONS;
 
+/**
+ * Unicode glyph -> ATASCII code, for paste translation: every FUNCTIONS
+ * entry's glyph plus its international-set altGlyph. Where two codes share
+ * a glyph (the cursor controls and their $9C-$9F/$FD-$FF editing
+ * counterparts, ESC and EOL), the first - lower - code wins.
+ */
+export const GLYPH_TO_ATASCII: ReadonlyMap<string, number> = (() => {
+	const map = new Map<string, number>();
+	for (const fn of Object.values(FUNCTIONS) as KeyFunction[]) {
+		if (!("code" in fn)) continue;
+		if (!map.has(fn.glyph)) map.set(fn.glyph, fn.code);
+		const alt = "altGlyph" in fn ? fn.altGlyph : undefined;
+		if (alt && !map.has(alt.glyph)) map.set(alt.glyph, fn.code);
+	}
+	return map;
+})();
+
 export interface Key {
 	name: string;
 	labels: [primary: string, secondary?: string, tertiary?: string];

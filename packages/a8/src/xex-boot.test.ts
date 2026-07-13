@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { DECODE, ReadOptions } from "@sfotty-pie/sfotty";
 import { Atari } from "./machine.ts";
+import { recognizableOs } from "./os-fixture.ts";
 import { buildBootDisk, FILE_SIZE_OFFSET } from "./xex-boot.ts";
 import { XEX_LOADER } from "./xex-loader-bytes.ts";
 
@@ -43,7 +44,7 @@ test("buildBootDisk lays out loader, size, and data", () => {
 
 test("booting the disk loads and runs the executable", () => {
 	const disk = buildBootDisk(XEX);
-	const machine = new Atari({ os: new Uint8Array(10240) });
+	const machine = new Atari({ os: recognizableOs(10240) });
 	machine.insertDisk(disk);
 	const cpu = machine.cpu; // the machine's own CPU, which its built-in SIO drives
 

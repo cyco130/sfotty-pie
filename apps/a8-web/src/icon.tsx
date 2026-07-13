@@ -13,6 +13,7 @@ export const ICON_NAMES = [
 	"star",
 	"joystick",
 	"keyboard",
+	"clipboard",
 	"chevron-down",
 	"swap",
 	"play",

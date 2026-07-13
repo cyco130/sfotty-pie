@@ -308,6 +308,15 @@ test("the palette chord is a global binding (Cmd+K mac / Alt+K win)", () => {
 	).toBeUndefined();
 });
 
+test("the paste chord is a global binding (Cmd+V mac / Alt+V win)", () => {
+	const mac = defaultBindingSet(true).find((b) => b.command === "PASTE_TEXT");
+	expect(mac).toMatchObject({ on: "KeyV", meta: true, scope: "global" });
+	const win = defaultBindingSet(false).find((b) => b.command === "PASTE_TEXT");
+	expect(win).toMatchObject({ on: "KeyV", alt: true, scope: "global" });
+	// Ctrl+V stays the Atari's own Ctrl+V.
+	expect(resolve({ code: "KeyV", ctrl: true })).toBe("PRESS_CONTROL_V");
+});
+
 test("relocated F-key homes (Help/Tab/Esc/Inverse)", () => {
 	expect(resolve({ code: "F1", ctrl: true })).toBe("PRESS_CONTROL_HELP");
 	expect(resolve({ code: "F9", ctrl: true })).toBe("PRESS_CONTROL_TAB");

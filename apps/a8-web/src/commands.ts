@@ -202,6 +202,9 @@ export const commands = {
 		label: "TOGGLE_FULLSCREEN",
 		run: ({ host }) => host.toggleFullscreen(),
 	},
+	// Show the touch on-screen controls without a touch pointer (they show
+	// themselves on touch devices) - for the paste editor and OSD testing.
+	OSD_TOGGLE: { label: "OSD_TOGGLE", run: ({ host }) => host.toggleOsd() },
 
 	// Boot a file as a fresh machine image (opens the file picker).
 	BOOT_IMAGE: { label: "BOOT_IMAGE", run: ({ host }) => host.pickBootImage() },

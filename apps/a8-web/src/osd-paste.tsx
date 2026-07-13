@@ -22,7 +22,7 @@ export function PasteView({ host }: { host: EmulatorHost }) {
 	};
 
 	return (
-		<div class="flex flex-col gap-2">
+		<div class="mx-auto flex w-full max-w-xl flex-col gap-2">
 			<textarea
 				ref={inputRef}
 				value={text}

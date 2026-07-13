@@ -66,7 +66,7 @@ function TriggerButton({ host }: { host: EmulatorHost }) {
 		<button
 			type="button"
 			aria-label="Fire"
-			class="aspect-square w-[22vw] touch-none rounded-full bg-red-600/40 select-none active:bg-red-600/70"
+			class="aspect-square w-[min(22vw,8rem)] touch-none rounded-full bg-red-600/40 select-none active:bg-red-600/70"
 			onTouchStart={(e) => {
 				e.preventDefault();
 				host.press("PRESS_JOY0_TRIGGER");
@@ -147,11 +147,16 @@ function JoystickStick({ host }: { host: EmulatorHost }) {
 	}
 
 	return (
-		<div class="relative aspect-square w-[40vw]">
+		// The stick diameter, clamped so it stops scaling on wide viewports;
+		// the knob's size, home position, and throw all derive from it.
+		<div
+			class="relative aspect-square w-(--stick)"
+			style={{ "--stick": "min(40vw, 13rem)" }}
+		>
 			<div
-				class="pointer-events-none absolute top-[10vw] left-[10vw] size-[20vw] rounded-full bg-slate-200/50"
+				class="pointer-events-none absolute top-[calc(var(--stick)/4)] left-[calc(var(--stick)/4)] size-[calc(var(--stick)/2)] rounded-full bg-slate-200/50"
 				style={{
-					transform: `translate(${knob.x * 10}vw, ${knob.y * 10}vw)`,
+					transform: `translate(calc(${knob.x} * var(--stick) / 4), calc(${knob.y} * var(--stick) / 4))`,
 				}}
 			/>
 			<div
@@ -253,14 +258,14 @@ export function Osd({ host }: { host: EmulatorHost }) {
 	);
 	const [view, setView] = useState<OsdView>("stick");
 
-	if (!coarse || panelOpen) return null;
+	if ((!coarse && !host.osdForced.value) || panelOpen) return null;
 
 	const fire = <TriggerButton host={host} />;
 	const stick = <JoystickStick host={host} />;
 
 	return (
 		<div class="flex shrink-0 flex-col gap-2 bg-neutral-900/80 p-2 select-none">
-			<div class="flex items-center justify-between">
+			<div class="mx-auto flex w-full max-w-xl items-center justify-between">
 				<div class="flex gap-1">
 					<PowerButton host={host} />
 					<ResetButton host={host} />
@@ -273,7 +278,7 @@ export function Osd({ host }: { host: EmulatorHost }) {
 			{view === "paste" && <PasteView host={host} />}
 
 			{view === "stick" && (
-				<>
+				<div class="mx-auto flex w-full max-w-xl flex-col gap-2">
 					<div class="flex gap-1">
 						<HoldButton host={host} command="PRESS_OPTION" label="Option" />
 						<HoldButton host={host} command="PRESS_SELECT" label="Select" />
@@ -299,7 +304,7 @@ export function Osd({ host }: { host: EmulatorHost }) {
 						</button>
 						{lefty ? fire : stick}
 					</div>
-				</>
+				</div>
 			)}
 		</div>
 	);

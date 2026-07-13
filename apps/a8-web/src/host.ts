@@ -386,6 +386,18 @@ export class EmulatorHost {
 	 */
 	readonly sidebar = signal<SidebarPanel | null>(null);
 
+	/**
+	 * Show the on-screen controls even without a touch pointer (the OSD shows
+	 * itself on coarse-pointer devices regardless). Session-only; toggled by
+	 * the OSD_TOGGLE command - handy for the paste editor and for exercising
+	 * the touch UI on desktop.
+	 */
+	readonly osdForced = signal(false);
+
+	toggleOsd(): void {
+		this.osdForced.value = !this.osdForced.value;
+	}
+
 	// The firmware picks per slot, persisted. appliedRoms is what the running
 	// machine uses (an explicit pick, or the rank-resolved one #ensurePins pins in
 	// so it stays put across library changes); stagedRoms is the ROMs panel's

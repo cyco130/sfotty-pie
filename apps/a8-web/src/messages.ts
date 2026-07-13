@@ -637,6 +637,7 @@ export const labels = {
 	RESET_TAB_SETTINGS: "Settings: Reset this tab to saved settings",
 	RESET_DEFAULT_SETTINGS: "Settings: Reset all settings to defaults",
 	TOGGLE_FULLSCREEN: "View: Toggle full screen",
+	OSD_TOGGLE: "View: Toggle on-screen controls",
 	BOOT_IMAGE: "Media: Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Media: Attach a disk to D1:…",
 	DETACH_D1: "Media: Detach the disk from D1:",

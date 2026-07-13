@@ -107,7 +107,9 @@ export function detectOsVectors(os: Uint8Array): OsVectors | undefined {
  * Atari graphics and international-set glyphs). ASCII $20-$7F otherwise
  * passes through, except backtick, which has no ATASCII counterpart;
  * anything else is dropped. Every emitted control code except EOL gets an
- * ESC prefix, so the screen editor displays it instead of performing it.
+ * ESC prefix, so the screen editor displays it instead of performing it -
+ * the `{!ddd}`/`{!$hh}` escape variant skips that prefix, emitting the raw
+ * byte so the control code acts.
  */
 export function textToAtascii(
 	text: string,
@@ -144,12 +146,14 @@ export function textToAtascii(
 		if (char === "{") {
 			const escape = BYTE_ESCAPE.exec(text.slice(i));
 			if (escape) {
-				const body = escape[1]!;
+				const raw = escape[1] === "!";
+				const body = escape[2]!;
 				const value = body.startsWith("$")
 					? parseInt(body.slice(1), 16)
 					: parseInt(body, 10);
 				if (value <= 0xff) {
-					emit(value);
+					if (raw) out.push(value);
+					else emit(value);
 					i += escape[0].length - 1;
 					continue;
 				}
@@ -168,8 +172,9 @@ export function textToAtascii(
 	return out;
 }
 
-// A byte escape: {decimal} or {$hex}, e.g. {125} / {$7D}.
-const BYTE_ESCAPE = /^\{(\$[0-9a-f]{1,2}|[0-9]{1,3})\}/i;
+// A byte escape: {decimal} or {$hex}, e.g. {125} / {$7D}; a ! makes it raw
+// (no ESC prefix on control codes), e.g. {!125}.
+const BYTE_ESCAPE = /^\{(!?)(\$[0-9a-f]{1,2}|[0-9]{1,3})\}/i;
 
 export interface OsTrapsOptions {
 	machine: Atari;

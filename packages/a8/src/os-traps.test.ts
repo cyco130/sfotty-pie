@@ -131,6 +131,12 @@ test("textToAtascii: control codes get an ESC prefix, except EOL", () => {
 	]);
 });
 
+test("textToAtascii: {!} escapes emit raw bytes, no ESC prefix", () => {
+	expect(textToAtascii("{!125}{!$7E}")).toEqual([0x7d, 0x7e]);
+	// Same as the plain escape for non-control bytes.
+	expect(textToAtascii("{!65}")).toEqual(textToAtascii("{65}"));
+});
+
 test("textToAtascii: a glyph map translates Unicode to ATASCII codes", () => {
 	const glyphs = new Map([
 		["♥", 0x00],

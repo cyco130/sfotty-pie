@@ -271,7 +271,8 @@ export class Atari {
 	 * passes through (backtick excepted - it has no ATASCII counterpart);
 	 * anything else is dropped. Every emitted control code except EOL gets
 	 * an ESC prefix, so the screen editor displays it instead of performing
-	 * it.
+	 * it; the `{!ddd}`/`{!$hh}` escape variant skips the prefix so the
+	 * control code acts.
 	 *
 	 * Returns the number of ATASCII bytes queued (0 when unsupported).
 	 */

@@ -87,7 +87,8 @@ function rig(disk?: AtrImage) {
 }
 
 test("read sector over the wire: ACK, Complete, data frame, checksum", () => {
-	const { sendCommand, receive } = rig(new AtrImage(makeAtr(128, 4)));
+	const { bus, sendCommand, receive } = rig(new AtrImage(makeAtr(128, 4)));
+	bus.serialAcceleration = false; // this test pins the real serializer
 
 	sendCommand(0x31, 0x52, 2, 0);
 	const bytes = receive(2 + 128 + 1);
@@ -161,7 +162,10 @@ test("an unknown command is NAKed; an unclaimed ID gets silence", () => {
 });
 
 test("US Doubler high speed: the $3F poll, then a whole read at the rate", () => {
-	const { pokey, sendCommand, receive } = rig(new AtrImage(makeAtr(128, 4)));
+	const { pokey, bus, sendCommand, receive } = rig(
+		new AtrImage(makeAtr(128, 4)),
+	);
+	bus.serialAcceleration = false; // this test pins clock-rate following
 
 	// Poll at standard speed: Complete plus the divisor as a data frame.
 	sendCommand(0x31, 0x3f, 0, 0);
@@ -200,4 +204,65 @@ test("a read error still sends the Error byte and a data frame", () => {
 	expect(bytes[0]).toBe(0x41); // the command itself is valid: ACK
 	expect(bytes[1]).toBe(0x45); // Error
 	expect(bytes.length).toBe(131); // the data frame still arrives
+});
+
+test("serial acceleration: delivery paced by the guest's IRQ acks", () => {
+	const { bus, sendCommand, receive } = rig(new AtrImage(makeAtr(128, 4)));
+	bus.serialAcceleration = true;
+
+	// A whole sector response lands within a few thousand cycles - the
+	// wire at 19040 baud would need ~125k. The receive helper acks every
+	// byte immediately, so injection runs at the ack rate.
+	sendCommand(0x31, 0x52, 2, 0);
+	const bytes = receive(2 + 128 + 1, 8_000);
+	expect(bytes.length).toBe(131);
+	expect(bytes[0]).toBe(0x41);
+	expect(bytes[1]).toBe(0x43);
+	expect(bytes[130]).toBe(sioChecksum(bytes.slice(2, 130)));
+});
+
+test("serial acceleration: a guest that never arms the IRQ falls back to the wire", () => {
+	const { pokey, bus, sendCommand, step } = rig(new AtrImage(makeAtr(128, 4)));
+	bus.serialAcceleration = true;
+
+	// Status command, but the "guest" never enables the input-ready IRQ -
+	// a SERIN-poll loop. The watchdog trips after ~a frame and the
+	// response arrives bit-serialized on the line; POKEY's shifter still
+	// receives it (async mode, IRQ not required for shifting), so SERIN
+	// ends up holding the last byte of the frame.
+	pokey.write(SKCTL, 0x13);
+	sendCommand(0x31, 0x53, 0, 0);
+	// The watchdog (~33k cycles), then the 7-byte frame (ACK, Complete,
+	// 4 status bytes, checksum) at wire speed.
+	step(40_000 + 7 * 1100);
+	// Status: [0x00, 0xff, 0xe0, 0x00], checksum 0xe0 - the final byte.
+	expect(pokey.read(SERIN)).toBe(0xe0);
+});
+
+test("send acceleration: a command frame ships at guest pace", () => {
+	const { pokey, connector, bus, drive, step } = rig(
+		new AtrImage(makeAtr(128, 4)),
+	);
+	bus.serialAcceleration = true;
+	let dispatched = 0;
+	const original = drive.command.bind(drive);
+	drive.command = (frame) => {
+		dispatched++;
+		return original(frame);
+	};
+
+	// Feed SEROUT with only a burst byte's worth of waiting (4-cycle bit
+	// cells = ~44 cycles per byte) - a wire byte needs ~990, so the
+	// dispatch below can only happen if the shifter ran overclocked.
+	pokey.write(SKCTL, 0x23);
+	connector.command.value = false;
+	step(20);
+	const frame = [0x31, 0x53, 0, 0];
+	for (const byte of [...frame, sioChecksum(frame)]) {
+		pokey.write(SEROUT, byte);
+		step(50);
+	}
+	connector.command.value = true;
+	step(1);
+	expect(dispatched).toBe(1);
 });

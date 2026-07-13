@@ -144,6 +144,14 @@ export const commands = {
 		label: "KEYBOARD_DETACH",
 		run: ({ host }) => host.setKeyboardAttached(false),
 	},
+	SIO_TRAP_TOGGLE: {
+		label: "SIO_TRAP_TOGGLE",
+		run: ({ host }) => host.toggleSioTrap(),
+	},
+	SIO_ACCELERATION_TOGGLE: {
+		label: "SIO_ACCELERATION_TOGGLE",
+		run: ({ host }) => host.toggleSioAcceleration(),
+	},
 	KEY_BINDINGS_RESET: {
 		label: "KEY_BINDINGS_RESET",
 		run: ({ host }) => void host.resetKeyBindings(),

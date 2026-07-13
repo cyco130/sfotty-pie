@@ -107,6 +107,14 @@ export const messages = {
 		on: "On",
 		off: "Off",
 		rebootToApply: "Reboot to apply",
+		serialIo: "Serial I/O",
+		trapSiov: "Trap SIOV calls",
+		accelerateSio: "Accelerate serial I/O",
+		sioSpeed: "SIO speed",
+		customDivisor: "POKEY divisor (0-40)",
+		speedStandard: "Standard (19200)",
+		speedMaximum: "Maximum (~128k)",
+		speedCustom: "Custom…",
 		keys: "Keys",
 		about: "About",
 		aboutBlurb: "Sfotty Pie A8 Web - an Atari 8-bit emulator. MIT-licensed.",
@@ -210,6 +218,14 @@ export const messages = {
 		layoutWarning:
 			"Key labels assume a US layout - this browser doesn't expose your keyboard layout, so they may not match your keys.",
 		setupLayout: "Set up your keyboard",
+		keyboardTitle: "Keyboard settings",
+		mode: "Typing mode",
+		modeCharacter: "Character",
+		modePositional: "Positional",
+		modeHint:
+			"Character types what you mean, layout-aware; Positional maps physical keys raw.",
+		attached: "Attached",
+		realisticScan: "Realistic key scan",
 		layoutTitle: "Keyboard layout",
 		layoutIntro:
 			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout when available.",
@@ -586,6 +602,14 @@ export const messages = {
 			`Pasting ${count} character${count === 1 ? "" : "s"}`,
 		pasteMode: (ch: boolean): string =>
 			`Paste mode: ${ch ? "CH (764) injection" : "K: handler"}`,
+		sioTrap: (enabled: boolean): string =>
+			`Serial I/O: SIOV trap ${enabled ? "on" : "off"}`,
+		sioAcceleration: (enabled: boolean): string =>
+			`Serial I/O: acceleration ${enabled ? "on" : "off"}`,
+		diskSpeed: (index: number | undefined): string =>
+			index === undefined
+				? "Disk SIO speed: standard"
+				: `Disk SIO speed: divisor ${index}`,
 		saving: (name: string) => `Saving (${name})`,
 		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
@@ -621,6 +645,8 @@ export const labels = {
 	KEYBOARD_REALISTIC_SCAN_TOGGLE: "Keyboard: Toggle realistic key scan",
 	KEYBOARD_ATTACH: "Keyboard: Attach",
 	KEYBOARD_DETACH: "Keyboard: Detach (an XEGS senses the absence)",
+	SIO_TRAP_TOGGLE: "Serial I/O: Toggle the SIOV trap (instant OS disk calls)",
+	SIO_ACCELERATION_TOGGLE: "Serial I/O: Toggle acceleration",
 	KEY_BINDINGS_RESET: "Keyboard: Reset key bindings to defaults",
 	PASTE_TEXT: "Keyboard: Paste text from the clipboard",
 	PASTE_MODE_TOGGLE: "Keyboard: Toggle paste mode (K: handler / CH injection)",

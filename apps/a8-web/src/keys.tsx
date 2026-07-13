@@ -105,7 +105,7 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 				class="mb-2 shrink-0 self-start text-xs text-neutral-500 underline hover:text-neutral-800"
 				onClick={() => navigate(LAYOUT_PATH)}
 			>
-				{messages.shortcuts.layoutTitle}
+				{messages.shortcuts.keyboardTitle}
 			</button>
 			<input
 				type="text"

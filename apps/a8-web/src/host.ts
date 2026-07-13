@@ -188,6 +188,9 @@ export class EmulatorHost {
 		this.keyboardMode.value =
 			loadPersisted(KBMODE_KEY) === "positional" ? "positional" : "character";
 		this.realisticScan.value = loadPersisted(REALISTIC_SCAN_KEY) === "on";
+		this.sioTrap.value = loadPersisted(SIO_TRAP_KEY) !== "off";
+		this.sioAcceleration.value = loadPersisted(SIO_ACCEL_KEY) !== "off";
+		this.diskSpeed.value = parseDiskSpeed(loadPersisted(DISK_SPEED_KEY));
 		this.pasteChMode.value = loadPersisted(PASTE_MODE_KEY) === "ch";
 		this.osdForced.value = loadPersisted(OSD_KEY) === "on";
 		if (audio) audio.muted = loadPersisted(MUTED_KEY) === "on";
@@ -335,6 +338,20 @@ export class EmulatorHost {
 	 *  matrix's two-keys-held debounce block. The 15KHz scan itself runs
 	 *  either way; the mode only limits what the matrix holds. */
 	readonly realisticScan = signal(false);
+
+	/** Whether the SIOV trap serves OS disk calls instantly (high-level
+	 *  emulation); off = everything runs over the emulated serial wire.
+	 *  Persisted; applied live and re-applied on a rebuild. */
+	readonly sioTrap = signal(true);
+
+	/** Serial I/O acceleration: SIO transfers paced by the program's own
+	 *  reads instead of the baud rate. Persisted; applied live. */
+	readonly sioAcceleration = signal(true);
+
+	/** The disk drive's advertised high-speed divisor (the $3F answer);
+	 *  undefined = a stock drive. Programs re-detect at their next boot.
+	 *  Persisted; applied live. */
+	readonly diskSpeed = signal<number | undefined>(9);
 
 	/** The active key bindings (one flat set); mirrors what the keyboard resolves,
 	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
@@ -710,6 +727,43 @@ export class EmulatorHost {
 
 	toggleRealisticScan(): void {
 		this.setRealisticScan(!this.realisticScan.value);
+	}
+
+	/** Turn the SIOV trap on or off (see {@link sioTrap}). Persisted. */
+	setSioTrap(enabled: boolean): void {
+		this.sioTrap.value = enabled;
+		savePersisted(SIO_TRAP_KEY, enabled ? "on" : "off");
+		this.#emulator.machine.sioTrapEnabled = enabled;
+		this.toast(messages.toasts.sioTrap(enabled));
+	}
+
+	toggleSioTrap(): void {
+		this.setSioTrap(!this.sioTrap.value);
+	}
+
+	/** Turn serial I/O acceleration on or off (see
+	 *  {@link sioAcceleration}). Persisted. */
+	setSioAcceleration(enabled: boolean): void {
+		this.sioAcceleration.value = enabled;
+		savePersisted(SIO_ACCEL_KEY, enabled ? "on" : "off");
+		this.#emulator.machine.sioAcceleration = enabled;
+		this.toast(messages.toasts.sioAcceleration(enabled));
+	}
+
+	toggleSioAcceleration(): void {
+		this.setSioAcceleration(!this.sioAcceleration.value);
+	}
+
+	/** Set the drive's advertised SIO speed (see {@link diskSpeed}).
+	 *  Persisted; programs pick it up on their next detection pass. */
+	setDiskSpeed(index: number | undefined): void {
+		this.diskSpeed.value = index;
+		savePersisted(
+			DISK_SPEED_KEY,
+			index === undefined ? "standard" : String(index),
+		);
+		this.#emulator.machine.diskSpeedIndex = index;
+		this.toast(messages.toasts.diskSpeed(index));
 	}
 
 	/** Type text into the machine through the OS K: trap (see the machine's
@@ -2188,6 +2242,9 @@ export class EmulatorHost {
 		emulator.setTrace(this.#cpuTrace);
 		emulator.setTurboMode(this.#turboMode);
 		emulator.machine.keyboard.attached.value = this.keyboardAttached.value;
+		emulator.machine.sioTrapEnabled = this.sioTrap.value;
+		emulator.machine.sioAcceleration = this.sioAcceleration.value;
+		emulator.machine.diskSpeedIndex = this.diskSpeed.value;
 		emulator.machine.pasteMode = this.pasteChMode.value ? "ch" : "k";
 		// Sample the gamepad on every emulation-loop yield (see Emulator.afterYield)
 		// - the freshest read, right before the next scanlines poll the pins.
@@ -2251,6 +2308,20 @@ const CONFIG_KEY = "config";
 const ROMS_KEY = "roms";
 const KBMODE_KEY = "keyboard-mode";
 const REALISTIC_SCAN_KEY = "realistic-key-scan";
+const SIO_TRAP_KEY = "sio-trap";
+const SIO_ACCEL_KEY = "sio-acceleration";
+const DISK_SPEED_KEY = "disk-sio-speed";
+
+// The persisted disk-speed value: "standard" = a stock drive (no $3F
+// answer), else a POKEY divisor 0-40; anything unparseable falls back to
+// the default (9, ~56k - the fastest value SpartaDOS X receives cleanly).
+function parseDiskSpeed(stored: unknown): number | undefined {
+	if (stored === "standard") return undefined;
+	const divisor = Number(stored);
+	return Number.isInteger(divisor) && divisor >= 0 && divisor <= 40
+		? divisor
+		: 9;
+}
 const PASTE_MODE_KEY = "paste-mode";
 const OSD_KEY = "osd-forced";
 const MUTED_KEY = "audio-muted";

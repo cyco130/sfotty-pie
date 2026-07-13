@@ -3,15 +3,18 @@ import { LAYOUT_AUTO } from "../../../key-bindings-store.ts";
 import { layoutLabelsAvailable } from "../../../key-bindings.ts";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
+import { GroupHeading, OnOff, Segmented } from "../../../settings-controls.tsx";
 import { useEmu } from "./emu-context.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
 const KEYS = "/a8/emu/keys";
 
-// The manual keyboard-layout picker (route /a8/emu/keys/layout). A pick overrides
-// getLayoutMap and regenerates the default bindings from that layout - the
-// fallback for browsers that don't expose the layout, and an override elsewhere.
-export default function KeyboardLayoutPanel() {
+// The keyboard-settings panel (route /a8/emu/keys/layout): typing mode, the
+// hardware-side switches (attach, realistic scan), and the manual layout
+// picker. A layout pick overrides getLayoutMap and regenerates the default
+// bindings from that layout - the fallback for browsers that don't expose
+// the layout, and an override elsewhere.
+export default function KeyboardSettingsPanel() {
 	const { host } = useEmu();
 	const current = host.layoutPref.value;
 	// Nothing to auto-detect from where getLayoutMap is absent - gray it out.
@@ -25,8 +28,8 @@ export default function KeyboardLayoutPanel() {
 	);
 
 	return (
-		<PanelFrame title={messages.shortcuts.layoutTitle}>
-			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+		<PanelFrame title={messages.shortcuts.keyboardTitle}>
+			<div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
 				<button
 					type="button"
 					class="self-start text-xs text-neutral-500 hover:underline"
@@ -35,8 +38,36 @@ export default function KeyboardLayoutPanel() {
 					‹ {messages.shortcuts.back}
 				</button>
 
-				<p class="text-sm text-neutral-600">{messages.shortcuts.layoutIntro}</p>
+				<Segmented
+					label={messages.shortcuts.mode}
+					value={host.keyboardMode.value}
+					options={[
+						{
+							value: "character",
+							label: messages.shortcuts.modeCharacter,
+							onSelect: () => host.setKeyboardMode("character"),
+						},
+						{
+							value: "positional",
+							label: messages.shortcuts.modePositional,
+							onSelect: () => host.setKeyboardMode("positional"),
+						},
+					]}
+				/>
+				<p class="text-xs text-neutral-500">{messages.shortcuts.modeHint}</p>
+				<OnOff
+					label={messages.shortcuts.attached}
+					value={host.keyboardAttached.value}
+					onSet={(on) => host.setKeyboardAttached(on)}
+				/>
+				<OnOff
+					label={messages.shortcuts.realisticScan}
+					value={host.realisticScan.value}
+					onSet={(on) => host.setRealisticScan(on)}
+				/>
 
+				<GroupHeading label={messages.shortcuts.layoutTitle} />
+				<p class="text-sm text-neutral-600">{messages.shortcuts.layoutIntro}</p>
 				<select
 					class="w-full rounded-sm border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-800"
 					value={current}
@@ -52,7 +83,6 @@ export default function KeyboardLayoutPanel() {
 						</option>
 					))}
 				</select>
-
 				<p class="text-xs text-neutral-500">
 					{messages.shortcuts.layoutRegenerates}
 				</p>

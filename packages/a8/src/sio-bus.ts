@@ -39,6 +39,13 @@ export class SioBus {
 	cycle(): void {
 		this.#cycles++;
 
+		// Send acceleration: the guest's transmit shifter may run
+		// overclocked exactly while the computer is addressing the bus -
+		// a command frame in progress or an expected data frame. Derived
+		// from the state every cycle, so every abort path clears it.
+		this.#pokey.serialOutBurst =
+			this.serialAcceleration && this.#state !== "idle";
+
 		// Idle fast path: with no transaction and nothing transmitting
 		// there is nothing to do - clock measurement can lapse, since the
 		// stability lock below re-acquires the rate within a few toggles
@@ -57,7 +64,11 @@ export class SioBus {
 		// consecutive agreeing intervals. That rejects the stray edges of
 		// mode switches (the line snapping to its pulled-up level) and
 		// idle gaps, which would otherwise read as bogus periods.
-		const clock = this.#pokey.serialClockOut;
+		// Send-acceleration ticks toggle the line at their own cadence, so
+		// measurement pauses while the shifter is overclocked; the latched
+		// rate then only matters to the wire-fallback path, which serves
+		// guests that most likely run the standard rate anyway.
+		const clock = this.#pokey.serialOutBurst ? 1 : this.#pokey.serialClockOut;
 		if (clock !== this.#lastClock) {
 			this.#lastClock = clock;
 			const interval = this.#cycles - this.#lastClockToggle;
@@ -73,7 +84,7 @@ export class SioBus {
 		}
 
 		// The transmitter: shift the in-flight byte at the latched rate,
-		// else start the next queued byte once its leading gap elapses.
+		// else deliver the next queued byte once its leading gap elapses.
 		if (this.#txBitsLeft > 0) {
 			if (--this.#txCountdown <= 0) {
 				this.#txBitsLeft--;
@@ -89,18 +100,52 @@ export class SioBus {
 			if (head) {
 				if (head.gap > 0) {
 					head.gap--;
+				} else if (this.serialAcceleration && !this.#wireFallback) {
+					// Serial I/O acceleration: inject straight into SERIN,
+					// paced by the guest's own per-byte IRQ acknowledgment -
+					// as fast as its code runs, no bauds involved. A guest
+					// that never arms the IRQ (a SERIN-poll loop, a SKSTAT
+					// watcher) trips the watchdog and drops the rest of the
+					// transaction onto the honest wire instead - acceleration
+					// degrades to accurate, never to broken.
+					if (this.#pokey.serialInReady) {
+						this.#txQueue.shift();
+						this.#txWatchdog = 0;
+						this.#pokey.injectSerialByte(head.byte);
+					} else if (++this.#txWatchdog > INJECT_WATCHDOG) {
+						this.#txWatchdog = 0;
+						this.#wireFallback = true;
+						this.#txQueue.shift();
+						this.#startWireByte(head.byte);
+					}
 				} else {
 					this.#txQueue.shift();
-					this.#txCell = this.#bitCell;
-					// Start + 8 data bits LSB-first + stop, start bit out now.
-					this.#txShift = ((head.byte & 0xff) << 1) | 0x200;
-					this.#txBitsLeft = 10;
-					this.#pokey.serialIn = this.#txShift & 1;
-					this.#txShift >>= 1;
-					this.#txCountdown = this.#txCell;
+					this.#startWireByte(head.byte);
 				}
 			}
 		}
+	}
+
+	/**
+	 * Serial I/O acceleration: deliver device responses directly into
+	 * SERIN at the guest's own acknowledgment pace (and overclock the
+	 * guest's transmit shifter) instead of serializing bits at the
+	 * programmed baud. Loads run as fast as the guest's code can; the
+	 * cost is wire-level fidelity (SKSTAT's busy/raw-line bits stay
+	 * idle, no framing, no load audio). Off by default - hosts opt in
+	 * via {@link Atari.sioAcceleration}.
+	 */
+	serialAcceleration = false;
+
+	// Start bit-serializing one byte onto the line at the latched rate:
+	// start + 8 data bits LSB-first + stop, start bit out now.
+	#startWireByte(byte: number): void {
+		this.#txCell = this.#bitCell;
+		this.#txShift = ((byte & 0xff) << 1) | 0x200;
+		this.#txBitsLeft = 10;
+		this.#pokey.serialIn = this.#txShift & 1;
+		this.#txShift >>= 1;
+		this.#txCountdown = this.#txCell;
 	}
 
 	/** Power-cycle: abort any transaction and release the line. */
@@ -111,7 +156,10 @@ export class SioBus {
 		this.#resolveData = null;
 		this.#txQueue.length = 0;
 		this.#txBitsLeft = 0;
+		this.#txWatchdog = 0;
+		this.#wireFallback = false;
 		this.#pokey.serialIn = 1;
+		this.#pokey.serialOutBurst = false;
 	}
 
 	// A byte fully shifted out of POKEY's transmitter.
@@ -126,12 +174,15 @@ export class SioBus {
 	}
 
 	// The command line dropped: a command frame is starting. This aborts
-	// whatever was in progress - a mid-response device stops talking.
+	// whatever was in progress - a mid-response device stops talking -
+	// and gives acceleration a fresh chance after a wire fallback.
 	#onCommandLowered(): void {
 		this.#state = "command";
 		this.#frame.length = 0;
 		this.#resolveData = null;
 		this.#txQueue.length = 0;
+		this.#txWatchdog = 0;
+		this.#wireFallback = false;
 	}
 
 	// The command line rose: the frame is complete. A malformed or
@@ -183,13 +234,22 @@ export class SioBus {
 		this.#sendResult(resolve(data));
 	}
 
-	// Queue the Complete/Error byte and any returned data frame (sent
-	// back-to-back with C/E, like real drives - AHRM warns receivers).
+	// Queue the Complete/Error byte and any returned data frame. The
+	// frame's first byte gets a lead gap: the OS SIO re-points its buffer
+	// in mainline code between the C/E phase and the data phase, and on
+	// the wire the first byte's own transmission time covers that dance -
+	// under acceleration the gap has to be explicit, and it keeps the
+	// wire path a pause-before-data drive (both are protocol-legal; AHRM
+	// notes back-to-back senders exist and warns receivers).
 	#sendResult(result: SioCommandResult): void {
 		if (result.kind === "nak") return; // protocol-illegal here; silence
 		this.#send(COMPLETE_DELAY, result.kind === "complete" ? COMPLETE : ERROR);
 		if (result.data) {
-			for (const byte of result.data) this.#send(0, byte);
+			let gap = DATA_LEAD_GAP;
+			for (const byte of result.data) {
+				this.#send(gap, byte);
+				gap = 0;
+			}
 			this.#send(0, sioChecksum(result.data));
 		}
 	}
@@ -214,6 +274,12 @@ export class SioBus {
 	#txBitsLeft = 0;
 	#txCountdown = 0;
 	#txCell = DEFAULT_BIT_CELL;
+
+	// Acceleration state: cycles spent waiting for the guest to arm the
+	// input IRQ, and the per-transaction fallback latch (cleared by the
+	// next command frame).
+	#txWatchdog = 0;
+	#wireFallback = false;
 
 	// Clock-out measurement.
 	#cycles = 0;
@@ -240,3 +306,9 @@ const DEFAULT_BIT_CELL = 94;
 const ACK_DELAY = 900; // ~0.5ms
 const DATA_ACK_DELAY = 1790; // ~1ms
 const COMPLETE_DELAY = 1790; // ~1ms (execution time included)
+const DATA_LEAD_GAP = 1790; // ~1ms of mainline re-phase room before data
+
+// How long acceleration waits for the guest to arm the input IRQ before
+// concluding it never will (a SERIN-poll loop, a SKSTAT watcher) and
+// falling back to the wire for the rest of the transaction: ~one frame.
+const INJECT_WATCHDOG = 32768;

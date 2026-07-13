@@ -1,3 +1,4 @@
+import { useState } from "preact/hooks";
 import type { Command } from "./commands.ts";
 import type { EmulatorHost } from "./host.ts";
 import { Icon } from "./icon.tsx";
@@ -11,72 +12,15 @@ import {
 	type AtariModel,
 } from "./machine-config.ts";
 import { messages } from "./messages.ts";
+import {
+	GroupHeading,
+	LabeledSelect,
+	OnOff,
+	Segmented,
+} from "./settings-controls.tsx";
 import { favoriteIds, toggleFavorite } from "./favorites.ts";
 import { recentsView } from "./recents.ts";
 import { TypePill } from "./type-pill.tsx";
-
-/** A labelled segmented control; each option stages its value via `onSelect`. */
-function Segmented({
-	label,
-	value,
-	options,
-}: {
-	label: string;
-	value: string;
-	options: { value: string; label: string; onSelect: () => void }[];
-}) {
-	return (
-		<div class="flex items-center justify-between gap-3">
-			<span class="text-sm text-neutral-600">{label}</span>
-			<div class="flex overflow-hidden rounded-sm border border-neutral-300">
-				{options.map((option) => (
-					<button
-						key={option.value}
-						type="button"
-						class={
-							option.value === value
-								? "bg-neutral-800 px-2 py-0.5 text-sm text-white"
-								: "bg-white px-2 py-0.5 text-sm text-neutral-700 hover:bg-neutral-100"
-						}
-						onClick={option.onSelect}
-					>
-						{option.label}
-					</button>
-				))}
-			</div>
-		</div>
-	);
-}
-
-/** A labelled dropdown; selecting a value calls `onSelect`. */
-function LabeledSelect({
-	label,
-	value,
-	options,
-	onSelect,
-}: {
-	label: string;
-	value: string;
-	options: { value: string; label: string }[];
-	onSelect: (value: string) => void;
-}) {
-	return (
-		<div class="flex items-center justify-between gap-3">
-			<span class="text-sm text-neutral-600">{label}</span>
-			<select
-				class="rounded-sm border border-neutral-300 bg-white px-2 py-0.5 text-sm text-neutral-700"
-				value={value}
-				onChange={(event) => onSelect(event.currentTarget.value)}
-			>
-				{options.map((option) => (
-					<option key={option.value} value={option.value}>
-						{option.label}
-					</option>
-				))}
-			</select>
-		</div>
-	);
-}
 
 /** A row in the key-mappings help. */
 function KeyRow({ keys, action }: { keys: string; action: string }) {
@@ -167,9 +111,26 @@ function RecentsSection({ host }: { host: EmulatorHost }) {
 	);
 }
 
+// The disk SIO speed presets: the divisor each real device advertised via
+// the $3F poll (drive names and rates are hardware tokens, kept inline).
+// "standard" = a stock drive that answers no $3F at all.
+const SPEED_PRESETS = [
+	{ value: "standard", label: messages.sidebar.speedStandard },
+	{ value: "15", label: "~38400 (divisor 15)" },
+	{ value: "10", label: "US Doubler (52.6k)" },
+	{ value: "9", label: "Speedy 1050 (55.9k)" },
+	{ value: "8", label: "57600 (59.7k)" },
+	{ value: "6", label: "1050 Turbo (68.8k)" },
+	{ value: "1", label: "115200 (111.9k)" },
+	{ value: "0", label: messages.sidebar.speedMaximum },
+];
+
 /**
  * The machine-configuration form (its own panel): model, RAM, optional separate
  * ANTIC RAM, TV standard, and BASIC. Edits are staged and applied with a reboot.
+ * Below the staged block: the live-applied Serial I/O group - a temporary
+ * tenant until a disks view exists (keyboard settings live on the keys
+ * pages' keyboard-settings panel).
  */
 export function ConfigView({ host }: { host: EmulatorHost }) {
 	const staged = host.staged.value;
@@ -261,7 +222,69 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 					{messages.sidebar.rebootToApply}
 				</button>
 			)}
+			<GroupHeading label={messages.sidebar.serialIo} />
+			<OnOff
+				label={messages.sidebar.trapSiov}
+				value={host.sioTrap.value}
+				onSet={(on) => host.setSioTrap(on)}
+			/>
+			<OnOff
+				label={messages.sidebar.accelerateSio}
+				value={host.sioAcceleration.value}
+				onSet={(on) => host.setSioAcceleration(on)}
+			/>
+			<SpeedSelect host={host} />
 		</div>
+	);
+}
+
+// The SIO speed picker: the named presets plus a custom divisor entry.
+// A persisted non-preset value opens as custom; picking a preset closes it.
+function SpeedSelect({ host }: { host: EmulatorHost }) {
+	const speed = host.diskSpeed.value;
+	const presetValue = speed === undefined ? "standard" : String(speed);
+	const isPreset = SPEED_PRESETS.some((p) => p.value === presetValue);
+	const [customOpen, setCustomOpen] = useState(false);
+	const custom = customOpen || !isPreset;
+
+	return (
+		<>
+			<LabeledSelect
+				label={messages.sidebar.sioSpeed}
+				value={custom ? "custom" : presetValue}
+				options={[
+					...SPEED_PRESETS,
+					{ value: "custom", label: messages.sidebar.speedCustom },
+				]}
+				onSelect={(value) => {
+					if (value === "custom") {
+						setCustomOpen(true);
+						return;
+					}
+					setCustomOpen(false);
+					host.setDiskSpeed(value === "standard" ? undefined : Number(value));
+				}}
+			/>
+			{custom && (
+				<label class="flex items-center justify-between gap-3">
+					<span class="text-sm text-neutral-600">
+						{messages.sidebar.customDivisor}
+					</span>
+					<input
+						type="number"
+						min={0}
+						max={40}
+						class="w-20 rounded-sm border border-neutral-300 bg-white px-2 py-0.5 text-sm text-neutral-700"
+						value={speed ?? 9}
+						onChange={(event) => {
+							const raw = Math.floor(Number(event.currentTarget.value));
+							if (!Number.isFinite(raw)) return;
+							host.setDiskSpeed(Math.max(0, Math.min(40, raw)));
+						}}
+					/>
+				</label>
+			)}
+		</>
 	);
 }
 

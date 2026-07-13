@@ -249,6 +249,19 @@ export class Pokey implements Memory {
 			}
 		}
 
+		// Serial I/O acceleration (send): extra transmit-clock ticks every
+		// other cycle while the bus engine holds the flag up and there is
+		// something to ship. Timer-driven ticks keep arriving too; more
+		// edges just move the same events sooner.
+		if (
+			this.serialOutBurst &&
+			!this.#initMode &&
+			(this.#shiftBitsLeft > 0 || this.#serout !== null)
+		) {
+			this.#outBurstPhase = !this.#outBurstPhase;
+			if (this.#outBurstPhase) this.#serialClockTick();
+		}
+
 		this.#shadowAudf1 = this.#audf1;
 		this.#shadowAudf2 = this.#audf2;
 		this.#shadowAudf3 = this.#audf3;
@@ -315,6 +328,50 @@ export class Pokey implements Memory {
 	}
 
 	/**
+	 * Serial I/O acceleration hook: is the guest ready for an injected
+	 * byte? Three conditions: the serial input ready IRQ is armed (IRQEN
+	 * bit 5), no byte is still pending (IRQST bit 5 high), and the last
+	 * injected byte has actually been read out of SERIN. The IRQ
+	 * acknowledgment alone is not consumption - the OS handler acks the
+	 * latch BEFORE it reads SERIN, so injecting on the ack would
+	 * overwrite the byte in that window.
+	 */
+	get serialInReady(): boolean {
+		return (
+			this.#serinConsumed &&
+			(this.#irqen & IRQ_SERIN) !== 0 &&
+			(this.#irqst & IRQ_SERIN) !== 0
+		);
+	}
+
+	/**
+	 * Serial I/O acceleration: deliver a received byte directly into
+	 * SERIN - what the stop-bit sample does, minus the shifter. The
+	 * overrun latch behaves normally, but injected bytes never shift, so
+	 * SKSTAT's busy and raw-line bits stay idle and framing errors can't
+	 * happen.
+	 */
+	injectSerialByte(byte: number): void {
+		this.#serin = byte & 0xff;
+		this.#serinConsumed = false;
+		if ((this.#irqst & IRQ_SERIN) === 0) this.#serialOverrun = true;
+		this.#raiseIrq(IRQ_SERIN);
+	}
+
+	/**
+	 * Serial I/O acceleration, send side: while set, the transmit
+	 * shifter is clocked at a fast fixed cadence (a 4-cycle bit cell)
+	 * instead of waiting for the timer-derived serial clock, so SEROUT
+	 * bytes ship as fast as the guest cares to write them. It is the
+	 * same shifter with the same event order - load on a clock edge,
+	 * SEROR at load, SEROC as a level, byte delivery at the stop bit -
+	 * just sooner. The bus engine raises this only while the computer is
+	 * addressing it (command and data frames), so cassette and two-tone
+	 * output never see an overclocked shifter.
+	 */
+	serialOutBurst = false;
+
+	/**
 	 * The keyboard matrix the 15KHz scan addresses: latch a scan code, read
 	 * the sense lines back. The machine plugs its Keyboard device in; a
 	 * future 5200 puts its controller mux behind the same seam.
@@ -361,6 +418,7 @@ export class Pokey implements Memory {
 		this.#serialOutBit = 1;
 		this.#serialHalfBit = false;
 		this.#clockOutPhase = false;
+		this.#outBurstPhase = false;
 		this.#serin = 0;
 		this.#rxShift = 0;
 		this.#rxBitsLeft = 0;
@@ -368,6 +426,7 @@ export class Pokey implements Memory {
 		this.#rxBusy = false;
 		this.#framingError = false;
 		this.#serialOverrun = false;
+		this.#serinConsumed = true;
 		this.#serialInPrev = 1;
 		this.#asyncHold = false;
 		this.#twoTone = false;
@@ -401,9 +460,11 @@ export class Pokey implements Memory {
 			case 0x0a:
 				return this.#usePoly9 ? this.#poly9.random() : this.#poly17.random();
 			// SERIN ($D20D): the last byte received, errors included.
-			// Reading has no side effects - acknowledgment is clearing the
-			// IRQST bit 5 latch, not this read.
+			// Reading has no architectural side effects - acknowledgment is
+			// clearing the IRQST bit 5 latch, not this read. (It does mark
+			// the byte consumed for the acceleration gate.)
 			case 0x0d:
+				this.#serinConsumed = true;
 				return this.#serin;
 			// IRQST ($D20E). Bit 3 (SEROC) is composed in as a level.
 			case 0x0e:
@@ -705,6 +766,8 @@ export class Pokey implements Memory {
 	// clock, independent of the output shifter's bit-cell phase (the line
 	// keeps toggling while the shifter idles).
 	#clockOutPhase = false;
+	// Send-acceleration divide-by-two: one extra tick every other cycle.
+	#outBurstPhase = false;
 
 	// Serial input (AHRM 5.6). The receive clock is timer 4 (or timers 3+4
 	// in asynchronous mode), two ticks per bit cell; the line is sampled on
@@ -718,6 +781,7 @@ export class Pokey implements Memory {
 	#rxBusy = false; // SKSTAT bit 1: mid-start-bit to mid-stop-bit
 	#framingError = false; // sticky until SKRES
 	#serialOverrun = false; // sticky until SKRES
+	#serinConsumed = true; // acceleration gate: SERIN read since last inject
 	#serialInPrev = 1; // for the async start-bit edge detect
 	// Asynchronous receive's timer hold: timers 3+4 sit in reset while the
 	// shifter is idle, released by the start bit's leading edge.

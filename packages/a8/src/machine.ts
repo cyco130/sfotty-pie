@@ -230,7 +230,9 @@ export class Atari {
 				devices: () => this.sio.devices,
 			});
 			this.interceptExecute(SIOV, (address) =>
-				this.mmu.isOsRomMapped ? sioHandler(address) : undefined,
+				this.sioTrapEnabled && this.mmu.isOsRomMapped
+					? sioHandler(address)
+					: undefined,
 			);
 
 			// Boot milestones, the CIO-init chain, and the K: get-byte trap
@@ -261,6 +263,40 @@ export class Atari {
 	 */
 	insertDisk(disk: AtrImage): void {
 		this.#d1Drive.disk = disk;
+	}
+
+	/**
+	 * Whether the SIOV trap answers OS-conformant disk calls instantly
+	 * (high-level emulation). Live-togglable; off, everything runs over
+	 * the real serial wire. Only effective on a recognized OS ROM - a
+	 * custom OS never gets the trap regardless.
+	 */
+	sioTrapEnabled = true;
+
+	/**
+	 * Serial I/O acceleration: deliver SIO bus traffic at the guest's own
+	 * pace instead of the programmed baud rate (see
+	 * {@link SioBus.serialAcceleration}). Off by default - the honest
+	 * wire; hosts that prefer speed over wire-level fidelity turn it on.
+	 */
+	get sioAcceleration(): boolean {
+		return this.#sioBus.serialAcceleration;
+	}
+	set sioAcceleration(enabled: boolean) {
+		this.#sioBus.serialAcceleration = enabled;
+	}
+
+	/**
+	 * The built-in D1: drive's ultra-speed index (the {@link DiskDrive}
+	 * `highSpeedIndex`): the POKEY divisor advertised to the guest via
+	 * the $3F poll; undefined = a stock drive. Guests re-negotiate on
+	 * their next detection pass (practically: the next boot).
+	 */
+	get diskSpeedIndex(): number | undefined {
+		return this.#d1Drive.highSpeedIndex;
+	}
+	set diskSpeedIndex(index: number | undefined) {
+		this.#d1Drive.highSpeedIndex = index;
 	}
 
 	/**

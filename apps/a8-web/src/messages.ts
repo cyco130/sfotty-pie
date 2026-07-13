@@ -119,6 +119,12 @@ export const messages = {
 		titleKeys: "Shortcuts",
 	},
 
+	// The OSD's paste view: free-form text typed into the machine on send.
+	paste: {
+		placeholder: "Type or paste text to send to the Atari…",
+		send: "Type it in",
+	},
+
 	// The controllers panel: a live view of connected gamepads for diagnosis and
 	// (later) binding. Button/axis names are hardware tokens and stay inline; only
 	// the surrounding copy is here.
@@ -517,6 +523,7 @@ export const messages = {
 	osd: {
 		joystickControls: "Joystick controls",
 		keyboard: "Keyboard",
+		pasteText: "Paste text",
 		hideControls: "Hide controls",
 		swapSides: "Swap stick and fire sides",
 	},

@@ -696,10 +696,22 @@ export class EmulatorHost {
 		this.setRealisticScan(!this.realisticScan.value);
 	}
 
-	/** Read the host clipboard and type it into the machine through the OS
-	 *  K: trap (see the machine's `paste`). Must run within a user gesture -
-	 *  the paste key binding or a palette pick - for the clipboard read to
-	 *  be allowed. */
+	/** Type text into the machine through the OS K: trap (see the machine's
+	 *  `paste`), with toast feedback - the shared tail of the clipboard
+	 *  shortcut and the paste panel. */
+	typeText(text: string): void {
+		if (!this.#emulator.machine.pasteSupported) {
+			this.toast(messages.errors.pasteUnsupported, "warning");
+			return;
+		}
+		const count = this.#emulator.machine.paste(text, GLYPH_TO_ATASCII);
+		if (count > 0) this.toast(messages.toasts.pasted(count));
+		else this.toast(messages.errors.nothingToPaste, "warning");
+	}
+
+	/** Read the host clipboard and type it into the machine (see
+	 *  {@link typeText}). Must run within a user gesture - the paste key
+	 *  binding or a palette pick - for the clipboard read to be allowed. */
 	pasteText(): void {
 		if (!this.#emulator.machine.pasteSupported) {
 			this.toast(messages.errors.pasteUnsupported, "warning");
@@ -707,11 +719,7 @@ export class EmulatorHost {
 		}
 		navigator.clipboard
 			.readText()
-			.then((text) => {
-				const count = this.#emulator.machine.paste(text, GLYPH_TO_ATASCII);
-				if (count > 0) this.toast(messages.toasts.pasted(count));
-				else this.toast(messages.errors.nothingToPaste, "warning");
-			})
+			.then((text) => this.typeText(text))
 			.catch(() => this.toast(messages.errors.clipboardUnavailable, "warning"));
 	}
 
@@ -1771,10 +1779,12 @@ export class EmulatorHost {
 		input.focus();
 
 		const refocus = (event: PointerEvent) => {
-			// Let toolbar buttons and the sidebar (which has its own focusable
-			// input) take their own clicks; only steal focus back from clicks on
-			// the screen/letterbox so keystrokes return to the emulator.
-			if ((event.target as HTMLElement).closest("button, aside")) return;
+			// Let toolbar buttons, the sidebar (which has its own focusable
+			// input), and editable controls (the OSD paste editor) take their
+			// own clicks; only steal focus back from clicks on the
+			// screen/letterbox so keystrokes return to the emulator.
+			const target = event.target as HTMLElement;
+			if (target.closest("button, aside, input, textarea, select")) return;
 			event.preventDefault();
 			input.focus();
 		};

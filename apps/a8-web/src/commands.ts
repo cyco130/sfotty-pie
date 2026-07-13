@@ -150,6 +150,7 @@ export const commands = {
 	},
 	// Read the host clipboard and type it into the machine through the OS
 	// keyboard trap. Must run within a user gesture (key binding, palette pick).
+	// Touch devices use the OSD's paste view instead (clipboard-API-free).
 	PASTE_TEXT: { label: "PASTE_TEXT", run: ({ host }) => host.pasteText() },
 
 	// Audio.

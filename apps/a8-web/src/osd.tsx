@@ -5,6 +5,7 @@ import type { EmulatorHost } from "./host.ts";
 import { Icon, type IconName } from "./icon.tsx";
 import { messages } from "./messages.ts";
 import { KeyboardView } from "./osd-keyboard.tsx";
+import { PasteView } from "./osd-paste.tsx";
 import {
 	initialStickState,
 	readRadialStick,
@@ -14,7 +15,7 @@ import { storageName } from "./storage.ts";
 
 const LEFTY_KEY = storageName("osd", "lefty");
 
-type OsdView = "stick" | "keyboard" | "off";
+type OsdView = "stick" | "keyboard" | "paste" | "off";
 
 /** True while the primary pointer is touch (a phone/tablet, not a mouse). */
 function useCoarsePointer(): boolean {
@@ -230,6 +231,7 @@ function ViewToggle({
 		<div class="flex gap-1 rounded-sm bg-neutral-800 p-0.5">
 			{tab("stick", "joystick", messages.osd.joystickControls)}
 			{tab("keyboard", "keyboard", messages.osd.keyboard)}
+			{tab("paste", "clipboard", messages.osd.pasteText)}
 			{tab("off", "chevron-down", messages.osd.hideControls)}
 		</div>
 	);
@@ -237,9 +239,9 @@ function ViewToggle({
 
 /**
  * The on-screen controls for touch devices. A persistent top bar (Power + a
- * joystick/keyboard view toggle) sits over a body that swaps between the
- * joystick view (a row of console keys over a fire button and analog stick,
- * with a left-hander swap) and the on-screen keyboard. Shown only when the
+ * view toggle) sits over a body that swaps between the joystick view (a row
+ * of console keys over a fire button and analog stick, with a left-hander
+ * swap), the on-screen keyboard, and the paste editor. Shown only when the
  * primary pointer is coarse and the menu is closed (the menu becomes a top
  * bar on mobile and needs the room).
  */
@@ -267,6 +269,8 @@ export function Osd({ host }: { host: EmulatorHost }) {
 			</div>
 
 			{view === "keyboard" && <KeyboardView host={host} />}
+
+			{view === "paste" && <PasteView host={host} />}
 
 			{view === "stick" && (
 				<>

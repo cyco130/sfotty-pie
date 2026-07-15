@@ -216,7 +216,7 @@ export const messages = {
 		eject: "Eject",
 		saveToLibrary: "Save to library",
 		saveAsNew: "Save to library as new item",
-		writeProtect: "Write-protect",
+		writeProtect: "Write-protected",
 		moveUp: "Move up",
 		moveDown: "Move down",
 		rotateUp: "Rotate drives up",
@@ -377,6 +377,7 @@ export const messages = {
 		exporting: "Exporting…",
 		compressing: "Compressing…",
 		exportFailed: "Library export failed.",
+		writeProtected: "Write-protected",
 		actions: {
 			boot: "Boot",
 			attachDisk: (unit: number): string => `Attach to D${unit}:`,
@@ -601,8 +602,6 @@ export const messages = {
 		noDiskToDetach: (unit: number): string => `No disk in D${unit}: to detach.`,
 		driveEmpty: (unit: number): string => `No disk in D${unit}:.`,
 		noDisksAttached: "No disks attached.",
-		syntheticProtected:
-			"A generated boot disk stays write-protected - it isn't real media.",
 		notACartridge: "Not a cartridge image.",
 		noCartridge: "No cartridge to detach.",
 		fullscreenUnavailable: "Full screen isn't available in this browser.",
@@ -629,8 +628,6 @@ export const messages = {
 		detachingAllDisks: "Detaching all disks",
 		driveOn: (unit: number, on: boolean): string =>
 			on ? `Turning on D${unit}:` : `Turning off D${unit}: (disk kept)`,
-		writeProtect: (unit: number, on: boolean): string =>
-			`D${unit}: write-protect ${on ? "on" : "off"}`,
 		movingDrive: (from: number, to: number): string =>
 			`Moving D${from}: to D${to}:`,
 		savedAsNewItem: (name: string): string =>

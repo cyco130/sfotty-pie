@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import type { Command } from "./commands.ts";
-import { favoritesView } from "./favorites.ts";
+import { favoritesView, toggleFavorite } from "./favorites.ts";
 import type { EmulatorHost } from "./host.ts";
 import { Icon } from "./icon.tsx";
 import { primaryChords, type Binding } from "./key-bindings.ts";
@@ -152,6 +152,15 @@ function RecentsSection({ host }: { host: EmulatorHost }) {
 								{entry.user.displayName}
 							</button>
 							<DetailsButton id={entry.id} />
+							<button
+								type="button"
+								class="shrink-0 text-neutral-400 hover:text-neutral-700"
+								title={messages.recents.unfavorite}
+								aria-label={messages.recents.unfavorite}
+								onClick={() => toggleFavorite(entry.id)}
+							>
+								<Icon name="close" class="size-4" />
+							</button>
 						</li>
 					))}
 				</ul>

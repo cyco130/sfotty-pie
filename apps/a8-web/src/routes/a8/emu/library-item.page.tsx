@@ -548,6 +548,24 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 					</div>
 				</div>
 
+				{/* The write-protect notch - a property of the medium, so it lives
+				    on the entry (mounted copies follow it live). */}
+				{type === "disk" && (
+					<label class="flex items-center gap-2 text-sm text-neutral-800">
+						<input
+							type="checkbox"
+							checked={entry.user.writeProtected ?? true}
+							onChange={(event) =>
+								void host.setImageWriteProtect(
+									entry.id,
+									event.currentTarget.checked,
+								)
+							}
+						/>
+						{messages.library.writeProtected}
+					</label>
+				)}
+
 				{isStdCart && (
 					<div class="flex flex-col gap-1.5">
 						<h3 class="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
@@ -596,7 +614,22 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 							{messages.library.actions.attachCart}
 						</button>
 					)}
-					{canBoot && (
+					{/* A transient (auto-added, unkept) entry is reachable here from
+					    the drive bank and recents - promote it to the curated
+					    library in place. The button disappears once kept. */}
+					{entry.transient && (
+						<button
+							type="button"
+							class="flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
+							onClick={() => host.keepRecent(entry.id)}
+						>
+							<Icon name="bookmark" class="size-4 text-neutral-400" />
+							{messages.recents.keepTitle}
+						</button>
+					)}
+					{/* Favoriting is for library members - a transient gets the
+					    Add-to-library button above first. */}
+					{canBoot && !entry.transient && (
 						<button
 							type="button"
 							class="flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"

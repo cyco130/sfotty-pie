@@ -141,19 +141,16 @@ function DriveRow({
 					hidden={!info || unit === 8}
 					onClick={() => host.moveDrive(unit, "down")}
 				/>
-				<DriveAction
-					name={info?.writeProtected ? "lock" : "lock-open"}
+				{/* Write-protect indicator only - the notch is edited on the
+				    disk's library page (it's a property of the medium). */}
+				<span
+					class={`shrink-0 text-amber-500 ${
+						info?.writeProtected ? "" : "invisible"
+					}`}
 					title={m.writeProtect}
-					tone={
-						info?.writeProtected
-							? "text-amber-500 hover:text-amber-600"
-							: "text-neutral-300 hover:text-neutral-500"
-					}
-					hidden={!info}
-					onClick={() =>
-						info && host.setWriteProtect(unit, !info.writeProtected)
-					}
-				/>
+				>
+					<Icon name="lock" class="size-4" />
+				</span>
 				<button
 					type="button"
 					class={`shrink-0 p-0.5 ${info ? "" : "invisible"}`}

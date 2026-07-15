@@ -64,6 +64,7 @@ import {
 	removeImage,
 	sweepTransients,
 	updateImage,
+	updateUserMeta,
 } from "./images/library.ts";
 import type { ImageEntry } from "./images/metadata.ts";
 import {
@@ -162,6 +163,14 @@ export interface DriveBankEntry {
 function density(disk: AtrImage): DriveBankEntry["density"] {
 	if (disk.sectorSize === 256) return "DD";
 	return disk.sectorCount > 720 ? "ED" : "SD";
+}
+
+// The write-protect notch persisted on the library entry (a property of the
+// medium). Protected is the DEFAULT - a disk writes only after a deliberate
+// un-protect on its library page. An id-less mount has no entry (and thus no
+// page to un-protect it from), so it alone starts writable.
+function imageWriteProtected(sourceId: string | undefined): boolean {
+	return sourceId ? (getImage(sourceId)?.user.writeProtected ?? true) : false;
 }
 
 /**
@@ -1306,7 +1315,8 @@ export class EmulatorHost {
 		);
 	}
 
-	/** Promote a transient (auto-added) recents item into the curated library. */
+	/** Promote a transient (auto-added) image into the curated library -
+	 *  from the recents bookmark or its own library page. */
 	keepRecent(id: string): void {
 		const entry = getImage(id);
 		if (!entry?.transient) return;
@@ -1470,7 +1480,13 @@ export class EmulatorHost {
 		let disk: Omit<DriveSlot, "on"> | null = null;
 		try {
 			if (format === "atr") {
-				disk = { disk: new AtrImage(contents), name, sourceId };
+				disk = {
+					disk: new AtrImage(contents, {
+						writeProtected: imageWriteProtected(sourceId),
+					}),
+					name,
+					sourceId,
+				};
 			} else if (format === "xex") {
 				// XEX boots from a generated in-memory disk (its loader). The source
 				// id is kept so the boot can be resumed (re-built from the XEX), but
@@ -1606,6 +1622,10 @@ export class EmulatorHost {
 			this.toast(messages.errors.unrecognized, "warning");
 			return;
 		}
+		// The new item records the mounted disk's notch state explicitly -
+		// with protected-by-default meta, a working (writable) copy must
+		// carry its false or it would re-protect on the next attach.
+		await updateUserMeta(id, { writeProtected: drive.disk.writeProtected });
 		drive.sourceId = id;
 		drive.disk.dirty = false;
 		this.#refreshAttachments();
@@ -1637,7 +1657,9 @@ export class EmulatorHost {
 	): boolean {
 		let disk: AtrImage;
 		try {
-			disk = new AtrImage(contents);
+			disk = new AtrImage(contents, {
+				writeProtected: imageWriteProtected(sourceId),
+			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.toast(`${name}: ${message}`, "error");
@@ -1710,22 +1732,21 @@ export class EmulatorHost {
 		this.setDriveOn(unit, !slot.on);
 	}
 
-	/** Write-protect a drive's disk (live - the drive's status frame follows
-	 *  the flag). In-memory only; not persisted across a reload. A synthetic
-	 *  boot disk (an XEX's loader) stays protected - it isn't real media. */
-	setWriteProtect(unit: number, on: boolean): void {
-		const slot = this.#drives[unit - 1];
-		if (!slot) {
-			this.toast(messages.errors.driveEmpty(unit), "warning");
-			return;
+	/**
+	 * Write-protect a library disk: the notch is a property of the medium,
+	 * so it persists on the entry's metadata (built-ins via overrides) and
+	 * flips every currently-mounted copy live (the drives' status frames
+	 * follow the flag). Synthetic boot disks stay protected regardless.
+	 */
+	async setImageWriteProtect(id: string, on: boolean): Promise<void> {
+		await updateUserMeta(id, { writeProtected: on });
+		for (let unit = 1; unit <= DRIVE_COUNT; unit++) {
+			const slot = this.#drives[unit - 1];
+			if (slot?.sourceId === id && !slot.synthetic) {
+				slot.disk.writeProtected = on;
+			}
 		}
-		if (slot.synthetic && !on) {
-			this.toast(messages.errors.syntheticProtected, "warning");
-			return;
-		}
-		slot.disk.writeProtected = on;
 		this.#refreshAttachments();
-		this.toast(messages.toasts.writeProtect(unit, on));
 	}
 
 	/**
@@ -2272,7 +2293,11 @@ export class EmulatorHost {
 					// arrangement (that's the slot a boot fills).
 					const synthetic = entry.derived.type === "xex" && unit === 1;
 					this.#drives[unit - 1] = {
-						disk: synthetic ? buildBootDisk(bytes) : new AtrImage(bytes),
+						disk: synthetic
+							? buildBootDisk(bytes)
+							: new AtrImage(bytes, {
+									writeProtected: entry.user.writeProtected ?? true,
+								}),
 						name: entry.user.displayName,
 						sourceId: saved.id,
 						on: saved.on,

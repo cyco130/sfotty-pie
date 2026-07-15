@@ -40,6 +40,10 @@ export interface UserMeta {
 	/** Slot pickers this image is surfaced in (standard-8K carts only). */
 	slots?: ImageSlot[];
 	tags?: string[];
+	/** The disk's write-protect notch - a property of the medium, so it
+	 *  travels with the library entry; mounts read it at attach time.
+	 *  Absent = protected: disks write only after a deliberate un-protect. */
+	writeProtected?: boolean;
 	// later: compat (models / tv / basic / requiresOs)
 }
 

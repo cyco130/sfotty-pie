@@ -32,9 +32,24 @@ export default function DevicesKeyboardPage() {
 			    (gap-1), so each hint reads as belonging to the control above it. */}
 			<div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
 				<div class="flex flex-col gap-2">
-					<p class="text-sm text-neutral-600">
-						{messages.shortcuts.layoutIntro}
-					</p>
+					{/* With no auto-detect the intro turns into the pitch for picking
+					    a layout - amber (like the shortcuts page's warning) while
+					    we're still guessing US; calm again once one is picked. */}
+					{autoAvailable ? (
+						<p class="text-sm text-neutral-600">
+							{messages.shortcuts.layoutIntro}
+						</p>
+					) : (
+						<p
+							class={
+								current === LAYOUT_AUTO
+									? "rounded-sm border border-amber-200 bg-amber-50 px-2 py-1 text-sm text-amber-800"
+									: "text-sm text-neutral-600"
+							}
+						>
+							{messages.shortcuts.layoutIntroNoAuto}
+						</p>
+					)}
 					<select
 						class="w-full rounded-sm border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-800"
 						value={current}

@@ -246,7 +246,9 @@ export const messages = {
 		realisticScanHint:
 			"Positional mode only - keys can jam, like the hardware. Character mode composes keystrokes itself and always uses the forgiving scan.",
 		layoutIntro:
-			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout when available.",
+			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout.",
+		layoutIntroNoAuto:
+			"This browser doesn't expose your keyboard layout - pick it here so shortcut labels match your keys.",
 		layoutAuto: "Auto-detect (from browser)",
 		layoutAutoUnavailable: "unavailable",
 		layoutRegenerates:

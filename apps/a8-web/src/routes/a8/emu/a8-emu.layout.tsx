@@ -36,9 +36,13 @@ function panelFromPath(path: string): SidebarPanel | null {
 	if (path === "/a8/emu/palette") return "palette";
 	if (path === "/a8/emu/roms") return "roms";
 	if (path === "/a8/emu/controllers") return "controllers";
-	// Includes the drill-downs (/keys/layout, /keys/:command).
+	// Includes the per-command drill-down (/keys/:command).
 	if (path === "/a8/emu/keys" || path.startsWith("/a8/emu/keys/")) {
 		return "keys";
+	}
+	// Includes the tabs (/devices/keyboard).
+	if (path === "/a8/emu/devices" || path.startsWith("/a8/emu/devices/")) {
+		return "devices";
 	}
 	if (path === "/a8/emu/library" || path.startsWith("/a8/emu/library/")) {
 		return "library";

@@ -208,6 +208,11 @@ export const commands = {
 		label: "OPEN_CONTROLLERS",
 		run: ({ host }) => host.showPanel("controllers"),
 	},
+	// The devices view (opens on its first tab, D:).
+	OPEN_DEVICES: {
+		label: "OPEN_DEVICES",
+		run: ({ host }) => host.showPanel("devices"),
+	},
 
 	// Full-screen the whole app (chrome included), so the on-screen controls
 	// stay reachable. A no-op-safe toggle; also bound to a double-click on the

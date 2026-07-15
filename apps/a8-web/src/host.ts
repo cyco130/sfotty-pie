@@ -133,6 +133,7 @@ export type SidebarPanel =
 	| "display"
 	| "palette"
 	| "keys"
+	| "devices"
 	| "controllers"
 	| "roms"
 	| "library";
@@ -351,7 +352,7 @@ export class EmulatorHost {
 	/** The disk drive's advertised high-speed divisor (the $3F answer);
 	 *  undefined = a stock drive. Programs re-detect at their next boot.
 	 *  Persisted; applied live. */
-	readonly diskSpeed = signal<number | undefined>(9);
+	readonly diskSpeed = signal<number | undefined>(6);
 
 	/** The active key bindings (one flat set); mirrors what the keyboard resolves,
 	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
@@ -790,11 +791,11 @@ export class EmulatorHost {
 		this.pasteChMode.value = ch;
 		savePersisted(PASTE_MODE_KEY, ch ? "ch" : "k");
 		this.#emulator.machine.pasteMode = ch ? "ch" : "k";
+		this.toast(messages.toasts.pasteMode(ch));
 	}
 
 	togglePasteChMode(): void {
 		this.setPasteChMode(!this.pasteChMode.value);
-		this.toast(messages.toasts.pasteMode(this.pasteChMode.value));
 	}
 
 	/** Read the host clipboard and type it into the machine (see
@@ -2314,13 +2315,14 @@ const DISK_SPEED_KEY = "disk-sio-speed";
 
 // The persisted disk-speed value: "standard" = a stock drive (no $3F
 // answer), else a POKEY divisor 0-40; anything unparseable falls back to
-// the default (9, ~56k - the fastest value SpartaDOS X receives cleanly).
+// the default (6, ~69k - the 1050 Turbo's rate, still within SpartaDOS
+// X's clean-receive floor).
 function parseDiskSpeed(stored: unknown): number | undefined {
 	if (stored === "standard") return undefined;
 	const divisor = Number(stored);
 	return Number.isInteger(divisor) && divisor >= 0 && divisor <= 40
 		? divisor
-		: 9;
+		: 6;
 }
 const PASTE_MODE_KEY = "paste-mode";
 const OSD_KEY = "osd-forced";

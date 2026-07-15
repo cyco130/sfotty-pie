@@ -107,14 +107,6 @@ export const messages = {
 		on: "On",
 		off: "Off",
 		rebootToApply: "Reboot to apply",
-		serialIo: "Serial I/O",
-		trapSiov: "Trap SIOV calls",
-		accelerateSio: "Accelerate serial I/O",
-		sioSpeed: "SIO speed",
-		customDivisor: "POKEY divisor (0-40)",
-		speedStandard: "Standard (19200)",
-		speedMaximum: "Maximum (~128k)",
-		speedCustom: "Custom…",
 		keys: "Keys",
 		about: "About",
 		aboutBlurb: "Sfotty Pie A8 Web - an Atari 8-bit emulator. MIT-licensed.",
@@ -188,6 +180,7 @@ export const messages = {
 	menu: {
 		docs: "Help & docs",
 		settings: "Settings…",
+		devices: "Devices…",
 		boot: "Boot image…",
 		library: "Library…",
 		palette: "Command palette…",
@@ -200,6 +193,22 @@ export const messages = {
 		display: "Display",
 		shortcuts: "Shortcuts",
 		controllers: "Controllers",
+	},
+
+	// The devices view: a standalone tabbed panel of what's plugged into the
+	// machine. Tab labels are the CIO device letters (hardware tokens, kept
+	// inline in the frame); these spell them out. Rates and drive names on
+	// the D: tab are hardware tokens too and stay inline.
+	devices: {
+		title: "Devices",
+		diskDrives: "Disk drives",
+		keyboard: "Keyboard",
+		trapSiov: "Trap SIOV calls",
+		accelerateSio: "Accelerate serial I/O",
+		sioSpeed: "SIO speed",
+		sioSpeedStandard: "standard",
+		sioSpeedMax: "max",
+		divisorValue: (n: number): string => `divisor ${n}`,
 	},
 
 	shortcuts: {
@@ -224,9 +233,16 @@ export const messages = {
 		modePositional: "Positional",
 		modeHint:
 			"Character types what you mean, layout-aware; Positional maps physical keys raw.",
-		attached: "Attached",
+		pasteMode: "Paste mode",
+		pasteModeK: "K: handler",
+		pasteModeCh: "CH (764)",
+		pasteModeHint:
+			"K: feeds the OS keyboard handler; CH injects key codes straight into location 764 for programs that poll it.",
+		detachKeyboard: "Detach keyboard",
+		keyboardIsDetached: "Keyboard is detached",
+		keyboardPlugHint:
+			"Detached, keystrokes no longer reach the machine - and an XEGS senses the absence and boots to its built-in game.",
 		realisticScan: "Realistic key scan",
-		layoutTitle: "Keyboard layout",
 		layoutIntro:
 			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout when available.",
 		layoutAuto: "Auto-detect (from browser)",
@@ -662,6 +678,7 @@ export const labels = {
 	OPEN_CONTROLLERS: "Settings: Controllers…",
 	CLOSE_PANEL: "View: Close panel",
 	OPEN_ROMS: "Settings: ROM preferences…",
+	OPEN_DEVICES: "Devices: Open…",
 	OPEN_LIBRARY: "Library: Open…",
 	OPEN_FAVORITES: "Library: Open game picker…",
 	CLEAR_LIBRARY: "Library: Clear…",

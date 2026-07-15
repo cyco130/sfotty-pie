@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
+import { OnOff } from "../../../settings-controls.tsx";
 import { DevicesFrame, IconAction } from "./devices-frame.tsx";
 import { useEmu } from "./emu-context.ts";
 
@@ -9,8 +10,9 @@ import { useEmu } from "./emu-context.ts";
 // later, model-aware). Attaching and ejecting reboot - a cartridge is
 // memory-mapped and only takes effect at reset. On the 400/800 an enabled
 // BASIC occupies the slot like a real cart; ejecting it disables BASIC.
-// One day this is home to per-cart extras - R-Time 8 passthrough, flash
-// write-enable - and with flashing, carts become modifiable media too.
+// Below the slot, the per-cart extras: the R-Time 8 passthrough clock
+// today; flash write-enable one day - and with flashing, carts become
+// modifiable media too.
 export default function DevicesCartPage() {
 	const { host } = useEmu();
 	const slot = host.cartSlot.value;
@@ -108,6 +110,31 @@ export default function DevicesCartPage() {
 								onClick={() => host.pickAttachCartridge()}
 							/>
 						</>
+					)}
+				</div>
+				{/* The R-Time 8 passthrough clock (default: unplugged). Isolation
+				    (default on, effective only while plugged in) claims
+				    $D5B8-$D5BF for the clock so it works even under carts whose
+				    control decode spans the page (Atarimax flash, OSS, ...).
+				    Unisolated it's hardware-faithful: over such a cart the
+				    clock suspends itself (both would drive the bus) - say so
+				    instead of leaving a dead clock unexplained. */}
+				<div class="mt-4 flex flex-col gap-2">
+					<h3 class="text-xs font-semibold tracking-wide text-neutral-500 uppercase">
+						{m.rtime8}
+					</h3>
+					<OnOff
+						label={m.rtime8Enable}
+						value={host.rtime8.value}
+						onSet={(on) => host.setRtime8(on)}
+					/>
+					<OnOff
+						label={m.rtime8Isolate}
+						value={host.rtime8Shield.value}
+						onSet={(on) => host.setRtime8Shield(on)}
+					/>
+					{host.rtime8.value && host.rtime8Blocked.value && (
+						<p class="pl-1 text-sm text-neutral-500">{m.rtime8Blocked}</p>
 					)}
 				</div>
 			</div>

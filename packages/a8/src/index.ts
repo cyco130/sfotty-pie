@@ -12,6 +12,7 @@ export {
 	RomCartridge,
 	createCartridge,
 	cartTypesForSize,
+	cartTypeHasD5b8ToD5bf,
 	isCartTypeSupported,
 	suggestCartType,
 	CART_TYPES,
@@ -19,6 +20,7 @@ export {
 	type CartType,
 	type CartTypeOption,
 } from "./cartridge.ts";
+export { Rtime8Cartridge, type Rtime8Options } from "./rtime8.ts";
 export { createSioHandler, SIOV, type SioHandlerOptions } from "./sio.ts";
 export { textToAtascii, type PasteMode } from "./os-traps.ts";
 export {

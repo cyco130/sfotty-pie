@@ -95,6 +95,7 @@ Unit tests (vitest, `*.test.ts` beside the sources) cover the chips, traps, ATR/
 | [src/disk-drive.ts](src/disk-drive.ts)                              | `DiskDrive`: a stock-speed drive over an `AtrImage`.                                             |
 | [src/atr.ts](src/atr.ts)                                            | `AtrImage`: sector-level `.atr` access.                                                          |
 | [src/cartridge.ts](src/cartridge.ts)                                | The `Cartridge` port interface; `RomCartridge` (raw/`.car` images) and the `CART_TYPES` mappers. |
+| [src/rtime8.ts](src/rtime8.ts)                                      | `Rtime8Cartridge`: the R-Time 8 passthrough clock (read-only M3002 port at $D5B8-$D5BF).         |
 | [src/xex-boot.ts](src/xex-boot.ts)                                  | `buildBootDisk`: XEX -> bootable ATR via the generated loader.                                   |
 | [src/build-loader.ts](src/build-loader.ts)                          | Dev-only: assembles the XEX loader with spasm -> `xex-loader-bytes.ts`.                          |
 | [src/detect-firmware.ts](src/detect-firmware.ts)                    | Known-firmware table and detection.                                                              |

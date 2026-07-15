@@ -224,6 +224,11 @@ export const messages = {
 		rotateDown: "Rotate drives down",
 		library: "Disk library…",
 		cartLibrary: "Cart library…",
+		rtime8: "R-Time 8",
+		rtime8Enable: "Plugged in",
+		rtime8Isolate: "Isolate clock port",
+		rtime8Blocked:
+			"Suspended - the inserted cartridge uses the clock's addresses.",
 	},
 
 	shortcuts: {
@@ -663,6 +668,12 @@ export const messages = {
 			index === undefined
 				? "Disk SIO speed: standard"
 				: `Disk SIO speed: divisor ${index}`,
+		rtime8: (enabled: boolean): string =>
+			enabled ? "R-Time 8 plugged in" : "R-Time 8 removed",
+		rtime8Shield: (on: boolean): string =>
+			on
+				? "R-Time 8: clock port isolated from the cartridge"
+				: "R-Time 8: clock port shared with the cartridge",
 		saving: (name: string) => `Saving (${name})`,
 		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,

@@ -97,6 +97,16 @@ export default function DevicesKeyboardPage() {
 						{messages.shortcuts.pasteModeHint}
 					</p>
 				</div>
+				<div class="flex flex-col gap-1">
+					<OnOff
+						label={messages.shortcuts.realisticScan}
+						value={host.realisticScan.value}
+						onSet={(on) => host.setRealisticScan(on)}
+					/>
+					<p class="text-xs text-neutral-500">
+						{messages.shortcuts.realisticScanHint}
+					</p>
+				</div>
 				{/* The plug: one toggle button. Detached it goes loud (amber, like
 				    the warnings) and reads as the state; clicking replugs. */}
 				<div class="flex flex-col gap-1">
@@ -121,11 +131,6 @@ export default function DevicesKeyboardPage() {
 						{messages.shortcuts.keyboardPlugHint}
 					</p>
 				</div>
-				<OnOff
-					label={messages.shortcuts.realisticScan}
-					value={host.realisticScan.value}
-					onSet={(on) => host.setRealisticScan(on)}
-				/>
 			</div>
 		</DevicesFrame>
 	);

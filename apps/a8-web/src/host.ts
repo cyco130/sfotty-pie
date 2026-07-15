@@ -473,7 +473,9 @@ export class EmulatorHost {
 	// where Shift and Control are LINES. The host holds the composed keys
 	// and drives the meta lines with the union of the held keys' bits plus
 	// the standalone SHIFT command - so overlapping shifted presses and a
-	// held Shift key can't release each other's line early.
+	// held Shift key can't release each other's line early. (Exception:
+	// in Character mode held composed keys own the SHIFT line - see
+	// #syncMetaLines.)
 	#heldComposed = new Map<number, number>(); // scan code -> composed code
 	#shiftCommandHeld = false;
 
@@ -481,11 +483,13 @@ export class EmulatorHost {
 	matrixKeyDown(code: number): void {
 		const scan = code & 0x3f;
 		const keyboard = this.#emulator.machine.keyboard;
-		// Forgiving mode (the default): lift the previous keys first, so a
-		// fast-typed overlap never trips the matrix's two-keys-held debounce
-		// block. The scan itself stays real - the matrix just only ever
-		// holds the newest key.
-		if (!this.realisticScan.value) {
+		// Forgiving mode (the default - and always in Character mode, where
+		// the character channel composes keystrokes itself and realistic
+		// two-keys-held blocking would garble fast typing): lift the
+		// previous keys first, so a fast-typed overlap never trips the
+		// matrix's debounce block. The scan itself stays real - the matrix
+		// just only ever holds the newest key.
+		if (!this.realisticScan.value || this.keyboardMode.value === "character") {
 			for (const held of this.#heldComposed.keys()) {
 				if (held === scan) continue;
 				keyboard.releaseKey(held);
@@ -524,7 +528,17 @@ export class EmulatorHost {
 		const keyboard = this.#emulator.machine.keyboard;
 		let bits = 0;
 		for (const code of this.#heldComposed.values()) bits |= code;
-		if (this.#shiftCommandHeld || bits & 0x40) {
+		// In Character mode a held composed key owns the SHIFT line: the
+		// produced character already carries the Shift it wants, and the
+		// physical Shift key (the standalone SHIFT command) must not leak
+		// in - on a layout where Shift+8 types "*", the held Shift would
+		// otherwise scan the asterisk key as Shift+asterisk, which is "^".
+		// With the matrix idle (or in Positional mode) the standalone
+		// Shift drives the line as a plain held key, so games that sense
+		// Shift keep working.
+		const composedOwnsShift =
+			this.keyboardMode.value === "character" && this.#heldComposed.size > 0;
+		if ((this.#shiftCommandHeld && !composedOwnsShift) || bits & 0x40) {
 			keyboard.pressMetaKey(KEYBOARD_LINES.SHIFT);
 		} else {
 			keyboard.releaseMetaKey(KEYBOARD_LINES.SHIFT);

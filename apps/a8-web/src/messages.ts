@@ -243,6 +243,8 @@ export const messages = {
 		keyboardPlugHint:
 			"Detached, keystrokes no longer reach the machine - and an XEGS senses the absence and boots to its built-in game.",
 		realisticScan: "Realistic key scan",
+		realisticScanHint:
+			"Positional mode only - keys can jam, like the hardware. Character mode composes keystrokes itself and always uses the forgiving scan.",
 		layoutIntro:
 			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout when available.",
 		layoutAuto: "Auto-detect (from browser)",

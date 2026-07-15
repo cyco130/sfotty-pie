@@ -375,7 +375,7 @@ export const commands = {
 	DOWNLOAD_D1: { label: "DOWNLOAD_D1", run: ({ host }) => host.downloadDisk() },
 	SAVE_D1_TO_LIBRARY: {
 		label: "SAVE_D1_TO_LIBRARY",
-		run: ({ host }) => void host.saveD1ToLibrary(),
+		run: ({ host }) => void host.saveDiskToLibrary(1),
 	},
 
 	// Machine configuration. Each applies the change and reboots into it

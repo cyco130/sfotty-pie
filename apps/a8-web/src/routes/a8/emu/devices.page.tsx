@@ -1,6 +1,8 @@
-import { useState } from "preact/hooks";
-import type { EmulatorHost } from "../../../host.ts";
+import { useEffect, useState } from "preact/hooks";
+import type { DriveBankEntry, EmulatorHost } from "../../../host.ts";
+import { Icon, type IconName } from "../../../icon.tsx";
 import { messages } from "../../../messages.ts";
+import { navigate } from "../../../navigate.ts";
 import { OnOff } from "../../../settings-controls.tsx";
 import { DevicesFrame } from "./devices-frame.tsx";
 import { useEmu } from "./emu-context.ts";
@@ -10,6 +12,12 @@ import { useEmu } from "./emu-context.ts";
 // behavior above the devices it governs), then the drive bank.
 export default function DevicesPage() {
 	const { host } = useEmu();
+	// Poll the drive bank while the tab is open: a guest write flips a disk's
+	// modified flag with no host action to piggyback a refresh on.
+	useEffect(() => {
+		const timer = setInterval(() => host.refreshDriveBank(), 500);
+		return () => clearInterval(timer);
+	}, [host]);
 	return (
 		<DevicesFrame active="disks">
 			<div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
@@ -31,133 +39,213 @@ export default function DevicesPage() {
 }
 
 // ---------------------------------------------------------------------------
-// The drive bank - MOCK, nothing is wired up. A non-functional pass so the
-// layout can be judged in context; all eight drives are always visible (no
-// add/remove - familiar emulators and AspeQt show the full bank). Three
-// states per drive: Empty (no disk - no power control, on-but-empty isn't
-// modeled), Active (disk + on, answers the bus), Parked (disk + off - keeps
-// its media like the favorites shelf keeps games; the bus hears nothing).
-// D1: mirrors the live attachment for realism; D2:/D3: are staged samples
-// (an active write-protected disk, a parked disk), the rest empty.
-
-interface MockDisk {
-	name: string;
-	density: string; // ATR density tag (SD/ED/DD) - hardware tokens
-	writeProtected: boolean;
-}
-
-interface MockDrive {
-	unit: number;
-	on: boolean; // meaningful only with a disk in: on = attached to the bus
-	disk: MockDisk | null;
-}
+// The drive bank: all eight drives, always (no add/remove - familiar
+// emulators and AspeQt show the full bank). Three states per drive: Empty
+// (no disk - no power control, on-but-empty isn't modeled), Active (disk +
+// on, answers the bus), Parked (disk + off - the disk is kept, the bus
+// hears nothing). Single-line rows with icon actions for compactness.
 
 function DriveBank({ host }: { host: EmulatorHost }) {
-	const d1Name = host.attachments.value.drives[0] ?? null;
-	const drives: MockDrive[] = [
-		{
-			unit: 1,
-			on: true,
-			disk: d1Name
-				? { name: d1Name, density: "SD", writeProtected: false }
-				: null,
-		},
-		{
-			unit: 2,
-			on: true,
-			disk: { name: "sample.atr", density: "DD", writeProtected: true },
-		},
-		{
-			unit: 3,
-			on: false,
-			disk: { name: "parked.atr", density: "SD", writeProtected: false },
-		},
-		...[4, 5, 6, 7, 8].map((unit) => ({ unit, on: false, disk: null })),
-	];
+	const m = messages.devices;
 	return (
-		<div class="mt-3 flex flex-col gap-1">
-			{drives.map((drive) => (
-				<DriveRow key={drive.unit} drive={drive} />
+		<div class="mt-3 flex flex-col gap-0.5">
+			{/* The bank toolbar: rotate up (D2: becomes D1:, D1: wraps to D8:,
+			    the multi-disk "next disk" gesture) and its inverse on the left;
+			    the other door to disks - the library, pre-filtered - on the
+			    right. */}
+			<div class="flex items-center gap-1.5 pl-1">
+				<DriveAction
+					name="arrow-up"
+					title={m.rotateUp}
+					onClick={() => host.rotateDrives("up")}
+				/>
+				<DriveAction
+					name="arrow-down"
+					title={m.rotateDown}
+					onClick={() => host.rotateDrives("down")}
+				/>
+				<button
+					type="button"
+					class="ml-auto text-sm text-neutral-500 hover:underline"
+					onClick={() => navigate("/a8/emu/library?type=disk")}
+				>
+					{m.library}
+				</button>
+			</div>
+			{host.driveBank.value.map((info, index) => (
+				<DriveRow key={index} host={host} unit={index + 1} info={info} />
 			))}
 		</div>
 	);
 }
 
-// A small text action in a drive card (mock: no onClick yet).
-function DriveAction({ label }: { label: string }) {
+// An icon action in a drive row. `hidden` renders it invisible but
+// space-holding, so the icon columns stay aligned across rows; `disabled`
+// grays it out (e.g. save with nothing modified).
+function DriveAction({
+	name,
+	title,
+	tone = "text-neutral-400 hover:text-neutral-700",
+	hidden = false,
+	disabled = false,
+	onClick,
+}: {
+	name: IconName;
+	title: string;
+	tone?: string;
+	hidden?: boolean;
+	disabled?: boolean;
+	onClick: () => void;
+}) {
 	return (
 		<button
 			type="button"
-			class="text-xs text-neutral-500 underline-offset-2 hover:text-neutral-800 hover:underline"
+			class={`shrink-0 ${disabled ? "text-neutral-200" : tone} ${
+				hidden ? "invisible" : ""
+			}`}
+			title={title}
+			aria-label={title}
+			disabled={disabled}
+			onClick={onClick}
 		>
-			{label}
+			<Icon name={name} class="size-4" />
 		</button>
 	);
 }
 
-function DriveRow({ drive }: { drive: MockDrive }) {
+function DriveRow({
+	host,
+	unit,
+	info,
+}: {
+	host: EmulatorHost;
+	unit: number;
+	info: DriveBankEntry | null;
+}) {
 	const m = messages.devices;
 	return (
-		<div class="rounded-sm border border-neutral-200 px-2 py-1.5">
-			<div class="flex items-center gap-2">
-				{/* Drive power - only with a disk in (an empty drive has no
-				    on-state to toggle). Off keeps the disk but leaves the bus
-				    silent. */}
-				{drive.disk && (
-					<button
-						type="button"
-						class="shrink-0 p-0.5"
-						title={m.drivePower}
-						aria-label={m.drivePower}
-						aria-pressed={drive.on}
-					>
-						<span
-							class={`block size-2 rounded-full ${
-								drive.on ? "bg-green-500" : "bg-neutral-300"
-							}`}
-						/>
-					</button>
-				)}
-				{/* The slot-label column is the alignment grid the other tabs'
-				    cards will reuse; empty drives (no power dot) indent to it. */}
-				<span
-					class={`w-7 shrink-0 text-sm font-medium text-neutral-700 ${
-						drive.disk ? "" : "ml-5"
-					}`}
+		<div class="flex items-center gap-2 rounded-sm p-1 hover:bg-neutral-50">
+			{/* The leading controls: move chevrons (reorder-handle style),
+			    write-protect, and drive power. Empty drives have none of the
+			    three - invisible placeholders keep the columns aligned. */}
+			<div class="flex shrink-0 items-center gap-1.5">
+				<DriveAction
+					name="chevron-up"
+					title={m.moveUp}
+					hidden={!info || unit === 1}
+					onClick={() => host.moveDrive(unit, "up")}
+				/>
+				<DriveAction
+					name="chevron-down"
+					title={m.moveDown}
+					hidden={!info || unit === 8}
+					onClick={() => host.moveDrive(unit, "down")}
+				/>
+				<DriveAction
+					name={info?.writeProtected ? "lock" : "lock-open"}
+					title={m.writeProtect}
+					tone={
+						info?.writeProtected
+							? "text-amber-500 hover:text-amber-600"
+							: "text-neutral-300 hover:text-neutral-500"
+					}
+					hidden={!info}
+					onClick={() =>
+						info && host.setWriteProtect(unit, !info.writeProtected)
+					}
+				/>
+				<button
+					type="button"
+					class={`shrink-0 p-0.5 ${info ? "" : "invisible"}`}
+					title={m.drivePower}
+					aria-label={m.drivePower}
+					aria-pressed={info?.on ?? false}
+					onClick={() => host.toggleDriveOn(unit)}
 				>
-					D{drive.unit}:
-				</span>
-				{drive.disk ? (
-					<>
-						<span class="shrink-0 rounded-sm bg-neutral-100 px-1 py-px font-mono text-[10px] text-neutral-500">
-							{drive.disk.density}
-						</span>
+					<span
+						class={`block size-2 rounded-full ${
+							info?.on ? "bg-green-500" : "bg-neutral-300"
+						}`}
+					/>
+				</button>
+			</div>
+			<span class="w-7 shrink-0 text-sm font-medium text-neutral-700">
+				D{unit}:
+			</span>
+			{info ? (
+				<>
+					<span class="shrink-0 rounded-sm bg-neutral-100 px-1 py-px font-mono text-[10px] text-neutral-500">
+						{info.density}
+					</span>
+					{/* The name links to the disk's library page (id-less mounts
+					    have none - plain text). */}
+					{info.sourceId ? (
+						<button
+							type="button"
+							class={`min-w-0 flex-1 truncate text-left text-sm hover:underline ${
+								info.on ? "text-neutral-800" : "text-neutral-400"
+							}`}
+							title={info.name}
+							onClick={() =>
+								navigate(
+									`/a8/emu/library/${encodeURIComponent(info.sourceId!)}` +
+										`?back=${encodeURIComponent("/a8/emu/devices")}`,
+								)
+							}
+						>
+							{info.name}
+						</button>
+					) : (
 						<span
 							class={`min-w-0 flex-1 truncate text-sm ${
-								drive.on ? "text-neutral-800" : "text-neutral-400"
+								info.on ? "text-neutral-800" : "text-neutral-400"
 							}`}
-							title={drive.disk.name}
+							title={info.name}
 						>
-							{drive.disk.name}
+							{info.name}
 						</span>
-					</>
-				) : (
-					<>
-						<span class="flex-1 text-sm text-neutral-400">{m.driveEmpty}</span>
-						<DriveAction label={m.insert} />
-					</>
-				)}
-			</div>
-			{drive.disk && (
-				<div class="mt-1 flex items-center gap-3 pl-7">
-					<DriveAction label={m.swap} />
-					<DriveAction label={m.eject} />
-					<DriveAction label={m.saveAs} />
-					<label class="ml-auto flex items-center gap-1 text-xs text-neutral-500">
-						<input type="checkbox" checked={drive.disk.writeProtected} />
-						{m.writeProtect}
-					</label>
-				</div>
+					)}
+					<div class="flex shrink-0 items-center gap-1.5">
+						<DriveAction
+							name="save"
+							title={m.saveToLibrary}
+							disabled={!info.modified}
+							onClick={() => void host.saveDiskToLibrary(unit)}
+						/>
+						<DriveAction
+							name="save-all"
+							title={m.saveAsNew}
+							disabled={!info.modified}
+							onClick={() => void host.saveDiskAsNew(unit)}
+						/>
+						<DriveAction
+							name="folder-open"
+							title={m.openFromComputer}
+							onClick={() => host.pickAttachDisk(unit)}
+						/>
+						<DriveAction
+							name="close"
+							title={m.eject}
+							onClick={() => host.detachDisk(unit)}
+						/>
+					</div>
+				</>
+			) : (
+				<>
+					<button
+						type="button"
+						class="flex-1 truncate text-left text-sm text-neutral-400 hover:text-neutral-600 hover:underline"
+						title={m.openFromComputer}
+						onClick={() => host.pickAttachDisk(unit)}
+					>
+						{m.driveEmpty}
+					</button>
+					<DriveAction
+						name="folder-open"
+						title={m.openFromComputer}
+						onClick={() => host.pickAttachDisk(unit)}
+					/>
+				</>
 			)}
 		</div>
 	);

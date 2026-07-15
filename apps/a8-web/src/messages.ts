@@ -91,6 +91,7 @@ export const messages = {
 
 	bottomBar: {
 		cartridge: "Cart:",
+		devices: "Devices…",
 		crashed: "CPU crashed (CIM)",
 		keyboardDetached: "Keyboard detached",
 		attachKeyboard: "Click to attach the keyboard",
@@ -211,11 +212,16 @@ export const messages = {
 		divisorValue: (n: number): string => `divisor ${n}`,
 		driveEmpty: "Empty",
 		drivePower: "Drive power",
-		insert: "Insert…",
-		swap: "Swap…",
+		openFromComputer: "Open from computer",
 		eject: "Eject",
-		saveAs: "Save as…",
+		saveToLibrary: "Save to library",
+		saveAsNew: "Save to library as new item",
 		writeProtect: "Write-protect",
+		moveUp: "Move up",
+		moveDown: "Move down",
+		rotateUp: "Rotate drives up",
+		rotateDown: "Rotate drives down",
+		library: "Disk library…",
 	},
 
 	shortcuts: {
@@ -375,6 +381,7 @@ export const messages = {
 			boot: "Boot",
 			attachDisk: (unit: number): string => `Attach to D${unit}:`,
 			attachTarget: "Target drive",
+			attachedTo: (drives: string): string => `Attached to ${drives}`,
 			replacesDisk: (name: string): string => `Replaces ${name}`,
 			attachCart: "Attach cartridge",
 			download: "Download",
@@ -587,12 +594,15 @@ export const messages = {
 			"Couldn't read the clipboard (denied or unsupported).",
 		nothingToPaste: "Nothing pasteable in the clipboard.",
 		pasteUnsupported: "Paste needs a recognized OS ROM.",
-		noWritableDisk: "No writable disk in D1: to download.",
-		noDiskToSave: "No disk in D1: to save.",
+		noWritableDisk: (unit: number): string =>
+			`No writable disk in D${unit}: to download.`,
+		noDiskToSave: (unit: number): string => `No disk in D${unit}: to save.`,
 		notLibraryDisk: "Only a disk attached from the library can be saved.",
 		noDiskToDetach: (unit: number): string => `No disk in D${unit}: to detach.`,
 		driveEmpty: (unit: number): string => `No disk in D${unit}:.`,
 		noDisksAttached: "No disks attached.",
+		syntheticProtected:
+			"A generated boot disk stays write-protected - it isn't real media.",
 		notACartridge: "Not a cartridge image.",
 		noCartridge: "No cartridge to detach.",
 		fullscreenUnavailable: "Full screen isn't available in this browser.",
@@ -619,6 +629,12 @@ export const messages = {
 		detachingAllDisks: "Detaching all disks",
 		driveOn: (unit: number, on: boolean): string =>
 			on ? `Turning on D${unit}:` : `Turning off D${unit}: (disk kept)`,
+		writeProtect: (unit: number, on: boolean): string =>
+			`D${unit}: write-protect ${on ? "on" : "off"}`,
+		movingDrive: (from: number, to: number): string =>
+			`Moving D${from}: to D${to}:`,
+		savedAsNewItem: (name: string): string =>
+			`Saved (${name}) to the library as a new item`,
 		rotatingDrives: (up: boolean): string =>
 			`Rotating drives ${up ? "up" : "down"}`,
 		attachingCartridge: (name: string) => `Attaching cartridge (${name})`,

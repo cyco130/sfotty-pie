@@ -12,7 +12,7 @@ import {
 } from "../../../images/library.ts";
 import type { DerivedMeta, ImageType } from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
-import { navigate } from "../../../navigate.ts";
+import { currentUrl, navigate } from "../../../navigate.ts";
 import { TypePill } from "../../../type-pill.tsx";
 import { useUrlParams } from "../../../url-params.ts";
 import { useEmu } from "./emu-context.ts";
@@ -580,7 +580,9 @@ export default function LibraryPage() {
 									type="button"
 									class="flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left hover:bg-neutral-100"
 									onClick={() =>
-										navigate(`/a8/emu/library/${encodeURIComponent(entry.id)}`)
+										navigate(
+											`/a8/emu/library/${encodeURIComponent(entry.id)}?back=${encodeURIComponent(currentUrl())}`,
+										)
 									}
 								>
 									<TypePill type={entry.derived.type} />
@@ -620,7 +622,7 @@ export default function LibraryPage() {
 											class="block w-full truncate text-left text-neutral-800 hover:underline"
 											onClick={() =>
 												navigate(
-													`/a8/emu/library/${encodeURIComponent(entry.id)}`,
+													`/a8/emu/library/${encodeURIComponent(entry.id)}?back=${encodeURIComponent(currentUrl())}`,
 												)
 											}
 										>

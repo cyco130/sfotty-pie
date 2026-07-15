@@ -52,7 +52,13 @@ export class AtrImage {
 
 	readonly sectorSize: 128 | 256;
 	readonly sectorCount: number;
-	readonly writeProtected: boolean;
+	/** The write-protect notch: mutable, like flipping the tab on a real
+	 *  disk - hosts may toggle it on a mounted image. */
+	writeProtected: boolean;
+
+	/** Set when a sector write lands - the "unsaved changes" sense. Hosts
+	 *  clear it after persisting the image; the machine never reads it. */
+	dirty = false;
 
 	/**
 	 * The contents of a sector (1-based), or `null` when out of range. The
@@ -77,6 +83,7 @@ export class AtrImage {
 		if (!loc) return false;
 		const n = Math.min(loc.length, data.length);
 		for (let i = 0; i < n; i++) this.#data[loc.offset + i] = data[i]! & 0xff;
+		this.dirty = true;
 		return true;
 	}
 

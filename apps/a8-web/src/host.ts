@@ -126,19 +126,42 @@ export interface Toast {
 
 /** A mounted drive slot: the disk, its display name, the library entry it
  *  came from (if any), and whether the drive is on (attached to the bus;
- *  off = parked, the disk is kept but the bus hears nothing). */
+ *  off = parked, the disk is kept but the bus hears nothing). `synthetic`
+ *  marks a generated boot disk (an XEX's loader) - not real media, so its
+ *  write-protection can't be lifted. */
 interface DriveSlot {
 	disk: AtrImage;
 	name: string;
 	sourceId?: string;
 	on: boolean;
+	synthetic?: boolean;
 }
 
 /** The fixed drive bank size (D1:-D8:, the SIO device-ID range). */
 export const DRIVE_COUNT = 8;
 
-function emptyDrives(): (DriveSlot | null)[] {
+function emptyDrives<T>(): (T | null)[] {
 	return Array.from({ length: DRIVE_COUNT }, () => null);
+}
+
+/** A mounted drive as the devices view sees it (see {@link EmulatorHost.driveBank}). */
+export interface DriveBankEntry {
+	name: string;
+	/** The library entry the disk came from - its details-page link; null
+	 *  for an id-less mount. */
+	sourceId: string | null;
+	/** Attached to the bus; off = parked (the disk is kept). */
+	on: boolean;
+	writeProtected: boolean;
+	/** Unsaved in-session writes (the disk's dirty flag). */
+	modified: boolean;
+	/** The ATR density tag: SD (128b/720), ED (128b/1040), DD (256b). */
+	density: "SD" | "ED" | "DD";
+}
+
+function density(disk: AtrImage): DriveBankEntry["density"] {
+	if (disk.sectorSize === 256) return "DD";
+	return disk.sectorCount > 720 ? "ED" : "SD";
 }
 
 /**
@@ -303,6 +326,10 @@ export class EmulatorHost {
 		cartridge: string | null;
 		drives: (string | null)[];
 	}>({ cartridge: null, drives: [null] });
+
+	/** The drive bank for the devices view (index 0 = D1:; null = empty):
+	 *  each mounted slot's name, power, write-protect, and ATR density. */
+	readonly driveBank = signal<(DriveBankEntry | null)[]>(emptyDrives());
 
 	/** True once the CPU has jammed (CIM). */
 	readonly crashed = signal(false);
@@ -1251,12 +1278,14 @@ export class EmulatorHost {
 		this.#bootImage(await getImageBytes(id), entry.user.displayName, id);
 	}
 
-	/** Attach a library disk image to a drive (live, no reboot). */
-	async attachDisk(id: string, unit = 1): Promise<void> {
+	/** Attach a library disk image to a drive (live, no reboot). Resolves
+	 *  true when the disk actually mounted - callers navigating afterwards
+	 *  (the item view heads to the devices view) skip it on failure. */
+	async attachDisk(id: string, unit = 1): Promise<boolean> {
 		await readyLibrary();
 		const entry = getImage(id);
-		if (!entry) return;
-		this.#attachDiskBytes(
+		if (!entry) return false;
+		return this.#attachDiskBytes(
 			await getImageBytes(id),
 			entry.user.displayName,
 			id,
@@ -1438,7 +1467,7 @@ export class EmulatorHost {
 		// rest. (Attach, below, instead adds to the running machine in place.)
 		let cartridge: { cart: Cartridge; name: string; sourceId?: string } | null =
 			null;
-		let disk: { disk: AtrImage; name: string; sourceId?: string } | null = null;
+		let disk: Omit<DriveSlot, "on"> | null = null;
 		try {
 			if (format === "atr") {
 				disk = { disk: new AtrImage(contents), name, sourceId };
@@ -1446,7 +1475,12 @@ export class EmulatorHost {
 				// XEX boots from a generated in-memory disk (its loader). The source
 				// id is kept so the boot can be resumed (re-built from the XEX), but
 				// saveD1ToLibrary refuses it - its synthetic disk isn't the XEX.
-				disk = { disk: buildBootDisk(contents), name, sourceId };
+				disk = {
+					disk: buildBootDisk(contents),
+					name,
+					sourceId,
+					synthetic: true,
+				};
 			} else {
 				cartridge = { cart: createCartridge(contents), name, sourceId };
 			}
@@ -1502,15 +1536,15 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Save the disk mounted in D1: as an `.atr`, including any sectors the
-	 * running machine has written this session (writes live only in memory, so
-	 * this is how you keep them). Writable disks only - the synthetic XEX boot
+	 * Save a drive's disk as an `.atr`, including any sectors the running
+	 * machine has written this session (writes live only in memory, so this
+	 * is how you keep them). Writable disks only - the synthetic XEX boot
 	 * disk is write-protected and isn't a real disk worth saving.
 	 */
-	downloadDisk(): void {
-		const drive = this.#drives[0];
+	downloadDisk(unit = 1): void {
+		const drive = this.#drives[unit - 1];
 		if (!drive || drive.disk.writeProtected) {
-			this.toast(messages.errors.noWritableDisk, "warning");
+			this.toast(messages.errors.noWritableDisk(unit), "warning");
 			return;
 		}
 
@@ -1529,15 +1563,15 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Save the D1: disk back to the library item it was attached from - keeping
-	 * any sectors written this session. Only a disk attached from one of your
-	 * library uploads can be saved (built-ins are read-only; a file-loaded disk
-	 * has no library item - use Download D1: to export those).
+	 * Save a drive's disk back to the library item it was attached from -
+	 * keeping any sectors written this session. Only a disk attached from one
+	 * of your library uploads can be saved (built-ins are read-only; a
+	 * file-loaded disk has no library item - use the download for those).
 	 */
-	async saveD1ToLibrary(): Promise<void> {
-		const drive = this.#drives[0];
+	async saveDiskToLibrary(unit = 1): Promise<void> {
+		const drive = this.#drives[unit - 1];
 		if (!drive) {
-			this.toast(messages.errors.noDiskToSave, "warning");
+			this.toast(messages.errors.noDiskToSave(unit), "warning");
 			return;
 		}
 		// Only a real disk entry can be overwritten - not a XEX (its D1: is a
@@ -1551,7 +1585,32 @@ export class EmulatorHost {
 			this.toast(messages.errors.notLibraryDisk, "warning");
 			return;
 		}
+		drive.disk.dirty = false;
+		this.#refreshAttachments();
 		this.toast(messages.toasts.savedToLibrary(drive.name));
+	}
+
+	/**
+	 * Save a drive's disk (in-session writes included) to the library as a
+	 * new item, and repoint the slot at it - subsequent in-place saves go to
+	 * the new item, Save As style.
+	 */
+	async saveDiskAsNew(unit = 1): Promise<void> {
+		const drive = this.#drives[unit - 1];
+		if (!drive) {
+			this.toast(messages.errors.noDiskToSave(unit), "warning");
+			return;
+		}
+		const id = await addOrFindImage(drive.disk.toBytes(), drive.name, false);
+		if (!id) {
+			this.toast(messages.errors.unrecognized, "warning");
+			return;
+		}
+		drive.sourceId = id;
+		drive.disk.dirty = false;
+		this.#refreshAttachments();
+		this.#saveMedia();
+		this.toast(messages.toasts.savedAsNewItem(drive.name));
 	}
 
 	/**
@@ -1575,14 +1634,14 @@ export class EmulatorHost {
 		name: string,
 		sourceId?: string,
 		unit = 1,
-	): void {
+	): boolean {
 		let disk: AtrImage;
 		try {
 			disk = new AtrImage(contents);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.toast(`${name}: ${message}`, "error");
-			return;
+			return false;
 		}
 
 		this.#drives[unit - 1] = { disk, name, sourceId, on: true };
@@ -1592,6 +1651,7 @@ export class EmulatorHost {
 		this.#saveMedia();
 		this.#noteUsed(sourceId);
 		this.toast(messages.toasts.attachingDisk(unit, name));
+		return true;
 	}
 
 	/** Detach the disk from a drive of the running machine (live, no reboot). */
@@ -1650,6 +1710,24 @@ export class EmulatorHost {
 		this.setDriveOn(unit, !slot.on);
 	}
 
+	/** Write-protect a drive's disk (live - the drive's status frame follows
+	 *  the flag). In-memory only; not persisted across a reload. A synthetic
+	 *  boot disk (an XEX's loader) stays protected - it isn't real media. */
+	setWriteProtect(unit: number, on: boolean): void {
+		const slot = this.#drives[unit - 1];
+		if (!slot) {
+			this.toast(messages.errors.driveEmpty(unit), "warning");
+			return;
+		}
+		if (slot.synthetic && !on) {
+			this.toast(messages.errors.syntheticProtected, "warning");
+			return;
+		}
+		slot.disk.writeProtected = on;
+		this.#refreshAttachments();
+		this.toast(messages.toasts.writeProtect(unit, on));
+	}
+
 	/**
 	 * Rotate the drive slots by one, wrapping - up moves each disk to the
 	 * next-lower drive (D2: becomes D1:, D1: wraps to D8:), the multi-disk
@@ -1672,6 +1750,24 @@ export class EmulatorHost {
 		this.#refreshAttachments();
 		this.#saveMedia();
 		this.toast(messages.toasts.rotatingDrives(direction === "up"));
+	}
+
+	/**
+	 * Exchange a drive's slot with its neighbor (whole slot, parked state
+	 * included) - the per-drive nudge; no wrap, that's what rotate is for.
+	 */
+	moveDrive(unit: number, direction: "up" | "down"): void {
+		const target = direction === "up" ? unit - 1 : unit + 1;
+		if (target < 1 || target > DRIVE_COUNT) return;
+		const d = this.#drives;
+		const moved = d[unit - 1] ?? null;
+		d[unit - 1] = d[target - 1] ?? null;
+		d[target - 1] = moved;
+		this.#syncDriveToMachine(unit);
+		this.#syncDriveToMachine(target);
+		this.#refreshAttachments();
+		this.#saveMedia();
+		this.toast(messages.toasts.movingDrive(unit, target));
 	}
 
 	// Mirror a slot onto the machine: the drive holds the disk only while the
@@ -2099,6 +2195,26 @@ export class EmulatorHost {
 			cartridge: this.#cartridge?.name ?? basic,
 			drives: this.#drives.map((drive) => drive?.name ?? null),
 		};
+		this.driveBank.value = this.#drives.map(
+			(slot) =>
+				slot && {
+					name: slot.name,
+					sourceId: slot.sourceId ?? null,
+					on: slot.on,
+					writeProtected: slot.disk.writeProtected,
+					modified: slot.disk.dirty,
+					density: density(slot.disk),
+				},
+		);
+	}
+
+	/**
+	 * Recompute the drive bank (and attachment labels). The devices view
+	 * polls this while open: a guest write flips a disk's dirty flag with no
+	 * host action to piggyback on.
+	 */
+	refreshDriveBank(): void {
+		this.#refreshAttachments();
 	}
 
 	// Persist this tab's mounted media (the library ids in each slot) plus the
@@ -2154,15 +2270,13 @@ export class EmulatorHost {
 					const bytes = await getImageBytes(saved.id);
 					// An XEX resumes via its synthetic boot disk - a D1:-only
 					// arrangement (that's the slot a boot fills).
-					const disk =
-						entry.derived.type === "xex" && unit === 1
-							? buildBootDisk(bytes)
-							: new AtrImage(bytes);
+					const synthetic = entry.derived.type === "xex" && unit === 1;
 					this.#drives[unit - 1] = {
-						disk,
+						disk: synthetic ? buildBootDisk(bytes) : new AtrImage(bytes),
 						name: entry.user.displayName,
 						sourceId: saved.id,
 						on: saved.on,
+						synthetic,
 					};
 				}
 			} catch {

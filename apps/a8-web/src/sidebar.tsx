@@ -37,7 +37,12 @@ function DetailsButton({ id }: { id: string }) {
 			class="shrink-0 text-neutral-400 hover:text-neutral-700"
 			title={messages.recents.details}
 			aria-label={messages.recents.details}
-			onClick={() => navigate(`/a8/emu/library/${encodeURIComponent(id)}`)}
+			onClick={() =>
+				navigate(
+					`/a8/emu/library/${encodeURIComponent(id)}` +
+						`?back=${encodeURIComponent("/a8/emu/menu")}`,
+				)
+			}
 		>
 			<Icon name="info" class="size-4" />
 		</button>

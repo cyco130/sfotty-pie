@@ -80,14 +80,29 @@ function detailRows(entry: ImageEntry): { label: string; value: string }[] {
 	}
 }
 
-function BackLink() {
+// Where the back link (and a post-delete return) goes: the `back` query
+// param whoever linked here set - the library list carries its search/filter
+// state, the devices view and the menu link with their own paths. Only
+// in-app panel paths are honored; anything else falls back to the list.
+function backTarget(): { to: string; label: string } {
+	const back = new URLSearchParams(window.location.search).get("back");
+	const to = back?.startsWith("/a8/emu/") ? back : LIBRARY;
+	const label = to.startsWith("/a8/emu/devices")
+		? messages.devices.title
+		: to.startsWith("/a8/emu/menu")
+			? messages.topBar.menu
+			: messages.library.title;
+	return { to, label };
+}
+
+function BackLink({ to, label }: { to: string; label: string }) {
 	return (
 		<button
 			type="button"
 			class="self-start text-xs text-neutral-500 hover:underline"
-			onClick={() => navigate(LIBRARY, { replace: true })}
+			onClick={() => navigate(to, { replace: true })}
 		>
-			‹ {messages.library.title}
+			‹ {label}
 		</button>
 	);
 }
@@ -211,19 +226,39 @@ function TagEditor({ entry }: { entry: ImageEntry }) {
 /**
  * The disk attach control: a button that attaches to the selected drive
  * (D1: by default, so the common case stays one click) beside a target-drive
- * selector. Picking an occupied slot notes what the attach would replace -
- * an informed overwrite instead of a surprise (parked disks included).
+ * selector. Notes where this image is already attached, disables the button
+ * when the target slot holds this very image (a self-replace), and names
+ * what a different occupant would be replaced by - an informed overwrite
+ * instead of a surprise (parked disks included).
  */
 function AttachToDrive({ host, id }: { host: EmulatorHost; id: string }) {
 	const [unit, setUnit] = useState(1);
-	const occupant = host.attachments.value.drives[unit - 1] ?? null;
+	const bank = host.driveBank.value;
+	const target = bank[unit - 1] ?? null;
+	const selfReplace = target?.sourceId === id;
+	const attachedTo = bank.flatMap((slot, index) =>
+		slot?.sourceId === id ? [`D${index + 1}:`] : [],
+	);
 	return (
 		<div class="flex flex-col gap-0.5">
 			<div class="flex gap-1">
 				<button
 					type="button"
-					class="min-w-0 flex-1 rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
-					onClick={() => void host.attachDisk(id, unit)}
+					class={`min-w-0 flex-1 rounded-sm border px-2 py-1.5 text-sm ${
+						selfReplace
+							? "border-neutral-200 text-neutral-300"
+							: "border-neutral-300 text-neutral-800 hover:bg-neutral-100"
+					}`}
+					disabled={selfReplace}
+					onClick={() =>
+						// Attaching lands on the devices view - the drive bank is
+						// the natural "did it mount" feedback - wherever this page
+						// was reached from (the back trail is for going back, not
+						// for after an action).
+						void host.attachDisk(id, unit).then((attached) => {
+							if (attached) navigate("/a8/emu/devices", { replace: true });
+						})
+					}
 				>
 					{messages.library.actions.attachDisk(unit)}
 				</button>
@@ -234,16 +269,21 @@ function AttachToDrive({ host, id }: { host: EmulatorHost; id: string }) {
 					title={messages.library.actions.attachTarget}
 					onChange={(event) => setUnit(Number(event.currentTarget.value))}
 				>
-					{host.attachments.value.drives.map((_, index) => (
+					{bank.map((_, index) => (
 						<option key={index} value={String(index + 1)}>
 							D{index + 1}:
 						</option>
 					))}
 				</select>
 			</div>
-			{occupant && (
-				<p class="truncate text-xs text-neutral-500" title={occupant}>
-					{messages.library.actions.replacesDisk(occupant)}
+			{attachedTo.length > 0 && (
+				<p class="truncate text-xs text-neutral-500">
+					{messages.library.actions.attachedTo(attachedTo.join(", "))}
+				</p>
+			)}
+			{target && !selfReplace && (
+				<p class="truncate text-xs text-neutral-500" title={target.name}>
+					{messages.library.actions.replacesDisk(target.name)}
 				</p>
 			)}
 		</div>
@@ -254,6 +294,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	const { host } = useEmu();
 	const [ready, setReady] = useState(false);
 	useEffect(() => void readyLibrary().then(() => setReady(true)), []);
+	const back = backTarget();
 
 	let id = rawId;
 	try {
@@ -301,7 +342,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 		return (
 			<PanelFrame title={messages.library.title}>
 				<div class="flex min-h-0 flex-1 flex-col gap-3">
-					<BackLink />
+					<BackLink to={back.to} label={back.label} />
 					<p class="text-sm text-neutral-400">
 						{ready ? messages.library.notFound : messages.library.loading}
 					</p>
@@ -381,7 +422,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 			return;
 		}
 		await removeImage(entry.id);
-		navigate(LIBRARY, { replace: true });
+		navigate(back.to, { replace: true });
 		host.toast(messages.library.deleted(entry.user.displayName));
 	};
 
@@ -415,7 +456,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 	return (
 		<PanelFrame title={entry.user.displayName}>
 			<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
-				<BackLink />
+				<BackLink to={back.to} label={back.label} />
 
 				<NameEditor
 					key={entry.id}

@@ -20,6 +20,7 @@ import {
 	updateUserMeta,
 } from "../../../images/library.ts";
 import { CANON_EXT } from "../../../images/metadata.ts";
+import type { EmulatorHost } from "../../../host.ts";
 import type { ImageEntry, ImageSlot } from "../../../images/metadata.ts";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
@@ -203,6 +204,48 @@ function TagEditor({ entry }: { entry: ImageEntry }) {
 					onBlur={() => add(draft)}
 				/>
 			</div>
+		</div>
+	);
+}
+
+/**
+ * The disk attach control: a button that attaches to the selected drive
+ * (D1: by default, so the common case stays one click) beside a target-drive
+ * selector. Picking an occupied slot notes what the attach would replace -
+ * an informed overwrite instead of a surprise (parked disks included).
+ */
+function AttachToDrive({ host, id }: { host: EmulatorHost; id: string }) {
+	const [unit, setUnit] = useState(1);
+	const occupant = host.attachments.value.drives[unit - 1] ?? null;
+	return (
+		<div class="flex flex-col gap-0.5">
+			<div class="flex gap-1">
+				<button
+					type="button"
+					class="min-w-0 flex-1 rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
+					onClick={() => void host.attachDisk(id, unit)}
+				>
+					{messages.library.actions.attachDisk(unit)}
+				</button>
+				<select
+					class="shrink-0 rounded-sm border border-neutral-300 bg-white px-1 py-1.5 text-sm text-neutral-700"
+					value={String(unit)}
+					aria-label={messages.library.actions.attachTarget}
+					title={messages.library.actions.attachTarget}
+					onChange={(event) => setUnit(Number(event.currentTarget.value))}
+				>
+					{host.attachments.value.drives.map((_, index) => (
+						<option key={index} value={String(index + 1)}>
+							D{index + 1}:
+						</option>
+					))}
+				</select>
+			</div>
+			{occupant && (
+				<p class="truncate text-xs text-neutral-500" title={occupant}>
+					{messages.library.actions.replacesDisk(occupant)}
+				</p>
+			)}
 		</div>
 	);
 }
@@ -502,15 +545,7 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 							{messages.library.actions.boot}
 						</button>
 					)}
-					{type === "disk" && (
-						<button
-							type="button"
-							class="w-full rounded-sm border border-neutral-300 px-2 py-1.5 text-sm text-neutral-800 hover:bg-neutral-100"
-							onClick={() => void host.attachDisk(entry.id)}
-						>
-							{messages.library.actions.attachDisk}
-						</button>
-					)}
+					{type === "disk" && <AttachToDrive host={host} id={entry.id} />}
 					{type === "cart" && !cartBlocked && (
 						<button
 							type="button"

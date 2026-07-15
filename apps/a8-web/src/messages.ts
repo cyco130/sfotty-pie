@@ -373,7 +373,9 @@ export const messages = {
 		exportFailed: "Library export failed.",
 		actions: {
 			boot: "Boot",
-			attachDisk: "Attach to D1:",
+			attachDisk: (unit: number): string => `Attach to D${unit}:`,
+			attachTarget: "Target drive",
+			replacesDisk: (name: string): string => `Replaces ${name}`,
 			attachCart: "Attach cartridge",
 			download: "Download",
 			delete: "Delete",

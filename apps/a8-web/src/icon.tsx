@@ -15,6 +15,7 @@ export const ICON_NAMES = [
 	"keyboard",
 	"clipboard",
 	"chevron-down",
+	"info",
 	"swap",
 	"play",
 	"pause",

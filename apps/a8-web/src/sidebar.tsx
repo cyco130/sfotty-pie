@@ -1,4 +1,6 @@
+import { useState } from "preact/hooks";
 import type { Command } from "./commands.ts";
+import { favoritesView } from "./favorites.ts";
 import type { EmulatorHost } from "./host.ts";
 import { Icon } from "./icon.tsx";
 import { primaryChords, type Binding } from "./key-bindings.ts";
@@ -11,8 +13,8 @@ import {
 	type AtariModel,
 } from "./machine-config.ts";
 import { messages } from "./messages.ts";
+import { navigate } from "./navigate.ts";
 import { LabeledSelect, Segmented } from "./settings-controls.tsx";
-import { favoriteIds, toggleFavorite } from "./favorites.ts";
 import { recentsView } from "./recents.ts";
 import { TypePill } from "./type-pill.tsx";
 
@@ -26,81 +28,129 @@ function KeyRow({ keys, action }: { keys: string; action: string }) {
 	);
 }
 
+/** A recents/favorites row's "Show in library" trailer (the item-details
+ *  view is where favoriting lives). */
+function DetailsButton({ id }: { id: string }) {
+	return (
+		<button
+			type="button"
+			class="shrink-0 text-neutral-400 hover:text-neutral-700"
+			title={messages.recents.details}
+			aria-label={messages.recents.details}
+			onClick={() => navigate(`/a8/emu/library/${encodeURIComponent(id)}`)}
+		>
+			<Icon name="info" class="size-4" />
+		</button>
+	);
+}
+
 /**
- * The recents list: images you've booted (newest first), then the built-in
- * software you haven't, so it's never empty. Click to boot; a transient
- * (file-booted) item can be kept in the library, and any history item removed.
+ * The menu's Recents/Favorites section, tabbed (local state only - the tab
+ * isn't part of the URL). Recents: images you've booted (newest first), then
+ * the built-in software you haven't, so it's never empty. Favorites: the
+ * starred games, in starring order. Click to boot; a library item links to
+ * its details view (where favoriting lives), a transient (file-booted) item
+ * can be kept in the library, and any history item removed.
  */
 function RecentsSection({ host }: { host: EmulatorHost }) {
+	const [tab, setTab] = useState<"recents" | "favorites">("recents");
 	const items = recentsView.value;
-	const favorites = favoriteIds.value;
+	const favorites = favoritesView.value;
 	if (items.length === 0) return null;
+
+	const tabs = [
+		{ id: "recents", label: messages.recents.title },
+		{ id: "favorites", label: messages.favorites.title },
+	] as const;
+
 	return (
 		<section>
-			<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-				{messages.recents.title}
-			</h2>
-			<ul class="flex flex-col gap-1">
-				{items.map(({ entry, recent }) => (
-					<li
-						key={entry.id}
-						class="flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
+			<div class="mb-2 flex gap-2 border-b border-neutral-200">
+				{tabs.map((t) => (
+					<button
+						key={t.id}
+						type="button"
+						aria-pressed={tab === t.id}
+						class={`-mb-px border-b-2 px-0.5 py-1 text-xs font-semibold tracking-wide uppercase ${
+							tab === t.id
+								? "border-neutral-700 text-neutral-900"
+								: "border-transparent text-neutral-400 hover:text-neutral-700"
+						}`}
+						onClick={() => setTab(t.id)}
 					>
-						<TypePill type={entry.derived.type} />
-						<button
-							type="button"
-							class="min-w-0 flex-1 truncate text-left text-sm hover:underline"
-							title={entry.user.displayName}
-							onClick={() => void host.bootImage(entry.id)}
-						>
-							{entry.user.displayName}
-						</button>
-						<button
-							type="button"
-							class={`shrink-0 ${
-								favorites.includes(entry.id)
-									? "text-amber-500 hover:text-amber-600"
-									: "text-neutral-300 hover:text-neutral-500"
-							}`}
-							title={
-								favorites.includes(entry.id)
-									? messages.recents.unfavorite
-									: messages.recents.favorite
-							}
-							aria-label={
-								favorites.includes(entry.id)
-									? messages.recents.unfavorite
-									: messages.recents.favorite
-							}
-							onClick={() => toggleFavorite(entry.id)}
-						>
-							<Icon name="star" class="size-4" />
-						</button>
-						{entry.transient && (
-							<button
-								type="button"
-								class="shrink-0 text-neutral-400 hover:text-neutral-700"
-								title={messages.recents.keepTitle}
-								aria-label={messages.recents.keepTitle}
-								onClick={() => host.keepRecent(entry.id)}
-							>
-								<Icon name="bookmark" class="size-4" />
-							</button>
-						)}
-						{recent && (
-							<button
-								type="button"
-								class="shrink-0 text-neutral-400 hover:text-neutral-700"
-								title={messages.recents.remove}
-								aria-label={messages.recents.remove}
-								onClick={() => host.removeFromRecents(entry.id)}
-							>
-								<Icon name="close" class="size-4" />
-							</button>
-						)}
-					</li>
+						{t.label}
+					</button>
 				))}
-			</ul>
+			</div>
+			{tab === "recents" ? (
+				<ul class="flex flex-col gap-1">
+					{items.map(({ entry, recent }) => (
+						<li
+							key={entry.id}
+							class="flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
+						>
+							<TypePill type={entry.derived.type} />
+							<button
+								type="button"
+								class="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+								title={entry.user.displayName}
+								onClick={() => void host.bootImage(entry.id)}
+							>
+								{entry.user.displayName}
+							</button>
+							{/* A library item links to its details; a transient
+							    (file-booted, unkept) item gets the bookmark (keep)
+							    instead. */}
+							{entry.transient ? (
+								<button
+									type="button"
+									class="shrink-0 text-neutral-400 hover:text-neutral-700"
+									title={messages.recents.keepTitle}
+									aria-label={messages.recents.keepTitle}
+									onClick={() => host.keepRecent(entry.id)}
+								>
+									<Icon name="bookmark" class="size-4" />
+								</button>
+							) : (
+								<DetailsButton id={entry.id} />
+							)}
+							{recent && (
+								<button
+									type="button"
+									class="shrink-0 text-neutral-400 hover:text-neutral-700"
+									title={messages.recents.remove}
+									aria-label={messages.recents.remove}
+									onClick={() => host.removeFromRecents(entry.id)}
+								>
+									<Icon name="close" class="size-4" />
+								</button>
+							)}
+						</li>
+					))}
+				</ul>
+			) : favorites.length === 0 ? (
+				<p class="text-sm text-neutral-500">{messages.favorites.empty}</p>
+			) : (
+				<ul class="flex flex-col gap-1">
+					{favorites.map((entry) => (
+						<li
+							key={entry.id}
+							class="flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
+						>
+							<TypePill type={entry.derived.type} />
+							<button
+								type="button"
+								class="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+								title={entry.user.displayName}
+								onClick={() => void host.bootImage(entry.id)}
+							>
+								{entry.user.displayName}
+							</button>
+							<DetailsButton id={entry.id} />
+						</li>
+					))}
+				</ul>
+			)}
 		</section>
 	);
 }

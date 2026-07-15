@@ -326,6 +326,7 @@ export const messages = {
 	recents: {
 		title: "Recents",
 		keepTitle: "Add to library",
+		details: "Show in library",
 		remove: "Remove from recents",
 		kept: (name: string): string => `Added ${name} to the library`,
 		favorite: "Add to favorites",
@@ -335,8 +336,7 @@ export const messages = {
 	favorites: {
 		title: "Favorites",
 		recentsTitle: "Recent",
-		empty:
-			"No favorites yet - star games in the menu's Recents list or in the library.",
+		empty: "No favorites yet - star games on their library pages.",
 		hint: "🕹 select · A / ✕ boot · B / ○ back",
 	},
 

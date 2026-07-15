@@ -975,9 +975,12 @@ export class EmulatorHost {
 		this.#bootImagePicker?.();
 	}
 
-	/** Open the file picker to attach a disk to the given drive (no reboot). */
+	/** Open the file picker to attach a disk to the given drive (no reboot).
+	 *  Keeps the open pane: the pick came from somewhere worth returning to
+	 *  (the drive bank), and with nothing open there's nothing to close. */
 	pickAttachDisk(unit = 1): void {
-		this.#pendingPick = (file) => void this.attachDiskFile(file, unit);
+		this.#pendingPick = (file) =>
+			void this.attachDiskFile(file, unit, { keepPanel: true });
 		this.#bootImagePicker?.();
 	}
 
@@ -1238,11 +1241,11 @@ export class EmulatorHost {
 	 * file is auto-added to the library (transient) so it has an id - for resume
 	 * and save - and booted through it; unrecognized bytes still warn directly.
 	 */
-	async loadFile(file: File): Promise<void> {
+	async loadFile(file: File, options?: { keepPanel?: boolean }): Promise<void> {
 		const bytes = new Uint8Array(await file.arrayBuffer());
 		const id = await addOrFindImage(bytes, file.name, true);
-		if (id) await this.bootImage(id);
-		else this.#bootImage(bytes, file.name);
+		if (id) await this.bootImage(id, options);
+		else this.#bootImage(bytes, file.name, undefined, options);
 	}
 
 	// --- Image library actions (by id; built-in or user). The id-based entry
@@ -1279,18 +1282,30 @@ export class EmulatorHost {
 	}
 
 	/** Boot a library image as a fresh machine. */
-	async bootImage(id: string): Promise<void> {
+	async bootImage(
+		id: string,
+		options?: { keepPanel?: boolean },
+	): Promise<void> {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
 		if (this.#interceptUnresolvedCart(entry)) return;
-		this.#bootImage(await getImageBytes(id), entry.user.displayName, id);
+		this.#bootImage(
+			await getImageBytes(id),
+			entry.user.displayName,
+			id,
+			options,
+		);
 	}
 
 	/** Attach a library disk image to a drive (live, no reboot). Resolves
 	 *  true when the disk actually mounted - callers navigating afterwards
 	 *  (the item view heads to the devices view) skip it on failure. */
-	async attachDisk(id: string, unit = 1): Promise<boolean> {
+	async attachDisk(
+		id: string,
+		unit = 1,
+		options?: { keepPanel?: boolean },
+	): Promise<boolean> {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return false;
@@ -1299,6 +1314,7 @@ export class EmulatorHost {
 			entry.user.displayName,
 			id,
 			unit,
+			options,
 		);
 	}
 
@@ -1461,7 +1477,12 @@ export class EmulatorHost {
 	// Booting an image always disables BASIC so it can't intercept the boot; on
 	// the 800 the BASIC cart also comes out for a game cartridge anyway (handled
 	// by #makeEmulator).
-	#bootImage(contents: Uint8Array, name: string, sourceId?: string): void {
+	#bootImage(
+		contents: Uint8Array,
+		name: string,
+		sourceId?: string,
+		options?: { keepPanel?: boolean },
+	): void {
 		// Content-based detection (no filename hint): the bytes carry their own
 		// magic/heuristics, and library images may have no meaningful extension.
 		const format = detectFileFormat(contents);
@@ -1517,7 +1538,9 @@ export class EmulatorHost {
 					: messages.toasts.bootDisk(name),
 		);
 
-		this.closePanel(); // get out of the way
+		// Get out of the way - except for a dropped file, where whatever pane
+		// is open (the drive bank, the library) is the context being worked in.
+		if (!options?.keepPanel) this.closePanel();
 		this.#cartridge = cartridge;
 		// Boot clears its own slot (D1:) only; disks parked or mounted in
 		// D2:-D8: ride along, like real drives across a power cycle.
@@ -1639,11 +1662,15 @@ export class EmulatorHost {
 	 * disk also stays mounted for the next cold start; D1:'s is what Download
 	 * D1: saves.
 	 */
-	async attachDiskFile(file: File, unit = 1): Promise<void> {
+	async attachDiskFile(
+		file: File,
+		unit = 1,
+		options?: { keepPanel?: boolean },
+	): Promise<void> {
 		const bytes = new Uint8Array(await file.arrayBuffer());
 		const id = await addOrFindImage(bytes, file.name, true);
-		if (id) await this.attachDisk(id, unit);
-		else this.#attachDiskBytes(bytes, file.name, undefined, unit);
+		if (id) await this.attachDisk(id, unit, options);
+		else this.#attachDiskBytes(bytes, file.name, undefined, unit, options);
 	}
 
 	// Attach an ATR's bytes to a drive, live - shared by the file picker and
@@ -1654,6 +1681,7 @@ export class EmulatorHost {
 		name: string,
 		sourceId?: string,
 		unit = 1,
+		options?: { keepPanel?: boolean },
 	): boolean {
 		let disk: AtrImage;
 		try {
@@ -1668,7 +1696,12 @@ export class EmulatorHost {
 
 		this.#drives[unit - 1] = { disk, name, sourceId, on: true };
 		this.#syncDriveToMachine(unit);
-		this.closePanel(); // get out of the way
+		// Get out of the way - unless the attach came from a pane the user is
+		// working in (a drive-row drop or its file picker, where the bank IS
+		// the feedback).
+		if (!options?.keepPanel && currentPath() !== "/a8/emu/devices") {
+			this.closePanel();
+		}
 		this.#refreshAttachments();
 		this.#saveMedia();
 		this.#noteUsed(sourceId);

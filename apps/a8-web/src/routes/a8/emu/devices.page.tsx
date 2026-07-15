@@ -123,8 +123,29 @@ function DriveRow({
 	info: DriveBankEntry | null;
 }) {
 	const m = messages.devices;
+	// Drop target: a file dropped on the row attaches to THIS drive
+	// (stopPropagation keeps the window-level drop from also booting it).
+	// The highlight follows dragover, which re-fires continuously.
+	const [dragOver, setDragOver] = useState(false);
 	return (
-		<div class="flex items-center gap-2 rounded-sm p-1 hover:bg-neutral-50">
+		<div
+			class={`flex items-center gap-2 rounded-sm p-1 ${
+				dragOver ? "bg-neutral-200" : "hover:bg-neutral-50"
+			}`}
+			onDragOver={(event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				setDragOver(true);
+			}}
+			onDragLeave={() => setDragOver(false)}
+			onDrop={(event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				setDragOver(false);
+				const file = event.dataTransfer?.files[0];
+				if (file) void host.attachDiskFile(file, unit, { keepPanel: true });
+			}}
+		>
 			{/* The leading controls: move chevrons (reorder-handle style),
 			    write-protect, and drive power. Empty drives have none of the
 			    three - invisible placeholders keep the columns aligned. */}

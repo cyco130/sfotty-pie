@@ -8,7 +8,7 @@
 	"ANTIC: Default value": "pass",
 	"ANTIC: Display list wrapping": "pass",
 	"ANTIC: HSCROL bug": "pass",
-	"ANTIC: Hires bug": "fail",
+	"ANTIC: Hires bug": "pass",
 	"ANTIC: Line buffering": "pass",
 	"ANTIC: NMIST/NMIRES test": "pass",
 	"ANTIC: P/M graphics DMA": "pass",

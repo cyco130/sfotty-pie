@@ -3,7 +3,7 @@ import type { ComponentChildren } from "preact";
 import { useMemo, useState } from "preact/hooks";
 import {
 	defaultDisplaySettings,
-	OVERSCAN_MAX_HEIGHT,
+	OVERSCAN_MAX_HEIGHTS,
 	OVERSCAN_MAX_WIDTH,
 	OVERSCAN_MIN_HEIGHT,
 	OVERSCAN_MIN_WIDTH,
@@ -286,7 +286,7 @@ export function DisplayView({ host }: { host: EmulatorHost }) {
 				<Slider
 					label={messages.display.height}
 					min={OVERSCAN_MIN_HEIGHT}
-					max={OVERSCAN_MAX_HEIGHT}
+					max={OVERSCAN_MAX_HEIGHTS[tab]}
 					step={2}
 					value={settings.overscan.height}
 					onChange={(height) => setOverscan({ ...settings.overscan, height })}

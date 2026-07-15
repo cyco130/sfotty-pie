@@ -24,7 +24,10 @@ import { DiskDrive } from "./disk-drive.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
 import { SioBus } from "./sio-bus.ts";
 import { SioConnector } from "./sio-connector.ts";
-import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
+import {
+	FRAME_BUFFER_HEIGHTS,
+	FRAME_BUFFER_WIDTH,
+} from "./timing-constants.ts";
 
 /**
  * The Atari 8-bit model class - what the firmware ranking and the UI key off.
@@ -134,6 +137,9 @@ export class Atari {
 		this.#xl = xl;
 
 		const tvSystem = config.tvSystem ?? "ntsc";
+		this.frame = new Uint8Array(
+			FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHTS[tvSystem],
+		);
 
 		// The Mmu is built first - bare geometry, no chips - so ANTIC and the
 		// CPU can take it as their bus; connect() below wires the ROMs and
@@ -433,12 +439,16 @@ export class Atari {
 	}
 
 	/**
-	 * The framebuffer the machine renders into (376x240 Atari color bytes),
-	 * updated by each cycle's render phase. Reassign only at a frame
-	 * boundary (e.g. swapping targets for tear-free double-buffering), or
-	 * the in-progress frame tears.
+	 * The framebuffer the machine renders into (FRAME_BUFFER_WIDTH x the TV
+	 * standard's FRAME_BUFFER_HEIGHTS entry, one Atari color byte per
+	 * pixel), updated by each cycle's render phase. Rows are scan lines
+	 * (row = VCOUNT over the full 262/312-line scan): rows 8-247 are the
+	 * normally visible region, the rest render black unless the ANTIC hires
+	 * bug opens the vertical border. Reassign only at a frame boundary
+	 * (e.g. swapping targets for tear-free double-buffering), or the
+	 * in-progress frame tears.
 	 */
-	frame: Uint8Array = new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT);
+	frame: Uint8Array;
 
 	/**
 	 * The audio level as summed on the board, as of the last cycle: POKEY's

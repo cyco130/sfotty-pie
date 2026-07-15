@@ -39,7 +39,7 @@ Built-in machine features use the same public trap machinery: the SIO handler is
 - **[src/pia.ts](src/pia.ts)** - the 6520: PORTA (joysticks), PORTB (joysticks on the 400/800; memory banking on XL/XE), IRQ lines.
 - The CPU is not in this package - it's the `Sfotty` core, driven through the bus.
 
-Framebuffer: `frame` is one Atari color byte per pixel, `FRAME_BUFFER_WIDTH x FRAME_BUFFER_HEIGHT` (376x240 - the full overscan region). Palette decode is the host's job; [src/palette.ts](src/palette.ts) provides NTSC (YIQ) and PAL (YUV) palette builders returning 256-entry `Uint32Array`s of little-endian RGBA words, designed to be written straight through a `Uint32Array` view of canvas `ImageData`. NTSC/PAL timing (line counts, rates) lives in [src/timing-constants.ts](src/timing-constants.ts), re-exported wholesale from the index.
+Framebuffer: `frame` is one Atari color byte per pixel, `FRAME_BUFFER_WIDTH` (376 - the full overscan width) by the standard's `FRAME_BUFFER_HEIGHTS` entry (262 NTSC / 312 PAL - the whole scan, row = VCOUNT). Rows 8-247 are the normally visible region; vertical blank rows render black unless the ANTIC hires bug opens the border. Palette decode is the host's job; [src/palette.ts](src/palette.ts) provides NTSC (YIQ) and PAL (YUV) palette builders returning 256-entry `Uint32Array`s of little-endian RGBA words, designed to be written straight through a `Uint32Array` view of canvas `ImageData`. NTSC/PAL timing (line counts, rates) lives in [src/timing-constants.ts](src/timing-constants.ts), re-exported wholesale from the index.
 
 ## The SIO bus: one device, two fronts
 

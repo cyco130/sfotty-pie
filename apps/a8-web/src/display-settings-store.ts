@@ -8,6 +8,7 @@ import {
 	sanitizeFrameBlending,
 	type StandardDisplaySettings,
 } from "./display-settings.ts";
+import type { TvStandard } from "./machine-config.ts";
 import { loadPersisted, savePersisted } from "./persist.ts";
 
 // The persisted per-standard display settings (see display-settings.ts).
@@ -27,16 +28,20 @@ function number(raw: unknown, fallback: number): number {
 }
 
 function sanitizeStandard(
+	tv: TvStandard,
 	raw: StandardDisplaySettings | undefined,
 	fallback: StandardDisplaySettings,
 ): StandardDisplaySettings {
 	const o = raw?.overscan as Partial<OverscanSettings> | undefined;
 	const p = raw?.palette as Partial<PaletteSettings> | undefined;
 	return {
-		overscan: sanitizeOverscan({
-			width: number(o?.width, fallback.overscan.width),
-			height: number(o?.height, fallback.overscan.height),
-		}),
+		overscan: sanitizeOverscan(
+			{
+				width: number(o?.width, fallback.overscan.width),
+				height: number(o?.height, fallback.overscan.height),
+			},
+			tv,
+		),
 		palette: sanitizePalette({
 			hue1Angle: number(p?.hue1Angle, fallback.palette.hue1Angle),
 			hueStep: number(p?.hueStep, fallback.palette.hueStep),
@@ -64,8 +69,8 @@ export function loadDisplaySettings(): DisplaySettings {
 		return defaults;
 	}
 	return {
-		ntsc: sanitizeStandard(stored.settings.ntsc, defaults.ntsc),
-		pal: sanitizeStandard(stored.settings.pal, defaults.pal),
+		ntsc: sanitizeStandard("ntsc", stored.settings.ntsc, defaults.ntsc),
+		pal: sanitizeStandard("pal", stored.settings.pal, defaults.pal),
 	};
 }
 

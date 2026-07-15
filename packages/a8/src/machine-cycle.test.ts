@@ -93,7 +93,7 @@ test("a mid-scanline color register write paints from color clock 2w+1", () => {
 	machine.mmu.write(0xd018, 0x34, ReadOptions.NONE);
 	while (anticGtia.vcount === 8 && guard++ < 300000) machine.cycle();
 
-	const row = machine.frame.subarray(0, 376);
+	const row = machine.frame.subarray(8 * 376, 9 * 376);
 	const boundary = row.findIndex((v, x) => v === 0x34 && row[x - 1] === 0x0e);
 	expect(boundary).toBe(4 * (w - 17) + 2);
 });
@@ -131,13 +131,88 @@ test("repositioning an in-flight player onto the beam retriggers and merges", ()
 		}
 		if (rewrite) machine.mmu.write(0xd002, 0x27, ReadOptions.NONE);
 		while (anticGtia.vcount === 20 && guard++ < 300000) machine.cycle();
-		const row = machine.frame.subarray(12 * 376, 13 * 376);
+		const row = machine.frame.subarray(20 * 376, 21 * 376);
 		const px = [];
 		for (let x = 0; x < 376; x++) if (row[x] === 0x46) px.push(x);
 		return `${px[0]}-${px[px.length - 1]}:${px.length}`;
 	};
 	expect(spanFor(false)).toBe("16-39:24");
 	expect(spanFor(true)).toBe("10-49:40");
+});
+
+test("the hires bug opens the vertical border: P/M and collisions run into vertical blank", () => {
+	// AHRM "Opening the vertical border": when the last display list byte
+	// ANTIC fetched is a hires mode (the JVB never displaces it) and
+	// playfield DMA stays enabled, the hires encoder keeps forcing AN2
+	// across the playfield window during vertical blank - GTIA sees lit
+	// pixel pairs and keeps processing graphics. Modeled on Acid800's
+	// antic_hiresbug: two overlapping players drawn from their GRAF
+	// latches (no P/M DMA) must collide on vertical blank lines, and the
+	// opened window must paint - but only when a hires mode line is the
+	// last thing on the list.
+	const vblankCollision = (modeFLast: boolean) => {
+		const machine = new Atari({ os: new Uint8Array(10240) });
+		const dl: number[] = [];
+		// Lines 8-246: 29 x 8 blank lines + 7 blank lines = 239 lines.
+		for (let i = 0; i < 29; i++) dl.push(0x70);
+		dl.push(0x60);
+		if (modeFLast) {
+			// Mode F + LMS on line 247: vertical blank starts before ANTIC
+			// fetches the JVB, so the IR still holds mode F.
+			dl.push(0x4f, 0x00, 0x30);
+		}
+		dl.push(0x41, 0x00, 0x20); // JVB
+		dl.forEach((b, i) => machine.mmu.write(0x2000 + i, b, ReadOptions.NONE));
+
+		// GTIA queues one pending write per latency class per color clock -
+		// space same-class writes a machine cycle apart so none displaces
+		// another.
+		for (const [address, value] of [
+			[0xd000, 0x80], // HPOSP0
+			[0xd001, 0x80], // HPOSP1
+			[0xd00d, 0xff], // GRAFP0
+			[0xd00e, 0xff], // GRAFP1
+			[0xd017, 0x0a], // COLPF1
+			[0xd018, 0x94], // COLPF2
+			[0xd402, 0x00], // DLISTL
+			[0xd403, 0x20], // DLISTH
+			[0xd400, 0x22], // DMACTL: normal + DL
+		] as const) {
+			machine.mmu.write(address, value, ReadOptions.NONE);
+			machine.cycle();
+		}
+
+		const { anticGtia } = machine;
+		let guard = 0;
+		// Into vertical blank, then clear the visible region's collisions.
+		while (
+			!(anticGtia.vcount === 248 && anticGtia.hpos === 0) &&
+			guard++ < 200000
+		) {
+			machine.cycle();
+		}
+		machine.mmu.write(0xd01e, 0, ReadOptions.NONE); // HITCLR
+		// Let vertical blank lines 248-250 run.
+		while (anticGtia.vcount < 251 && guard++ < 300000) machine.cycle();
+		return { p0pl: anticGtia.p0pl, row: machine.frame.subarray(250 * 376) };
+	};
+
+	const bugged = vblankCollision(true);
+	// P1 collided with P0 on the opened lines...
+	expect(bugged.p0pl).toBe(0x02);
+	// ...and line 250 paints: black borders, lit hires pairs (PF2 hue,
+	// PF1 luminance) across the normal-width window (color clocks
+	// $30-$CF = frame x 28-347).
+	expect(bugged.row[10]).toBe(0x00);
+	expect(bugged.row[100]).toBe(0x9a);
+	expect(bugged.row[347]).toBe(0x9a);
+	expect(bugged.row[350]).toBe(0x00);
+
+	// With the JVB fetched (no hires mode line at the end), vertical blank
+	// stays closed: no collisions, black lines.
+	const clean = vblankCollision(false);
+	expect(clean.p0pl).toBe(0x00);
+	expect(clean.row[100]).toBe(0x00);
 });
 
 test("the machine ticks the PIA: a CA2 read pulse ends after one cycle", () => {

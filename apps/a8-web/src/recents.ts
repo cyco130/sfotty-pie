@@ -50,7 +50,8 @@ export interface RecentItem {
 
 /**
  * The menu's recents view: the MRU history (resolved, newest first) followed by
- * built-in software not already in it (alphabetical). Stale ids are skipped.
+ * built-in software not already in it (alphabetical), the whole list capped at
+ * {@link RECENTS_CAP}. Stale ids are skipped.
  */
 export const recentsView = computed<RecentItem[]>(() => {
 	const ids = recentIds.value;
@@ -62,5 +63,5 @@ export const recentsView = computed<RecentItem[]>(() => {
 	const seeds: RecentItem[] = builtinSoftware.value
 		.filter((e) => !inMru.has(e.id))
 		.map((entry) => ({ entry, recent: false }));
-	return [...mru, ...seeds];
+	return [...mru, ...seeds].slice(0, RECENTS_CAP);
 });

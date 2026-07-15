@@ -26,7 +26,7 @@ export class Keyboard {
 	// Host facade
 
 	/**
-	 * Whether the keyboard is plugged in. Detached, the matrix sends no
+	 * Whether the keyboard is plugged in. When detached, the matrix sends no
 	 * response: every scan reads open lines, so POKEY sees all keys up. On
 	 * the XEGS the machine wires this to GTIA TRIG2 (the keyboard-presence
 	 * sense) - the other models' keyboards are captive, but detaching still

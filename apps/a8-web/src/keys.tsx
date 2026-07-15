@@ -15,7 +15,9 @@ import {
 import { messages } from "./messages.ts";
 import { navigate } from "./navigate.ts";
 
-const LAYOUT_PATH = "/a8/emu/keys/layout";
+// Keyboard settings (the layout picker included) live on the devices
+// view's K: tab; the links here are the second door to the same page.
+const KEYBOARD_PATH = "/a8/emu/devices/keyboard";
 
 // One displayed row: a command and one of its bound chords, or null when the
 // command has no binding (shown so it's findable to bind later).
@@ -37,7 +39,7 @@ export function LayoutWarning({ host }: { host: EmulatorHost }) {
 			<button
 				type="button"
 				class="font-medium underline"
-				onClick={() => navigate(LAYOUT_PATH)}
+				onClick={() => navigate(KEYBOARD_PATH)}
 			>
 				{messages.shortcuts.setupLayout}
 			</button>
@@ -103,9 +105,9 @@ export function KeysView({ host }: { host: EmulatorHost }) {
 			<button
 				type="button"
 				class="mb-2 shrink-0 self-start text-xs text-neutral-500 underline hover:text-neutral-800"
-				onClick={() => navigate(LAYOUT_PATH)}
+				onClick={() => navigate(KEYBOARD_PATH)}
 			>
-				{messages.shortcuts.layoutTitle}
+				{messages.shortcuts.keyboardTitle}
 			</button>
 			<input
 				type="text"

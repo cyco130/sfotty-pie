@@ -43,13 +43,14 @@ export function App({
 		return () => teardowns.forEach((teardown) => teardown());
 	}, [host]);
 
-	// Dropping a file anywhere on the page loads it.
+	// Dropping a file anywhere on the page loads it (keeping whatever pane
+	// is open - the drop's context; drive rows claim their own drops).
 	useEffect(() => {
 		const over = (event: DragEvent) => event.preventDefault();
 		const drop = (event: DragEvent) => {
 			event.preventDefault();
 			const file = event.dataTransfer?.files[0];
-			if (file) void host.loadFile(file);
+			if (file) void host.loadFile(file, { keepPanel: true });
 		};
 		window.addEventListener("dragover", over);
 		window.addEventListener("drop", drop);

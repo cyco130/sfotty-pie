@@ -49,6 +49,49 @@
 	<symbol id="chevron-down" viewBox="0 0 24 24">
 		<path d="m6 9 6 6 6-6" />
 	</symbol>
+	<symbol id="info" viewBox="0 0 24 24">
+		<circle cx="12" cy="12" r="10" />
+		<path d="M12 16v-4" />
+		<path d="M12 8h.01" />
+	</symbol>
+	<symbol id="download" viewBox="0 0 24 24">
+		<path d="M12 15V3" />
+		<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+		<path d="m7 10 5 5 5-5" />
+	</symbol>
+	<symbol id="lock" viewBox="0 0 24 24">
+		<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+		<path d="M7 11V7a5 5 0 0 1 10 0v4" />
+	</symbol>
+	<symbol id="lock-open" viewBox="0 0 24 24">
+		<rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+		<path d="M7 11V7a5 5 0 0 1 9.9-1" />
+	</symbol>
+	<symbol id="save" viewBox="0 0 24 24">
+		<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+		<path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" />
+		<path d="M7 3v4a1 1 0 0 0 1 1h7" />
+	</symbol>
+	<symbol id="save-all" viewBox="0 0 24 24">
+		<path d="M10 2v3a1 1 0 0 0 1 1h5" />
+		<path d="M18 18v-6a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6" />
+		<path d="M18 22H4a2 2 0 0 1-2-2V6" />
+		<path d="M8 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9.172a2 2 0 0 1 1.414.586l2.828 2.828A2 2 0 0 1 22 6.828V16a2 2 0 0 1-2 2z" />
+	</symbol>
+	<symbol id="chevron-up" viewBox="0 0 24 24">
+		<path d="m18 15-6-6-6 6" />
+	</symbol>
+	<symbol id="arrow-up" viewBox="0 0 24 24">
+		<path d="m5 12 7-7 7 7" />
+		<path d="M12 19V5" />
+	</symbol>
+	<symbol id="arrow-down" viewBox="0 0 24 24">
+		<path d="M12 5v14" />
+		<path d="m19 12-7 7-7-7" />
+	</symbol>
+	<symbol id="folder-open" viewBox="0 0 24 24">
+		<path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
+	</symbol>
 	<symbol id="swap" viewBox="0 0 24 24">
 		<path d="M8 3 4 7l4 4" />
 		<path d="M4 7h16" />

@@ -24,3 +24,9 @@ export function navigate(to: string, options: NavigateOptions = {}): void {
 export function currentPath(): string {
 	return window.location.pathname;
 }
+
+/** The current path plus query - for `back`-style return links that should
+ *  restore in-page state kept in the query (the library list's search). */
+export function currentUrl(): string {
+	return window.location.pathname + window.location.search;
+}

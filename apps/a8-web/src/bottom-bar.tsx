@@ -1,9 +1,13 @@
 import type { EmulatorHost } from "./host.ts";
 import { messages } from "./messages.ts";
+import { navigate } from "./navigate.ts";
 
-/** The bottom status bar: the attached cartridge/disks and a crash indicator. */
+/** The bottom status bar: the attached cartridge and D1: disk (the bootable
+ *  media), each linking to its devices tab, and a crash indicator. With
+ *  nothing attached, a plain link to the devices view takes the spot. */
 export function BottomBar({ host }: { host: EmulatorHost }) {
 	const { cartridge, drives } = host.attachments.value;
+	const d1 = drives[0] ?? null;
 	const crashed = host.crashed.value;
 	const leds = host.leds.value;
 
@@ -11,17 +15,31 @@ export function BottomBar({ host }: { host: EmulatorHost }) {
 		<footer class="flex h-7 shrink-0 items-center gap-4 px-3 text-sm text-neutral-400">
 			<div class="flex min-w-0 flex-1 items-center gap-4">
 				{cartridge && (
-					<span class="truncate">
+					<button
+						type="button"
+						class="truncate hover:text-neutral-200 hover:underline"
+						onClick={() => navigate("/a8/emu/devices/cart", { replace: true })}
+					>
 						{messages.bottomBar.cartridge} {cartridge}
-					</span>
+					</button>
 				)}
-				{drives.map(
-					(name, index) =>
-						name && (
-							<span key={index} class="truncate">
-								D{index + 1}: {name}
-							</span>
-						),
+				{d1 && (
+					<button
+						type="button"
+						class="truncate hover:text-neutral-200 hover:underline"
+						onClick={() => host.showPanel("devices")}
+					>
+						D1: {d1}
+					</button>
+				)}
+				{!cartridge && !d1 && (
+					<button
+						type="button"
+						class="truncate hover:text-neutral-200 hover:underline"
+						onClick={() => host.showPanel("devices")}
+					>
+						{messages.bottomBar.devices}
+					</button>
 				)}
 			</div>
 			{leds && (

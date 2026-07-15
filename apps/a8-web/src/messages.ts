@@ -91,6 +91,7 @@ export const messages = {
 
 	bottomBar: {
 		cartridge: "Cart:",
+		devices: "Devices…",
 		crashed: "CPU crashed (CIM)",
 		keyboardDetached: "Keyboard detached",
 		attachKeyboard: "Click to attach the keyboard",
@@ -180,6 +181,7 @@ export const messages = {
 	menu: {
 		docs: "Help & docs",
 		settings: "Settings…",
+		devices: "Devices…",
 		boot: "Boot image…",
 		library: "Library…",
 		palette: "Command palette…",
@@ -192,6 +194,36 @@ export const messages = {
 		display: "Display",
 		shortcuts: "Shortcuts",
 		controllers: "Controllers",
+	},
+
+	// The devices view: a standalone tabbed panel of what's plugged into the
+	// machine. Tab labels are the CIO device letters (hardware tokens, kept
+	// inline in the frame); these spell them out. Rates and drive names on
+	// the D: tab are hardware tokens too and stay inline.
+	devices: {
+		title: "Devices",
+		diskDrives: "Disk drives",
+		cartridge: "Cartridge",
+		keyboard: "Keyboard",
+		trapSiov: "Trap SIOV calls",
+		accelerateSio: "Accelerate serial I/O",
+		sioSpeed: "SIO speed",
+		sioSpeedStandard: "standard",
+		sioSpeedMax: "max",
+		divisorValue: (n: number): string => `divisor ${n}`,
+		driveEmpty: "Empty",
+		drivePower: "Drive power",
+		openFromComputer: "Open from computer",
+		eject: "Eject",
+		saveToLibrary: "Save to library",
+		saveAsNew: "Save to library as new item",
+		writeProtect: "Write-protected",
+		moveUp: "Move up",
+		moveDown: "Move down",
+		rotateUp: "Rotate drives up",
+		rotateDown: "Rotate drives down",
+		library: "Disk library…",
+		cartLibrary: "Cart library…",
 	},
 
 	shortcuts: {
@@ -210,9 +242,28 @@ export const messages = {
 		layoutWarning:
 			"Key labels assume a US layout - this browser doesn't expose your keyboard layout, so they may not match your keys.",
 		setupLayout: "Set up your keyboard",
-		layoutTitle: "Keyboard layout",
+		keyboardTitle: "Keyboard settings",
+		mode: "Typing mode",
+		modeCharacter: "Character",
+		modePositional: "Positional",
+		modeHint:
+			"Character types what you mean, layout-aware; Positional maps physical keys raw.",
+		pasteMode: "Paste mode",
+		pasteModeK: "K: handler",
+		pasteModeCh: "CH (764)",
+		pasteModeHint:
+			"K: feeds the OS keyboard handler; CH injects key codes straight into location 764 for programs that poll it.",
+		detachKeyboard: "Detach keyboard",
+		keyboardIsDetached: "Keyboard is detached",
+		keyboardPlugHint:
+			"When detached, keystrokes no longer reach the machine. XEGS can sense the absence and boots to its built-in game.",
+		realisticScan: "Realistic key scan",
+		realisticScanHint:
+			"Positional mode only - keys can jam, like the hardware. Character mode composes keystrokes itself and always uses the forgiving scan.",
 		layoutIntro:
-			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout when available.",
+			"Pick your keyboard layout so shortcut labels match your keys. Auto-detect uses the browser's reported layout.",
+		layoutIntroNoAuto:
+			"This browser doesn't expose your keyboard layout - pick it here so shortcut labels match your keys.",
 		layoutAuto: "Auto-detect (from browser)",
 		layoutAutoUnavailable: "unavailable",
 		layoutRegenerates:
@@ -290,6 +341,7 @@ export const messages = {
 	recents: {
 		title: "Recents",
 		keepTitle: "Add to library",
+		details: "Show in library",
 		remove: "Remove from recents",
 		kept: (name: string): string => `Added ${name} to the library`,
 		favorite: "Add to favorites",
@@ -299,8 +351,7 @@ export const messages = {
 	favorites: {
 		title: "Favorites",
 		recentsTitle: "Recent",
-		empty:
-			"No favorites yet - star games in the menu's Recents list or in the library.",
+		empty: "No favorites yet - star games on their library pages.",
 		hint: "🕹 select · A / ✕ boot · B / ○ back",
 	},
 
@@ -328,9 +379,13 @@ export const messages = {
 		exporting: "Exporting…",
 		compressing: "Compressing…",
 		exportFailed: "Library export failed.",
+		writeProtected: "Write-protected",
 		actions: {
 			boot: "Boot",
-			attachDisk: "Attach to D1:",
+			attachDisk: (unit: number): string => `Attach to D${unit}:`,
+			attachTarget: "Target drive",
+			attachedTo: (drives: string): string => `Attached to ${drives}`,
+			replacesDisk: (name: string): string => `Replaces ${name}`,
 			attachCart: "Attach cartridge",
 			download: "Download",
 			delete: "Delete",
@@ -542,10 +597,13 @@ export const messages = {
 			"Couldn't read the clipboard (denied or unsupported).",
 		nothingToPaste: "Nothing pasteable in the clipboard.",
 		pasteUnsupported: "Paste needs a recognized OS ROM.",
-		noWritableDisk: "No writable disk in D1: to download.",
-		noDiskToSave: "No disk in D1: to save.",
+		noWritableDisk: (unit: number): string =>
+			`No writable disk in D${unit}: to download.`,
+		noDiskToSave: (unit: number): string => `No disk in D${unit}: to save.`,
 		notLibraryDisk: "Only a disk attached from the library can be saved.",
-		noDiskToDetach: "No disk in D1: to detach.",
+		noDiskToDetach: (unit: number): string => `No disk in D${unit}: to detach.`,
+		driveEmpty: (unit: number): string => `No disk in D${unit}:.`,
+		noDisksAttached: "No disks attached.",
 		notACartridge: "Not a cartridge image.",
 		noCartridge: "No cartridge to detach.",
 		fullscreenUnavailable: "Full screen isn't available in this browser.",
@@ -565,8 +623,19 @@ export const messages = {
 		bootDisk: (name: string) => `Booting D1: (${name})`,
 		bootCartridge: (name: string) => `Booting cartridge (${name})`,
 		bootExecutable: (name: string) => `Booting executable (${name})`,
-		attachingDisk: (name: string) => `Attaching D1: (${name})`,
-		detachingDisk: (name: string) => `Detaching D1: (${name})`,
+		attachingDisk: (unit: number, name: string) =>
+			`Attaching D${unit}: (${name})`,
+		detachingDisk: (unit: number, name: string) =>
+			`Detaching D${unit}: (${name})`,
+		detachingAllDisks: "Detaching all disks",
+		driveOn: (unit: number, on: boolean): string =>
+			on ? `Turning on D${unit}:` : `Turning off D${unit}: (disk kept)`,
+		movingDrive: (from: number, to: number): string =>
+			`Moving D${from}: to D${to}:`,
+		savedAsNewItem: (name: string): string =>
+			`Saved (${name}) to the library as a new item`,
+		rotatingDrives: (up: boolean): string =>
+			`Rotating drives ${up ? "up" : "down"}`,
 		attachingCartridge: (name: string) => `Attaching cartridge (${name})`,
 		detachingCartridge: (name: string) => `Detaching cartridge (${name})`,
 		enablingBasic: "Enabling BASIC",
@@ -586,6 +655,14 @@ export const messages = {
 			`Pasting ${count} character${count === 1 ? "" : "s"}`,
 		pasteMode: (ch: boolean): string =>
 			`Paste mode: ${ch ? "CH (764) injection" : "K: handler"}`,
+		sioTrap: (enabled: boolean): string =>
+			`Serial I/O: SIOV trap ${enabled ? "on" : "off"}`,
+		sioAcceleration: (enabled: boolean): string =>
+			`Serial I/O: acceleration ${enabled ? "on" : "off"}`,
+		diskSpeed: (index: number | undefined): string =>
+			index === undefined
+				? "Disk SIO speed: standard"
+				: `Disk SIO speed: divisor ${index}`,
 		saving: (name: string) => `Saving (${name})`,
 		cartTypeSet: (typeName: string) => `Cartridge type set: ${typeName}`,
 		savedToLibrary: (name: string) => `Saved (${name}) to the library`,
@@ -620,7 +697,9 @@ export const labels = {
 		"Keyboard: Disable realistic key scan (new presses lift held keys)",
 	KEYBOARD_REALISTIC_SCAN_TOGGLE: "Keyboard: Toggle realistic key scan",
 	KEYBOARD_ATTACH: "Keyboard: Attach",
-	KEYBOARD_DETACH: "Keyboard: Detach (an XEGS senses the absence)",
+	KEYBOARD_DETACH: "Keyboard: Detach",
+	SIO_TRAP_TOGGLE: "Serial I/O: Toggle the SIOV trap (instant OS disk calls)",
+	SIO_ACCELERATION_TOGGLE: "Serial I/O: Toggle acceleration",
 	KEY_BINDINGS_RESET: "Keyboard: Reset key bindings to defaults",
 	PASTE_TEXT: "Keyboard: Paste text from the clipboard",
 	PASTE_MODE_TOGGLE: "Keyboard: Toggle paste mode (K: handler / CH injection)",
@@ -636,6 +715,7 @@ export const labels = {
 	OPEN_CONTROLLERS: "Settings: Controllers…",
 	CLOSE_PANEL: "View: Close panel",
 	OPEN_ROMS: "Settings: ROM preferences…",
+	OPEN_DEVICES: "Devices: Open…",
 	OPEN_LIBRARY: "Library: Open…",
 	OPEN_FAVORITES: "Library: Open game picker…",
 	CLEAR_LIBRARY: "Library: Clear…",
@@ -646,7 +726,48 @@ export const labels = {
 	OSD_TOGGLE: "View: Toggle on-screen controls",
 	BOOT_IMAGE: "Media: Boot a disk, cartridge, or executable…",
 	ATTACH_D1: "Media: Attach a disk to D1:…",
+	ATTACH_D2: "Media: Attach a disk to D2:…",
+	ATTACH_D3: "Media: Attach a disk to D3:…",
+	ATTACH_D4: "Media: Attach a disk to D4:…",
+	ATTACH_D5: "Media: Attach a disk to D5:…",
+	ATTACH_D6: "Media: Attach a disk to D6:…",
+	ATTACH_D7: "Media: Attach a disk to D7:…",
+	ATTACH_D8: "Media: Attach a disk to D8:…",
 	DETACH_D1: "Media: Detach the disk from D1:",
+	DETACH_D2: "Media: Detach the disk from D2:",
+	DETACH_D3: "Media: Detach the disk from D3:",
+	DETACH_D4: "Media: Detach the disk from D4:",
+	DETACH_D5: "Media: Detach the disk from D5:",
+	DETACH_D6: "Media: Detach the disk from D6:",
+	DETACH_D7: "Media: Detach the disk from D7:",
+	DETACH_D8: "Media: Detach the disk from D8:",
+	TURN_ON_D1: "Media: Turn on D1:",
+	TURN_ON_D2: "Media: Turn on D2:",
+	TURN_ON_D3: "Media: Turn on D3:",
+	TURN_ON_D4: "Media: Turn on D4:",
+	TURN_ON_D5: "Media: Turn on D5:",
+	TURN_ON_D6: "Media: Turn on D6:",
+	TURN_ON_D7: "Media: Turn on D7:",
+	TURN_ON_D8: "Media: Turn on D8:",
+	TURN_OFF_D1: "Media: Turn off D1: (keep the disk)",
+	TURN_OFF_D2: "Media: Turn off D2: (keep the disk)",
+	TURN_OFF_D3: "Media: Turn off D3: (keep the disk)",
+	TURN_OFF_D4: "Media: Turn off D4: (keep the disk)",
+	TURN_OFF_D5: "Media: Turn off D5: (keep the disk)",
+	TURN_OFF_D6: "Media: Turn off D6: (keep the disk)",
+	TURN_OFF_D7: "Media: Turn off D7: (keep the disk)",
+	TURN_OFF_D8: "Media: Turn off D8: (keep the disk)",
+	TOGGLE_D1: "Media: Toggle D1: on/off",
+	TOGGLE_D2: "Media: Toggle D2: on/off",
+	TOGGLE_D3: "Media: Toggle D3: on/off",
+	TOGGLE_D4: "Media: Toggle D4: on/off",
+	TOGGLE_D5: "Media: Toggle D5: on/off",
+	TOGGLE_D6: "Media: Toggle D6: on/off",
+	TOGGLE_D7: "Media: Toggle D7: on/off",
+	TOGGLE_D8: "Media: Toggle D8: on/off",
+	ROTATE_DRIVES_UP: "Media: Rotate drives up (D2: becomes D1:)",
+	ROTATE_DRIVES_DOWN: "Media: Rotate drives down (D1: becomes D2:)",
+	DETACH_ALL_DISKS: "Media: Detach all disks",
 	ATTACH_CARTRIDGE: "Media: Attach a cartridge… [reboots]",
 	DETACH_CARTRIDGE: "Media: Detach the cartridge [reboots]",
 	DOWNLOAD_D1: "Media: Download the D1: disk image…",

@@ -1,8 +1,8 @@
-// Starred games - the game picker's shelf (see favorites-menu.tsx). A global
-// (cross-tab) ordered id list in localStorage, like the recents history;
-// entries resolve against the library when rendered, skipping any that no
-// longer exist. Starring happens in the menu's Recents list, which includes
-// every built-in plus anything you've booted.
+// Starred games - the game picker's shelf (see favorites-menu.tsx) and the
+// menu's Favorites tab. A global (cross-tab) ordered id list in localStorage,
+// like the recents history; entries resolve against the library when
+// rendered, skipping any that no longer exist. Starring happens on an
+// image's library details page.
 
 import { computed, signal } from "@preact/signals";
 import { getImage } from "./images/library.ts";

@@ -1,4 +1,6 @@
+import { useState } from "preact/hooks";
 import type { Command } from "./commands.ts";
+import { favoritesView, toggleFavorite } from "./favorites.ts";
 import type { EmulatorHost } from "./host.ts";
 import { Icon } from "./icon.tsx";
 import { primaryChords, type Binding } from "./key-bindings.ts";
@@ -11,72 +13,10 @@ import {
 	type AtariModel,
 } from "./machine-config.ts";
 import { messages } from "./messages.ts";
-import { favoriteIds, toggleFavorite } from "./favorites.ts";
+import { navigate } from "./navigate.ts";
+import { LabeledSelect, Segmented } from "./settings-controls.tsx";
 import { recentsView } from "./recents.ts";
 import { TypePill } from "./type-pill.tsx";
-
-/** A labelled segmented control; each option stages its value via `onSelect`. */
-function Segmented({
-	label,
-	value,
-	options,
-}: {
-	label: string;
-	value: string;
-	options: { value: string; label: string; onSelect: () => void }[];
-}) {
-	return (
-		<div class="flex items-center justify-between gap-3">
-			<span class="text-sm text-neutral-600">{label}</span>
-			<div class="flex overflow-hidden rounded-sm border border-neutral-300">
-				{options.map((option) => (
-					<button
-						key={option.value}
-						type="button"
-						class={
-							option.value === value
-								? "bg-neutral-800 px-2 py-0.5 text-sm text-white"
-								: "bg-white px-2 py-0.5 text-sm text-neutral-700 hover:bg-neutral-100"
-						}
-						onClick={option.onSelect}
-					>
-						{option.label}
-					</button>
-				))}
-			</div>
-		</div>
-	);
-}
-
-/** A labelled dropdown; selecting a value calls `onSelect`. */
-function LabeledSelect({
-	label,
-	value,
-	options,
-	onSelect,
-}: {
-	label: string;
-	value: string;
-	options: { value: string; label: string }[];
-	onSelect: (value: string) => void;
-}) {
-	return (
-		<div class="flex items-center justify-between gap-3">
-			<span class="text-sm text-neutral-600">{label}</span>
-			<select
-				class="rounded-sm border border-neutral-300 bg-white px-2 py-0.5 text-sm text-neutral-700"
-				value={value}
-				onChange={(event) => onSelect(event.currentTarget.value)}
-			>
-				{options.map((option) => (
-					<option key={option.value} value={option.value}>
-						{option.label}
-					</option>
-				))}
-			</select>
-		</div>
-	);
-}
 
 /** A row in the key-mappings help. */
 function KeyRow({ keys, action }: { keys: string; action: string }) {
@@ -88,81 +28,143 @@ function KeyRow({ keys, action }: { keys: string; action: string }) {
 	);
 }
 
+/** A recents/favorites row's "Show in library" trailer (the item-details
+ *  view is where favoriting lives). */
+function DetailsButton({ id }: { id: string }) {
+	return (
+		<button
+			type="button"
+			class="shrink-0 text-neutral-400 hover:text-neutral-700"
+			title={messages.recents.details}
+			aria-label={messages.recents.details}
+			onClick={() =>
+				navigate(
+					`/a8/emu/library/${encodeURIComponent(id)}` +
+						`?back=${encodeURIComponent("/a8/emu/menu")}`,
+				)
+			}
+		>
+			<Icon name="info" class="size-4" />
+		</button>
+	);
+}
+
 /**
- * The recents list: images you've booted (newest first), then the built-in
- * software you haven't, so it's never empty. Click to boot; a transient
- * (file-booted) item can be kept in the library, and any history item removed.
+ * The menu's Recents/Favorites section, tabbed (local state only - the tab
+ * isn't part of the URL). Recents: images you've booted (newest first), then
+ * the built-in software you haven't, so it's never empty. Favorites: the
+ * starred games, in starring order. Click to boot; a library item links to
+ * its details view (where favoriting lives), a transient (file-booted) item
+ * can be kept in the library, and any history item removed.
  */
 function RecentsSection({ host }: { host: EmulatorHost }) {
+	const [tab, setTab] = useState<"recents" | "favorites">("recents");
 	const items = recentsView.value;
-	const favorites = favoriteIds.value;
+	const favorites = favoritesView.value;
 	if (items.length === 0) return null;
+
+	const tabs = [
+		{ id: "recents", label: messages.recents.title },
+		{ id: "favorites", label: messages.favorites.title },
+	] as const;
+
 	return (
 		<section>
-			<h2 class="mb-2 text-xs font-semibold tracking-wide text-neutral-500 uppercase">
-				{messages.recents.title}
-			</h2>
-			<ul class="flex flex-col gap-1">
-				{items.map(({ entry, recent }) => (
-					<li
-						key={entry.id}
-						class="flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
+			<div class="mb-2 flex gap-2 border-b border-neutral-200">
+				{tabs.map((t) => (
+					<button
+						key={t.id}
+						type="button"
+						aria-pressed={tab === t.id}
+						class={`-mb-px border-b-2 px-0.5 py-1 text-xs font-semibold tracking-wide uppercase ${
+							tab === t.id
+								? "border-neutral-700 text-neutral-900"
+								: "border-transparent text-neutral-400 hover:text-neutral-700"
+						}`}
+						onClick={() => setTab(t.id)}
 					>
-						<TypePill type={entry.derived.type} />
-						<button
-							type="button"
-							class="min-w-0 flex-1 truncate text-left text-sm hover:underline"
-							title={entry.user.displayName}
-							onClick={() => void host.bootImage(entry.id)}
+						{t.label}
+					</button>
+				))}
+			</div>
+			{tab === "recents" ? (
+				<ul class="flex flex-col gap-1">
+					{items.map(({ entry, recent }) => (
+						<li
+							key={entry.id}
+							class="flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
 						>
-							{entry.user.displayName}
-						</button>
-						<button
-							type="button"
-							class={`shrink-0 ${
-								favorites.includes(entry.id)
-									? "text-amber-500 hover:text-amber-600"
-									: "text-neutral-300 hover:text-neutral-500"
-							}`}
-							title={
-								favorites.includes(entry.id)
-									? messages.recents.unfavorite
-									: messages.recents.favorite
-							}
-							aria-label={
-								favorites.includes(entry.id)
-									? messages.recents.unfavorite
-									: messages.recents.favorite
-							}
-							onClick={() => toggleFavorite(entry.id)}
-						>
-							<Icon name="star" class="size-4" />
-						</button>
-						{entry.transient && (
+							<TypePill type={entry.derived.type} />
 							<button
 								type="button"
-								class="shrink-0 text-neutral-400 hover:text-neutral-700"
-								title={messages.recents.keepTitle}
-								aria-label={messages.recents.keepTitle}
-								onClick={() => host.keepRecent(entry.id)}
+								class="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+								title={entry.user.displayName}
+								onClick={() => void host.bootImage(entry.id)}
 							>
-								<Icon name="bookmark" class="size-4" />
+								{entry.user.displayName}
 							</button>
-						)}
-						{recent && (
+							{/* A library item links to its details; a transient
+							    (file-booted, unkept) item gets the bookmark (keep)
+							    instead. */}
+							{entry.transient ? (
+								<button
+									type="button"
+									class="shrink-0 text-neutral-400 hover:text-neutral-700"
+									title={messages.recents.keepTitle}
+									aria-label={messages.recents.keepTitle}
+									onClick={() => host.keepRecent(entry.id)}
+								>
+									<Icon name="bookmark" class="size-4" />
+								</button>
+							) : (
+								<DetailsButton id={entry.id} />
+							)}
+							{recent && (
+								<button
+									type="button"
+									class="shrink-0 text-neutral-400 hover:text-neutral-700"
+									title={messages.recents.remove}
+									aria-label={messages.recents.remove}
+									onClick={() => host.removeFromRecents(entry.id)}
+								>
+									<Icon name="close" class="size-4" />
+								</button>
+							)}
+						</li>
+					))}
+				</ul>
+			) : favorites.length === 0 ? (
+				<p class="text-sm text-neutral-500">{messages.favorites.empty}</p>
+			) : (
+				<ul class="flex flex-col gap-1">
+					{favorites.map((entry) => (
+						<li
+							key={entry.id}
+							class="flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors duration-150 hover:bg-neutral-100"
+						>
+							<TypePill type={entry.derived.type} />
+							<button
+								type="button"
+								class="min-w-0 flex-1 truncate text-left text-sm hover:underline"
+								title={entry.user.displayName}
+								onClick={() => void host.bootImage(entry.id)}
+							>
+								{entry.user.displayName}
+							</button>
+							<DetailsButton id={entry.id} />
 							<button
 								type="button"
 								class="shrink-0 text-neutral-400 hover:text-neutral-700"
-								title={messages.recents.remove}
-								aria-label={messages.recents.remove}
-								onClick={() => host.removeFromRecents(entry.id)}
+								title={messages.recents.unfavorite}
+								aria-label={messages.recents.unfavorite}
+								onClick={() => toggleFavorite(entry.id)}
 							>
 								<Icon name="close" class="size-4" />
 							</button>
-						)}
-					</li>
-				))}
-			</ul>
+						</li>
+					))}
+				</ul>
+			)}
 		</section>
 	);
 }
@@ -170,6 +172,8 @@ function RecentsSection({ host }: { host: EmulatorHost }) {
 /**
  * The machine-configuration form (its own panel): model, RAM, optional separate
  * ANTIC RAM, TV standard, and BASIC. Edits are staged and applied with a reboot.
+ * (The live-applied Serial bus group moved to the devices view's D: tab;
+ * keyboard settings live on its K: tab.)
  */
 export function ConfigView({ host }: { host: EmulatorHost }) {
 	const staged = host.staged.value;
@@ -272,6 +276,7 @@ export function ConfigView({ host }: { host: EmulatorHost }) {
 // the palette; the settings entry fans out into its own tabbed view.
 const MENU_COMMANDS = [
 	{ command: "OPEN_SETTINGS", label: messages.menu.settings },
+	{ command: "OPEN_DEVICES", label: messages.menu.devices },
 	{ command: "BOOT_IMAGE", label: messages.menu.boot },
 	{ command: "OPEN_LIBRARY", label: messages.menu.library },
 	{ command: "OPEN_PALETTE", label: messages.menu.palette },

@@ -20,7 +20,10 @@ import { Pbi } from "./pbi.ts";
 import { Pia } from "./pia.ts";
 import { Pokey } from "./pokey.ts";
 import { detectOsVectors, OsTraps, type PasteMode } from "./os-traps.ts";
+import { DiskDrive } from "./disk-drive.ts";
 import { createSioHandler, SIOV } from "./sio.ts";
+import { SioBus } from "./sio-bus.ts";
+import { SioConnector } from "./sio-connector.ts";
 import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
 /**
@@ -196,24 +199,40 @@ export class Atari {
 		// sequence like real hardware.
 		this.cpu = new Sfotty(this.mmu);
 
+		// The SIO bus: the connector (devices attach, control lines readable),
+		// the serial-wire engine behind POKEY's serial port, and the built-in
+		// D1: drive that insertDisk feeds. The command and motor lines come off
+		// the PIA's CB2/CA2 outputs. Hardware, so wired unconditionally - the
+		// wire works on any OS ROM.
+		this.sio = new SioConnector();
+		this.pia.cb2Out.connect(this.sio.command);
+		this.pia.ca2Out.connect(this.sio.motor);
+		this.#sioBus = new SioBus({ pokey: this.pokey, connector: this.sio });
+		this.#d1Drive = new DiskDrive(1);
+		this.sio.attach(this.#d1Drive);
+
 		// OS-level traps install only on a recognized OS ROM shape (the
 		// well-known vector rows must hold JMPs) - an unrecognized image is a
 		// custom ROM and runs pure hardware, no traps at all.
 		const vectors = detectOsVectors(os);
 		if (vectors) {
-			// Built-in SIO high-level emulation: a JSR through SIOV is trapped and
-			// served from the inserted D1: image (no serial hardware emulated). Wired
-			// once; insertDisk swaps the image the handler reads. Only fires while
-			// the OS ROM is mapped: with RAM banked in under the OS, $E459 is the
-			// running program's own code (Turbo Basic XL keeps its interpreter
-			// there), so the fetch must fall through to it.
+			// Built-in SIO high-level emulation: a JSR through SIOV is trapped
+			// and served directly from the attached devices - no serial
+			// traffic, loads are instant. Software that drives POKEY's serial
+			// port itself bypasses the trap and reaches the same devices
+			// through the wire engine. The trap only fires while the OS ROM is
+			// mapped: with RAM banked in under the OS, $E459 is the running
+			// program's own code (Turbo Basic XL keeps its interpreter there),
+			// so the fetch must fall through to it.
 			const sioHandler = createSioHandler({
 				machine: this,
 				cpu: this.cpu,
-				getDisk: (unit) => (unit === 1 ? this.#disk : undefined),
+				devices: () => this.sio.devices,
 			});
 			this.interceptExecute(SIOV, (address) =>
-				this.mmu.isOsRomMapped ? sioHandler(address) : undefined,
+				this.sioTrapEnabled && this.mmu.isOsRomMapped
+					? sioHandler(address)
+					: undefined,
 			);
 
 			// Boot milestones, the CIO-init chain, and the K: get-byte trap
@@ -227,6 +246,7 @@ export class Atari {
 	readonly joysticks: readonly JoystickConnector[];
 	readonly console: ConsolePanel;
 	readonly keyboard: Keyboard;
+	readonly sio: SioConnector;
 
 	get cartridge(): Cartridge | undefined {
 		return this.#cartridge;
@@ -236,12 +256,59 @@ export class Atari {
 	}
 
 	/**
-	 * Insert (or replace) the D1: disk image the built-in SIO serves. Pass it
-	 * before booting a disk; with none inserted, SIO requests time out and the
-	 * OS falls through to its other boot sources.
+	 * Insert (or replace) the disk in the built-in D1: drive. Pass it before
+	 * booting a disk; with none inserted, SIO requests time out and the OS
+	 * falls through to its other boot sources. Further drives (D2:-D8:) are
+	 * {@link DiskDrive} devices the host attaches to {@link sio}.
 	 */
 	insertDisk(disk: AtrImage): void {
-		this.#disk = disk;
+		this.#d1Drive.disk = disk;
+	}
+
+	/**
+	 * Whether the SIOV trap answers OS-conformant disk calls instantly
+	 * (high-level emulation). Live-togglable; off, everything runs over
+	 * the real serial wire. Only effective on a recognized OS ROM - a
+	 * custom OS never gets the trap regardless.
+	 */
+	sioTrapEnabled = true;
+
+	/**
+	 * Serial I/O acceleration: deliver SIO bus traffic at the guest's own
+	 * pace instead of the programmed baud rate (see
+	 * {@link SioBus.serialAcceleration}). Off by default - the honest
+	 * wire; hosts that prefer speed over wire-level fidelity turn it on.
+	 */
+	get sioAcceleration(): boolean {
+		return this.#sioBus.serialAcceleration;
+	}
+	set sioAcceleration(enabled: boolean) {
+		this.#sioBus.serialAcceleration = enabled;
+	}
+
+	/**
+	 * Idle-line cycles the wire engine inserts between data-frame bytes,
+	 * like a real drive's per-byte processing pause (see
+	 * {@link SioBus.interByteGap}). Zero = back-to-back.
+	 */
+	get sioInterByteGap(): number {
+		return this.#sioBus.interByteGap;
+	}
+	set sioInterByteGap(cycles: number) {
+		this.#sioBus.interByteGap = cycles;
+	}
+
+	/**
+	 * The built-in D1: drive's ultra-speed index (the {@link DiskDrive}
+	 * `highSpeedIndex`): the POKEY divisor advertised to the guest via
+	 * the $3F poll; undefined = a stock drive. Guests re-negotiate on
+	 * their next detection pass (practically: the next boot).
+	 */
+	get diskSpeedIndex(): number | undefined {
+		return this.#d1Drive.highSpeedIndex;
+	}
+	set diskSpeedIndex(index: number | undefined) {
+		this.#d1Drive.highSpeedIndex = index;
 	}
 
 	/**
@@ -249,7 +316,7 @@ export class Atari {
 	 * time out and the OS falls through to its other boot sources.
 	 */
 	ejectDisk(): void {
-		this.#disk = undefined;
+		this.#d1Drive.disk = undefined;
 	}
 
 	/**
@@ -339,6 +406,7 @@ export class Atari {
 				this.anticGtia.beforeCpu();
 				this.pokey.cycle();
 				this.pia.cycle();
+				this.#sioBus.cycle();
 				this.phase = PHASE.BUS;
 
 			// falls through
@@ -490,11 +558,11 @@ export class Atari {
 
 	readonly #xl: boolean;
 	#resetHeld = false;
-	// The D1: disk image served by the built-in trap-based SIO; undefined = no
-	// disk (SIO times out and the OS moves on). Set via insertDisk.
-	#disk: AtrImage | undefined;
 	// The OS trap framework; undefined on an unrecognized (custom) OS ROM.
 	#osTraps: OsTraps | undefined;
+	// The SIO serial-wire engine and the built-in D1: drive insertDisk feeds.
+	readonly #sioBus: SioBus;
+	readonly #d1Drive: DiskDrive;
 
 	// Create and wire the joystick connectors: two jacks on the XL/XE, four
 	// on the 400/800 (ports 2/3 live on PIA port B). Connector signals are
@@ -598,6 +666,9 @@ export class Atari {
 		this.anticGtia.reset(cold);
 		this.pia.reset(cold);
 		this.pokey.reset(cold);
+		// The bus engine follows POKEY: a warm reset leaves an in-flight
+		// transaction alone (the OS re-inits the serial port in software).
+		if (cold) this.#sioBus.reset();
 	}
 
 	// The /IRQ line as sampled at the end of the last completed cycle.

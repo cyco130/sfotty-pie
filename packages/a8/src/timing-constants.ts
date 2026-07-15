@@ -1,9 +1,11 @@
 export const CYCLES_PER_LINE = 114; // 94 visible cycles (17..111) + 20 horizontal blank
 
 // The framebuffer AnticGtia.afterCpu renders into: one Atari color byte per
-// hi-res pixel.
+// hi-res pixel. Rows are vcount 0..height-1 covering the full scan (the
+// ANTIC hires bug can light pixels on any vertical blank line), so the
+// height is the standard's line count; the normally visible region is rows
+// 8..247 and everything else is black unless the bug opens it.
 export const FRAME_BUFFER_WIDTH = 376; // 94 visible cycles x 4 hi-res pixels
-export const FRAME_BUFFER_HEIGHT = 240;
 
 export const NTSC_MASTER_CLOCK_RATE = 14_318_180;
 export const NTSC_CYCLES_PER_SECOND = NTSC_MASTER_CLOCK_RATE / 8; // 1_789_772.5, slightly off from the exact (5 * 7 * 9) / (16 * 11) MHz ~= 1_789_772.73
@@ -24,6 +26,11 @@ export const PAL_PIXEL_ASPECT_RATIO =
 	PAL_SQUARE_PIXEL_RATE / (PAL_MASTER_CLOCK_RATE / 2); // ~1.0396
 export const PAL_FRAMES_PER_SECOND =
 	PAL_CYCLES_PER_SECOND / PAL_CYCLES_PER_FRAME;
+
+export const FRAME_BUFFER_HEIGHTS = {
+	ntsc: NTSC_LINES_PER_FRAME,
+	pal: PAL_LINES_PER_FRAME,
+} as const;
 
 /*
 A write on cycle 65 of a scan line shows up on 128.

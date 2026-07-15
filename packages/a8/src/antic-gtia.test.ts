@@ -216,7 +216,7 @@ test("a JVB display list reloads its target every frame", () => {
 	ag.write(0xd403, 0x2c); // DLISTH
 	ag.write(0xd400, 0x20); // DMACTL: display list DMA on, playfield off
 
-	const frame = new Uint8Array(376 * 240);
+	const frame = new Uint8Array(376 * 262);
 	const latchLines: number[] = [];
 	for (let cycle = 0; cycle < 262 * 114 * 3; cycle++) {
 		ag.beforeCpu();
@@ -272,7 +272,7 @@ test("the PAL VCOUNT overflow window reads $9C", () => {
 
 test("direct GRAF writes survive when GRACTL has latching off", () => {
 	const ag = makeAnticGtia();
-	const frame = new Uint8Array(376 * 240);
+	const frame = new Uint8Array(376 * 262);
 
 	ag.write(0xd400, 0x0c); // DMACTL: P/M DMA - the fetch slots halt
 	ag.write(0xd00d, 0xff); // GRAFP0, written by the CPU
@@ -298,7 +298,7 @@ test("with all DMA off, GRACTL latching finds no fetch slot and loads nothing", 
 	// entirely off there is no halted HBLANK cycle (DRAM refresh halts land
 	// later in the line), so GRACTL-enabled latching never fires.
 	const ag = makeAnticGtia();
-	const frame = new Uint8Array(376 * 240);
+	const frame = new Uint8Array(376 * 262);
 
 	ag.write(0xd00d, 0xff); // GRAFP0, written by the CPU
 	ag.write(0xd01d, 0x03); // GRACTL: latch players + missiles
@@ -317,7 +317,7 @@ test("P/M graphics latch across the whole visible region, including the bottom b
 	// HUD on PAL (taller frame), leaking a stale P2<->P3 collision and crashing
 	// the plane. The latch must run for the full collision region (lines 8-247).
 	const ag = makeAnticGtia();
-	const frame = new Uint8Array(376 * 240);
+	const frame = new Uint8Array(376 * 262);
 	ag.write(0xd400, 0x0c); // DMACTL: P/M DMA - the fetch slots halt
 	ag.write(0xd01d, 0x02); // GRACTL: enable player-graphics latching
 

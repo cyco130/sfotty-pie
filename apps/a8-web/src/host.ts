@@ -9,7 +9,6 @@ import {
 	isCartTypeSupported,
 	type Cartridge,
 	detectFileFormat,
-	FRAME_BUFFER_HEIGHT,
 	FRAME_BUFFER_WIDTH,
 	NTSC_PIXEL_ASPECT_RATIO,
 	PAL_PIXEL_ASPECT_RATIO,
@@ -656,7 +655,7 @@ export class EmulatorHost {
 		const current = this.displaySettings.peek();
 		const next: DisplaySettings = {
 			...current,
-			[tv]: { ...current[tv], overscan: sanitizeOverscan(overscan) },
+			[tv]: { ...current[tv], overscan: sanitizeOverscan(overscan, tv) },
 		};
 		this.displaySettings.value = next;
 		saveDisplaySettings(next);
@@ -1981,6 +1980,7 @@ export class EmulatorHost {
 		// shown. Updated by the subscriptions below.
 		let crop = overscanCrop(
 			this.displaySettings.value[this.config.value.tv].overscan,
+			this.config.value.tv,
 		);
 
 		// Fit the canvas into its parent, preserving the display aspect - which
@@ -2006,12 +2006,15 @@ export class EmulatorHost {
 		const resize = new ResizeObserver(fit);
 		resize.observe(stage);
 
-		const imageData = context.createImageData(
+		// The full rendered frame in display RGB. The height is the running
+		// standard's scan-line count (the machine renders the whole scan), so
+		// a machine swap that changes it re-creates the buffer in present().
+		let imageData = context.createImageData(
 			FRAME_BUFFER_WIDTH,
-			FRAME_BUFFER_HEIGHT,
+			this.#emulator.frame.length / FRAME_BUFFER_WIDTH,
 			{ colorSpace: outputGamut },
 		);
-		const pixels = new Uint32Array(imageData.data.buffer);
+		let pixels = new Uint32Array(imageData.data.buffer);
 
 		// The frameCount of the frame currently on the canvas; -1 forces a
 		// redraw on the next present.
@@ -2023,6 +2026,7 @@ export class EmulatorHost {
 		const applyCrop = () => {
 			crop = overscanCrop(
 				this.displaySettings.value[this.config.value.tv].overscan,
+				this.config.value.tv,
 			);
 			if (canvas.width !== crop.width || canvas.height !== crop.height) {
 				canvas.width = crop.width;
@@ -2080,6 +2084,17 @@ export class EmulatorHost {
 			if (this.#emulator.frameCount !== presented) {
 				const frameCount = this.#emulator.frameCount;
 				const frame = this.#emulator.frame;
+				// A machine swap can change the scan-line count (NTSC <-> PAL):
+				// re-size the RGB buffers to the frame.
+				if (pixels.length !== frame.length) {
+					imageData = context.createImageData(
+						FRAME_BUFFER_WIDTH,
+						frame.length / FRAME_BUFFER_WIDTH,
+						{ colorSpace: outputGamut },
+					);
+					pixels = new Uint32Array(imageData.data.buffer);
+					retained = null;
+				}
 				if (frameBlending > 0) {
 					// Decay per *emulated* frame: skipped frames (turbo, slow
 					// tabs) decay by k^N rather than one step. A non-advancing

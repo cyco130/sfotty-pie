@@ -6,14 +6,14 @@
 // paletteFor) -> a 24-bit RGB PNG.
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
-import { FRAME_BUFFER_HEIGHT, FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
+import { FRAME_BUFFER_WIDTH } from "./timing-constants.ts";
 
 /** Encode a framebuffer as a PNG (24-bit RGB). */
 export function frameToPng(
 	frame: Uint8Array,
 	palette: Uint32Array,
 	width = FRAME_BUFFER_WIDTH,
-	height = FRAME_BUFFER_HEIGHT,
+	height = frame.length / width,
 ): Uint8Array {
 	// Raw image: each row is a filter byte (0 = none) then RGB triplets.
 	const stride = 1 + width * 3;

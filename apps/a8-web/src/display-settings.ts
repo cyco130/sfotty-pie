@@ -1,26 +1,22 @@
-// Per-TV-standard display settings. The machine always renders the full
-// 376x240 frame (games draw into overscan); overscan is a display-side crop,
-// and the correct amounts genuinely differ per standard - 80s NTSC sets
-// showed ~204-216 lines while PAL sets showed all 240 and then some. More
-// settings (palette generation parameters, frame frameBlending) join this
-// record over time; the eventual settings page is tabbed per standard.
+// Per-TV-standard display settings. The machine renders the full scan
+// (376 x 262/312, games draw into overscan and the ANTIC hires bug can open
+// the vertical borders); overscan is a display-side crop, and the correct
+// amounts genuinely differ per standard - 80s NTSC sets showed ~204-216
+// lines while PAL sets showed all 240 and then some. More settings (palette
+// generation parameters, frame frameBlending) join this record over time;
+// the eventual settings page is tabbed per standard.
 //
 // Horizontal positions are in absolute hi-res pixels (GTIA color clocks x 2):
 // the standard playfield spans 96..415, so "no overscan" (320) is exactly
 // that, and wider crops add equal border per side. The frame buffer's first
 // pixel is at absolute position 68 - buffer cycle x = hpos - 15 emits color
-// clocks (hpos + 2) * 2 (see antic-gtia.ts). Vertically the anchors are
-// vcount: the buffer holds vcount 8..247 and the standard display (24 blank
-// lines after VBLANK + 192 picture lines) occupies vcount 32..223, centre
-// 128.
-//
-// The crop is capped at the rendered frame (376x240). Atari genuinely can't
-// draw wider; taller exists via the ANTIC last-line bug (full 262/312 lines,
-// vsync-override), so an "Extended" view may one day require a taller frame
-// buffer - deliberately not modeled yet.
+// clocks (hpos + 2) * 2 (see antic-gtia.ts). Vertically the buffer row is
+// vcount over the full 262/312-line scan; the normally visible region is
+// rows 8..247 and the standard display (24 blank lines after VBLANK + 192
+// picture lines) occupies vcount 32..223, centre 128.
 
 import {
-	FRAME_BUFFER_HEIGHT,
+	FRAME_BUFFER_HEIGHTS,
 	FRAME_BUFFER_WIDTH,
 	type PalettePrimaries,
 } from "@sfotty-pie/a8";
@@ -70,11 +66,14 @@ export interface StandardDisplaySettings {
 
 export type DisplaySettings = Record<TvStandard, StandardDisplaySettings>;
 
-/** The adjustable crop range: OS playfield up to the full rendered frame. */
+/** The adjustable crop range: OS playfield up to the full rendered frame -
+ *  vertically the standard's whole scan (262/312 lines), so an opened
+ *  vertical border is viewable in full. */
 export const OVERSCAN_MIN_WIDTH = 320;
 export const OVERSCAN_MAX_WIDTH = FRAME_BUFFER_WIDTH;
 export const OVERSCAN_MIN_HEIGHT = 192;
-export const OVERSCAN_MAX_HEIGHT = FRAME_BUFFER_HEIGHT;
+export const OVERSCAN_MAX_HEIGHTS: Record<TvStandard, number> =
+	FRAME_BUFFER_HEIGHTS;
 
 /**
  * Named palette presets per standard - parameter sets, not curated RGB
@@ -204,14 +203,18 @@ export function defaultDisplaySettings(): DisplaySettings {
 	};
 }
 
-/** An overscan value clamped to the legal range (even, within min/max). */
-export function sanitizeOverscan(overscan: OverscanSettings): OverscanSettings {
+/** An overscan value clamped to the legal range (even, within min/max -
+ *  the height cap is the standard's scan-line count). */
+export function sanitizeOverscan(
+	overscan: OverscanSettings,
+	tv: TvStandard,
+): OverscanSettings {
 	return {
 		width: clampEven(overscan.width, OVERSCAN_MIN_WIDTH, OVERSCAN_MAX_WIDTH),
 		height: clampEven(
 			overscan.height,
 			OVERSCAN_MIN_HEIGHT,
-			OVERSCAN_MAX_HEIGHT,
+			OVERSCAN_MAX_HEIGHTS[tv],
 		),
 	};
 }
@@ -255,23 +258,31 @@ export interface CropRect {
 }
 
 /** The frame-buffer crop for an overscan setting: centred on the standard
- *  playfield/display (not the buffer), per the anchors below. */
-export function overscanCrop(overscan: OverscanSettings): CropRect {
-	const { width, height } = sanitizeOverscan(overscan);
+ *  playfield/display (not the buffer), per the anchors below. Crops taller
+ *  than the display centre allows slide down to stay inside the buffer
+ *  (a full-scan crop starts at row 0). */
+export function overscanCrop(
+	overscan: OverscanSettings,
+	tv: TvStandard,
+): CropRect {
+	const { width, height } = sanitizeOverscan(overscan, tv);
 	return {
 		left: PLAYFIELD_CENTER - width / 2 - BUFFER_ORIGIN_X,
-		top: DISPLAY_CENTER - height / 2 - BUFFER_ORIGIN_Y,
+		top: clamp(
+			DISPLAY_CENTER - height / 2,
+			0,
+			OVERSCAN_MAX_HEIGHTS[tv] - height,
+		),
 		width,
 		height,
 	};
 }
 
 // Crop anchors (see the module comment): the playfield centre in absolute
-// hi-res pixels and the display centre in vcount, minus each axis's buffer
-// origin.
+// hi-res pixels minus the buffer's X origin, and the display centre in
+// vcount (= buffer row).
 const BUFFER_ORIGIN_X = 68;
 const PLAYFIELD_CENTER = 256;
-const BUFFER_ORIGIN_Y = 8;
 const DISPLAY_CENTER = 128;
 
 const clampEven = (value: number, min: number, max: number) =>

@@ -1,8 +1,6 @@
 import {
 	Atari,
 	CYCLES_PER_LINE,
-	FRAME_BUFFER_HEIGHT,
-	FRAME_BUFFER_WIDTH,
 	Joystick,
 	NTSC_CYCLES_PER_SECOND,
 	PAL_CYCLES_PER_SECOND,
@@ -79,7 +77,7 @@ export class Emulator {
 		// needs no setFrameBuffer. The front starts on the other (empty) half.
 		this.#frames = [
 			this.machine.frame,
-			new Uint8Array(FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT),
+			new Uint8Array(this.machine.frame.length),
 		];
 		this.frame = this.#frames[1];
 

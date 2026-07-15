@@ -439,18 +439,21 @@ export class AnticGtia implements Memory {
 		const i = this.hpos - 1;
 
 		const x = i - 17;
-		const y = this.vcount - 8;
+		const y = this.vcount;
 
-		if (y >= 0 && y < 240) {
-			if (x >= 0 && x < 94) {
-				const base = (x + y * 94) * 4;
-				frame[base] = left0;
-				frame[base + 1] = right0;
-				frame[base + 2] = left1;
-				frame[base + 3] = right1;
-			}
+		// The frame covers the full scan (row = vcount): vertical blank rows
+		// paint black from the blanking gate in #generateColor unless the
+		// hires bug opens them.
+		if (x >= 0 && x < 94) {
+			const base = (x + y * 94) * 4;
+			frame[base] = left0;
+			frame[base + 1] = right0;
+			frame[base + 2] = left1;
+			frame[base + 3] = right1;
+		}
 
-			const isOddScanline = y & 1;
+		if (this.vcount >= 8 && this.vcount < 248) {
+			const isOddScanline = this.vcount & 1;
 
 			// GTIA has no window into ANTIC's DMA schedule: it takes the
 			// first halted cycle within horizontal blank to be the missile
@@ -470,11 +473,12 @@ export class AnticGtia implements Memory {
 
 			// The GRAF registers latch the bus during the P/M fetch slots only
 			// when GRACTL enables it - with GRACTL off, direct GRAF writes
-			// persist (the GTIA collision tests rely on that). The latch runs for
-			// the whole visible region (scan lines 8-247 - the enclosing y < 240):
-			// an earlier cut at y < 224 froze player graphics over the bottom 16
-			// lines, which is invisible on NTSC but corrupts the lower HUD on PAL
-			// (its taller frame puts content there) - River Raid's bug.
+			// persist (the GTIA collision tests rely on that). The latch runs
+			// for the whole visible region (scan lines 8-247 - the enclosing
+			// gate): an earlier cut at 224 lines froze player graphics over
+			// the bottom 16 lines, which is invisible on NTSC but corrupts
+			// the lower HUD on PAL (its taller frame puts content there) -
+			// River Raid's bug.
 			if (pmSlot === 0 && this.enableMissiles) {
 				// VDELAY bits 0-3 delay each missile independently, but
 				// grafM packs all four (M0=bits 0-1 .. M3=bits 6-7), so
@@ -1592,6 +1596,14 @@ export class AnticGtia implements Memory {
 			this.#gtiaBkMuted = !this.hires && incoming === 0;
 		}
 
+		// Vertical blank: unless the hires bug opened the playfield window
+		// (#drawPlayfield emits playfield codes there), GTIA sees only
+		// blanking codes - graphics processing (P/M, collisions) stays
+		// suppressed and the output is blank (black), not background.
+		if (pf < 4 && (this.vcount < 8 || this.vcount >= 248)) {
+			return 0;
+		}
+
 		const pm = this.#drawPlayerMissile(pos);
 		const gtiaMode = this.#gtiaModes ? this.prior & 0xc0 : 0;
 
@@ -1802,6 +1814,31 @@ export class AnticGtia implements Memory {
 			this.#anxDrain--;
 			pixel = this.#anxLine.cycle();
 		}
+		if (this.vcount < 8 || this.vcount >= 248) {
+			// Vertical blank: ANTIC holds the blanking code on the ANx bus
+			// (the vertical sync code across the sync lines), so GTIA sees
+			// no playfield - except for the hires bug (AHRM "Opening the
+			// vertical border"). With a hires mode still in the IR (the
+			// last instruction byte fetched - a JVB normally displaces it)
+			// and playfield DMA enabled, the hires encoder keeps forcing
+			// AN2 across the playfield window, corrupting blank %011 into
+			// the playfield code %111 (two lit hires pixels) and vertical
+			// sync %001 into %101. The pipe still ticks above: a continued
+			// line's last taps drain into the next line's first cycles.
+			if (this.hires && this.playfieldWidth !== 0) {
+				const t = (this.hpos - 1) * 2 + pos;
+				const start = PF_WINDOW_START[this.playfieldWidth];
+				const width = PF_WINDOW_WIDTH[this.playfieldWidth];
+				if (t >= start && t < start + width) {
+					const vsyncStart =
+						this.anticLineCount === PAL_LINES_PER_FRAME ? 275 : 251;
+					return this.vcount >= vsyncStart && this.vcount < vsyncStart + 3
+						? 5
+						: 7;
+				}
+			}
+			return 0;
+		}
 		const scrolled =
 			(this.instruction & 0x0f) > 1 && (this.instruction & 0x10) !== 0;
 		if (scrolled && this.hscrol & 1) {
@@ -1830,16 +1867,15 @@ export class AnticGtia implements Memory {
 		return pixel;
 	}
 
-	// 1 bit for each player or missile. 1 means active, 0 means inactive
+	// 1 bit for each player or missile. 1 means active, 0 means inactive.
+	// Only called while GTIA processes graphics - on visible lines, plus the
+	// hires bug's opened playfield window during vertical blank (the
+	// #generateColor blanking gate): the comparators and shift registers
+	// hold still under blanking.
 	#drawPlayerMissile(pos: 0 | 1): number {
 		const i = this.hpos - 1;
 
 		const x = i - 17;
-		const y = this.vcount - 8;
-
-		if (y < 0 || y >= 240) {
-			return 0;
-		}
 
 		// The idle fast path: with every shift register and GRAF latch zero,
 		// this whole function is a no-op returning 0 (a comparator match

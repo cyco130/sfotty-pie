@@ -37,6 +37,9 @@ export class BountyBobCartridge implements Cartridge {
 		return true;
 	}
 
+	/** See {@link Cartridge.hasD5b8ToD5bf}: the board has no control region. */
+	readonly hasD5b8ToD5bf = false;
+
 	/** See {@link Cartridge.mappingChanged}. */
 	readonly mappingChanged = new Pulse();
 

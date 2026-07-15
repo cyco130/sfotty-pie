@@ -15,6 +15,7 @@ import {
 	KEYBOARD_LINES,
 	preferredBasicKeys,
 	preferredOsKeys,
+	Rtime8Cartridge,
 	type AtariFileFormat,
 	type AtariModel,
 	type FirmwareKey,
@@ -242,6 +243,8 @@ export class EmulatorHost {
 		this.sioAcceleration.value = loadPersisted(SIO_ACCEL_KEY) !== "off";
 		this.diskSpeed.value = parseDiskSpeed(loadPersisted(DISK_SPEED_KEY));
 		this.pasteChMode.value = loadPersisted(PASTE_MODE_KEY) === "ch";
+		this.rtime8.value = loadPersisted(RTIME8_KEY) === true;
+		this.rtime8Shield.value = loadPersisted(RTIME8_SHIELD_KEY) !== false;
 		this.osdForced.value = loadPersisted(OSD_KEY) === "on";
 		if (audio) audio.muted = loadPersisted(MUTED_KEY) === "on";
 
@@ -413,6 +416,21 @@ export class EmulatorHost {
 	 *  undefined = a stock drive. Programs re-detect at their next boot.
 	 *  Persisted; applied live. */
 	readonly diskSpeed = signal<number | undefined>(6);
+
+	/** Whether the R-Time 8 passthrough clock sits under the cartridge slot.
+	 *  Persisted; applied live (the clock has no ROM - nothing to boot). */
+	readonly rtime8 = signal(false);
+
+	/** True while the R-Time 8 is enabled but suspended because the inserted
+	 *  cartridge decodes the clock's port addresses (see Rtime8Cartridge's
+	 *  rtcActive) - the Cart tab explains itself with this. */
+	readonly rtime8Blocked = signal(false);
+
+	/** Whether the R-Time 8 claims $D5B8-$D5BF exclusively (Rtime8Cartridge's
+	 *  portShield): the clock stays alive over port-conflicting cartridges
+	 *  (Atarimax flash, OSS, ...) by hiding those accesses from them.
+	 *  Persisted; applied live. */
+	readonly rtime8Shield = signal(true);
 
 	/** The active key bindings (one flat set); mirrors what the keyboard resolves,
 	 *  for surfaces that show shortcuts (the palette). Updated via #applyBindings. */
@@ -827,6 +845,39 @@ export class EmulatorHost {
 
 	toggleSioAcceleration(): void {
 		this.setSioAcceleration(!this.sioAcceleration.value);
+	}
+
+	/** Plug in or remove the R-Time 8 (see {@link rtime8}). Persisted;
+	 *  applied live by recomposing the machine's cartridge stack - clock
+	 *  drivers detect the chip at their next probe. */
+	setRtime8(enabled: boolean): void {
+		this.rtime8.value = enabled;
+		savePersisted(RTIME8_KEY, enabled);
+		const machine = this.#emulator.machine;
+		const inner =
+			machine.cartridge instanceof Rtime8Cartridge
+				? machine.cartridge.inner
+				: machine.cartridge;
+		const cartridge = enabled
+			? new Rtime8Cartridge(inner, { portShield: this.rtime8Shield.value })
+			: inner;
+		machine.cartridge = cartridge;
+		this.rtime8Blocked.value =
+			cartridge instanceof Rtime8Cartridge && !cartridge.rtcActive;
+		this.toast(messages.toasts.rtime8(enabled));
+	}
+
+	/** Turn the clock-port shield on or off (see {@link rtime8Shield}).
+	 *  Persisted; applied live to the running passthrough. */
+	setRtime8Shield(on: boolean): void {
+		this.rtime8Shield.value = on;
+		savePersisted(RTIME8_SHIELD_KEY, on);
+		const cart = this.#emulator.machine.cartridge;
+		if (cart instanceof Rtime8Cartridge) {
+			cart.portShield = on;
+			this.rtime8Blocked.value = !cart.rtcActive;
+		}
+		this.toast(messages.toasts.rtime8Shield(on));
 	}
 
 	/** Set the drive's advertised SIO speed (see {@link diskSpeed}).
@@ -2566,11 +2617,20 @@ export class EmulatorHost {
 
 		// On 400/800 & 1200XL, BASIC is an $A000 cartridge displaced by a real
 		// cart; on XL/XE & XEGS it's built in (banked, OPTION-hold to disable).
-		const cartridge =
+		const slotted =
 			this.#cartridge?.cart ??
 			(!builtinBasic && !basicDisabled && basicBytes
 				? createCartridge(basicBytes)
 				: undefined);
+		// The R-Time 8 sits under whatever is in the slot (BASIC included) -
+		// or alone. Over a port-conflicting cartridge it either claims the
+		// port (shield) or suspends itself; mirror the suspension onto the
+		// signal the Cart tab explains it with.
+		const cartridge = this.rtime8.value
+			? new Rtime8Cartridge(slotted, { portShield: this.rtime8Shield.value })
+			: slotted;
+		this.rtime8Blocked.value =
+			cartridge instanceof Rtime8Cartridge && !cartridge.rtcActive;
 
 		// eslint-disable-next-line no-console -- shows which ROMs the ranking picked
 		console.log(
@@ -2680,6 +2740,8 @@ const REALISTIC_SCAN_KEY = "realistic-key-scan";
 const SIO_TRAP_KEY = "sio-trap";
 const SIO_ACCEL_KEY = "sio-acceleration";
 const DISK_SPEED_KEY = "disk-sio-speed";
+const RTIME8_KEY = "rtime8";
+const RTIME8_SHIELD_KEY = "rtime8-shield";
 
 // The persisted disk-speed value: "standard" = a stock drive (no $3F
 // answer), else a POKEY divisor 0-40; anything unparseable falls back to

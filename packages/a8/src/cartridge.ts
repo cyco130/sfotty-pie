@@ -77,6 +77,41 @@ export interface CartType {
 	): number;
 }
 
+/**
+ * Whether a CART type's control decode reacts to (or drives) accesses in
+ * $D5B8-$D5BF - the R-Time 8's port (see rtime8.ts). Probed from the type's
+ * pure `control`/`controlRead` hooks: a read trigger, representative written
+ * values, and a read-back that returns anything but the $FF pull-up all
+ * count as decoding the range. Probing against `initialMapping` is sound for
+ * every current type - their decodes are gated by address and value, never
+ * by the mapping they're in (the sequence-switched types react from *every*
+ * state) - keep it that way when adding types, or extend the probe.
+ */
+export function cartTypeHasD5b8ToD5bf(type: CartType): boolean {
+	if (!type.initialMapping) return false; // can't attach anyway
+	for (let address = 0xd5b8; address <= 0xd5bf; address++) {
+		for (const value of [null, 0x00, 0x0f, 0x80, 0xff]) {
+			if (type.control?.(address, value, type.initialMapping) !== undefined) {
+				return true;
+			}
+		}
+		// A zero-filled probe image, not the real one: classification is
+		// per-type, and a real image could legitimately store $FF (the
+		// "not driving" value) where a ROM-window type serves the range.
+		if (
+			type.controlRead &&
+			type.controlRead(address, type.initialMapping, PROBE_ROM) !== 0xff
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Large enough for every controlRead's initial-state indexing (DCart reads
+// up to $15FF of bank 0).
+const PROBE_ROM = new Uint8Array(0x4000);
+
 /** Whether CART type `cartType` can run: its scheme is implemented (a
  *  RomCartridge mapping or a custom implementation) and it isn't 5200-only.
  *  Unsupported types can still be recorded in a `.car` header - they just
@@ -233,8 +268,8 @@ export function suggestCartType(bytes: Uint8Array): number | null {
 /**
  * What the machine needs from whatever is plugged into the cartridge slot.
  * {@link RomCartridge} - a plain `.car`/raw ROM image - is the shipped
- * implementation; special hardware (an RTime-8, a passthrough cart with its
- * own slot) can implement this directly.
+ * implementation; special hardware implements this directly (the R-Time 8
+ * passthrough in rtime8.ts is the worked example).
  *
  * `read`/`write` (from {@link Memory}) receive the cartridge address ranges:
  * $8000-$BFFF for whatever areas the cartridge claims, and $D500-$D5FF for
@@ -245,6 +280,13 @@ export interface Cartridge extends AtariMemory {
 	readonly has8000To9fff: boolean;
 	/** Whether the cartridge currently decodes $A000-$BFFF. */
 	readonly hasA000ToBfff: boolean;
+	/**
+	 * Whether the cartridge decodes accesses in $D5B8-$D5BF, the R-Time 8's
+	 * port. The R-Time 8 passthrough (rtime8.ts) goes transparent while such
+	 * a cartridge sits in its slot - the real pairing would fight over the
+	 * bus.
+	 */
+	readonly hasD5b8ToD5bf: boolean;
 	reset(cold: boolean): void;
 	/**
 	 * Fires after anything changes which addresses the cartridge decodes or
@@ -402,6 +444,7 @@ export class RomCartridge implements Cartridge {
 			this.#rom = this.#type.prepare(this.#rom);
 		}
 		this.#applyMapping(this.#type.initialMapping!);
+		this.hasD5b8ToD5bf = cartTypeHasD5b8ToD5bf(this.#type);
 	}
 
 	get has8000To9fff(): boolean {
@@ -411,6 +454,9 @@ export class RomCartridge implements Cartridge {
 	get hasA000ToBfff(): boolean {
 		return this.#mapping.areaA000 !== "ram";
 	}
+
+	/** See {@link Cartridge.hasD5b8ToD5bf} - static per type. */
+	readonly hasD5b8ToD5bf: boolean;
 
 	/** See {@link Cartridge.mappingChanged}. */
 	readonly mappingChanged = new Pulse();

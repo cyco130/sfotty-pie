@@ -256,10 +256,112 @@ export const commands = {
 		run: ({ host }) => host.resetDefaultSettings(),
 	},
 
-	// Attach a disk to D1: of the running machine (no reboot, BASIC kept).
-	ATTACH_D1: { label: "ATTACH_D1", run: ({ host }) => host.pickAttachDisk() },
-	// Detach the disk from D1: (live).
-	DETACH_D1: { label: "DETACH_D1", run: ({ host }) => host.detachDisk() },
+	// Attach a disk to a drive of the running machine (no reboot, BASIC kept).
+	ATTACH_D1: { label: "ATTACH_D1", run: ({ host }) => host.pickAttachDisk(1) },
+	ATTACH_D2: { label: "ATTACH_D2", run: ({ host }) => host.pickAttachDisk(2) },
+	ATTACH_D3: { label: "ATTACH_D3", run: ({ host }) => host.pickAttachDisk(3) },
+	ATTACH_D4: { label: "ATTACH_D4", run: ({ host }) => host.pickAttachDisk(4) },
+	ATTACH_D5: { label: "ATTACH_D5", run: ({ host }) => host.pickAttachDisk(5) },
+	ATTACH_D6: { label: "ATTACH_D6", run: ({ host }) => host.pickAttachDisk(6) },
+	ATTACH_D7: { label: "ATTACH_D7", run: ({ host }) => host.pickAttachDisk(7) },
+	ATTACH_D8: { label: "ATTACH_D8", run: ({ host }) => host.pickAttachDisk(8) },
+	// Detach the disk from a drive (live).
+	DETACH_D1: { label: "DETACH_D1", run: ({ host }) => host.detachDisk(1) },
+	DETACH_D2: { label: "DETACH_D2", run: ({ host }) => host.detachDisk(2) },
+	DETACH_D3: { label: "DETACH_D3", run: ({ host }) => host.detachDisk(3) },
+	DETACH_D4: { label: "DETACH_D4", run: ({ host }) => host.detachDisk(4) },
+	DETACH_D5: { label: "DETACH_D5", run: ({ host }) => host.detachDisk(5) },
+	DETACH_D6: { label: "DETACH_D6", run: ({ host }) => host.detachDisk(6) },
+	DETACH_D7: { label: "DETACH_D7", run: ({ host }) => host.detachDisk(7) },
+	DETACH_D8: { label: "DETACH_D8", run: ({ host }) => host.detachDisk(8) },
+	// Drive power (only meaningful with a disk in): off parks the disk - the
+	// image is kept, the bus hears nothing - and on reattaches it.
+	TURN_ON_D1: {
+		label: "TURN_ON_D1",
+		run: ({ host }) => host.setDriveOn(1, true),
+	},
+	TURN_ON_D2: {
+		label: "TURN_ON_D2",
+		run: ({ host }) => host.setDriveOn(2, true),
+	},
+	TURN_ON_D3: {
+		label: "TURN_ON_D3",
+		run: ({ host }) => host.setDriveOn(3, true),
+	},
+	TURN_ON_D4: {
+		label: "TURN_ON_D4",
+		run: ({ host }) => host.setDriveOn(4, true),
+	},
+	TURN_ON_D5: {
+		label: "TURN_ON_D5",
+		run: ({ host }) => host.setDriveOn(5, true),
+	},
+	TURN_ON_D6: {
+		label: "TURN_ON_D6",
+		run: ({ host }) => host.setDriveOn(6, true),
+	},
+	TURN_ON_D7: {
+		label: "TURN_ON_D7",
+		run: ({ host }) => host.setDriveOn(7, true),
+	},
+	TURN_ON_D8: {
+		label: "TURN_ON_D8",
+		run: ({ host }) => host.setDriveOn(8, true),
+	},
+	TURN_OFF_D1: {
+		label: "TURN_OFF_D1",
+		run: ({ host }) => host.setDriveOn(1, false),
+	},
+	TURN_OFF_D2: {
+		label: "TURN_OFF_D2",
+		run: ({ host }) => host.setDriveOn(2, false),
+	},
+	TURN_OFF_D3: {
+		label: "TURN_OFF_D3",
+		run: ({ host }) => host.setDriveOn(3, false),
+	},
+	TURN_OFF_D4: {
+		label: "TURN_OFF_D4",
+		run: ({ host }) => host.setDriveOn(4, false),
+	},
+	TURN_OFF_D5: {
+		label: "TURN_OFF_D5",
+		run: ({ host }) => host.setDriveOn(5, false),
+	},
+	TURN_OFF_D6: {
+		label: "TURN_OFF_D6",
+		run: ({ host }) => host.setDriveOn(6, false),
+	},
+	TURN_OFF_D7: {
+		label: "TURN_OFF_D7",
+		run: ({ host }) => host.setDriveOn(7, false),
+	},
+	TURN_OFF_D8: {
+		label: "TURN_OFF_D8",
+		run: ({ host }) => host.setDriveOn(8, false),
+	},
+	TOGGLE_D1: { label: "TOGGLE_D1", run: ({ host }) => host.toggleDriveOn(1) },
+	TOGGLE_D2: { label: "TOGGLE_D2", run: ({ host }) => host.toggleDriveOn(2) },
+	TOGGLE_D3: { label: "TOGGLE_D3", run: ({ host }) => host.toggleDriveOn(3) },
+	TOGGLE_D4: { label: "TOGGLE_D4", run: ({ host }) => host.toggleDriveOn(4) },
+	TOGGLE_D5: { label: "TOGGLE_D5", run: ({ host }) => host.toggleDriveOn(5) },
+	TOGGLE_D6: { label: "TOGGLE_D6", run: ({ host }) => host.toggleDriveOn(6) },
+	TOGGLE_D7: { label: "TOGGLE_D7", run: ({ host }) => host.toggleDriveOn(7) },
+	TOGGLE_D8: { label: "TOGGLE_D8", run: ({ host }) => host.toggleDriveOn(8) },
+	// Rotate the drive slots by one, wrapping - up brings D2:'s disk to D1:
+	// (the multi-disk "insert the next disk" gesture); down is the inverse.
+	ROTATE_DRIVES_UP: {
+		label: "ROTATE_DRIVES_UP",
+		run: ({ host }) => host.rotateDrives("up"),
+	},
+	ROTATE_DRIVES_DOWN: {
+		label: "ROTATE_DRIVES_DOWN",
+		run: ({ host }) => host.rotateDrives("down"),
+	},
+	DETACH_ALL_DISKS: {
+		label: "DETACH_ALL_DISKS",
+		run: ({ host }) => host.detachAllDisks(),
+	},
 	// Attach/detach a cartridge (cold boots; leaves other media in place).
 	ATTACH_CARTRIDGE: {
 		label: "ATTACH_CARTRIDGE",

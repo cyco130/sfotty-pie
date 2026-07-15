@@ -5,6 +5,7 @@ import {
 	buildPalPalette,
 	CART_TYPES,
 	createCartridge,
+	DiskDrive,
 	isCartTypeSupported,
 	type Cartridge,
 	detectFileFormat,
@@ -121,6 +122,23 @@ export interface Toast {
 	id: number;
 	kind: ToastKind;
 	text: string;
+}
+
+/** A mounted drive slot: the disk, its display name, the library entry it
+ *  came from (if any), and whether the drive is on (attached to the bus;
+ *  off = parked, the disk is kept but the bus hears nothing). */
+interface DriveSlot {
+	disk: AtrImage;
+	name: string;
+	sourceId?: string;
+	on: boolean;
+}
+
+/** The fixed drive bank size (D1:-D8:, the SIO device-ID range). */
+export const DRIVE_COUNT = 8;
+
+function emptyDrives(): (DriveSlot | null)[] {
+	return Array.from({ length: DRIVE_COUNT }, () => null);
 }
 
 /**
@@ -777,7 +795,8 @@ export class EmulatorHost {
 			DISK_SPEED_KEY,
 			index === undefined ? "standard" : String(index),
 		);
-		this.#emulator.machine.diskSpeedIndex = index;
+		this.#emulator.machine.diskSpeedIndex = index; // the built-in D1:
+		for (const drive of this.#extraDrives) drive.highSpeedIndex = index;
 		this.toast(messages.toasts.diskSpeed(index));
 	}
 
@@ -920,9 +939,9 @@ export class EmulatorHost {
 		this.#bootImagePicker?.();
 	}
 
-	/** Open the file picker to attach a disk to D1: (no reboot). */
-	pickAttachDisk(): void {
-		this.#pendingPick = (file) => void this.attachDiskFile(file);
+	/** Open the file picker to attach a disk to the given drive (no reboot). */
+	pickAttachDisk(unit = 1): void {
+		this.#pendingPick = (file) => void this.attachDiskFile(file, unit);
 		this.#bootImagePicker?.();
 	}
 
@@ -1232,12 +1251,17 @@ export class EmulatorHost {
 		this.#bootImage(await getImageBytes(id), entry.user.displayName, id);
 	}
 
-	/** Attach a library disk image to D1: (live, no reboot). */
-	async attachDisk(id: string): Promise<void> {
+	/** Attach a library disk image to a drive (live, no reboot). */
+	async attachDisk(id: string, unit = 1): Promise<void> {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
-		this.#attachDiskBytes(await getImageBytes(id), entry.user.displayName, id);
+		this.#attachDiskBytes(
+			await getImageBytes(id),
+			entry.user.displayName,
+			id,
+			unit,
+		);
 	}
 
 	/** Attach a library cartridge (cold boots). */
@@ -1368,7 +1392,7 @@ export class EmulatorHost {
 	// the reset's storage wipe). The caller reboots into the now-empty machine.
 	#clearMedia(): void {
 		this.#cartridge = null;
-		this.#drives = [null];
+		this.#drives = emptyDrives();
 		this.#refreshAttachments();
 	}
 
@@ -1445,7 +1469,11 @@ export class EmulatorHost {
 
 		this.closePanel(); // get out of the way
 		this.#cartridge = cartridge;
-		this.#drives = [disk];
+		// Boot clears its own slot (D1:) only; disks parked or mounted in
+		// D2:-D8: ride along, like real drives across a power cycle.
+		const drives = [...this.#drives];
+		drives[0] = disk ? { ...disk, on: true } : null;
+		this.#drives = drives;
 		this.config.value = { ...this.config.value, basicDisabled: true };
 		this.#refreshAttachments();
 		this.#saveMedia();
@@ -1466,7 +1494,7 @@ export class EmulatorHost {
 			this.toast(messages.toasts.detachingCartridge(name));
 		}
 		if (this.#drives[0]) {
-			this.toast(messages.toasts.detachingDisk(this.#drives[0].name));
+			this.toast(messages.toasts.detachingDisk(1, this.#drives[0].name));
 		}
 		if (hasBuiltinBasic(model) && !basicDisabled) {
 			this.toast(messages.toasts.disablingBasic);
@@ -1527,24 +1555,26 @@ export class EmulatorHost {
 	}
 
 	/**
-	 * Attach an ATR to D1: of the running machine - live, no reboot, BASIC
+	 * Attach an ATR to a drive of the running machine - live, no reboot, BASIC
 	 * untouched (unlike Boot image, which power-cycles into the image). The
-	 * disk also becomes D1: for the next cold start and is what Download D1:
-	 * saves.
+	 * disk also stays mounted for the next cold start; D1:'s is what Download
+	 * D1: saves.
 	 */
-	async attachDiskFile(file: File): Promise<void> {
+	async attachDiskFile(file: File, unit = 1): Promise<void> {
 		const bytes = new Uint8Array(await file.arrayBuffer());
 		const id = await addOrFindImage(bytes, file.name, true);
-		if (id) await this.attachDisk(id);
-		else this.#attachDiskBytes(bytes, file.name);
+		if (id) await this.attachDisk(id, unit);
+		else this.#attachDiskBytes(bytes, file.name, undefined, unit);
 	}
 
-	// Attach an ATR's bytes to D1: live - shared by the file picker and the
-	// library's `attachDisk(id)` (which passes the source entry for saving back).
+	// Attach an ATR's bytes to a drive, live - shared by the file picker and
+	// the library's `attachDisk(id)` (which passes the source entry for saving
+	// back). The drive comes on with the disk: inserting is the intent to use.
 	#attachDiskBytes(
 		contents: Uint8Array,
 		name: string,
 		sourceId?: string,
+		unit = 1,
 	): void {
 		let disk: AtrImage;
 		try {
@@ -1555,27 +1585,108 @@ export class EmulatorHost {
 			return;
 		}
 
-		this.#drives[0] = { disk, name, sourceId };
-		this.#emulator.machine.insertDisk(disk);
+		this.#drives[unit - 1] = { disk, name, sourceId, on: true };
+		this.#syncDriveToMachine(unit);
 		this.closePanel(); // get out of the way
 		this.#refreshAttachments();
 		this.#saveMedia();
 		this.#noteUsed(sourceId);
-		this.toast(messages.toasts.attachingDisk(name));
+		this.toast(messages.toasts.attachingDisk(unit, name));
 	}
 
-	/** Detach the disk from D1: of the running machine (live, no reboot). */
-	detachDisk(): void {
-		const drive = this.#drives[0];
-		if (!drive) {
-			this.toast(messages.errors.noDiskToDetach, "warning");
+	/** Detach the disk from a drive of the running machine (live, no reboot). */
+	detachDisk(unit = 1): void {
+		const slot = this.#drives[unit - 1];
+		if (!slot) {
+			this.toast(messages.errors.noDiskToDetach(unit), "warning");
 			return;
 		}
-		this.#drives[0] = null;
-		this.#emulator.machine.ejectDisk();
+		this.#drives[unit - 1] = null;
+		this.#syncDriveToMachine(unit);
 		this.#refreshAttachments();
 		this.#saveMedia();
-		this.toast(messages.toasts.detachingDisk(drive.name));
+		this.toast(messages.toasts.detachingDisk(unit, slot.name));
+	}
+
+	/** Detach every mounted disk (live, no reboot). */
+	detachAllDisks(): void {
+		if (this.#drives.every((slot) => slot === null)) {
+			this.toast(messages.errors.noDisksAttached, "warning");
+			return;
+		}
+		this.#drives = emptyDrives();
+		for (let unit = 1; unit <= DRIVE_COUNT; unit++) {
+			this.#syncDriveToMachine(unit);
+		}
+		this.#refreshAttachments();
+		this.#saveMedia();
+		this.toast(messages.toasts.detachingAllDisks);
+	}
+
+	/**
+	 * Turn a drive on or off (only meaningful with a disk in). Off parks the
+	 * disk: the host keeps the image (in-session writes included), the bus
+	 * hears nothing - like powering a real drive down with the disk inside.
+	 */
+	setDriveOn(unit: number, on: boolean): void {
+		const slot = this.#drives[unit - 1];
+		if (!slot) {
+			this.toast(messages.errors.driveEmpty(unit), "warning");
+			return;
+		}
+		slot.on = on;
+		this.#syncDriveToMachine(unit);
+		this.#refreshAttachments();
+		this.#saveMedia();
+		this.toast(messages.toasts.driveOn(unit, on));
+	}
+
+	toggleDriveOn(unit: number): void {
+		const slot = this.#drives[unit - 1];
+		if (!slot) {
+			this.toast(messages.errors.driveEmpty(unit), "warning");
+			return;
+		}
+		this.setDriveOn(unit, !slot.on);
+	}
+
+	/**
+	 * Rotate the drive slots by one, wrapping - up moves each disk to the
+	 * next-lower drive (D2: becomes D1:, D1: wraps to D8:), the multi-disk
+	 * "insert the next disk" gesture; down is the inverse. The whole slot
+	 * travels, parked state included.
+	 */
+	rotateDrives(direction: "up" | "down"): void {
+		if (this.#drives.every((slot) => slot === null)) {
+			this.toast(messages.errors.noDisksAttached, "warning");
+			return;
+		}
+		const d = this.#drives;
+		this.#drives =
+			direction === "up"
+				? [...d.slice(1), d[0] ?? null]
+				: [d[DRIVE_COUNT - 1] ?? null, ...d.slice(0, DRIVE_COUNT - 1)];
+		for (let unit = 1; unit <= DRIVE_COUNT; unit++) {
+			this.#syncDriveToMachine(unit);
+		}
+		this.#refreshAttachments();
+		this.#saveMedia();
+		this.toast(messages.toasts.rotatingDrives(direction === "up"));
+	}
+
+	// Mirror a slot onto the machine: the drive holds the disk only while the
+	// slot is on (a parked or empty drive claims no bus ID - identical on the
+	// wire). D1: is the machine's built-in drive; the rest are the host's.
+	#syncDriveToMachine(unit: number): void {
+		const slot = this.#drives[unit - 1];
+		const active = slot?.on ? slot.disk : undefined;
+		if (unit === 1) {
+			if (active) this.#emulator.machine.insertDisk(active);
+			else this.#emulator.machine.ejectDisk();
+		} else {
+			const drive = this.#extraDrives[unit - 2];
+			if (drive) drive.disk = active;
+		}
 	}
 
 	/**
@@ -1954,14 +2065,19 @@ export class EmulatorHost {
 	#turboMode = false; // persists across reboots; reapplied to each emulator
 	// What's mounted, kept across reboots and re-applied by #makeEmulator. The
 	// cartridge slot and the disk drives are independent (a cart and a disk can
-	// coexist); #drives is indexed by drive number (0 = D1:), one slot for now.
+	// coexist); #drives is indexed by drive number (0 = D1:), all eight slots.
 	// `sourceId` is the library entry the cart/disk came from, if any - used to
 	// persist what's mounted (and, for a disk, what `saveD1ToLibrary` writes back).
+	// A slot's `on` is "attached to the bus": off keeps the disk parked (the
+	// host holds the AtrImage, the machine drive is empty, in-session writes
+	// survive the park). On-but-empty isn't modeled - an empty drive claims no
+	// bus ID either way.
 	#cartridge: { cart: Cartridge; name: string; sourceId?: string } | null =
 		null;
-	#drives: ({ disk: AtrImage; name: string; sourceId?: string } | null)[] = [
-		null,
-	];
+	#drives: (DriveSlot | null)[] = emptyDrives();
+	// The D2:-D8: DiskDrive devices attached to the current machine's SIO
+	// connector (index 0 = D2:), rebuilt with each emulator by #makeEmulator.
+	#extraDrives: DiskDrive[] = [];
 	// Media to re-mount once the library is ready (set from sessionStorage in the
 	// constructor, consumed by create()/#restoreMedia). Null when nothing to do.
 	#pendingMedia: PersistedMedia | null = null;
@@ -1992,7 +2108,9 @@ export class EmulatorHost {
 	#saveMedia(): void {
 		saveSession(MEDIA_KEY, {
 			cart: this.#cartridge?.sourceId ?? null,
-			disk: this.#drives[0]?.sourceId ?? null,
+			drives: this.#drives.map((slot) =>
+				slot?.sourceId ? { id: slot.sourceId, on: slot.on } : null,
+			),
 			basicDisabled: this.config.value.basicDisabled,
 		} satisfies PersistedMedia);
 	}
@@ -2005,12 +2123,17 @@ export class EmulatorHost {
 		touchRecent(sourceId);
 		const keep = new Set(recentIds.value);
 		if (this.#cartridge?.sourceId) keep.add(this.#cartridge.sourceId);
-		if (this.#drives[0]?.sourceId) keep.add(this.#drives[0].sourceId);
+		for (const slot of this.#drives) {
+			if (slot?.sourceId) keep.add(slot.sourceId);
+		}
 		void sweepTransients(keep);
 	}
 
 	#mountsImage(id: string): boolean {
-		return this.#cartridge?.sourceId === id || this.#drives[0]?.sourceId === id;
+		return (
+			this.#cartridge?.sourceId === id ||
+			this.#drives.some((slot) => slot?.sourceId === id)
+		);
 	}
 
 	// Re-mount the media persisted for this tab, resolving ids against the
@@ -2022,23 +2145,28 @@ export class EmulatorHost {
 		this.#pendingMedia = null;
 		if (!media) return;
 		await readyLibrary();
-		if (media.disk) {
+		for (let unit = 1; unit <= DRIVE_COUNT; unit++) {
+			const saved = media.drives[unit - 1];
+			if (!saved) continue;
 			try {
-				const entry = getImage(media.disk);
+				const entry = getImage(saved.id);
 				if (entry) {
-					const bytes = await getImageBytes(media.disk);
+					const bytes = await getImageBytes(saved.id);
+					// An XEX resumes via its synthetic boot disk - a D1:-only
+					// arrangement (that's the slot a boot fills).
 					const disk =
-						entry.derived.type === "xex"
+						entry.derived.type === "xex" && unit === 1
 							? buildBootDisk(bytes)
 							: new AtrImage(bytes);
-					this.#drives[0] = {
+					this.#drives[unit - 1] = {
 						disk,
 						name: entry.user.displayName,
-						sourceId: media.disk,
+						sourceId: saved.id,
+						on: saved.on,
 					};
 				}
 			} catch {
-				// corrupt or missing blob - leave D1: empty
+				// corrupt or missing blob - leave the drive empty
 			}
 		}
 		if (media.cart) {
@@ -2251,7 +2379,7 @@ export class EmulatorHost {
 			...(model === "xegs" && gameBytes && { game: gameBytes }),
 			...(model === "xegs" && { keyboardSense: true }),
 			...(cartridge && { cartridge }),
-			...(this.#drives[0] && { disk: this.#drives[0].disk }),
+			...(this.#drives[0]?.on && { disk: this.#drives[0].disk }),
 			...(this.#audio && { audio: this.#audio }),
 		});
 		emulator.setTrace(this.#cpuTrace);
@@ -2261,6 +2389,18 @@ export class EmulatorHost {
 		emulator.machine.sioAcceleration = this.sioAcceleration.value;
 		emulator.machine.diskSpeedIndex = this.diskSpeed.value;
 		emulator.machine.pasteMode = this.pasteChMode.value ? "ch" : "k";
+		// D2:-D8: are host-attached DiskDrive devices on the SIO connector
+		// (D1: is the machine's built-in drive, fed above). Rebuilt fresh per
+		// emulator; each carries the advertised speed and its slot's disk.
+		this.#extraDrives = [];
+		for (let unit = 2; unit <= DRIVE_COUNT; unit++) {
+			const drive = new DiskDrive(unit);
+			drive.highSpeedIndex = this.diskSpeed.value;
+			const slot = this.#drives[unit - 1];
+			if (slot?.on) drive.disk = slot.disk;
+			emulator.machine.sio.attach(drive);
+			this.#extraDrives.push(drive);
+		}
 		// Sample the gamepad on every emulation-loop yield (see Emulator.afterYield)
 		// - the freshest read, right before the next scanlines poll the pins.
 		emulator.afterYield = () => this.#gamepads.poll();
@@ -2353,20 +2493,32 @@ const MEDIA_KEY = "media";
 /** This tab's persisted mounted media: the library ids in each slot. */
 interface PersistedMedia {
 	cart: string | null;
-	disk: string | null;
+	/** Per-drive slot (index 0 = D1:): the library id and the drive's on
+	 *  (bus-attached) state; null = empty. */
+	drives: ({ id: string; on: boolean } | null)[];
 	/** The live BASIC-disabled state (a boot turns it off without touching the
 	 *  saved config seed), so a resume matches the booted machine. */
 	basicDisabled: boolean;
 }
 
 // Coerce an untrusted persisted value into a PersistedMedia, or null if absent
-// or malformed (ids are resolved against the library lazily, on restore).
+// or malformed (ids are resolved against the library lazily, on restore). The
+// pre-multi-drive shape carried a single `disk` id - accept it as D1:.
 function sanitizeMedia(value: unknown): PersistedMedia | null {
 	if (typeof value !== "object" || value === null) return null;
-	const v = value as Partial<PersistedMedia>;
+	const v = value as Partial<PersistedMedia> & { disk?: unknown };
+	const drives = Array.from({ length: DRIVE_COUNT }, (_, index) => {
+		const slot = Array.isArray(v.drives) ? (v.drives[index] as unknown) : null;
+		if (typeof slot !== "object" || slot === null) return null;
+		const s = slot as { id?: unknown; on?: unknown };
+		return typeof s.id === "string" ? { id: s.id, on: s.on !== false } : null;
+	});
+	if (typeof v.disk === "string" && !drives[0]) {
+		drives[0] = { id: v.disk, on: true };
+	}
 	return {
 		cart: typeof v.cart === "string" ? v.cart : null,
-		disk: typeof v.disk === "string" ? v.disk : null,
+		drives,
 		basicDisabled: Boolean(v.basicDisabled),
 	};
 }

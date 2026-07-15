@@ -5,10 +5,9 @@ import { OnOff } from "../../../settings-controls.tsx";
 import { DevicesFrame } from "./devices-frame.tsx";
 import { useEmu } from "./emu-context.ts";
 
-// /a8/emu/devices - the devices view's D: tab. Drive cards come later; for
-// now it hosts the bus-wide Serial bus group (moved from the Hardware tab):
-// the SIOV trap, acceleration, and the advertised-speed slider. Bus-wide
-// behavior sits above the devices it governs.
+// /a8/emu/devices - the devices view's D: tab: the bus-wide Serial bus group
+// (the SIOV trap, acceleration, and the advertised-speed slider - bus-wide
+// behavior above the devices it governs), then the drive bank.
 export default function DevicesPage() {
 	const { host } = useEmu();
 	return (
@@ -25,8 +24,142 @@ export default function DevicesPage() {
 					onSet={(on) => host.setSioAcceleration(on)}
 				/>
 				<SpeedSlider host={host} />
+				<DriveBank host={host} />
 			</div>
 		</DevicesFrame>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// The drive bank - MOCK, nothing is wired up. A non-functional pass so the
+// layout can be judged in context; all eight drives are always visible (no
+// add/remove - familiar emulators and AspeQt show the full bank). Three
+// states per drive: Empty (no disk - no power control, on-but-empty isn't
+// modeled), Active (disk + on, answers the bus), Parked (disk + off - keeps
+// its media like the favorites shelf keeps games; the bus hears nothing).
+// D1: mirrors the live attachment for realism; D2:/D3: are staged samples
+// (an active write-protected disk, a parked disk), the rest empty.
+
+interface MockDisk {
+	name: string;
+	density: string; // ATR density tag (SD/ED/DD) - hardware tokens
+	writeProtected: boolean;
+}
+
+interface MockDrive {
+	unit: number;
+	on: boolean; // meaningful only with a disk in: on = attached to the bus
+	disk: MockDisk | null;
+}
+
+function DriveBank({ host }: { host: EmulatorHost }) {
+	const d1Name = host.attachments.value.drives[0] ?? null;
+	const drives: MockDrive[] = [
+		{
+			unit: 1,
+			on: true,
+			disk: d1Name
+				? { name: d1Name, density: "SD", writeProtected: false }
+				: null,
+		},
+		{
+			unit: 2,
+			on: true,
+			disk: { name: "sample.atr", density: "DD", writeProtected: true },
+		},
+		{
+			unit: 3,
+			on: false,
+			disk: { name: "parked.atr", density: "SD", writeProtected: false },
+		},
+		...[4, 5, 6, 7, 8].map((unit) => ({ unit, on: false, disk: null })),
+	];
+	return (
+		<div class="mt-3 flex flex-col gap-1">
+			{drives.map((drive) => (
+				<DriveRow key={drive.unit} drive={drive} />
+			))}
+		</div>
+	);
+}
+
+// A small text action in a drive card (mock: no onClick yet).
+function DriveAction({ label }: { label: string }) {
+	return (
+		<button
+			type="button"
+			class="text-xs text-neutral-500 underline-offset-2 hover:text-neutral-800 hover:underline"
+		>
+			{label}
+		</button>
+	);
+}
+
+function DriveRow({ drive }: { drive: MockDrive }) {
+	const m = messages.devices;
+	return (
+		<div class="rounded-sm border border-neutral-200 px-2 py-1.5">
+			<div class="flex items-center gap-2">
+				{/* Drive power - only with a disk in (an empty drive has no
+				    on-state to toggle). Off keeps the disk but leaves the bus
+				    silent. */}
+				{drive.disk && (
+					<button
+						type="button"
+						class="shrink-0 p-0.5"
+						title={m.drivePower}
+						aria-label={m.drivePower}
+						aria-pressed={drive.on}
+					>
+						<span
+							class={`block size-2 rounded-full ${
+								drive.on ? "bg-green-500" : "bg-neutral-300"
+							}`}
+						/>
+					</button>
+				)}
+				{/* The slot-label column is the alignment grid the other tabs'
+				    cards will reuse; empty drives (no power dot) indent to it. */}
+				<span
+					class={`w-7 shrink-0 text-sm font-medium text-neutral-700 ${
+						drive.disk ? "" : "ml-5"
+					}`}
+				>
+					D{drive.unit}:
+				</span>
+				{drive.disk ? (
+					<>
+						<span class="shrink-0 rounded-sm bg-neutral-100 px-1 py-px font-mono text-[10px] text-neutral-500">
+							{drive.disk.density}
+						</span>
+						<span
+							class={`min-w-0 flex-1 truncate text-sm ${
+								drive.on ? "text-neutral-800" : "text-neutral-400"
+							}`}
+							title={drive.disk.name}
+						>
+							{drive.disk.name}
+						</span>
+					</>
+				) : (
+					<>
+						<span class="flex-1 text-sm text-neutral-400">{m.driveEmpty}</span>
+						<DriveAction label={m.insert} />
+					</>
+				)}
+			</div>
+			{drive.disk && (
+				<div class="mt-1 flex items-center gap-3 pl-7">
+					<DriveAction label={m.swap} />
+					<DriveAction label={m.eject} />
+					<DriveAction label={m.saveAs} />
+					<label class="ml-auto flex items-center gap-1 text-xs text-neutral-500">
+						<input type="checkbox" checked={drive.disk.writeProtected} />
+						{m.writeProtect}
+					</label>
+				</div>
+			)}
+		</div>
 	);
 }
 

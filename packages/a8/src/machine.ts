@@ -287,6 +287,18 @@ export class Atari {
 	}
 
 	/**
+	 * Idle-line cycles the wire engine inserts between data-frame bytes,
+	 * like a real drive's per-byte processing pause (see
+	 * {@link SioBus.interByteGap}). Zero = back-to-back.
+	 */
+	get sioInterByteGap(): number {
+		return this.#sioBus.interByteGap;
+	}
+	set sioInterByteGap(cycles: number) {
+		this.#sioBus.interByteGap = cycles;
+	}
+
+	/**
 	 * The built-in D1: drive's ultra-speed index (the {@link DiskDrive}
 	 * `highSpeedIndex`): the POKEY divisor advertised to the guest via
 	 * the $3F poll; undefined = a stock drive. Guests re-negotiate on

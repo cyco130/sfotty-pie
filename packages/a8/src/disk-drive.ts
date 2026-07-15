@@ -41,21 +41,22 @@ export class DiskDrive implements SioDevice {
 	 * and rely on command retries - this drive hears every speed at
 	 * once, so the first frame is never dropped.
 	 *
-	 * The default of 9 (~56k baud, 2.9x standard) is the fastest value
-	 * SpartaDOS X 4.50 receives cleanly with the display on; 6 (~69k)
-	 * already outruns its interrupt loop and each dropped response costs
-	 * an 8.5s guest timeout, so faster values only pay off for guests
-	 * with tighter receive loops (e.g. a HISIO-patched OS). Avoid $0A,
-	 * the Happy 1050 signature, which invites Happy $48 commands this
-	 * drive NAKs; $10, which some software heuristically reads as "this
-	 * is an XF551" and switches to XF551 command framing this drive does
-	 * not speak (use $0F or $11 for ~38400); and $40 and up, which
-	 * collide with the mode-flag encodings HISIO-family patches use for
-	 * non-Ultra drives ($40 XF551, $41 Happy warp, $80 1050 Turbo).
-	 * $00-$03 outruns POKEY receive tricks on real hardware entirely
-	 * (see AHRM table 45 for the rates real drives use).
+	 * The default of 6 (the 1050 Turbo's rate, ~69k baud, 3.6x standard)
+	 * keeps a margin: SpartaDOS X 4.50 measures clean down to divisor 5
+	 * (NTSC) / 4 (PAL) with the display on - its receive loop's real
+	 * budget is ~240 cycles per byte, the bus's Complete-to-data lead
+	 * gap is what makes hot divisors deliverable at all, and
+	 * {@link SioBus.interByteGap} can carry slower guests all the way to
+	 * divisor 0. Avoid $0A, the
+	 * Happy 1050 signature, which invites Happy $48 commands this drive
+	 * NAKs; $10, which some software heuristically reads as "this is an
+	 * XF551" and switches to XF551 command framing this drive does not
+	 * speak (use $0F or $11 for ~38400); and $40 and up, which collide
+	 * with the mode-flag encodings HISIO-family patches use for
+	 * non-Ultra drives ($40 XF551, $41 Happy warp, $80 1050 Turbo). See
+	 * AHRM table 45 for the rates real drives used.
 	 */
-	highSpeedIndex: number | undefined = 9;
+	highSpeedIndex: number | undefined = 6;
 
 	respondsTo(deviceId: number): boolean {
 		return this.disk !== undefined && deviceId === 0x30 + this.unit;

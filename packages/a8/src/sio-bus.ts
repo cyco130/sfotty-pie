@@ -234,13 +234,24 @@ export class SioBus {
 		this.#sendResult(resolve(data));
 	}
 
+	/**
+	 * Idle-line cycles between consecutive data-frame bytes, like a real
+	 * drive's per-byte processing pause (zero = back-to-back, the
+	 * harshest legal sender). The guest's per-byte time budget is bit
+	 * time PLUS this gap, so a small gap lets receive loops keep up with
+	 * hotter divisors - e.g. SpartaDOS X handles the 1050 Turbo's
+	 * divisor 6 on real hardware only because the drive paces its bytes.
+	 */
+	interByteGap = 0;
+
 	// Queue the Complete/Error byte and any returned data frame. The
 	// frame's first byte gets a lead gap: the OS SIO re-points its buffer
 	// in mainline code between the C/E phase and the data phase, and on
 	// the wire the first byte's own transmission time covers that dance -
 	// under acceleration the gap has to be explicit, and it keeps the
 	// wire path a pause-before-data drive (both are protocol-legal; AHRM
-	// notes back-to-back senders exist and warns receivers).
+	// notes back-to-back senders exist and warns receivers). Later bytes
+	// get the drive's inter-byte gap.
 	#sendResult(result: SioCommandResult): void {
 		if (result.kind === "nak") return; // protocol-illegal here; silence
 		this.#send(COMPLETE_DELAY, result.kind === "complete" ? COMPLETE : ERROR);
@@ -248,9 +259,9 @@ export class SioBus {
 			let gap = DATA_LEAD_GAP;
 			for (const byte of result.data) {
 				this.#send(gap, byte);
-				gap = 0;
+				gap = this.interByteGap;
 			}
-			this.#send(0, sioChecksum(result.data));
+			this.#send(this.interByteGap, sioChecksum(result.data));
 		}
 	}
 

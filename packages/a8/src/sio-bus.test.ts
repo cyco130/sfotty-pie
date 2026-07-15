@@ -162,10 +162,11 @@ test("an unknown command is NAKed; an unclaimed ID gets silence", () => {
 });
 
 test("US Doubler high speed: the $3F poll, then a whole read at the rate", () => {
-	const { pokey, bus, sendCommand, receive } = rig(
+	const { pokey, bus, drive, sendCommand, receive } = rig(
 		new AtrImage(makeAtr(128, 4)),
 	);
 	bus.serialAcceleration = false; // this test pins clock-rate following
+	drive.highSpeedIndex = 9; // pinned; the test doesn't track the default
 
 	// Poll at standard speed: Complete plus the divisor as a data frame.
 	sendCommand(0x31, 0x3f, 0, 0);
@@ -265,4 +266,32 @@ test("send acceleration: a command frame ships at guest pace", () => {
 	connector.command.value = true;
 	step(1);
 	expect(dispatched).toBe(1);
+});
+
+test("the inter-byte gap spaces data-frame bytes like a pausing drive", () => {
+	const { bus, sendCommand, pokey, step } = rig(new AtrImage(makeAtr(128, 4)));
+	bus.interByteGap = 200;
+
+	// Time the arrivals: at 19040 baud a byte is ~940 cycles on the wire,
+	// so with the gap the data bytes should land ~1140 cycles apart.
+	sendCommand(0x31, 0x52, 2, 0);
+	pokey.write(SKCTL, 0x13);
+	pokey.write(IRQEN_IRQST, IRQ_SERIN);
+	const arrivals: number[] = [];
+	for (let i = 0; i < 200_000 && arrivals.length < 20; i++) {
+		step(1);
+		if ((pokey.read(IRQEN_IRQST) & IRQ_SERIN) === 0) {
+			arrivals.push(i);
+			pokey.read(SERIN);
+			pokey.write(IRQEN_IRQST, 0);
+			pokey.write(IRQEN_IRQST, IRQ_SERIN);
+		}
+	}
+	// Skip ACK -> Complete -> first-data (protocol delays); measure the
+	// steady data-byte cadence.
+	for (let i = 4; i < 20; i++) {
+		const delta = arrivals[i]! - arrivals[i - 1]!;
+		expect(delta).toBeGreaterThan(1100);
+		expect(delta).toBeLessThan(1200);
+	}
 });

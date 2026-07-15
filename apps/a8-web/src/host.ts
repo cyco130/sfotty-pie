@@ -888,9 +888,9 @@ export class EmulatorHost {
 			.catch(() => this.toast(messages.errors.clipboardUnavailable, "warning"));
 	}
 
-	/** Plug or unplug the keyboard. Detached, the matrix sends no response,
-	 *  and an XEGS senses the absence on TRIG2. Session-only - a rebuild
-	 *  carries it over, like a cable nobody replugged. */
+	/** Plug or unplug the keyboard. When detached, the matrix sends no
+	 *  response, and an XEGS senses the absence on TRIG2. Session-only - a
+	 *  rebuild carries it over, like a cable nobody replugged. */
 	setKeyboardAttached(attached: boolean): void {
 		this.keyboardAttached.value = attached;
 		this.#emulator.machine.keyboard.attached.value = attached;

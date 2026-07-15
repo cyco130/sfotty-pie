@@ -256,7 +256,7 @@ export const messages = {
 		detachKeyboard: "Detach keyboard",
 		keyboardIsDetached: "Keyboard is detached",
 		keyboardPlugHint:
-			"Detached, keystrokes no longer reach the machine - and an XEGS senses the absence and boots to its built-in game.",
+			"When detached, keystrokes no longer reach the machine. XEGS can sense the absence and boots to its built-in game.",
 		realisticScan: "Realistic key scan",
 		realisticScanHint:
 			"Positional mode only - keys can jam, like the hardware. Character mode composes keystrokes itself and always uses the forgiving scan.",
@@ -697,7 +697,7 @@ export const labels = {
 		"Keyboard: Disable realistic key scan (new presses lift held keys)",
 	KEYBOARD_REALISTIC_SCAN_TOGGLE: "Keyboard: Toggle realistic key scan",
 	KEYBOARD_ATTACH: "Keyboard: Attach",
-	KEYBOARD_DETACH: "Keyboard: Detach (an XEGS senses the absence)",
+	KEYBOARD_DETACH: "Keyboard: Detach",
 	SIO_TRAP_TOGGLE: "Serial I/O: Toggle the SIOV trap (instant OS disk calls)",
 	SIO_ACCELERATION_TOGGLE: "Serial I/O: Toggle acceleration",
 	KEY_BINDINGS_RESET: "Keyboard: Reset key bindings to defaults",

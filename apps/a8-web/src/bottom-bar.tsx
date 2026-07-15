@@ -1,10 +1,10 @@
 import type { EmulatorHost } from "./host.ts";
 import { messages } from "./messages.ts";
+import { navigate } from "./navigate.ts";
 
 /** The bottom status bar: the attached cartridge and D1: disk (the bootable
- *  media; the full bank lives on the devices view these link to - one day
- *  the cart will link to its own tab) and a crash indicator. With nothing
- *  attached, a plain link to the devices view takes the spot. */
+ *  media), each linking to its devices tab, and a crash indicator. With
+ *  nothing attached, a plain link to the devices view takes the spot. */
 export function BottomBar({ host }: { host: EmulatorHost }) {
 	const { cartridge, drives } = host.attachments.value;
 	const d1 = drives[0] ?? null;
@@ -18,7 +18,7 @@ export function BottomBar({ host }: { host: EmulatorHost }) {
 					<button
 						type="button"
 						class="truncate hover:text-neutral-200 hover:underline"
-						onClick={() => host.showPanel("devices")}
+						onClick={() => navigate("/a8/emu/devices/cart", { replace: true })}
 					>
 						{messages.bottomBar.cartridge} {cartridge}
 					</button>

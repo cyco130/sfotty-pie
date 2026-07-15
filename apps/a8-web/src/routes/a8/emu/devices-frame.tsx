@@ -1,14 +1,14 @@
 import type { ComponentChildren } from "preact";
+import { Icon, type IconName } from "../../../icon.tsx";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
 import { PanelFrame } from "./panel-frame.tsx";
 
 // The devices tabs, in socket order (storage first, then input). More appear
-// as their subsystems land (Cart, C:, H:, P:, Joystick, PBI, Internal) -
-// absent, not grayed. Tab labels are the CIO device letters (hardware
-// tokens); the heading under the strip spells the active one out, and
-// aria-labels carry the full names.
-export type DevicesTab = "disks" | "keyboard";
+// as their subsystems land (C:, H:, P:, Joystick, PBI, Internal) - absent,
+// not grayed. Tab labels are the CIO device letters where real (hardware
+// tokens) and short plain words where not; aria-labels carry the full names.
+export type DevicesTab = "disks" | "cart" | "keyboard";
 
 const TABS: readonly {
 	id: DevicesTab;
@@ -23,12 +23,52 @@ const TABS: readonly {
 		name: messages.devices.diskDrives,
 	},
 	{
+		id: "cart",
+		path: "/a8/emu/devices/cart",
+		label: "Cart",
+		name: messages.devices.cartridge,
+	},
+	{
 		id: "keyboard",
 		path: "/a8/emu/devices/keyboard",
 		label: "K:",
 		name: messages.devices.keyboard,
 	},
 ];
+
+/** An icon action in a device row. `hidden` renders it invisible but
+ *  space-holding, so icon columns stay aligned across rows; `disabled`
+ *  grays it out (e.g. save with nothing modified). */
+export function IconAction({
+	name,
+	title,
+	tone = "text-neutral-400 hover:text-neutral-700",
+	hidden = false,
+	disabled = false,
+	onClick,
+}: {
+	name: IconName;
+	title: string;
+	tone?: string;
+	hidden?: boolean;
+	disabled?: boolean;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			class={`shrink-0 ${disabled ? "text-neutral-200" : tone} ${
+				hidden ? "invisible" : ""
+			}`}
+			title={title}
+			aria-label={title}
+			disabled={disabled}
+			onClick={onClick}
+		>
+			<Icon name={name} class="size-4" />
+		</button>
+	);
+}
 
 /**
  * The shell shared by the devices panels: the PanelFrame titled "Devices"

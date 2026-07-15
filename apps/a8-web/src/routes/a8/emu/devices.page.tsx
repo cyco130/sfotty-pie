@@ -1,10 +1,10 @@
 import { useEffect, useState } from "preact/hooks";
 import type { DriveBankEntry, EmulatorHost } from "../../../host.ts";
-import { Icon, type IconName } from "../../../icon.tsx";
+import { Icon } from "../../../icon.tsx";
 import { messages } from "../../../messages.ts";
 import { navigate } from "../../../navigate.ts";
 import { OnOff } from "../../../settings-controls.tsx";
-import { DevicesFrame } from "./devices-frame.tsx";
+import { DevicesFrame, IconAction } from "./devices-frame.tsx";
 import { useEmu } from "./emu-context.ts";
 
 // /a8/emu/devices - the devices view's D: tab: the bus-wide Serial bus group
@@ -54,12 +54,12 @@ function DriveBank({ host }: { host: EmulatorHost }) {
 			    the other door to disks - the library, pre-filtered - on the
 			    right. */}
 			<div class="flex items-center gap-1.5 pl-1">
-				<DriveAction
+				<IconAction
 					name="arrow-up"
 					title={m.rotateUp}
 					onClick={() => host.rotateDrives("up")}
 				/>
-				<DriveAction
+				<IconAction
 					name="arrow-down"
 					title={m.rotateDown}
 					onClick={() => host.rotateDrives("down")}
@@ -76,40 +76,6 @@ function DriveBank({ host }: { host: EmulatorHost }) {
 				<DriveRow key={index} host={host} unit={index + 1} info={info} />
 			))}
 		</div>
-	);
-}
-
-// An icon action in a drive row. `hidden` renders it invisible but
-// space-holding, so the icon columns stay aligned across rows; `disabled`
-// grays it out (e.g. save with nothing modified).
-function DriveAction({
-	name,
-	title,
-	tone = "text-neutral-400 hover:text-neutral-700",
-	hidden = false,
-	disabled = false,
-	onClick,
-}: {
-	name: IconName;
-	title: string;
-	tone?: string;
-	hidden?: boolean;
-	disabled?: boolean;
-	onClick: () => void;
-}) {
-	return (
-		<button
-			type="button"
-			class={`shrink-0 ${disabled ? "text-neutral-200" : tone} ${
-				hidden ? "invisible" : ""
-			}`}
-			title={title}
-			aria-label={title}
-			disabled={disabled}
-			onClick={onClick}
-		>
-			<Icon name={name} class="size-4" />
-		</button>
 	);
 }
 
@@ -150,13 +116,13 @@ function DriveRow({
 			    write-protect, and drive power. Empty drives have none of the
 			    three - invisible placeholders keep the columns aligned. */}
 			<div class="flex shrink-0 items-center gap-1.5">
-				<DriveAction
+				<IconAction
 					name="chevron-up"
 					title={m.moveUp}
 					hidden={!info || unit === 1}
 					onClick={() => host.moveDrive(unit, "up")}
 				/>
-				<DriveAction
+				<IconAction
 					name="chevron-down"
 					title={m.moveDown}
 					hidden={!info || unit === 8}
@@ -224,24 +190,24 @@ function DriveRow({
 						</span>
 					)}
 					<div class="flex shrink-0 items-center gap-1.5">
-						<DriveAction
+						<IconAction
 							name="save"
 							title={m.saveToLibrary}
 							disabled={!info.modified}
 							onClick={() => void host.saveDiskToLibrary(unit)}
 						/>
-						<DriveAction
+						<IconAction
 							name="save-all"
 							title={m.saveAsNew}
 							disabled={!info.modified}
 							onClick={() => void host.saveDiskAsNew(unit)}
 						/>
-						<DriveAction
+						<IconAction
 							name="folder-open"
 							title={m.openFromComputer}
 							onClick={() => host.pickAttachDisk(unit)}
 						/>
-						<DriveAction
+						<IconAction
 							name="close"
 							title={m.eject}
 							onClick={() => host.detachDisk(unit)}
@@ -258,7 +224,7 @@ function DriveRow({
 					>
 						{m.driveEmpty}
 					</button>
-					<DriveAction
+					<IconAction
 						name="folder-open"
 						title={m.openFromComputer}
 						onClick={() => host.pickAttachDisk(unit)}

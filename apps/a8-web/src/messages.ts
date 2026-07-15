@@ -203,6 +203,7 @@ export const messages = {
 	devices: {
 		title: "Devices",
 		diskDrives: "Disk drives",
+		cartridge: "Cartridge",
 		keyboard: "Keyboard",
 		trapSiov: "Trap SIOV calls",
 		accelerateSio: "Accelerate serial I/O",
@@ -222,6 +223,7 @@ export const messages = {
 		rotateUp: "Rotate drives up",
 		rotateDown: "Rotate drives down",
 		library: "Disk library…",
+		cartLibrary: "Cart library…",
 	},
 
 	shortcuts: {

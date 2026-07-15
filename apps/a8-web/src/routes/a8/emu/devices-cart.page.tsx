@@ -1,0 +1,116 @@
+import { useState } from "preact/hooks";
+import { messages } from "../../../messages.ts";
+import { navigate } from "../../../navigate.ts";
+import { DevicesFrame, IconAction } from "./devices-frame.tsx";
+import { useEmu } from "./emu-context.ts";
+
+// /a8/emu/devices/cart - the devices view's Cart tab: the one cartridge
+// slot, drive-row mechanics but simpler (the 800's right slot can come
+// later, model-aware). Attaching and ejecting reboot - a cartridge is
+// memory-mapped and only takes effect at reset. On the 400/800 an enabled
+// BASIC occupies the slot like a real cart; ejecting it disables BASIC.
+// One day this is home to per-cart extras - R-Time 8 passthrough, flash
+// write-enable - and with flashing, carts become modifiable media too.
+export default function DevicesCartPage() {
+	const { host } = useEmu();
+	const slot = host.cartSlot.value;
+	const m = messages.devices;
+	// Drop target, like a drive row (stopPropagation keeps the window-level
+	// drop from also booting the file).
+	const [dragOver, setDragOver] = useState(false);
+	return (
+		<DevicesFrame active="cart">
+			<div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+				<div class="flex items-center pl-1">
+					<button
+						type="button"
+						class="ml-auto text-sm text-neutral-500 hover:underline"
+						onClick={() => navigate("/a8/emu/library?type=cart")}
+					>
+						{m.cartLibrary}
+					</button>
+				</div>
+				<div
+					class={`flex items-center gap-2 rounded-sm p-1 ${
+						dragOver ? "bg-neutral-200" : "hover:bg-neutral-50"
+					}`}
+					onDragOver={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						setDragOver(true);
+					}}
+					onDragLeave={() => setDragOver(false)}
+					onDrop={(event) => {
+						event.preventDefault();
+						event.stopPropagation();
+						setDragOver(false);
+						const file = event.dataTransfer?.files[0];
+						if (file) {
+							void host.attachCartridgeFile(file, { keepPanel: true });
+						}
+					}}
+				>
+					<span class="w-10 shrink-0 text-sm font-medium text-neutral-700">
+						Cart
+					</span>
+					{slot ? (
+						<>
+							{/* The name links to the cart's library page; BASIC in the
+							    400/800 slot has none - plain text. */}
+							{slot.sourceId ? (
+								<button
+									type="button"
+									class="min-w-0 flex-1 truncate text-left text-sm text-neutral-800 hover:underline"
+									title={slot.name}
+									onClick={() =>
+										navigate(
+											`/a8/emu/library/${encodeURIComponent(slot.sourceId!)}` +
+												`?back=${encodeURIComponent("/a8/emu/devices/cart")}`,
+										)
+									}
+								>
+									{slot.name}
+								</button>
+							) : (
+								<span
+									class="min-w-0 flex-1 truncate text-sm text-neutral-800"
+									title={slot.name}
+								>
+									{slot.name}
+								</span>
+							)}
+							<div class="flex shrink-0 items-center gap-1.5">
+								<IconAction
+									name="folder-open"
+									title={m.openFromComputer}
+									onClick={() => host.pickAttachCartridge()}
+								/>
+								<IconAction
+									name="close"
+									title={m.eject}
+									onClick={() => host.detachCartridge()}
+								/>
+							</div>
+						</>
+					) : (
+						<>
+							<button
+								type="button"
+								class="flex-1 truncate text-left text-sm text-neutral-400 hover:text-neutral-600 hover:underline"
+								title={m.openFromComputer}
+								onClick={() => host.pickAttachCartridge()}
+							>
+								{m.driveEmpty}
+							</button>
+							<IconAction
+								name="folder-open"
+								title={m.openFromComputer}
+								onClick={() => host.pickAttachCartridge()}
+							/>
+						</>
+					)}
+				</div>
+			</div>
+		</DevicesFrame>
+	);
+}

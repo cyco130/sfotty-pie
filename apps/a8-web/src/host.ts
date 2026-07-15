@@ -340,6 +340,13 @@ export class EmulatorHost {
 	 *  each mounted slot's name, power, write-protect, and ATR density. */
 	readonly driveBank = signal<(DriveBankEntry | null)[]>(emptyDrives());
 
+	/** The cartridge slot for the devices view: the mounted cart (its
+	 *  library link), or BASIC when it occupies the 400/800 slot
+	 *  (sourceId null - eject then means "disable BASIC"), or null. */
+	readonly cartSlot = signal<{ name: string; sourceId: string | null } | null>(
+		null,
+	);
+
 	/** True once the CPU has jammed (CIM). */
 	readonly crashed = signal(false);
 
@@ -984,9 +991,11 @@ export class EmulatorHost {
 		this.#bootImagePicker?.();
 	}
 
-	/** Open the file picker to attach a cartridge (cold boots). */
+	/** Open the file picker to attach a cartridge (cold boots). Keeps the
+	 *  open pane, like {@link pickAttachDisk}. */
 	pickAttachCartridge(): void {
-		this.#pendingPick = (file) => void this.attachCartridgeFile(file);
+		this.#pendingPick = (file) =>
+			void this.attachCartridgeFile(file, { keepPanel: true });
 		this.#bootImagePicker?.();
 	}
 
@@ -1319,7 +1328,10 @@ export class EmulatorHost {
 	}
 
 	/** Attach a library cartridge (cold boots). */
-	async attachCartridge(id: string): Promise<void> {
+	async attachCartridge(
+		id: string,
+		options?: { keepPanel?: boolean },
+	): Promise<void> {
 		await readyLibrary();
 		const entry = getImage(id);
 		if (!entry) return;
@@ -1328,6 +1340,7 @@ export class EmulatorHost {
 			await getImageBytes(id),
 			entry.user.displayName,
 			id,
+			options,
 		);
 	}
 
@@ -1846,11 +1859,14 @@ export class EmulatorHost {
 	 * cartridge is memory-mapped and only takes effect at reset; the niche
 	 * "stage it without rebooting" can come later.
 	 */
-	async attachCartridgeFile(file: File): Promise<void> {
+	async attachCartridgeFile(
+		file: File,
+		options?: { keepPanel?: boolean },
+	): Promise<void> {
 		const bytes = new Uint8Array(await file.arrayBuffer());
 		const id = await addOrFindImage(bytes, file.name, true);
-		if (id) await this.attachCartridge(id);
-		else this.#attachCartridgeBytes(bytes, file.name);
+		if (id) await this.attachCartridge(id, options);
+		else this.#attachCartridgeBytes(bytes, file.name, undefined, options);
 	}
 
 	// Attach a cartridge's bytes (cold boots) - shared by the file picker and the
@@ -1860,6 +1876,7 @@ export class EmulatorHost {
 		contents: Uint8Array,
 		name: string,
 		sourceId?: string,
+		options?: { keepPanel?: boolean },
 	): void {
 		const format = detectFileFormat(contents);
 		const isCartridge =
@@ -1893,7 +1910,9 @@ export class EmulatorHost {
 		}
 		this.toast(messages.toasts.attachingCartridge(name));
 
-		this.closePanel(); // get out of the way
+		// Get out of the way - unless the attach came from a pane the user is
+		// working in (the cart slot's drop target or file picker).
+		if (!options?.keepPanel) this.closePanel();
 		this.#cartridge = { cart, name, sourceId };
 		this.#refreshAttachments();
 		this.#saveMedia();
@@ -2249,6 +2268,14 @@ export class EmulatorHost {
 			cartridge: this.#cartridge?.name ?? basic,
 			drives: this.#drives.map((drive) => drive?.name ?? null),
 		};
+		this.cartSlot.value = this.#cartridge
+			? {
+					name: this.#cartridge.name,
+					sourceId: this.#cartridge.sourceId ?? null,
+				}
+			: basic
+				? { name: basic, sourceId: null }
+				: null;
 		this.driveBank.value = this.#drives.map(
 			(slot) =>
 				slot && {

@@ -380,6 +380,25 @@ export class Mmu implements Memory {
 		this.#rebuildPageTables();
 	}
 
+	/**
+	 * Hot-plug or remove the right-slot cartridge (the 400/800's cartridge
+	 * B). It only ever decodes $8000-$9FFF - the right slot has no $A000
+	 * select line - and while it claims the area it wins it over the normal
+	 * cartridge (both slots share the select; a two-cart conflict resolves
+	 * to the right slot).
+	 */
+	setRightCartridge(cartridge: Cartridge | null) {
+		this.#unwatchRightCartMapping?.();
+		this.#unwatchRightCartMapping = null;
+		this.#rightCartridge = cartridge ?? undefined;
+		if (this.#rightCartridge) {
+			this.#unwatchRightCartMapping = this.#rightCartridge.mappingChanged.watch(
+				this.#cartMappingChanged,
+			);
+		}
+		this.#rebuildPageTables();
+	}
+
 	reset(cold: boolean) {
 		this.#ram.reset(cold);
 		for (const bank of this.#banks) {
@@ -387,6 +406,7 @@ export class Mmu implements Memory {
 		}
 
 		this.#cartridge?.reset(cold);
+		this.#rightCartridge?.reset(cold);
 
 		this.#bank = 0;
 		this.#cpuSeesExtendedRam = false;
@@ -579,6 +599,7 @@ export class Mmu implements Memory {
 	#basicRom?: Rom;
 	#gameRom?: Rom;
 	#cartridge?: Cartridge;
+	#rightCartridge?: Cartridge;
 
 	#gtia!: Memory;
 	#pbi!: Memory;
@@ -599,6 +620,7 @@ export class Mmu implements Memory {
 	#isOsRomEnabled = true;
 
 	#unwatchCartMapping: (() => void) | null = null;
+	#unwatchRightCartMapping: (() => void) | null = null;
 
 	// The page-dispatch table: for each of the 256 pages, fast read/write
 	// bytes plus a slow-path target, one set per bus master (the CPU, and
@@ -711,11 +733,16 @@ export class Mmu implements Memory {
 			}
 		}
 
-		// 8000-9FFF: cartridge or RAM.
+		// 8000-9FFF: the right-slot cartridge (which wins the area while it
+		// claims it - see setRightCartridge), else the normal cartridge, else
+		// RAM.
 		const cartridge = this.#cartridge;
+		const rightCartridge = this.#rightCartridge;
+		const right8000 = rightCartridge?.has8000To9fff ?? false;
 		const has8000 = cartridge?.has8000To9fff ?? false;
 		for (let page = 0x80; page < 0xa0; page++) {
-			if (has8000) this.#setCartPage(page, cartridge!);
+			if (right8000) this.#setCartPage(page, rightCartridge!);
+			else if (has8000) this.#setCartPage(page, cartridge!);
 			else this.#setRamPage(page);
 		}
 
@@ -742,13 +769,16 @@ export class Mmu implements Memory {
 
 		// D000-D7FF: the hardware register pages - always the slow path, since
 		// registers have side effects. D5 is the cartridge control region ($FF
-		// when no cartridge is inserted).
+		// when both slots are empty). Both slots hear CCTL on the hardware; a
+		// two-cart bus fight is resolved to the normal slot (no supported
+		// right-slot type decodes the region anyway).
 		this.#setPage(0xd0, this.#gtia, null, null);
 		this.#setPage(0xd1, this.#pbi, null, null);
 		this.#setPage(0xd2, this.#pokey, null, null);
 		this.#setPage(0xd3, this.#pia, null, null);
 		this.#setPage(0xd4, this.#antic, null, null);
-		if (cartridge) this.#setPage(0xd5, cartridge, null, null);
+		const cctlCartridge = cartridge ?? rightCartridge;
+		if (cctlCartridge) this.#setPage(0xd5, cctlCartridge, null, null);
 		else this.#setPage(0xd5, unconnectedMemory, FF_PAGE, null);
 		this.#setPage(0xd6, this.#pbi, null, null);
 		this.#setPage(0xd7, this.#pbi, null, null);

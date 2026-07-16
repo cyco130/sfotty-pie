@@ -29,6 +29,14 @@ export interface CartType {
 	/** ROM size in KB. */
 	size: number;
 
+	/**
+	 * The image belongs in the 400/800's right cartridge slot (cartridge B,
+	 * decoding $8000-$9FFF) rather than the normal (left) slot. Hosts route
+	 * it to the machine's `rightCartridge` slot so it can sit alongside a
+	 * left cartridge.
+	 */
+	rightSlot?: boolean;
+
 	/** The mapping at power-on. Absent = the type isn't supported yet. */
 	initialMapping?: CartridgeMapping;
 
@@ -287,6 +295,13 @@ export interface Cartridge extends AtariMemory {
 	 * bus.
 	 */
 	readonly hasD5b8ToD5bf: boolean;
+	/**
+	 * Whether the image belongs in the 400/800's right cartridge slot (see
+	 * {@link CartType.rightSlot}). Absent = a normal (left slot) cartridge.
+	 * Purely advisory - the machine maps whatever slot a host puts the
+	 * cartridge in; hosts use this to pick the slot.
+	 */
+	readonly rightSlot?: boolean;
 	reset(cold: boolean): void;
 	/**
 	 * Fires after anything changes which addresses the cartridge decodes or
@@ -445,6 +460,7 @@ export class RomCartridge implements Cartridge {
 		}
 		this.#applyMapping(this.#type.initialMapping!);
 		this.hasD5b8ToD5bf = cartTypeHasD5b8ToD5bf(this.#type);
+		this.rightSlot = !!this.#type.rightSlot;
 	}
 
 	get has8000To9fff(): boolean {
@@ -457,6 +473,9 @@ export class RomCartridge implements Cartridge {
 
 	/** See {@link Cartridge.hasD5b8ToD5bf} - static per type. */
 	readonly hasD5b8ToD5bf: boolean;
+
+	/** See {@link Cartridge.rightSlot} - static per type. */
+	readonly rightSlot: boolean;
 
 	/** See {@link Cartridge.mappingChanged}. */
 	readonly mappingChanged = new Pulse();
@@ -1128,6 +1147,7 @@ export const CART_TYPES: Record<number, CartType> = {
 		name: "Right slot 8 KB cartridge",
 		machine: "800",
 		size: 8,
+		rightSlot: true,
 
 		initialMapping: {
 			area8000: 0,
@@ -1325,6 +1345,7 @@ export const CART_TYPES: Record<number, CartType> = {
 		name: "Right slot 4 KB cartridge",
 		machine: "800",
 		size: 4,
+		rightSlot: true,
 
 		// The chip only decodes with A12 high: $9000-$9FFF.
 		initialMapping: { area8000: [null, 0], areaA000: "ram" },

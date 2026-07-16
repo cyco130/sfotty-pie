@@ -16,6 +16,8 @@ export interface EmulatorConfig extends MachineConfig {
 	/** Cartridge in the (left) slot - inserted via the machine's cartridge
 	 *  accessor after construction. */
 	cartridge?: Cartridge;
+	/** Cartridge in the 400/800's right slot (decodes $8000-$9FFF). */
+	rightCartridge?: Cartridge;
 	/** Disk in drive D1: (read-only; served by the trap-based SIO). */
 	disk?: AtrImage;
 	/** Audio sink. When its context runs, the audio clock paces emulation. */
@@ -82,6 +84,9 @@ export class Emulator {
 		this.frame = this.#frames[1];
 
 		if (config.cartridge) this.machine.cartridge = config.cartridge;
+		if (config.rightCartridge) {
+			this.machine.rightCartridge = config.rightCartridge;
+		}
 		if (config.disk) this.machine.insertDisk(config.disk);
 
 		this.#holdOption = config.holdOption ?? false;

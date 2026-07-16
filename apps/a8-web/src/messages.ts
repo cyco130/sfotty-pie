@@ -92,6 +92,8 @@ export const messages = {
 	bottomBar: {
 		cartridge: "Cart:",
 		devices: "Devices…",
+		moreAttached: (count: number): string =>
+			count === 1 ? "1 more device attached" : `${count} more devices attached`,
 		crashed: "CPU crashed (CIM)",
 		keyboardDetached: "Keyboard detached",
 		attachKeyboard: "Click to attach the keyboard",
@@ -643,6 +645,10 @@ export const messages = {
 			`Rotating drives ${up ? "up" : "down"}`,
 		attachingCartridge: (name: string) => `Attaching cartridge (${name})`,
 		detachingCartridge: (name: string) => `Detaching cartridge (${name})`,
+		attachingRightCartridge: (name: string) =>
+			`Attaching right slot cartridge (${name})`,
+		detachingRightCartridge: (name: string) =>
+			`Detaching right slot cartridge (${name})`,
 		enablingBasic: "Enabling BASIC",
 		disablingBasic: "Disabling BASIC",
 		switchingMachine: (model: string) => `Switching to Atari ${model}`,

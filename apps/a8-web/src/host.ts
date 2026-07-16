@@ -349,6 +349,13 @@ export class EmulatorHost {
 		null,
 	);
 
+	/** The 400/800's right cartridge slot for the devices view. Null while
+	 *  empty - the slot's row only renders (eject-only) with a cart in it. */
+	readonly rightCartSlot = signal<{
+		name: string;
+		sourceId: string | null;
+	} | null>(null);
+
 	/** True once the CPU has jammed (CIM). */
 	readonly crashed = signal(false);
 
@@ -1503,13 +1510,18 @@ export class EmulatorHost {
 	}
 
 	#mediaMounted(): boolean {
-		return this.#cartridge !== null || this.#drives.some((d) => d !== null);
+		return (
+			this.#cartridge !== null ||
+			this.#rightCartridge !== null ||
+			this.#drives.some((d) => d !== null)
+		);
 	}
 
 	// Unmount everything in memory (the persisted media is cleared separately by
 	// the reset's storage wipe). The caller reboots into the now-empty machine.
 	#clearMedia(): void {
 		this.#cartridge = null;
+		this.#rightCartridge = null;
 		this.#drives = emptyDrives();
 		this.#refreshAttachments();
 	}
@@ -1604,7 +1616,11 @@ export class EmulatorHost {
 		// Get out of the way - except for a dropped file, where whatever pane
 		// is open (the drive bank, the library) is the context being worked in.
 		if (!options?.keepPanel) this.closePanel();
-		this.#cartridge = cartridge;
+		// A cart boots from the slot its image belongs in; the other cart slot
+		// is cleared with the rest either way.
+		const right = cartridge?.cart.rightSlot ?? false;
+		this.#cartridge = right ? null : cartridge;
+		this.#rightCartridge = right ? cartridge : null;
 		// Boot clears its own slot (D1:) only; disks parked or mounted in
 		// D2:-D8: ride along, like real drives across a power cycle.
 		const drives = [...this.#drives];
@@ -1617,7 +1633,7 @@ export class EmulatorHost {
 		void this.#reboot();
 	}
 
-	// Toast each boot source Boot image is about to clear: the cartridge slot
+	// Toast each boot source Boot image is about to clear: the cartridge slots
 	// (an explicit cart, or BASIC on the 400/800), the D1: disk, and BASIC on
 	// XL/XE (on the 400/800 that's the cartridge-slot toast above).
 	#announceBootTeardown(): void {
@@ -1628,6 +1644,11 @@ export class EmulatorHost {
 			const name =
 				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(name));
+		}
+		if (this.#rightCartridge) {
+			this.toast(
+				messages.toasts.detachingRightCartridge(this.#rightCartridge.name),
+			);
 		}
 		if (this.#drives[0]) {
 			this.toast(messages.toasts.detachingDisk(1, this.#drives[0].name));
@@ -1921,7 +1942,9 @@ export class EmulatorHost {
 
 	// Attach a cartridge's bytes (cold boots) - shared by the file picker and the
 	// library's `attachCartridge(id)`. Content-based detection so canonical `.car`
-	// and raw built-in bytes both load without a filename hint.
+	// and raw built-in bytes both load without a filename hint. A right-slot
+	// image routes to the right slot and adds to what's mounted; a normal one
+	// takes the left slot and ejects both.
 	#attachCartridgeBytes(
 		contents: Uint8Array,
 		name: string,
@@ -1948,22 +1971,42 @@ export class EmulatorHost {
 			return;
 		}
 
-		// Announce what's leaving the cart slot (an explicit cart, or BASIC on
-		// the 400/800) before the new cart goes in.
-		const { model, basicDisabled } = this.config.value;
-		if (this.#cartridge) {
-			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
-		} else if (!hasBuiltinBasic(model) && !basicDisabled) {
-			const basic =
-				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
-			this.toast(messages.toasts.detachingCartridge(basic));
+		if (cart.rightSlot) {
+			// A right-slot cart goes into the right slot *alongside* the normal
+			// slot's occupant (a cart or BASIC), only displacing a previous
+			// right cart.
+			if (this.#rightCartridge) {
+				this.toast(
+					messages.toasts.detachingRightCartridge(this.#rightCartridge.name),
+				);
+			}
+			this.toast(messages.toasts.attachingRightCartridge(name));
+			this.#rightCartridge = { cart, name, sourceId };
+		} else {
+			// Announce what's leaving the slots (an explicit cart, or BASIC on
+			// the 400/800; a normal cart insertion ejects the right cart too)
+			// before the new cart goes in.
+			const { model, basicDisabled } = this.config.value;
+			if (this.#cartridge) {
+				this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
+			} else if (!hasBuiltinBasic(model) && !basicDisabled) {
+				const basic =
+					this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
+				this.toast(messages.toasts.detachingCartridge(basic));
+			}
+			if (this.#rightCartridge) {
+				this.toast(
+					messages.toasts.detachingRightCartridge(this.#rightCartridge.name),
+				);
+			}
+			this.toast(messages.toasts.attachingCartridge(name));
+			this.#cartridge = { cart, name, sourceId };
+			this.#rightCartridge = null;
 		}
-		this.toast(messages.toasts.attachingCartridge(name));
 
 		// Get out of the way - unless the attach came from a pane the user is
 		// working in (the cart slot's drop target or file picker).
 		if (!options?.keepPanel) this.closePanel();
-		this.#cartridge = { cart, name, sourceId };
 		this.#refreshAttachments();
 		this.#saveMedia();
 		this.#noteUsed(sourceId);
@@ -1994,6 +2037,21 @@ export class EmulatorHost {
 			return;
 		}
 		this.toast(messages.errors.noCartridge, "warning");
+	}
+
+	/**
+	 * Clear the right cartridge slot and cold boot; the normal slot stays.
+	 * Its devices-view row (the only surface with the eject) renders only
+	 * while a cart is in, so an empty slot just no-ops.
+	 */
+	detachRightCartridge(): void {
+		if (!this.#rightCartridge) return;
+		const { name } = this.#rightCartridge;
+		this.#rightCartridge = null;
+		this.#refreshAttachments();
+		this.#saveMedia();
+		void this.#reboot();
+		this.toast(messages.toasts.detachingRightCartridge(name));
 	}
 
 	/**
@@ -2309,6 +2367,15 @@ export class EmulatorHost {
 	// bus ID either way.
 	#cartridge: { cart: Cartridge; name: string; sourceId?: string } | null =
 		null;
+	// The 400/800's right slot. A right-slot image (Cartridge.rightSlot) goes
+	// in here *alongside* whatever the normal slot holds; a normal cart
+	// insertion ejects both slots first (insert the normal cart, then the
+	// right one).
+	#rightCartridge: {
+		cart: Cartridge;
+		name: string;
+		sourceId?: string;
+	} | null = null;
 	#drives: (DriveSlot | null)[] = emptyDrives();
 	// The D2:-D8: DiskDrive devices attached to the current machine's SIO
 	// connector (index 0 = D2:), rebuilt with each emulator by #makeEmulator.
@@ -2342,6 +2409,12 @@ export class EmulatorHost {
 			: basic
 				? { name: basic, sourceId: null }
 				: null;
+		this.rightCartSlot.value = this.#rightCartridge
+			? {
+					name: this.#rightCartridge.name,
+					sourceId: this.#rightCartridge.sourceId ?? null,
+				}
+			: null;
 		this.driveBank.value = this.#drives.map(
 			(slot) =>
 				slot && {
@@ -2371,6 +2444,7 @@ export class EmulatorHost {
 	#saveMedia(): void {
 		saveSession(MEDIA_KEY, {
 			cart: this.#cartridge?.sourceId ?? null,
+			rightCart: this.#rightCartridge?.sourceId ?? null,
 			drives: this.#drives.map((slot) =>
 				slot?.sourceId ? { id: slot.sourceId, on: slot.on } : null,
 			),
@@ -2386,6 +2460,9 @@ export class EmulatorHost {
 		touchRecent(sourceId);
 		const keep = new Set(recentIds.value);
 		if (this.#cartridge?.sourceId) keep.add(this.#cartridge.sourceId);
+		if (this.#rightCartridge?.sourceId) {
+			keep.add(this.#rightCartridge.sourceId);
+		}
 		for (const slot of this.#drives) {
 			if (slot?.sourceId) keep.add(slot.sourceId);
 		}
@@ -2395,6 +2472,7 @@ export class EmulatorHost {
 	#mountsImage(id: string): boolean {
 		return (
 			this.#cartridge?.sourceId === id ||
+			this.#rightCartridge?.sourceId === id ||
 			this.#drives.some((slot) => slot?.sourceId === id)
 		);
 	}
@@ -2447,6 +2525,21 @@ export class EmulatorHost {
 				}
 			} catch {
 				// corrupt or missing blob - leave the cart slot empty
+			}
+		}
+		if (media.rightCart) {
+			try {
+				const entry = getImage(media.rightCart);
+				if (entry) {
+					const bytes = await getImageBytes(media.rightCart);
+					this.#rightCartridge = {
+						cart: createCartridge(bytes),
+						name: entry.user.displayName,
+						sourceId: media.rightCart,
+					};
+				}
+			} catch {
+				// corrupt or missing blob - leave the right slot empty
 			}
 		}
 		this.#refreshAttachments();
@@ -2653,6 +2746,9 @@ export class EmulatorHost {
 			...(model === "xegs" && gameBytes && { game: gameBytes }),
 			...(model === "xegs" && { keyboardSense: true }),
 			...(cartridge && { cartridge }),
+			...(this.#rightCartridge && {
+				rightCartridge: this.#rightCartridge.cart,
+			}),
 			...(this.#drives[0]?.on && { disk: this.#drives[0].disk }),
 			...(this.#audio && { audio: this.#audio }),
 		});
@@ -2769,6 +2865,8 @@ const MEDIA_KEY = "media";
 /** This tab's persisted mounted media: the library ids in each slot. */
 interface PersistedMedia {
 	cart: string | null;
+	/** The 400/800's right cartridge slot. */
+	rightCart: string | null;
 	/** Per-drive slot (index 0 = D1:): the library id and the drive's on
 	 *  (bus-attached) state; null = empty. */
 	drives: ({ id: string; on: boolean } | null)[];
@@ -2794,6 +2892,7 @@ function sanitizeMedia(value: unknown): PersistedMedia | null {
 	}
 	return {
 		cart: typeof v.cart === "string" ? v.cart : null,
+		rightCart: typeof v.rightCart === "string" ? v.rightCart : null,
 		drives,
 		basicDisabled: Boolean(v.basicDisabled),
 	};

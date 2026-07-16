@@ -58,7 +58,7 @@ pnpm --filter @sfotty-pie/a8-web deploy
 
 That runs the app build and `wrangler pages deploy dist` - note the Pages **project name is hardcoded** in the `deploy` script (`a8-web`); create a project with that name or edit the script. Wrangler must be authenticated against the target account.
 
-The repo also ships the full CI pipeline (`.github/workflows/`): pushes to `main` auto-deploy production after the test and conformance jobs pass, PRs get preview deployments at a stable per-branch URL, and old production deployments are pruned weekly. If you fork and want that pipeline, set the repository variable `CLOUDFLARE_ACCOUNT_ID` and the secret `CLOUDFLARE_API_TOKEN`.
+The repo also ships the full CI pipeline (`.github/workflows/`): production deploys are triggered manually via the Deploy workflow, PRs get preview deployments at a stable per-branch URL, and old production deployments are pruned weekly. If you fork and want that pipeline, set the repository variable `CLOUDFLARE_ACCOUNT_ID` and the secret `CLOUDFLARE_API_TOKEN`.
 
 ### Anywhere else
 

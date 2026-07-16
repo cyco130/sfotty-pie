@@ -63,7 +63,7 @@ Inside a package, `pnpm test` similarly fans out to `test:unit` (vitest), `test:
 ## Tooling around the edges
 
 - **husky + lint-staged** run on pre-commit, layered: the root config Prettier-formats everything staged, and each `packages/*` has its own `lint-staged.config.mjs` that additionally runs typecheck + eslint + `vitest related` on staged TS files (the app has no per-package config, so its files only get Prettier). If a commit is being blocked, fix the underlying issue rather than bypassing the hook.
-- **GitHub workflows** (`.github/workflows/`): `ci.yml` (quality + conformance jobs, plus a gated production deploy of a8-web to Cloudflare Pages on `main`), `preview.yml` (per-PR Cloudflare preview deploys, cleaned up on close), `deploy.yml` (manual deploy escape hatch), `cleanup.yml` (weekly prune of old production deployments), `publish.yml` (npm release).
+- **GitHub workflows** (`.github/workflows/`): `ci.yml` (quality + conformance jobs), `preview.yml` (per-PR Cloudflare preview deploys, cleaned up on close), `deploy.yml` (manual deploys — the only path to production on Cloudflare Pages), `cleanup.yml` (weekly prune of old production deployments), `publish.yml` (npm release).
 - **Renovate** config lives at [.github/renovate.json](.github/renovate.json).
 - **VSCode** recommended extensions and settings live in `.vscode/`.
 - **AGENTS.md** is a symlink to this file — edit `CLAUDE.md` only.

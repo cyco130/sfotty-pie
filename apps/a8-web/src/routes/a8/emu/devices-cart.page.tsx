@@ -5,17 +5,20 @@ import { OnOff } from "../../../settings-controls.tsx";
 import { DevicesFrame, IconAction } from "./devices-frame.tsx";
 import { useEmu } from "./emu-context.ts";
 
-// /a8/emu/devices/cart - the devices view's Cart tab: the one cartridge
-// slot, drive-row mechanics but simpler (the 800's right slot can come
-// later, model-aware). Attaching and ejecting reboot - a cartridge is
-// memory-mapped and only takes effect at reset. On the 400/800 an enabled
-// BASIC occupies the slot like a real cart; ejecting it disables BASIC.
-// Below the slot, the per-cart extras: the R-Time 8 passthrough clock
-// today; flash write-enable one day - and with flashing, carts become
-// modifiable media too.
+// /a8/emu/devices/cart - the devices view's Cart tab: the cartridge slot,
+// drive-row mechanics but simpler. Attaching and ejecting reboot - a
+// cartridge is memory-mapped and only takes effect at reset. On the 400/800
+// an enabled BASIC occupies the slot like a real cart; ejecting it disables
+// BASIC. Below it, the 800's right slot: no picker and no empty state - a
+// right-slot image lands there on any insert gesture (in addition to the
+// normal slot; a normal insert ejects both), so the row only shows with a
+// cart in it, eject-only. Then the per-cart extras: the R-Time 8
+// passthrough clock today; flash write-enable one day - and with flashing,
+// carts become modifiable media too.
 export default function DevicesCartPage() {
 	const { host } = useEmu();
 	const slot = host.cartSlot.value;
+	const rightSlot = host.rightCartSlot.value;
 	const m = messages.devices;
 	// Drop target, like a drive row (stopPropagation keeps the window-level
 	// drop from also booting the file).
@@ -112,6 +115,43 @@ export default function DevicesCartPage() {
 						</>
 					)}
 				</div>
+				{rightSlot && (
+					<div class="flex items-center gap-2 rounded-sm p-1 hover:bg-neutral-50">
+						{/* "Right" is a slot name like "Cart" above - kept inline. */}
+						<span class="w-10 shrink-0 text-sm font-medium text-neutral-700">
+							Right
+						</span>
+						{rightSlot.sourceId ? (
+							<button
+								type="button"
+								class="min-w-0 flex-1 truncate text-left text-sm text-neutral-800 hover:underline"
+								title={rightSlot.name}
+								onClick={() =>
+									navigate(
+										`/a8/emu/library/${encodeURIComponent(rightSlot.sourceId!)}` +
+											`?back=${encodeURIComponent("/a8/emu/devices/cart")}`,
+									)
+								}
+							>
+								{rightSlot.name}
+							</button>
+						) : (
+							<span
+								class="min-w-0 flex-1 truncate text-sm text-neutral-800"
+								title={rightSlot.name}
+							>
+								{rightSlot.name}
+							</span>
+						)}
+						<div class="flex shrink-0 items-center gap-1.5">
+							<IconAction
+								name="close"
+								title={m.eject}
+								onClick={() => host.detachRightCartridge()}
+							/>
+						</div>
+					</div>
+				)}
 				{/* The R-Time 8 passthrough clock (default: unplugged). Isolation
 				    (default on, effective only while plugged in) claims
 				    $D5B8-$D5BF for the clock so it works even under carts whose

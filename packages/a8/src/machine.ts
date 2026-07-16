@@ -262,6 +262,22 @@ export class Atari {
 	}
 
 	/**
+	 * The 400/800's right cartridge slot (cartridge B). It decodes
+	 * $8000-$9FFF only, and takes the area over the normal slot while both
+	 * are inserted. Same electrical-swap semantics as {@link cartridge};
+	 * no cartridge sense either way (the right slot's RD4 line reaches no
+	 * TRIG input). XL/XE machines have no right slot - nothing here enforces
+	 * the model, that's the host's call.
+	 */
+	get rightCartridge(): Cartridge | undefined {
+		return this.#rightCartridge;
+	}
+	set rightCartridge(cart: Cartridge | undefined) {
+		this.#rightCartridge = cart;
+		this.mmu.setRightCartridge(cart ?? null);
+	}
+
+	/**
 	 * Insert (or replace) the disk in the built-in D1: drive. Pass it before
 	 * booting a disk; with none inserted, SIO requests time out and the OS
 	 * falls through to its other boot sources. Further drives (D2:-D8:) are
@@ -685,6 +701,7 @@ export class Atari {
 	#irqLine = false;
 
 	#cartridge: Cartridge | undefined;
+	#rightCartridge: Cartridge | undefined;
 	#unwatchCartMapping: (() => void) | undefined;
 
 	/**

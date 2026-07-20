@@ -1,6 +1,7 @@
 export type AtariFileFormat =
 	| "xex"
 	| "atr"
+	| "bas"
 	| "raw-cart-8k-8000-9fff"
 	| "raw-cart-8k-a000-bfff"
 	| "raw-cart-16k"
@@ -88,6 +89,19 @@ export function detectFileFormat(
 		// followed immediately with the ROM data: 2, 4, 8, 16, 32, 40, etc. kilobytes.
 	}
 
+	// A tokenized (SAVEd) BASIC program: the first of its seven header words
+	// is always zero. The signature is weak (any 0,0-led blob passes), so
+	// unlike the other formats the `.bas` extension is required: nameless
+	// blobs are never detected as BASIC.
+	if (
+		name !== undefined &&
+		BAS_RE.test(name) &&
+		contents[0] === 0x00 &&
+		contents[1] === 0x00
+	) {
+		return "bas";
+	}
+
 	return null;
 }
 
@@ -96,6 +110,10 @@ export function detectFileFormat(
 // nameless blob (e.g. a built-in served raw) matches on content alone.
 const ATR = ["atr"];
 const XEX = ["xex", "axe", "exe", "com", "obj", "bin", "obx"];
+// Tokenized BASIC programs. Deliberately kept out of KNOWN_RE until the
+// library grows a canonical BASIC kind - bulk import would otherwise read
+// them only for canonicalize to reject them.
+const BAS = ["bas"];
 // Raw ROM dumps: raw cartridges, OS ROMs, and the XEGS 32K dump.
 const RAW_ROM = ["rom", "bin", "raw"];
 const CAR = ["car"];
@@ -105,6 +123,7 @@ const extMatcher = (exts: readonly string[]): RegExp =>
 
 const ATR_RE = extMatcher(ATR);
 const XEX_RE = extMatcher(XEX);
+const BAS_RE = extMatcher(BAS);
 const RAW_ROM_RE = extMatcher(RAW_ROM);
 const CAR_RE = extMatcher(CAR);
 

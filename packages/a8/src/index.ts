@@ -32,6 +32,7 @@ export {
 	type SioDevice,
 } from "./sio-connector.ts";
 export { DiskDrive } from "./disk-drive.ts";
+export { buildBasicBootDisk } from "./bas-boot.ts";
 export { buildBootDisk } from "./xex-boot.ts";
 export {
 	detectFileFormat,

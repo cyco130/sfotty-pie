@@ -7,12 +7,14 @@ import { createCartridge, type Cartridge } from "./cartridge.ts";
 import { detectFileFormat } from "./detect-file-format.ts";
 import { Headless, type InputSource } from "./headless.ts";
 import { Atari } from "./machine.ts";
+import { buildBasicBootDisk } from "./bas-boot.ts";
 import { buildBootDisk } from "./xex-boot.ts";
 
 // Usage: boot.ts --os <file> [--basic <file>] [--xl | --xe] [--pal] [--trace] [--dump-frame] [file]
 // `--os`/`--basic` are paths to the OS and BASIC ROM images. `file` is an XEX,
-// ATR, or cartridge image; like the web emulator's Load, booting a file is
-// boot-image semantics - the 800's BASIC cart comes out. This is a thin CLI over
+// ATR, cartridge, or tokenized BASIC image; like the web emulator's Load,
+// booting a file is boot-image semantics - the 800's BASIC cart comes out
+// (except for a BASIC program, which needs it to stay in). This is a thin CLI over
 // the headless host (machine + OS-ROM HLE traps + run loop); console I/O is wired
 // to stdin/stdout here, and the run loop lives in Headless.
 const argv = process.argv.slice(2);
@@ -49,6 +51,7 @@ const filePath = argv.find(
 
 let cartridge: Cartridge | undefined;
 let disk: AtrImage | undefined;
+let needsBasic = false;
 
 if (filePath) {
 	const contents = new Uint8Array(fs.readFileSync(filePath));
@@ -58,6 +61,10 @@ if (filePath) {
 			break;
 		case "xex":
 			disk = buildBootDisk(contents);
+			break;
+		case "bas":
+			disk = buildBasicBootDisk(contents);
+			needsBasic = true;
 			break;
 		case "cart":
 		case "raw-cart-8k-8000-9fff":
@@ -80,8 +87,9 @@ const machine = new Atari({
 });
 
 // On the 400/800 BASIC is an ordinary $A000 cartridge; boot it when no
-// file (and no cartridge) takes the slot.
-if (!xl && !cartridge && !filePath) {
+// file (and no cartridge) takes the slot - or when the file is a BASIC
+// program, which needs the cartridge to run.
+if (!xl && !cartridge && (!filePath || needsBasic)) {
 	cartridge = createCartridge(loadRom(basicPath, "--basic"));
 }
 if (cartridge) machine.cartridge = cartridge;

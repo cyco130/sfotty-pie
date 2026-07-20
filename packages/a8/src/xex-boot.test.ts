@@ -2,7 +2,8 @@ import { expect, test } from "vitest";
 import { DECODE, ReadOptions } from "@sfotty-pie/sfotty";
 import { Atari } from "./machine.ts";
 import { recognizableOs } from "./os-fixture.ts";
-import { buildBootDisk, FILE_SIZE_OFFSET } from "./xex-boot.ts";
+import { FILE_SIZE_OFFSET } from "./boot-disk.ts";
+import { buildBootDisk } from "./xex-boot.ts";
 import { XEX_LOADER } from "./xex-loader-bytes.ts";
 
 // A four-chunk XEX exercising the whole protocol:

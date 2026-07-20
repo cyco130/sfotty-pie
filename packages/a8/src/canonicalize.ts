@@ -114,6 +114,10 @@ export function canonicalize(
 				cartPiece(source, 1, XEGS_GAME_END, XEGS_BASIC_END, "basic"),
 				osPiece(source, 16, XEGS_BASIC_END, XEGS_OS_END, "os"),
 			];
+		case "bas":
+			// Bootable via `buildBasicBootDisk`, but the library has no
+			// canonical BASIC kind yet - treat as unrecognized for now.
+			throw new Error("Unrecognized image format");
 		case null:
 			// A raw-ROM-named (or nameless) dump whose size matches at least one
 			// CART type is a cartridge of unknown mapper - kept raw until the

@@ -4,8 +4,9 @@
 ; calls `init` through DOSINI; the loader installs a B: device serving the
 ; tokenized BASIC file laid out from sector 4 onward - `file_size` is patched
 ; by the image builder - and patches the E: GET BYTE handler to type
-; `RUN "B:"` into BASIC. The E: patch removes itself at the end of that line;
-; CLOSE removes the B: device again.
+; `RUN "B:"` into BASIC, printing a loading message under the READY prompt
+; when BASIC first reads input. The E: patch removes itself at the end of
+; that line; CLOSE removes the B: device again.
 
 .import "./atari.s"
 
@@ -58,6 +59,7 @@ file_size:
 buffer_offset:	.byte 128	; read position in `buffer`; 128 = empty
 sector:			.word 4		; next sector to read
 e_input_offset:	.byte 0		; read position in `e_input`
+message_offset:	.res 1		; read position in `message` while printing
 e_handlers:		.res 12		; RAM copy of the E: handler table (GET BYTE patched)
 
 ; -------------------------------------------------------------------------
@@ -66,6 +68,9 @@ e_handlers:		.res 12		; RAM copy of the E: handler table (GET BYTE patched)
 
 e_input:
 	.byte "RUN \"B:\"", $9B
+
+message:
+	.byte "Loading program...", $9B
 
 b_handlers:
 	.word b_open - 1
@@ -83,7 +88,7 @@ init:
 	; Fake a successful disk boot
 	lda #1
 	sta BOOTQ
-	lda #0
+	lsr			; 1 -> 0
 	sta COLDST
 
 	; Reset will cold boot
@@ -152,11 +157,43 @@ copy_e_handlers:
 	clc
 	rts
 
+; Print the character in A through IOCB #0's cached E: PUT BYTE vector
+; (stored as address-1, dispatched RTS-style: high byte pushed first)
+put_byte:
+	tax
+	lda ICPTL+1
+	pha
+	lda ICPTL
+	pha
+	txa
+	rts
+
 ; -------------------------------------------------------------------------
 ; E: GET BYTE handler
 
 e_get_byte:
 	ldx e_input_offset
+	bne read_input
+
+; First read after the READY prompt: print the loading message, so the pause
+; while the program loads explains itself. X is 0 here, doubling as the
+; message index.
+print_message:
+	stx message_offset
+	lda message,x
+	pha
+	jsr put_byte
+	pla
+	cmp #$9B
+	beq message_done
+	ldx message_offset
+	inx
+	bne print_message
+
+message_done:
+	ldx #0 ; = e_input_offset, still at the start
+
+read_input:
 	lda e_input,x
 	cmp #$9B
 	bne e_get_byte_done
@@ -172,19 +209,7 @@ e_get_byte:
 
 e_get_byte_done:
 	inc e_input_offset
-	pha
-	jsr echo
-	pla
 	ldy #1
-	rts
-
-echo:
-	tax
-	lda ICPTL+1
-	pha
-	lda ICPTL
-	pha
-	txa
 	rts
 
 ; -------------------------------------------------------------------------

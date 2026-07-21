@@ -92,6 +92,13 @@ test('init installs B:, types RUN "B:", and serves the file', () => {
 		expect(cpu.PC).toBe(RETURN);
 	};
 
+	// The loader prints its loading message (and used to echo the typed
+	// line) through IOCB #0's cached E: PUT BYTE vector (ICPTL, address-1
+	// RTS-style); point it at the loader's own boot-continuation clc/rts so
+	// printing is a harmless no-op here.
+	poke(0x0346, (LOAD_ADDRESS + 5) & 0xff);
+	poke(0x0347, (LOAD_ADDRESS + 5) >> 8);
+
 	// The boot init, through the header's init vector (goes to DOSINI).
 	callSub(peekWord(LOAD_ADDRESS + 4));
 
@@ -116,12 +123,6 @@ test('init installs B:, types RUN "B:", and serves the file', () => {
 	for (const i of [0, 1, 2, 3, 6, 7, 8, 9, 10, 11]) {
 		expect(peek(eTable + i)).toBe(0x10 + i);
 	}
-
-	// The E: patch echoes each typed byte through IOCB #0's cached put-byte
-	// vector (ICPTL, address-1 RTS-style); point it at the loader's own
-	// boot-continuation clc/rts so the echo is a harmless no-op here.
-	poke(0x0346, (LOAD_ADDRESS + 5) & 0xff);
-	poke(0x0347, (LOAD_ADDRESS + 5) >> 8);
 
 	// Drive the patched E: GET BYTE like CIO would (table stores address-1):
 	// it types RUN "B:" plus EOL...

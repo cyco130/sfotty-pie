@@ -172,7 +172,19 @@ e_get_byte:
 
 e_get_byte_done:
 	inc e_input_offset
-	ldy #1 ; Success, return with byte in A
+	pha
+	jsr echo
+	pla
+	ldy #1
+	rts
+
+echo:
+	tax
+	lda ICPTL+1
+	pha
+	lda ICPTL
+	pha
+	txa
 	rts
 
 ; -------------------------------------------------------------------------
@@ -189,6 +201,7 @@ b_close:
 
 ; B: OPEN handler, return with success
 b_open:
+return_with_success:
 	ldy #1
 
 ; Not implemented (CIO calls with the function not implemented already in Y)

@@ -117,6 +117,12 @@ test('init installs B:, types RUN "B:", and serves the file', () => {
 		expect(peek(eTable + i)).toBe(0x10 + i);
 	}
 
+	// The E: patch echoes each typed byte through IOCB #0's cached put-byte
+	// vector (ICPTL, address-1 RTS-style); point it at the loader's own
+	// boot-continuation clc/rts so the echo is a harmless no-op here.
+	poke(0x0346, (LOAD_ADDRESS + 5) & 0xff);
+	poke(0x0347, (LOAD_ADDRESS + 5) >> 8);
+
 	// Drive the patched E: GET BYTE like CIO would (table stores address-1):
 	// it types RUN "B:" plus EOL...
 	const eGetByte = peekWord(eTable + 4) + 1;

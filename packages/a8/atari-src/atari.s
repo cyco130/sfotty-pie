@@ -25,6 +25,7 @@
 .export DAUX2 := $030B
 
 ; CIO related
+.export ICPTL := $0346
 .export HATABS := $031A
 
 ; HATABS offsets

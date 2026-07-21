@@ -89,20 +89,46 @@ export function detectFileFormat(
 		// followed immediately with the ROM data: 2, 4, 8, 16, 32, 40, etc. kilobytes.
 	}
 
-	// A tokenized (SAVEd) BASIC program: the first of its seven header words
-	// is always zero. The signature is weak (any 0,0-led blob passes), so
-	// unlike the other formats the `.bas` extension is required: nameless
-	// blobs are never detected as BASIC.
-	if (
-		name !== undefined &&
-		BAS_RE.test(name) &&
-		contents[0] === 0x00 &&
-		contents[1] === 0x00
-	) {
+	// A tokenized (SAVEd) BASIC program. The `.bas` extension is required on
+	// top of the structural check: the signature is weak for nameless blobs.
+	if (name !== undefined && BAS_RE.test(name) && isBasicProgram(contents)) {
 		return "bas";
 	}
 
 	return null;
+}
+
+// The seven-word .bas header: zero-page table pointers (LOMEM..STARP), each
+// stored LSB-first relative to LOMEM. Checks validated against a 400+ file
+// corpus loaded in real BASIC:
+// - the first word (LOMEM itself) is always 0;
+// - VNTP is at least 256 (it grows by 16 per BASIC Rev. B save/load cycle;
+//   no upper bound is enforced pending further research);
+// - the table pointers ascend (STMCUR excluded: stored but unused by LOAD,
+//   and junk in many circulating files);
+// - BASIC's LOAD reads exactly STARP-256 body bytes, so a shorter file
+//   cannot load on real hardware (LOAD hits EOF and silently NEWs) - files
+//   trimmed to the intuitive-but-wrong STARP-VNTP size are refused here on
+//   purpose. Trailing bytes beyond the demand are ignored by LOAD and
+//   tolerated here.
+function isBasicProgram(contents: Uint8Array): boolean {
+	if (contents.length < 14) {
+		return false;
+	}
+	const word = (i: number) => contents[i]! | (contents[i + 1]! << 8);
+	const [lomem, vntp, vntd, vvtp, stmtab, , starp] = Array.from(
+		{ length: 7 },
+		(_, i) => word(i * 2),
+	) as [number, number, number, number, number, number, number];
+	return (
+		lomem === 0 &&
+		vntp >= 256 &&
+		vntp <= vntd &&
+		vntd <= vvtp &&
+		vvtp <= stmtab &&
+		stmtab <= starp &&
+		contents.length >= 14 + starp - 256
+	);
 }
 
 // Filename extensions each detector accepts (the content check still confirms).
@@ -110,9 +136,7 @@ export function detectFileFormat(
 // nameless blob (e.g. a built-in served raw) matches on content alone.
 const ATR = ["atr"];
 const XEX = ["xex", "axe", "exe", "com", "obj", "bin", "obx"];
-// Tokenized BASIC programs. Deliberately kept out of KNOWN_RE until the
-// library grows a canonical BASIC kind - bulk import would otherwise read
-// them only for canonicalize to reject them.
+// Tokenized BASIC programs.
 const BAS = ["bas"];
 // Raw ROM dumps: raw cartridges, OS ROMs, and the XEGS 32K dump.
 const RAW_ROM = ["rom", "bin", "raw"];
@@ -129,7 +153,9 @@ const CAR_RE = extMatcher(CAR);
 
 // The union of every accepted extension, derived from the lists above so it
 // can't drift out of sync.
-const KNOWN_RE = extMatcher([...new Set([...ATR, ...XEX, ...RAW_ROM, ...CAR])]);
+const KNOWN_RE = extMatcher([
+	...new Set([...ATR, ...XEX, ...BAS, ...RAW_ROM, ...CAR]),
+]);
 
 function getRawCartType(
 	contents: Uint8Array,

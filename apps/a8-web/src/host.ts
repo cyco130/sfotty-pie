@@ -1,5 +1,6 @@
 import {
 	AtrImage,
+	buildBasicBootDisk,
 	buildBootDisk,
 	buildNtscPalette,
 	buildPalPalette,
@@ -1361,6 +1362,9 @@ export class EmulatorHost {
 			entry.user.displayName,
 			id,
 			options,
+			// A tokenized BASIC program is the one kind content alone can't
+			// prove (stored names carry no extension) - pass it through.
+			entry.derived.type === "bas" ? "bas" : undefined,
 		);
 	}
 
@@ -1557,10 +1561,13 @@ export class EmulatorHost {
 		name: string,
 		sourceId?: string,
 		options?: { keepPanel?: boolean },
+		derivedFormat?: AtariFileFormat,
 	): void {
 		// Content-based detection (no filename hint): the bytes carry their own
 		// magic/heuristics, and library images may have no meaningful extension.
-		const format = detectFileFormat(contents);
+		// `derivedFormat` covers the one format content alone can't prove (a
+		// tokenized BASIC program), from the caller's library metadata.
+		const format = detectFileFormat(contents) ?? derivedFormat ?? null;
 
 		// An unrecognized/unloadable file changes nothing - just warn.
 		const unsupported = unsupportedMessage(format);
@@ -1593,6 +1600,15 @@ export class EmulatorHost {
 					sourceId,
 					synthetic: true,
 				};
+			} else if (format === "bas") {
+				// A BASIC program boots like a XEX - from a generated in-memory
+				// disk whose loader types RUN "B:" - but needs BASIC left in.
+				disk = {
+					disk: buildBasicBootDisk(contents),
+					name,
+					sourceId,
+					synthetic: true,
+				};
 			} else {
 				cartridge = { cart: createCartridge(contents), name, sourceId };
 			}
@@ -1602,15 +1618,20 @@ export class EmulatorHost {
 			return;
 		}
 
+		// A BASIC program is the one boot image that needs BASIC in, not out.
+		const keepsBasic = format === "bas";
+
 		// Announce the teardown of every boot source it clears, then the boot
 		// itself - so the silent multi-action is legible.
-		this.#announceBootTeardown();
+		this.#announceBootTeardown(keepsBasic);
 		this.toast(
 			cartridge
 				? messages.toasts.bootCartridge(name)
 				: format === "xex"
 					? messages.toasts.bootExecutable(name)
-					: messages.toasts.bootDisk(name),
+					: format === "bas"
+						? messages.toasts.bootBasicProgram(name)
+						: messages.toasts.bootDisk(name),
 		);
 
 		// Get out of the way - except for a dropped file, where whatever pane
@@ -1626,7 +1647,7 @@ export class EmulatorHost {
 		const drives = [...this.#drives];
 		drives[0] = disk ? { ...disk, on: true } : null;
 		this.#drives = drives;
-		this.config.value = { ...this.config.value, basicDisabled: true };
+		this.config.value = { ...this.config.value, basicDisabled: !keepsBasic };
 		this.#refreshAttachments();
 		this.#saveMedia();
 		this.#noteUsed(sourceId);
@@ -1635,12 +1656,14 @@ export class EmulatorHost {
 
 	// Toast each boot source Boot image is about to clear: the cartridge slots
 	// (an explicit cart, or BASIC on the 400/800), the D1: disk, and BASIC on
-	// XL/XE (on the 400/800 that's the cartridge-slot toast above).
-	#announceBootTeardown(): void {
+	// XL/XE (on the 400/800 that's the cartridge-slot toast above). A
+	// BASIC-program boot keeps BASIC in, so its teardown skips the BASIC
+	// toasts.
+	#announceBootTeardown(keepsBasic: boolean): void {
 		const { model, basicDisabled } = this.config.value;
 		if (this.#cartridge) {
 			this.toast(messages.toasts.detachingCartridge(this.#cartridge.name));
-		} else if (!hasBuiltinBasic(model) && !basicDisabled) {
+		} else if (!hasBuiltinBasic(model) && !basicDisabled && !keepsBasic) {
 			const name =
 				this.#pick(preferredBasicKeys())?.user.displayName ?? "BASIC";
 			this.toast(messages.toasts.detachingCartridge(name));
@@ -1653,7 +1676,7 @@ export class EmulatorHost {
 		if (this.#drives[0]) {
 			this.toast(messages.toasts.detachingDisk(1, this.#drives[0].name));
 		}
-		if (hasBuiltinBasic(model) && !basicDisabled) {
+		if (hasBuiltinBasic(model) && !basicDisabled && !keepsBasic) {
 			this.toast(messages.toasts.disablingBasic);
 		}
 	}
@@ -2493,15 +2516,18 @@ export class EmulatorHost {
 				const entry = getImage(saved.id);
 				if (entry) {
 					const bytes = await getImageBytes(saved.id);
-					// An XEX resumes via its synthetic boot disk - a D1:-only
-					// arrangement (that's the slot a boot fills).
-					const synthetic = entry.derived.type === "xex" && unit === 1;
+					// A XEX or BASIC program resumes via its synthetic boot disk
+					// - a D1:-only arrangement (that's the slot a boot fills).
+					const kind = entry.derived.type;
+					const synthetic = (kind === "xex" || kind === "bas") && unit === 1;
 					this.#drives[unit - 1] = {
-						disk: synthetic
-							? buildBootDisk(bytes)
-							: new AtrImage(bytes, {
+						disk: !synthetic
+							? new AtrImage(bytes, {
 									writeProtected: entry.user.writeProtected ?? true,
-								}),
+								})
+							: kind === "xex"
+								? buildBootDisk(bytes)
+								: buildBasicBootDisk(bytes),
 						name: entry.user.displayName,
 						sourceId: saved.id,
 						on: saved.on,

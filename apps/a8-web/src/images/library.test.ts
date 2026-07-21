@@ -51,6 +51,24 @@ describe("image library", () => {
 		expect(await sha256Hex(bytes)).toBe(entry.hash);
 	});
 
+	it("ingests a .bas upload as a BASIC program by its extension", async () => {
+		// A minimal tokenized program: the header of a freshly saved empty
+		// program plus the body bytes BASIC's LOAD demands (STARP - 256),
+		// with unique bytes so the hash is test-local.
+		const words = [0, 256, 256, 257, 257, 257, 281];
+		const bas = new Uint8Array(14 + 281 - 256);
+		words.forEach((value, i) => {
+			bas[i * 2] = value & 0xff;
+			bas[i * 2 + 1] = value >> 8;
+		});
+		bas.set([0x33, 0x44, 0x55], 14);
+		const { added } = await addImage(bas, "hello.bas");
+
+		expect(added).toHaveLength(1);
+		expect(added[0]!.derived).toEqual({ type: "bas" });
+		expect(await getImageBytes(added[0]!.id)).toEqual(bas);
+	});
+
 	it("dedups a re-upload of identical bytes (no second entry)", async () => {
 		const first = await addImage(rawCart8k(0x22), "a.rom");
 		const again = await addImage(rawCart8k(0x22), "b.rom");

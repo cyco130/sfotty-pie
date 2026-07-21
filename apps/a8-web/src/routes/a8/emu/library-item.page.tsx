@@ -75,6 +75,7 @@ function detailRows(entry: ImageEntry): { label: string; value: string }[] {
 				{ label: f.sectorSize, value: `${k.sectorSize} B` },
 			];
 		case "xex":
+		case "bas":
 		case "unknown-rom":
 			return [];
 	}
@@ -358,7 +359,10 @@ export default function LibraryItemPanel({ id: rawId }: { id: string }) {
 		entry.derived.type === "cart" &&
 		!isCartTypeSupported(entry.derived.cartType);
 	const canBoot =
-		type === "disk" || type === "xex" || (type === "cart" && !cartBlocked);
+		type === "disk" ||
+		type === "xex" ||
+		type === "bas" ||
+		(type === "cart" && !cartBlocked);
 
 	// The type picker: user cart / unknown-ROM entries can (re)pick their CART
 	// type - it rewrites the header, so it's for user entries only. The option

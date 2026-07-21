@@ -33,6 +33,7 @@ const TYPE_VALUES: readonly ImageType[] = [
 	"cart",
 	"disk",
 	"xex",
+	"bas",
 	"unknown-rom",
 ];
 
@@ -152,6 +153,7 @@ function detailCols(type: ImageType): DetailCol[] {
 				},
 			];
 		case "xex":
+		case "bas":
 		case "unknown-rom":
 			return [];
 	}

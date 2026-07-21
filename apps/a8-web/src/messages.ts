@@ -462,6 +462,7 @@ export const messages = {
 			cart: "Cartridge",
 			disk: "Disk",
 			xex: "Executable",
+			bas: "BASIC program",
 			"unknown-rom": "Unknown ROM",
 		},
 		range: (from: number, to: number, total: number): string =>
@@ -630,6 +631,7 @@ export const messages = {
 		bootDisk: (name: string) => `Booting D1: (${name})`,
 		bootCartridge: (name: string) => `Booting cartridge (${name})`,
 		bootExecutable: (name: string) => `Booting executable (${name})`,
+		bootBasicProgram: (name: string) => `Booting BASIC program (${name})`,
 		attachingDisk: (unit: number, name: string) =>
 			`Attaching D${unit}: (${name})`,
 		detachingDisk: (unit: number, name: string) =>

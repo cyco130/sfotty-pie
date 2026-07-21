@@ -24,6 +24,21 @@
 .export DAUX1 := $030A
 .export DAUX2 := $030B
 
+; CIO related
+.export ICPTL := $0346
+.export HATABS := $031A
+
+; HATABS offsets
+.export HATABS_OFFSET_OPEN = 0
+.export HATABS_OFFSET_CLOSE = 2
+.export HATABS_OFFSET_GET_BYTE = 4
+.export HATABS_OFFSET_PUT_BYTE = 6
+.export HATABS_OFFSET_STATUS = 8
+.export HATABS_OFFSET_SPECIAL = 10
+
+; OS error codes
+.export ERR_EOF = 136
+
 ; OS vectors
 .export SIOV := $E459		; serial I/O entry
 .export BLKBDV := $E471	; blackboard (Memo Pad) entry

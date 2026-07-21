@@ -71,6 +71,19 @@ function makeAtr(sectorSize: 128 | 256, dataBytes: number): Uint8Array {
 
 const CART_MAGIC = [0x43, 0x41, 0x52, 0x54];
 
+/** A minimal tokenized BASIC SAVE: the header of a freshly saved empty
+ *  program (relative pointers as Rev. C writes them) plus the 25 body bytes
+ *  BASIC's LOAD will demand (STARP - 256). */
+function tokenizedBas(): Uint8Array {
+	const words = [0, 256, 256, 257, 257, 257, 281];
+	const file = new Uint8Array(14 + 281 - 256);
+	words.forEach((value, i) => {
+		file[i * 2] = value & 0xff;
+		file[i * 2 + 1] = value >> 8;
+	});
+	return file;
+}
+
 describe("canonicalize", () => {
 	it("wraps a raw 8K $A000 cart as a type-1 .car the Cartridge can parse", () => {
 		const [piece, ...rest] = canonicalize(rawCart8kA000());
@@ -147,6 +160,25 @@ describe("canonicalize", () => {
 			sectorSize: 256,
 			sectors: 720,
 		});
+	});
+
+	it("passes a .bas-named tokenized BASIC program through raw", () => {
+		const bas = tokenizedBas();
+		const [piece, ...rest] = canonicalize(bas, "hello.bas");
+		expect(rest).toHaveLength(0);
+		expect(piece!.kind).toEqual({ type: "bas" });
+		expect(piece!.header).toHaveLength(0);
+		expect(piece!.bytes).toHaveLength(bas.length);
+		// The extension is load-bearing: the same bytes nameless stay
+		// unrecognized.
+		expect(detectFileFormat(bas)).toBe(null);
+	});
+
+	it("refuses a .bas too short for LOAD's STARP-256 byte demand", () => {
+		// A file trimmed short of what BASIC will read can't load on real
+		// hardware; the detector refuses it outright.
+		const truncated = tokenizedBas().subarray(0, 30);
+		expect(detectFileFormat(truncated, "hello.bas")).toBe(null);
 	});
 
 	it("throws on an unrecognized format", () => {

@@ -11,7 +11,7 @@ import {
 //   cartridge  ->  `.car` (16-byte CART header + ROM) - a raw `.rom`/`.bin`
 //                 gets the header prepended; the mapper/type lives in the
 //                 header, so it becomes part of the content identity.
-//   OS / XEX   ->  the raw bytes (no container).
+//   OS / XEX / BASIC  ->  the raw bytes (no container).
 //   combined   ->  split: an XEGS 32K dump becomes a game cart, a BASIC cart,
 //                 and the OS, each canonicalized independently.
 //   disk       ->  passthrough for now (ATR container-stripping is deferred).
@@ -27,6 +27,7 @@ export type ImageKind =
 	| { type: "cart"; cartType: number } // the CART-table number = mapper/subtype
 	| { type: "disk"; sectorSize: 128 | 256; sectors: number }
 	| { type: "xex" }
+	| { type: "bas" } // a tokenized (SAVEd) BASIC program
 	// A raw cartridge dump whose mapper couldn't be detected (its size matches
 	// at least one CART type). Stored raw; picking a type later completes the
 	// canonicalization by writing the CART header.
@@ -113,6 +114,16 @@ export function canonicalize(
 				cartPiece(source, 1, 0, XEGS_GAME_END, "game"),
 				cartPiece(source, 1, XEGS_GAME_END, XEGS_BASIC_END, "basic"),
 				osPiece(source, 16, XEGS_BASIC_END, XEGS_OS_END, "os"),
+			];
+		case "bas":
+			return [
+				{
+					from: 0,
+					to: source.length,
+					header: EMPTY,
+					bytes: source,
+					kind: { type: "bas" },
+				},
 			];
 		case null:
 			// A raw-ROM-named (or nameless) dump whose size matches at least one

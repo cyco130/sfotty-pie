@@ -21,14 +21,16 @@ export type DerivedMeta = ImageKind;
 export type ImageType = ImageKind["type"];
 
 /** Canonical file extension per type - a cartridge is a `.car`, an OS a raw
- *  `.rom`, a disk an `.atr`, an executable a `.xex`. Stored names carry none;
- *  this is added on download / library export. */
+ *  `.rom`, a disk an `.atr`, an executable a `.xex`, a BASIC program a
+ *  `.bas`. Stored names carry none; this is added on download / library
+ *  export. */
 export const CANON_EXT: Record<ImageType, string> = {
 	"unknown-rom": "rom",
 	os: "rom",
 	cart: "car",
 	disk: "atr",
 	xex: "xex",
+	bas: "bas",
 };
 
 /** A slot picker an image can be surfaced in (standard-8K carts only). */

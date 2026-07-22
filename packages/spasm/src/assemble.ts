@@ -89,8 +89,9 @@ function assembleModules(
 	let diagnostics: Message[] = [];
 	let bases = new Map<string, bigint>(); // segment bases from the previous render
 
-	// Pessimistic shrink-only sizing is monotone; values also flow across modules
-	// through the ambient scope a hop per pass. The cap is a generous backstop.
+	// Pessimistic shrink-only sizing is monotone; label values still flow a hop
+	// per pass (render defines them after collect). The cap is a generous
+	// backstop.
 	const statementCount = modules.reduce((n, m) => n + m.statements.length, 0);
 	const cap = Math.max(statementCount + 1, 8);
 	let converged = false;
@@ -122,10 +123,17 @@ function assembleModules(
 			},
 			report,
 		);
+		const previous = output;
 		output = result.bytes;
 		bases = result.bases;
 
-		if (!scopes.changedSince(snapshot)) {
+		// Converged only when both the symbol table AND the output bytes are
+		// stable. Symbols alone miss non-symbol state that feeds bytes (segment
+		// bases, `.res` counts); bytes alone would stop early on placeholder
+		// streaks while values are still propagating. Each check catches what
+		// the other can't see (emplaced segments are byte-invisible but
+		// label-visible).
+		if (!scopes.changedSince(snapshot) && bytesEqual(output, previous)) {
 			converged = true;
 			break;
 		}
@@ -261,6 +269,14 @@ function collect(
 	}
 
 	return segments;
+}
+
+function bytesEqual(a: readonly number[], b: readonly number[]): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) return false;
+	}
+	return true;
 }
 
 function segmentName(

@@ -118,6 +118,22 @@ describe("segments", () => {
 		]);
 	});
 
+	test("a *-relative .res fill in an emitted segment converges", () => {
+		// Regression: the fill count reads the segment base, which is not a
+		// symbol - with symbol-only convergence this exited after pass 1 with a
+		// stale base-0 count (8K of garbage). Byte-stable convergence keeps
+		// iterating until the fill settles.
+		const { bytes, messages } = asm(
+			'.define_segment "CODE"\n' +
+				'.segment "OUTPUT"\n.org $1f00\n.emit "CODE"\n' +
+				'.segment "CODE"\n\tlda #1\n\t.res $2000 - *\n\t.byte $aa\n',
+		);
+		expect(messages).toEqual([]);
+		// 2 bytes of code at $1f00, fill to $2000, one sentinel byte.
+		expect(bytes).toHaveLength(257);
+		expect(bytes[bytes.length - 1]).toBe(0xaa);
+	});
+
 	test("a segment shorthand switches the current segment", () => {
 		const { bytes, symbols } = asm(
 			'.define_segment "CODE"\n.segment "OUTPUT"\n.org $0400\n.emit "CODE"\n' +

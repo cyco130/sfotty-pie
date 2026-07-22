@@ -376,7 +376,9 @@ function collectContent(
 		}
 
 		case "instruction": {
-			const expr = operandExpression(content.operand);
+			// Multi-operand lists only occur on macro calls (gone by now) and on
+			// misused real instructions - encode reports the arity error below.
+			const expr = operandExpression(content.operands[0] ?? null);
 			const value = expr ? evaluate(expr, env) : undefined;
 			const bytes = encodeInstruction(content, value, { location, report });
 			output.items.push({ kind: "bytes", bytes });

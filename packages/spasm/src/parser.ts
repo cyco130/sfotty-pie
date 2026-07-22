@@ -227,6 +227,8 @@ class Parser {
 				while (this.#token.type === "identifier") {
 					params.push(this.#token);
 					this.#consume();
+					// Separating commas are optional, matching the call site.
+					if ((this.#token.type as TokenType) === ",") this.#consume();
 				}
 				this.#expect("newline");
 				const body: Statement[] = [];
@@ -244,14 +246,31 @@ class Parser {
 		return null;
 	}
 
+	// Operands are comma-separated. A comma followed by a register name binds
+	// to the preceding operand as its indexed suffix (registers are reserved
+	// words, so this is unambiguous - `#operand` consumes those commas itself);
+	// any other comma separates operands. Real mnemonics take at most one
+	// operand (the encoder enforces arity); macro calls take any number.
 	#instruction(identifier: Token<"identifier">): Instruction {
 		const mnemonic = identifier;
-		const operand = this.#operand();
+		const operands: Operand[] = [];
+		const first = this.#operand();
+		if (first) {
+			operands.push(first);
+			while (this.#token.type === ",") {
+				this.#consume();
+				const next = this.#operand();
+				if (!next) {
+					throw new ParseError(this.#token, ["an operand"]);
+				}
+				operands.push(next);
+			}
+		}
 
 		return {
 			type: "instruction",
 			mnemonic,
-			operand,
+			operands,
 		};
 	}
 
@@ -777,7 +796,7 @@ export interface Label {
 export interface Instruction {
 	type: "instruction";
 	mnemonic: Token<"identifier">;
-	operand: null | Operand;
+	operands: Operand[];
 }
 
 export type Operand =

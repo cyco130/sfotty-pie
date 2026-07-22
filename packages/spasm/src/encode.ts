@@ -58,7 +58,7 @@ export function encodeInstruction(
 	operandValue: Value | undefined,
 	context: EncodeContext,
 ): number[] {
-	const { mnemonic, operand } = instruction;
+	const { mnemonic, operands } = instruction;
 	const name = mnemonic.text.toUpperCase();
 	const modes = OPCODES[name];
 	const nameSpan: readonly [number, number] = [mnemonic.start, mnemonic.end];
@@ -67,6 +67,16 @@ export function encodeInstruction(
 		context.report(`Unknown mnemonic "${mnemonic.text}"`, nameSpan);
 		return [];
 	}
+
+	// Operand lists exist for macro calls; a real instruction takes at most one.
+	if (operands.length > 1) {
+		context.report(
+			`Too many operands for ${name}`,
+			getOperandLocation(operands[1]!),
+		);
+		return [];
+	}
+	const operand = operands[0] ?? null;
 
 	const mode = resolveMode(operand, operandValue, modes);
 	const opcode = modes[mode];

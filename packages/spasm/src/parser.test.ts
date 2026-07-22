@@ -52,8 +52,8 @@ function list(items: Byte["list"]): string {
 function content(c: StatementContent): string {
 	switch (c.type) {
 		case "instruction":
-			return c.operand
-				? `${c.mnemonic.text} ${operand(c.operand)}`
+			return c.operands.length
+				? `${c.mnemonic.text} ${c.operands.map(operand).join(", ")}`
 				: c.mnemonic.text;
 		case "assignment":
 			return `${c.identifier.text} ${c.operatorToken.text} ${expr(c.expression)}`;
@@ -158,6 +158,11 @@ describe("operands", () => {
 			"jmp ([(sym + 2)] * 2),x",
 		]);
 	});
+
+	test("operand lists: a comma before a non-register separates operands", () => {
+		expect(dump("mva (src),y, (dest),y")).toEqual(["mva (src),y, (dest),y"]);
+		expect(dump("pair 1, 2, #3")).toEqual(["pair 1, 2, #3"]);
+	});
 });
 
 describe("expression precedence and associativity", () => {
@@ -247,6 +252,15 @@ describe("directives", () => {
 			expect(m.nameToken.text).toBe("mprint");
 			expect(m.params.map((p) => p.text)).toEqual(["str"]);
 			expect(m.body).toHaveLength(2); // .rodata, .byte
+		}
+	});
+
+	test("macro params separate with optional commas", () => {
+		const [s] = parseOk(".macro mva src, dest\n.endmacro\n");
+		const m = s!.content;
+		expect(m?.type).toBe("macro");
+		if (m?.type === "macro") {
+			expect(m.params.map((p) => p.text)).toEqual(["src", "dest"]);
 		}
 	});
 

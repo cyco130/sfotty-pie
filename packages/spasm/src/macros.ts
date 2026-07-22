@@ -11,9 +11,9 @@ import { exportedNames } from "./scopes.ts";
 
 type Reporter = (message: string, span: readonly [number, number]) => void;
 
-// A param substitutes to an argument expression; a body-local label renames.
+// A param substitutes to an argument operand; a body-local label renames.
 type Substitution =
-	| { kind: "expr"; expr: Expression }
+	| { kind: "operand"; operand: Operand }
 	| { kind: "rename"; name: string };
 
 const MAX_DEPTH = 64;
@@ -212,16 +212,16 @@ function checkBody(macro: Macro, report: Reporter): void {
 	}
 }
 
+// A macro argument is a whole *operand*, shape included - `mva (src),y, (dst),y`
+// passes two indirect-indexed operands. Operand is a super-type of simple
+// values: a simple operand is a plain expression and substitutes anywhere; a
+// shaped operand only substitutes as a whole operand (a type error elsewhere).
 function callArgs(
 	call: Extract<StatementContent, { type: "instruction" }>,
 	macro: Macro,
 	report: Reporter,
-): Expression[] | undefined {
-	const args: Expression[] = [];
-	const operand = call.operand;
-	if (operand && operand.type !== "accumulator-operand") {
-		args.push(operand.expression);
-	}
+): Operand[] | undefined {
+	const args = call.operands;
 	if (args.length !== macro.params.length) {
 		report(
 			`Macro "${macro.nameToken.text}" expects ${macro.params.length} argument(s), got ${args.length}`,
@@ -235,13 +235,13 @@ function callArgs(
 function expandCall(
 	macro: Macro,
 	definingId: string,
-	args: Expression[],
+	args: Operand[],
 	gensym: () => number,
 	report: Reporter,
 ): Statement[] {
 	const subst = new Map<string, Substitution>();
 	macro.params.forEach((param, i) => {
-		subst.set(param.text, { kind: "expr", expr: args[i]! });
+		subst.set(param.text, { kind: "operand", operand: args[i]! });
 	});
 	const suffix = `@${gensym()}`;
 	for (const name of localNames(macro.body)) {
@@ -295,8 +295,13 @@ function substituteName(
 ): Token<"identifier"> {
 	const s = subst.get(identifier.text);
 	if (s?.kind === "rename") return { ...identifier, text: s.name };
-	if (s?.kind === "expr") {
-		if (s.expr.type === "identifier") return structuredClone(s.expr);
+	if (s?.kind === "operand") {
+		if (
+			s.operand.type === "simple-operand" &&
+			s.operand.expression.type === "identifier"
+		) {
+			return structuredClone(s.operand.expression);
+		}
 		report(
 			`Macro argument for "${identifier.text}" defines a name and must be a plain identifier`,
 			tokenSpan(identifier),
@@ -315,28 +320,35 @@ function substituteContent(
 		case "byte":
 		case "word":
 			content.list = content.list.map(([e, comma]) => [
-				substituteExpr(e, subst, origin),
+				substituteExpr(e, subst, origin, report),
 				comma,
 			]);
 			break;
 		case "org":
-			content.expression = substituteExpr(content.expression, subst, origin);
+			content.expression = substituteExpr(
+				content.expression,
+				subst,
+				origin,
+				report,
+			);
 			break;
 		case "res":
-			content.count = substituteExpr(content.count, subst, origin);
+			content.count = substituteExpr(content.count, subst, origin, report);
 			break;
 		case "assignment": {
-			content.expression = substituteExpr(content.expression, subst, origin);
+			content.expression = substituteExpr(
+				content.expression,
+				subst,
+				origin,
+				report,
+			);
 			content.identifier = substituteName(content.identifier, subst, report);
 			break;
 		}
 		case "instruction":
-			if (content.operand && content.operand.type !== "accumulator-operand") {
-				content.operand = {
-					...content.operand,
-					expression: substituteExpr(content.operand.expression, subst, origin),
-				} as Operand;
-			}
+			content.operands = content.operands.map((operand) =>
+				substituteOperand(operand, subst, origin, report),
+			);
 			break;
 		// Segment directives carry no substitutable expressions; import/export/
 		// macro are rejected from bodies at collection.
@@ -345,15 +357,51 @@ function substituteContent(
 	}
 }
 
+// A param standing alone in operand position (`lda src`) splices the whole
+// argument operand, shape included. A param inside a composite operand
+// (`#src`, `src,x`, `(src),y`) is in expression position - `substituteExpr`
+// type-checks it there.
+function substituteOperand(
+	operand: Operand,
+	subst: Map<string, Substitution>,
+	origin: string,
+	report: Reporter,
+): Operand {
+	if (operand.type === "accumulator-operand") return operand;
+	if (
+		operand.type === "simple-operand" &&
+		operand.expression.type === "identifier"
+	) {
+		const s = subst.get(operand.expression.text);
+		if (s?.kind === "operand") return structuredClone(s.operand);
+	}
+	return {
+		...operand,
+		expression: substituteExpr(operand.expression, subst, origin, report),
+	} as Operand;
+}
+
 function substituteExpr(
 	expr: Expression,
 	subst: Map<string, Substitution>,
 	origin: string,
+	report: Reporter,
 ): Expression {
 	switch (expr.type) {
 		case "identifier": {
 			const s = subst.get(expr.text);
-			if (s?.kind === "expr") return structuredClone(s.expr);
+			if (s?.kind === "operand") {
+				// Operand is a super-type of simple values: only a simple operand
+				// (a plain expression) has a value usable inside an expression.
+				if (s.operand.type === "simple-operand") {
+					return structuredClone(s.operand.expression);
+				}
+				report(
+					`Macro argument "${expr.text}" has an operand value and can only be used as a whole operand`,
+					tokenSpan(expr),
+				);
+				return expr;
+			}
 			if (s?.kind === "rename") return { ...expr, text: s.name };
 			// A free name binds where the macro was defined (hygiene). An already
 			// stamped identifier (from an outer expansion's argument) keeps its
@@ -363,21 +411,24 @@ function substituteExpr(
 		case "prefix-expression":
 			return {
 				...expr,
-				expression: substituteExpr(expr.expression, subst, origin),
+				expression: substituteExpr(expr.expression, subst, origin, report),
 			};
 		case "infix-expression":
 			return {
 				...expr,
-				left: substituteExpr(expr.left, subst, origin),
-				right: substituteExpr(expr.right, subst, origin),
+				left: substituteExpr(expr.left, subst, origin, report),
+				right: substituteExpr(expr.right, subst, origin, report),
 			};
 		case "grouped-expression":
 			return {
 				...expr,
-				expression: substituteExpr(expr.expression, subst, origin),
+				expression: substituteExpr(expr.expression, subst, origin, report),
 			};
 		case "member-expression":
-			return { ...expr, object: substituteExpr(expr.object, subst, origin) };
+			return {
+				...expr,
+				object: substituteExpr(expr.object, subst, origin, report),
+			};
 		default:
 			return expr; // literals and `*`
 	}
@@ -455,8 +506,10 @@ function validateBody(
 				break;
 			case "instruction":
 				if (isMacro(content.mnemonic.text)) break;
-				if (content.operand && content.operand.type !== "accumulator-operand") {
-					check(content.operand.expression);
+				for (const operand of content.operands) {
+					if (operand.type !== "accumulator-operand") {
+						check(operand.expression);
+					}
 				}
 				break;
 			default:

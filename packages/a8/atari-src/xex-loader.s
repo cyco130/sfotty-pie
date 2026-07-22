@@ -6,6 +6,7 @@
 ; honors the INITAD/RUNAD protocol like DOS does.
 
 .import "./atari.s"
+.import "./atari-boot.s"
 
 ; Sector buffer, just past the loaded boot region ($0700-$087F)
 buffer = $0880
@@ -23,21 +24,16 @@ BOOT_ERROR_CHUNK = 'c'
 count = $20			; number of bytes to read
 load_address = $22	; address to read into
 
-.define_segment "CODE"
-.define_segment "DATA"
-
 ; -------------------------------------------------------------------------
 
-; The boot image: exactly three 128-byte sectors.
+; The boot image: exactly three 128-byte sectors. The build script pads it
+; to the full 384 bytes.
 
-.segment "OUTPUT"
-.org $0700
+output_atari_boot init, $0700
 
-	; Disk boot header
-	.byte 0			; flags
-	.byte 3			; number of boot sectors
-	.word $0700		; load address
-	.word init		; init address (goes to DOSINI)
+; The boot continuation lives at load+6, so it leads CODE.
+
+.segment "CODE"
 
 rtsadr:				; boot-continuation entry (carry clear = boot OK);
 	clc				; doubles as the INITAD/RUNAD default target
@@ -46,10 +42,6 @@ rtsadr:				; boot-continuation entry (carry clear = boot OK);
 	; Executable size (24-bit LSB-first; patched by the image builder)
 file_size:
 	.byte 0, 0, 0
-
-	; The build script pads the image to the full three sectors (384 bytes).
-	.emit "CODE"
-	.emit "DATA"
 
 ; -------------------------------------------------------------------------
 

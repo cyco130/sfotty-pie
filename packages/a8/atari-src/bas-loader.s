@@ -9,6 +9,7 @@
 ; that line; CLOSE removes the B: device again.
 
 .import "./atari.s"
+.import "./atari-boot.s"
 
 ; Top of the free memory - 512 bytes
 LOAD_ADDRESS = $9a20
@@ -20,22 +21,16 @@ old_e_handlers = $CB
 b_hatabs_offset = $CD
 e_hatabs_offset = $CE
 
-.define_segment "CODE"
-.define_segment "RODATA"
-.define_segment "DATA"
-
 ; -------------------------------------------------------------------------
 
-; The boot image: exactly three 128-byte sectors.
+; The boot image: exactly three 128-byte sectors. The build script pads it
+; to the full 384 bytes.
 
-.segment "OUTPUT"
-.org LOAD_ADDRESS
+output_atari_boot init, LOAD_ADDRESS
 
-	; Disk boot header
-	.byte 0				; flags
-	.byte 3				; number of boot sectors
-	.word LOAD_ADDRESS	; load address
-	.word init			; init address (goes to DOSINI)
+; The boot continuation lives at load+6, so it leads CODE.
+
+.segment "CODE"
 
 	; boot-continuation entry (carry clear = boot OK);
 	clc
@@ -44,11 +39,6 @@ e_hatabs_offset = $CE
 	; File size (24-bit LSB-first; patched by the image builder)
 file_size:
 	.byte 0, 0, 0
-
-	; The build script pads the image to the full three sectors (384 bytes).
-	.emit "CODE"
-	.emit "RODATA"
-	.emit "DATA"
 
 ; -------------------------------------------------------------------------
 

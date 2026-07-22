@@ -468,6 +468,45 @@ describe("macros", () => {
 		);
 	});
 
+	test("multi-argument call passes whole operands (the mva pattern)", () => {
+		const { bytes, messages } = asm(
+			"ptr = $20\ndst = $22\n" +
+				".macro mva src, dest\n\tlda src\n\tsta dest\n.endmacro\n" +
+				"mva (ptr),y, (dst),y\n",
+		);
+		expect(messages).toEqual([]);
+		// lda (ptr),y / sta (dst),y - the ",y" shape survives substitution.
+		expect(bytes).toEqual([0xb1, 0x20, 0x91, 0x22]);
+	});
+
+	test("multi-argument call with plain expressions", () => {
+		const { bytes, messages } = asm(
+			".macro pair lo, hi\n\t.byte lo, hi\n.endmacro\npair 1, 2\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 2]);
+	});
+
+	test("an immediate argument splices as a whole operand", () => {
+		const { bytes, messages } = asm(
+			".macro put v\n\tlda v\n.endmacro\nput #$42\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xa9, 0x42]);
+	});
+
+	test("a shaped operand argument in expression position is a type error", () => {
+		expect(
+			asm(".macro bad v\n\t.byte v\n.endmacro\nbad (foo),y\n").messages,
+		).toContain(
+			'Macro argument "v" has an operand value and can only be used as a whole operand',
+		);
+	});
+
+	test("a real instruction rejects an operand list", () => {
+		expect(asm("lda 1, 2\n").messages).toContain("Too many operands for LDA");
+	});
+
 	test("a param-named label defines a caller-visible symbol", () => {
 		const { bytes, symbols, messages } = asm(
 			".macro alloc name\nname: .res 1\n.endmacro\n.org $10\nalloc buffer\n.byte <buffer\n",

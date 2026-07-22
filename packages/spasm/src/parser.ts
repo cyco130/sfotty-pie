@@ -511,6 +511,44 @@ class Parser {
 				};
 			}
 
+			// Dictionary literal. `{` opens a context where newlines separate
+			// entries like commas do (each nesting level handles its own), and
+			// `key: value` uses the call-site association mark - a keyword-arg
+			// list is a braceless dict literal.
+			case "{": {
+				const openingBraceToken = token;
+				this.#consume();
+				const entries: DictEntry[] = [];
+				this.#skipNewlines();
+				while (this.#token.type !== "}") {
+					const key = this.#expect("identifier");
+					const colonToken = this.#expect(":");
+					const value = this.#expression(1);
+					let commaToken: Token<","> | undefined;
+					let separated = false;
+					if (this.#token.type === ",") {
+						commaToken = this.#token;
+						this.#consume();
+						separated = true;
+					}
+					if ((this.#token.type as TokenType) === "newline") {
+						this.#skipNewlines();
+						separated = true;
+					}
+					entries.push({ key, colonToken, value, commaToken });
+					if (!separated && (this.#token.type as TokenType) !== "}") {
+						throw new ParseError(this.#token, ['","', "newline", '"}"']);
+					}
+				}
+				const closingBraceToken = this.#expect("}");
+				return {
+					type: "dict-literal",
+					openingBraceToken,
+					entries,
+					closingBraceToken,
+				};
+			}
+
 			// Grouping parentheses
 			case "(": {
 				const openingBracketToken = token;
@@ -607,6 +645,10 @@ class Parser {
 		}
 
 		return this.#consume() as Token<T[number]>;
+	}
+
+	#skipNewlines(): void {
+		while (this.#token.type === "newline") this.#consume();
 	}
 
 	// Call the lexer, skipping whitespace tokens
@@ -706,6 +748,11 @@ export function getExpressionLocation(
 			return [
 				expression.openingBracketToken.start,
 				expression.closingBracketToken.end,
+			];
+		case "dict-literal":
+			return [
+				expression.openingBraceToken.start,
+				expression.closingBraceToken.end,
 			];
 		case "prefix-expression":
 			return [
@@ -952,9 +999,32 @@ export type Expression =
 	| GroupedExpression
 	| PrefixExpression
 	| InfixExpression
-	| MemberExpression;
+	| MemberExpression
+	| DictLiteral;
 
-/** Scope resolution: `object::member`, e.g. `mod::sym` (unsupported so far). */
+export interface DictEntry {
+	// Keys are ordinary identifiers - register names stay reserved here too,
+	// because a future namespace-splat must be able to turn any key into a
+	// bare symbol. Keys and scope names share one name grammar.
+	key: Token<"identifier">;
+	colonToken: Token<":">;
+	value: Expression;
+	commaToken?: Token<",">;
+}
+
+/**
+ * `{ key: value, ... }` - a dictionary (namespace) literal. Only valid as the
+ * whole right-hand side of a `=` definition; entries lower to qualified
+ * symbols accessed with `::`.
+ */
+export interface DictLiteral {
+	type: "dict-literal";
+	openingBraceToken: Token<"{">;
+	entries: DictEntry[];
+	closingBraceToken: Token<"}">;
+}
+
+/** Dictionary access: `object::member`, e.g. `NOTES::C4` or nested paths. */
 export interface MemberExpression {
 	type: "member-expression";
 	object: Expression;

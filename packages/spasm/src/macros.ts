@@ -497,6 +497,14 @@ function substituteExpr(
 				...expr,
 				object: substituteExpr(expr.object, subst, origin, report),
 			};
+		case "dict-literal":
+			return {
+				...expr,
+				entries: expr.entries.map((entry) => ({
+					...entry,
+					value: substituteExpr(entry.value, subst, origin, report),
+				})),
+			};
 		default:
 			return expr; // literals and `*`
 	}
@@ -549,6 +557,9 @@ function validateBody(
 				break;
 			case "member-expression":
 				check(expr.object);
+				break;
+			case "dict-literal":
+				for (const entry of expr.entries) check(entry.value);
 				break;
 			default:
 				break;

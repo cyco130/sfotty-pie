@@ -28,16 +28,20 @@
 .export ICPTL := $0346
 .export HATABS := $031A
 
-; HATABS offsets
-.export HATABS_OFFSET_OPEN = 0
-.export HATABS_OFFSET_CLOSE = 2
-.export HATABS_OFFSET_GET_BYTE = 4
-.export HATABS_OFFSET_PUT_BYTE = 6
-.export HATABS_OFFSET_STATUS = 8
-.export HATABS_OFFSET_SPECIAL = 10
+; HATABS handler-table offsets
+.export HatabsOffset = {
+	OPEN: 0
+	CLOSE: 2
+	GET_BYTE: 4
+	PUT_BYTE: 6
+	STATUS: 8
+	SPECIAL: 10
+}
 
 ; OS error codes
-.export ERR_EOF = 136
+.export Error = {
+	EOF: 136
+}
 
 ; OS vectors
 .export SIOV := $E459		; serial I/O entry
@@ -45,4 +49,6 @@
 .export COLDSV := $E477	; cold start entry
 
 ; SIO commands
-.export SIO_READ = $52
+.export SioCommand = {
+	READ: $52
+}

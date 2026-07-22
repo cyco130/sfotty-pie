@@ -123,7 +123,7 @@ find_e_entry:
 	sta old_e_handlers
 	lda HATABS+2,x
 	sta old_e_handlers + 1
-	ldy #HATABS_OFFSET_SPECIAL + 1 ; Move 6 vectors (12 bytes)
+	ldy #HatabsOffset::SPECIAL + 1 ; Move 6 vectors (12 bytes)
 copy_e_handlers:
 	lda (old_e_handlers),y
 	sta e_handlers,y
@@ -132,9 +132,9 @@ copy_e_handlers:
 
 ; Patch E: GET BYTE handler
 	lda #<(e_get_byte - 1)
-	sta e_handlers + HATABS_OFFSET_GET_BYTE
+	sta e_handlers + HatabsOffset::GET_BYTE
 	lda #>(e_get_byte - 1)
-	sta e_handlers + HATABS_OFFSET_GET_BYTE + 1
+	sta e_handlers + HatabsOffset::GET_BYTE + 1
 
 ; Replace E: handler pointer
 	lda #<e_handlers
@@ -239,12 +239,12 @@ b_get_byte:
 	sta file_size + 2
 	bcs not_eof
 
-	; Read past EOF, reset the file size to 0 and return ERR_EOF in Y
+	; Read past EOF, reset the file size to 0 and return Error::EOF in Y
 	lda #0
 	sta file_size
 	sta file_size + 1
 	sta file_size + 2
-	ldy #ERR_EOF
+	ldy #Error::EOF
 	rts
 
 not_eof:
@@ -278,7 +278,7 @@ fill_buffer:
 	sta DUNIT
 	lda #$40
 	sta DSTATS
-	lda #SIO_READ
+	lda #SioCommand::READ
 	sta DCOMND
 	lda sector
 	sta DAUX1

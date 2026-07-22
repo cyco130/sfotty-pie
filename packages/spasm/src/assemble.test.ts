@@ -600,3 +600,102 @@ describe("macros", () => {
 		);
 	});
 });
+
+describe("namespaces (dict-valued symbols)", () => {
+	test("entries define and resolve via ::", () => {
+		const { bytes, symbols, messages } = asm(
+			"N = { V: 1, B: 2 }\n.byte N::V, N::B\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 2]);
+		expect(symbols.get("N::V")).toBe(1n);
+	});
+
+	test("multiline literal: newline separators, comments, trailing comma", () => {
+		const { bytes, messages } = asm(
+			"HATABS_OFFSET = {\n" +
+				"\tOPEN: 0 ; open vector\n" +
+				"\tCLOSE: 2\n" +
+				"\tGET_BYTE: 4, PUT_BYTE: 6,\n" +
+				"}\n" +
+				".byte HATABS_OFFSET::PUT_BYTE\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([6]);
+	});
+
+	test("nested dictionaries chain with ::", () => {
+		const { bytes, messages } = asm("N = { M: { W: 5 } }\n.byte N::M::W\n");
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([5]);
+	});
+
+	test("entry values may forward-reference (multipass)", () => {
+		const { bytes, messages } = asm(
+			"N = { V: LATER }\nLATER = 7\n.byte N::V\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
+	});
+
+	test("an unknown key is an undefined symbol with the full path", () => {
+		expect(asm("N = { V: 1 }\n.byte N::NOPE\n").messages).toContain(
+			'Undefined symbol "N::NOPE"',
+		);
+	});
+
+	test("duplicate keys are duplicate definitions", () => {
+		expect(asm("N = { V: 1, V: 2 }\n").messages).toContain(
+			'Symbol "N::V" is already defined',
+		);
+	});
+
+	test("the root name is define-once too", () => {
+		expect(asm("N = { V: 1 }\nN = 2\n").messages).toContain(
+			'Symbol "N" is already defined',
+		);
+	});
+
+	test("a dictionary is not a value in expression position", () => {
+		expect(asm(".byte { V: 1 }\n").messages).toContain(
+			"A dictionary literal can only be the right-hand side of a `=` definition",
+		);
+	});
+
+	test(":= rejects a dictionary", () => {
+		expect(asm("N := { V: 1 }\n").messages).toContain(
+			"A dictionary is a value, not an address - define it with `=`",
+		);
+	});
+
+	test("an exported dictionary's entries resolve through the import", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte N::V\n',
+			lib: ".export N = { V: 9 }\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([9]);
+	});
+
+	test("namespace references in macro bodies are hygienic", async () => {
+		const host = memHost({
+			// lib's N is private; the body still binds it, and the caller's own N
+			// neither collides nor leaks in.
+			main: '.import "lib"\nN = { V: 2 }\nput\n.byte N::V\n',
+			lib: "N = { V: 1 }\n.export .macro put\n\t.byte N::V\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([1, 2]);
+	});
+
+	test("a namespace passes through a macro parameter", () => {
+		const { bytes, messages } = asm(
+			"NOTES = { C4: 60, E4: 64 }\n" +
+				".macro play n\n\t.byte n::E4\n.endmacro\nplay NOTES\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([64]);
+	});
+});

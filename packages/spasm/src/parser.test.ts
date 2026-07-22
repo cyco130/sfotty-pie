@@ -21,6 +21,10 @@ function expr(e: Expression): string {
 			return `[${expr(e.expression)}]`;
 		case "member-expression":
 			return `${expr(e.object)}::${e.member.text}`;
+		case "dict-literal":
+			return `{${e.entries
+				.map((entry) => `${entry.key.text}: ${expr(entry.value)}`)
+				.join(", ")}}`;
 		default:
 			return e.text;
 	}
@@ -235,6 +239,22 @@ describe("directives", () => {
 
 	test("scope resolution with ::", () => {
 		expect(dump("lda #foo::bar")).toEqual(["lda #foo::bar"]);
+	});
+
+	test("dictionary literals", () => {
+		expect(dump("N = {OPEN: 0, CLOSE: 2}")).toEqual([
+			"N = {OPEN: 0, CLOSE: 2}",
+		]);
+		expect(dump("lda #NOTES::A4")).toEqual(["lda #NOTES::A4"]);
+		// Newlines separate entries inside braces; trailing comma accepted.
+		expect(dump("N = {\nC4: 1 ; comment\nB: 2,\n}")).toEqual([
+			"N = {C4: 1, B: 2}",
+		]);
+		// Register names are reserved as keys, like everywhere else - a future
+		// namespace-splat must be able to turn any key into a bare symbol.
+		expect(
+			parse(new SourceFile("t", "N = { A: 1 }\n")).errors,
+		).not.toHaveLength(0);
 	});
 
 	test(".res and segment shorthands", () => {

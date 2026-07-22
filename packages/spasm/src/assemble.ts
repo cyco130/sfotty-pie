@@ -8,12 +8,14 @@ import {
 	getExpressionLocation,
 	parse,
 	type Assignment,
+	type DictLiteral,
 	type Expression,
 	type Message,
 	type Operand,
 	type StatementContent,
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
+import { SEP } from "./symbols.ts";
 import { decodeStringLiteral, type Value } from "./value.ts";
 
 export interface AssembleResult {
@@ -316,12 +318,79 @@ function defineAssignment(
 	report: Reporter,
 ): void {
 	const env = moduleEnv(moduleId, scopes, location, report);
-	const value = evaluate(assignment.expression, env);
-	const kind = assignment.operatorToken.type === ":=" ? "label" : "constant";
 	const { text, start, end, origin } = assignment.identifier;
 	const span: readonly [number, number] = [start, end];
-	if (scopes.defineLocal(origin ?? moduleId, text, value, kind, span)) {
+	const definitionModule = origin ?? moduleId;
+
+	if (assignment.expression.type === "dict-literal") {
+		if (assignment.operatorToken.type === ":=") {
+			report("A dictionary is a value, not an address - define it with `=`", [
+				assignment.operatorToken.start,
+				assignment.operatorToken.end,
+			]);
+		}
+		if (
+			scopes.defineLocal(definitionModule, text, undefined, "namespace", span)
+		) {
+			report(`Symbol "${text}" is already defined`, span);
+		}
+		defineDict(
+			assignment.expression,
+			definitionModule,
+			text,
+			text,
+			scopes,
+			env,
+			report,
+		);
+		return;
+	}
+
+	const value = evaluate(assignment.expression, env);
+	const kind = assignment.operatorToken.type === ":=" ? "label" : "constant";
+	if (scopes.defineLocal(definitionModule, text, value, kind, span)) {
 		report(`Symbol "${text}" is already defined`, span);
+	}
+}
+
+// Lower a dictionary literal to qualified symbols: entry `key` of dict `N`
+// becomes the symbol `N<SEP>key`, resolved by `N::key`. Nested dicts recurse;
+// entry values are ordinary expressions evaluated in the enclosing module's
+// env (their identifiers carry their own hygiene origins).
+function defineDict(
+	dict: DictLiteral,
+	definitionModule: string,
+	prefix: string,
+	display: string,
+	scopes: Scopes,
+	env: EvalEnv,
+	report: Reporter,
+): void {
+	for (const entry of dict.entries) {
+		const name = prefix + SEP + entry.key.text;
+		const path = display + "::" + entry.key.text;
+		const span: readonly [number, number] = [entry.key.start, entry.key.end];
+		if (entry.value.type === "dict-literal") {
+			if (
+				scopes.defineLocal(definitionModule, name, undefined, "namespace", span)
+			) {
+				report(`Symbol "${path}" is already defined`, span);
+			}
+			defineDict(
+				entry.value,
+				definitionModule,
+				name,
+				path,
+				scopes,
+				env,
+				report,
+			);
+		} else {
+			const value = evaluate(entry.value, env);
+			if (scopes.defineLocal(definitionModule, name, value, "constant", span)) {
+				report(`Symbol "${path}" is already defined`, span);
+			}
+		}
 	}
 }
 

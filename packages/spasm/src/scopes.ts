@@ -1,11 +1,7 @@
 import type { LoadedModule } from "./loader.ts";
 import type { Statement } from "./parser.ts";
-import { SymbolTable, type SymbolKind } from "./symbols.ts";
+import { SEP, SymbolTable, type SymbolKind } from "./symbols.ts";
 import type { Value } from "./value.ts";
-
-// A NUL separator can't appear in a module id or symbol name, so qualified keys
-// never collide.
-const SEP = "\0";
 
 type Span = readonly [number, number];
 
@@ -53,22 +49,31 @@ export class Scopes {
 		return key === undefined ? undefined : this.#table.resolve(key);
 	}
 
-	/** A module's resolved symbols, unqualified (for the assemble result). */
+	/**
+	 * A module's resolved symbols, unqualified (for the assemble result).
+	 * Dictionary entries surface under their user-facing `::` paths.
+	 */
 	resolvedFor(moduleId: string): Map<string, Value> {
 		const prefix = moduleId + SEP;
 		const out = new Map<string, Value>();
 		for (const [key, value] of this.#table.resolved()) {
-			if (key.startsWith(prefix)) out.set(key.slice(prefix.length), value);
+			if (key.startsWith(prefix)) {
+				out.set(key.slice(prefix.length).split(SEP).join("::"), value);
+			}
 		}
 		return out;
 	}
 
 	// The qualified key `name` resolves to from `moduleId`, or undefined.
+	// `name` may itself be qualified (a dictionary path `N\0key`); the export
+	// check tests its root - exporting a dict exports its entries.
 	#scopeKey(moduleId: string, name: string): string | undefined {
 		const own = moduleId + SEP + name;
 		if (this.#table.has(own)) return own;
+		const sep = name.indexOf(SEP);
+		const root = sep === -1 ? name : name.slice(0, sep);
 		for (const importId of this.#imports.get(moduleId) ?? []) {
-			if (this.#exports.get(importId)?.has(name)) return importId + SEP + name;
+			if (this.#exports.get(importId)?.has(root)) return importId + SEP + name;
 		}
 		return undefined;
 	}

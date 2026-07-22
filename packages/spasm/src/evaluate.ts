@@ -1,9 +1,12 @@
+import type { Token } from "./lexer.ts";
 import {
 	getExpressionLocation,
 	type Expression,
 	type InfixExpression,
+	type MemberExpression,
 	type PrefixExpression,
 } from "./parser.ts";
+import { SEP } from "./symbols.ts";
 import { decodeStringLiteral, type Value } from "./value.ts";
 
 export interface EvalEnv {
@@ -81,13 +84,57 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return prefix(expr, env);
 		case "infix-expression":
 			return infix(expr, env);
-		case "member-expression":
+		case "member-expression": {
+			// A dictionary path: `N::key` (chains for nested dicts). Entries live
+			// in the symbol table under qualified names, so this is an ordinary
+			// resolve with the joined key; the root's hygiene origin applies to
+			// the whole path.
+			const path = flattenPath(expr);
+			if (!path) {
+				env.report(
+					"`::` requires a namespace name on its left",
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			const value = env.resolve(path.qualified, path.root.origin);
+			if (value === undefined && env.strict) {
+				env.report(
+					`Undefined symbol "${path.display}"`,
+					getExpressionLocation(expr),
+				);
+			}
+			return value;
+		}
+		case "dict-literal":
 			env.report(
-				"Scope resolution (`mod::sym`) is not supported yet",
+				"A dictionary literal can only be the right-hand side of a `=` definition",
 				getExpressionLocation(expr),
 			);
 			return undefined;
 	}
+}
+
+// Flatten `A::B::C` to its root identifier and joined keys; undefined when the
+// path doesn't bottom out at an identifier.
+function flattenPath(
+	expr: MemberExpression,
+):
+	| { root: Token<"identifier">; qualified: string; display: string }
+	| undefined {
+	const keys: string[] = [expr.member.text];
+	let object = expr.object;
+	while (object.type === "member-expression") {
+		keys.unshift(object.member.text);
+		object = object.object;
+	}
+	if (object.type !== "identifier") return undefined;
+	keys.unshift(object.text);
+	return {
+		root: object,
+		qualified: keys.join(SEP),
+		display: keys.join("::"),
+	};
 }
 
 /** Coerce an evaluated operand to a number, reporting if it's a string. */

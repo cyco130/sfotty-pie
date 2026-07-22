@@ -269,7 +269,7 @@ fill_buffer:
 	sta DUNIT
 	lda #$40
 	sta DSTATS
-	lda #SIO_READ
+	lda #SioCommand::READ
 	sta DCOMND
 	lda sector
 	sta DAUX1

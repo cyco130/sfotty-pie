@@ -118,6 +118,32 @@ describe("segments", () => {
 		]);
 	});
 
+	test("a branch across a *-relative fill gets the right offset", () => {
+		// The fill size is render-resolved and fed back into collect's running
+		// location, so the branch pc after the fill is correct.
+		const { bytes, messages } = asm(
+			'.define_segment "CODE"\n' +
+				'.segment "OUTPUT"\n.org $0400\n.emit "CODE"\n' +
+				'.segment "CODE"\nstart:\n\tlda #1\n\t.res $0410 - *\n\tbeq start\n',
+		);
+		expect(messages).toEqual([]);
+		// lda #1, 14 fill bytes, then beq back: $0400 - ($0410 + 2) = -$12.
+		expect(bytes).toHaveLength(18);
+		expect(bytes.slice(-2)).toEqual([0xf0, 0xee]);
+	});
+
+	test("content past the fill boundary is an overflow error", () => {
+		expect(asm(".org $10\n.byte 1, 2, 3\n.res $12 - *\n").messages).toContain(
+			"`.res` count is negative - content overflows the fill boundary",
+		);
+	});
+
+	test("a string .res count is a type error", () => {
+		expect(asm('.res "x"\n').messages).toContain(
+			"`.res` requires a numeric count",
+		);
+	});
+
 	test("a *-relative .res fill in an emitted segment converges", () => {
 		// Regression: the fill count reads the segment base, which is not a
 		// symbol - with symbol-only convergence this exited after pass 1 with a

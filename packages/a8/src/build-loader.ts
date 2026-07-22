@@ -42,19 +42,19 @@ for (const { source, out, constant, doc } of LOADERS) {
 		process.exit(1);
 	}
 
-	if (result.output.length > 384) {
+	// The format derives the sector count and the loaders derive their buffer
+	// and read position from it, but memory *placement* still assumes three
+	// sectors (bas-loader's 512-byte top-of-RAM reservation, the buffers
+	// sitting right past the image) - guard against silent growth.
+	if (result.output.length !== 384) {
 		process.stderr.write(
-			`${source}: must fit 3 boot sectors (384 bytes), ` +
-				`got ${result.output.length}\n`,
+			`${source}: expected a 3-sector boot image (384 bytes), ` +
+				`got ${result.output.length} - revisit the loaders' memory placement\n`,
 		);
 		process.exit(1);
 	}
 
-	// Pad to the full three sectors.
-	const image = new Uint8Array(384);
-	image.set(result.output);
-
-	const bytes = [...image]
+	const bytes = [...result.output]
 		.map((byte) => `0x${byte.toString(16).padStart(2, "0")}`)
 		.join(", ");
 

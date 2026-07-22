@@ -8,8 +8,10 @@
 .import "./atari.s"
 .import "./atari-boot.s"
 
-; Sector buffer, just past the loaded boot region ($0700-$087F)
-buffer = $0880
+; Loaded at the standard boot address
+LOAD_ADDRESS = $0700
+; Sector buffer, just past the loaded boot region
+buffer = LOAD_ADDRESS + boot_sectors * 128
 
 ; Boot error letters, shown at the top-left of the screen. Lowercase ATASCII
 ; equals the screen code, so they can be stored raw.
@@ -26,10 +28,9 @@ load_address = $22	; address to read into
 
 ; -------------------------------------------------------------------------
 
-; The boot image: exactly three 128-byte sectors. The build script pads it
-; to the full 384 bytes.
+; The boot image: exactly three 128-byte sectors, padded by the format.
 
-output_atari_boot init, $0700
+output_atari_boot init, LOAD_ADDRESS, boot_sectors
 
 ; The boot continuation lives at load+6, so it leads CODE.
 
@@ -51,7 +52,7 @@ file_size:
 
 first_chunk:	.byte 1		; is this the first chunk?
 buffer_offset:	.byte 128	; read position in `buffer`; 128 = empty
-sector:			.word 4		; next sector to read
+sector:			.word boot_sectors + 1	; next sector to read
 last_word:		.word 0		; last word read
 chunk_address:	.word 0		; chunk load address
 

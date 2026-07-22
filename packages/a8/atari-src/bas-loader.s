@@ -14,7 +14,7 @@
 ; Top of the free memory - 512 bytes
 LOAD_ADDRESS = $9a20
 ; Sector buffer, just past the loaded region
-buffer = LOAD_ADDRESS + 3*128
+buffer = LOAD_ADDRESS + boot_sectors * 128
 
 ; Zero page workspace. $CB-$D1 are unused by the OS and BASIC.
 old_e_handlers = $CB
@@ -23,10 +23,9 @@ e_hatabs_offset = $CE
 
 ; -------------------------------------------------------------------------
 
-; The boot image: exactly three 128-byte sectors. The build script pads it
-; to the full 384 bytes.
+; The boot image: exactly three 128-byte sectors, padded by the format.
 
-output_atari_boot init, LOAD_ADDRESS
+output_atari_boot init, LOAD_ADDRESS, boot_sectors
 
 ; The boot continuation lives at load+6, so it leads CODE.
 
@@ -47,7 +46,7 @@ file_size:
 .segment "DATA"
 
 buffer_offset:	.byte 128	; read position in `buffer`; 128 = empty
-sector:			.word 4		; next sector to read
+sector:			.word boot_sectors + 1	; next sector to read
 e_input_offset:	.byte 0		; read position in `e_input`
 message_offset:	.res 1		; read position in `message` while printing
 e_handlers:		.res 12		; RAM copy of the E: handler table (GET BYTE patched)

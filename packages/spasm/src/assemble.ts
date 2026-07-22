@@ -88,6 +88,7 @@ function assembleModules(
 	let output: number[] = [];
 	let diagnostics: Message[] = [];
 	let bases = new Map<string, bigint>(); // segment bases from the previous render
+	let resSizes = new Map<string, bigint>(); // `res` sizes from the previous render
 
 	// Pessimistic shrink-only sizing is monotone; label values still flow a hop
 	// per pass (render defines them after collect). The cap is a generous
@@ -112,7 +113,7 @@ function assembleModules(
 		// Collect content into segments (defining constants), then render OUTPUT
 		// to bytes (defining labels). Everything evaluates against the previous
 		// pass's symbol values and segment bases; this pass produces the new ones.
-		const segments = collect(modules, scopes, report, bases);
+		const segments = collect(modules, scopes, report, bases, resSizes);
 		const result = render(
 			segments,
 			"OUTPUT",
@@ -121,11 +122,14 @@ function assembleModules(
 					report(`Symbol "${name}" is already defined`, span);
 				}
 			},
+			(expression, moduleId, location) =>
+				evaluate(expression, moduleEnv(moduleId, scopes, location, report)),
 			report,
 		);
 		const previous = output;
 		output = result.bytes;
 		bases = result.bases;
+		resSizes = result.resSizes;
 
 		// Converged only when both the symbol table AND the output bytes are
 		// stable. Symbols alone miss non-symbol state that feeds bytes (segment
@@ -168,6 +172,7 @@ function collect(
 	scopes: Scopes,
 	report: Reporter,
 	bases: Map<string, bigint>,
+	resSizes: Map<string, bigint>,
 ): Map<string, Segment> {
 	const segments = new Map<string, Segment>();
 	const getSegment = (name: string): Segment => {
@@ -261,6 +266,7 @@ function collect(
 							scopes,
 							locationOf(current.name),
 							current,
+							resSizes,
 							report,
 						),
 					);
@@ -329,6 +335,7 @@ function collectContent(
 	scopes: Scopes,
 	location: bigint,
 	output: Segment,
+	resSizes: Map<string, bigint>,
 	report: Reporter,
 ): bigint {
 	const env = moduleEnv(moduleId, scopes, location, report);
@@ -359,20 +366,18 @@ function collectContent(
 		}
 
 		case "res": {
-			// Reserve N zero bytes. In an emplaced segment they're never written
-			// (emplace renders for size only); in an emitted segment they're real.
-			const value = evaluate(content.count, env);
-			if (value === undefined) return location; // count resolves later
-			if (typeof value !== "bigint" || value < 0n) {
-				report(
-					"`.res` requires a non-negative count",
-					getExpressionLocation(content.count),
-				);
-				return location;
-			}
-			const count = Number(value);
-			output.items.push({ kind: "bytes", bytes: new Array(count).fill(0) });
-			return location + value;
+			// Deferred to render, where the count evaluates at the exact LC - a
+			// collect-time count would bake the previous pass's segment base into
+			// `*`-relative fills. Collect's running location advances by the
+			// previous render's size (one pass of lag the fixpoint absorbs).
+			const ordinal = output.items.filter((i) => i.kind === "res").length;
+			output.items.push({
+				kind: "res",
+				expression: content.count,
+				moduleId,
+				span: getExpressionLocation(content.count),
+			});
+			return location + (resSizes.get(output.name + "\0" + ordinal) ?? 0n);
 		}
 
 		case "instruction": {

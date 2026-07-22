@@ -1,6 +1,6 @@
 .import "./lib.s"
 
-.global start
+output_sfotty_exe start
 
 .segment "CODE"
 

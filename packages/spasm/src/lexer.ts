@@ -52,7 +52,6 @@ export const DOT_KEYWORDS = [
 	"emplace",
 	"import",
 	"export",
-	"global",
 	"res",
 	"code",
 	"rodata",
@@ -162,6 +161,13 @@ interface TypedToken<T extends TokenType = TokenType> {
 	end: number;
 	before?: Array<SkippedToken>;
 	after?: Array<SkippedToken>;
+	/**
+	 * The module id an identifier lexically binds to. Macro expansion stamps
+	 * this on the free identifiers of an expanded body (hygiene: they resolve
+	 * where the macro was defined, not where it was called). Absent everywhere
+	 * else - an unstamped identifier binds to its containing module.
+	 */
+	origin?: string;
 }
 
 export type SkippedToken = Token<"whitespace" | "comment">;

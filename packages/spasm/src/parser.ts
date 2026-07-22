@@ -206,15 +206,6 @@ class Parser {
 				return { type: "export", exportToken: token, content };
 			}
 
-			case "global": {
-				this.#consume();
-				return {
-					type: "global",
-					globalToken: token,
-					nameToken: this.#expect("identifier"),
-				};
-			}
-
 			case "res": {
 				this.#consume();
 				return { type: "res", resToken: token, count: this.#expression(1) };
@@ -472,8 +463,7 @@ class Parser {
 			case "hexadecimal":
 			case "string":
 			case "character":
-			case "*":
-			case "global": {
+			case "*": {
 				this.#consume();
 				return this.#memberTail(token);
 			}
@@ -680,7 +670,6 @@ export function getExpressionLocation(
 		case "string":
 		case "character":
 		case "*":
-		case "global":
 			return [expression.start, expression.end];
 		case "member-expression":
 			return [
@@ -768,7 +757,6 @@ export type StatementContent =
 	| Emplace
 	| Import
 	| Export
-	| Global
 	| Res
 	| SegmentShorthand
 	| Macro;
@@ -903,12 +891,6 @@ export interface Export {
 	content: StatementContent;
 }
 
-export interface Global {
-	type: "global";
-	globalToken: Token<"global">;
-	nameToken: Token<"identifier">;
-}
-
 export interface Res {
 	type: "res";
 	resToken: Token<"res">;
@@ -933,14 +915,13 @@ export type Expression =
 	| Token<"string">
 	| Token<"character">
 	| Token<"*">
-	| Token<"global">
 	| IntegerLiteral
 	| GroupedExpression
 	| PrefixExpression
 	| InfixExpression
 	| MemberExpression;
 
-/** Scope resolution: `object::member`, e.g. `.global::start` or `mod::sym`. */
+/** Scope resolution: `object::member`, e.g. `mod::sym` (unsupported so far). */
 export interface MemberExpression {
 	type: "member-expression";
 	object: Expression;

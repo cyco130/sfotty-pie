@@ -2,14 +2,13 @@ import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
 import { render, Segment } from "./layout.ts";
 import { loadModules, type Host, type LoadedModule } from "./loader.ts";
-import { expandMacros } from "./macros.ts";
+import { expandModules } from "./macros.ts";
 import { Scopes } from "./scopes.ts";
 import {
 	getExpressionLocation,
 	parse,
 	type Assignment,
 	type Expression,
-	type Global,
 	type Message,
 	type Operand,
 	type StatementContent,
@@ -83,10 +82,7 @@ function assembleModules(
 			message,
 		});
 	};
-	const modules = loaded.map((module) => ({
-		...module,
-		statements: expandMacros(module.statements, expandReport),
-	}));
+	const modules = expandModules(loaded, expandReport);
 
 	const scopes = new Scopes(modules);
 	let output: number[] = [];
@@ -190,7 +186,9 @@ function collect(
 			for (const label of statement.labels) {
 				current.items.push({
 					kind: "label",
-					moduleId,
+					// A macro-stamped label (a param-named definition threaded through
+					// an outer expansion) belongs to the module it binds to.
+					moduleId: label.identifier.origin ?? moduleId,
 					name: label.identifier.text,
 					symbolKind: "label",
 					span: [label.identifier.start, label.identifier.end],
@@ -237,9 +235,6 @@ function collect(
 						]);
 					}
 					break;
-				case "global":
-					defineGlobal(content, moduleId, scopes, report);
-					break;
 				case "assignment":
 					defineAssignment(
 						content,
@@ -284,8 +279,7 @@ function moduleEnv(
 	report: Reporter,
 ): EvalEnv {
 	return {
-		resolve: (name) => scopes.resolve(moduleId, name),
-		resolveGlobal: (name) => scopes.resolveAmbient(name),
+		resolve: (name, origin) => scopes.resolve(origin ?? moduleId, name),
 		locationCounter: location,
 		report,
 		strict: true,
@@ -302,26 +296,10 @@ function defineAssignment(
 	const env = moduleEnv(moduleId, scopes, location, report);
 	const value = evaluate(assignment.expression, env);
 	const kind = assignment.operatorToken.type === ":=" ? "label" : "constant";
-	const { text, start, end } = assignment.identifier;
+	const { text, start, end, origin } = assignment.identifier;
 	const span: readonly [number, number] = [start, end];
-	if (scopes.defineLocal(moduleId, text, value, kind, span)) {
+	if (scopes.defineLocal(origin ?? moduleId, text, value, kind, span)) {
 		report(`Symbol "${text}" is already defined`, span);
-	}
-}
-
-// `.global name` publishes the module's local `name` to the ambient scope.
-function defineGlobal(
-	global: Global,
-	moduleId: string,
-	scopes: Scopes,
-	report: Reporter,
-): void {
-	const { text, start, end } = global.nameToken;
-	const span: readonly [number, number] = [start, end];
-	const value = scopes.resolve(moduleId, text);
-	const kind = scopes.kindOf(moduleId, text) ?? "label";
-	if (scopes.defineAmbient(text, value, kind, span)) {
-		report(`Global "${text}" is already defined`, span);
 	}
 }
 

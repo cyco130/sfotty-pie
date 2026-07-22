@@ -75,8 +75,6 @@ function content(c: StatementContent): string {
 			return `.import ${c.specToken.text}`;
 		case "export":
 			return `.export ${content(c.content)}`;
-		case "global":
-			return `.global ${c.nameToken.text}`;
 		case "res":
 			return `.res ${expr(c.count)}`;
 		case "segment-shorthand":
@@ -222,12 +220,13 @@ describe("directives", () => {
 
 	test("module directives", () => {
 		expect(dump('.import "./lib.s"')).toEqual(['.import "./lib.s"']);
-		expect(dump(".global start")).toEqual([".global start"]);
 		expect(dump(".export EXIT := $0200")).toEqual([".export EXIT := $0200"]);
+		expect(dump(".export .macro output_sfotty_exe start\n.endmacro")).toEqual([
+			".export .macro output_sfotty_exe start",
+		]);
 	});
 
 	test("scope resolution with ::", () => {
-		expect(dump("sym := .global::start")).toEqual(["sym := .global::start"]);
 		expect(dump("lda #foo::bar")).toEqual(["lda #foo::bar"]);
 	});
 

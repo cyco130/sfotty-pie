@@ -19,7 +19,7 @@ source -> lex -> parse -> +------------- multipass loop -------------+ -> bytes
 1. **Lex** ([src/lexer.ts](src/lexer.ts)) - a single big anchored regex turns source into tokens.
 2. **Parse** ([src/parser.ts](src/parser.ts)) - recursive descent for statements, a Pratt parser for expressions, producing a CST-ish AST that keeps its tokens (and trivia) for a future pretty-printer.
 3. **Load** ([src/loader.ts](src/loader.ts)) - resolve and parse the `.import` closure into a module graph.
-4. **Expand macros** ([src/macros.ts](src/macros.ts)) - a static, per-module rewrite of each module's statements before assembly.
+4. **Expand macros** ([src/macros.ts](src/macros.ts)) - a static rewrite of every module's statements before assembly; macros are visible across modules via `.export .macro` and expansion is hygienic (see below).
 5. **Assemble** ([src/assemble.ts](src/assemble.ts)) - the multipass loop: each pass _collects_ content into segments (evaluating expressions and encoding instructions) and then _renders_ the OUTPUT segment to bytes, until the symbol table reaches a fixpoint.
 
 Steps 1-4 happen once; step 5 iterates.
@@ -54,7 +54,7 @@ The symbol table ([src/symbols.ts](src/symbols.ts)) is built for this: values **
 
 `Value = bigint | string` ([src/value.ts](src/value.ts)); `undefined` threads through as "unresolved." Numbers are unbounded `bigint` (range is checked at emit, not during arithmetic). Strings are first-class values, decoded with minimal C escapes; a **character literal is a single _byte_** in the target encoding (UTF-8 for now), so `'A'` is `65` but `'ü'` (two UTF-8 bytes) is an error - char and string literals share one encoder.
 
-[src/evaluate.ts](src/evaluate.ts) is a straightforward recursive evaluator over an `EvalEnv` (`resolve`, optional `resolveGlobal`, the `*` location counter, `report`, `strict`). `*` is also source-level syntax - an expression can reference the current location counter directly (`jmp *`). `undefined` propagates through arithmetic so forward references defer cleanly. With `strict` on (the assemble pass turns it on), an unresolved _identifier_ is reported as undefined - but only on the converged pass survives, since earlier passes' diagnostics are discarded. Equality is `=` (ca65-style, no `==`); precedence low->high is `|| < && < (= != < >) < (+ -) < (* / %)`, with prefix `+ - < > !` binding tightest and `::` (scope resolution) tighter still.
+[src/evaluate.ts](src/evaluate.ts) is a straightforward recursive evaluator over an `EvalEnv` (`resolve`, the `*` location counter, `report`, `strict`). `resolve` takes an optional `origin` - the module a macro-stamped identifier lexically binds to (see Macros). `*` is also source-level syntax - an expression can reference the current location counter directly (`jmp *`). `undefined` propagates through arithmetic so forward references defer cleanly. With `strict` on (the assemble pass turns it on), an unresolved _identifier_ is reported as undefined - but only on the converged pass survives, since earlier passes' diagnostics are discarded. Equality is `=` (ca65-style, no `==`); precedence low->high is `|| < && < (= != < >) < (+ -) < (* / %)`, with prefix `+ - < > !` binding tightest and `::` (scope resolution) tighter still.
 
 ## Instruction encoding
 
@@ -77,28 +77,30 @@ This is what makes "assembler = linker." It lives in [src/layout.ts](src/layout.
 
 ## Modules and scoping
 
-A build is a graph of modules reached through a `Host`. The loader ([src/loader.ts](src/loader.ts)) starts at the entry, resolves each `.import` (relative to the importer), parses it, and recurses - **deduped by canonical id** (a diamond loads once), in dependency order (imports before importers), with import cycles reported rather than followed. It records each module's resolved imports for scoping. `.import` evaluates the _whole_ module (its side effects - segment definitions, the OUTPUT script - run); there is no `import type`-style exports-only form.
+A build is a graph of modules reached through a `Host`. The loader ([src/loader.ts](src/loader.ts)) starts at the entry, resolves each `.import` (relative to the importer), parses it, and recurses - **deduped by canonical id** (a diamond loads once), in dependency order (imports before importers), with import cycles reported rather than followed. It records each module's resolved imports for scoping. `.import` evaluates the _whole_ module (any top-level side effects run); there is no `import type`-style exports-only form - though a module like lib.s that only exports assignments and macros has no side effects left to run.
 
 Scoping ([src/scopes.ts](src/scopes.ts)) layers per-module scopes and one ambient scope over a single `SymbolTable` via qualified keys (`moduleId \0 name`; the ambient scope uses a reserved pseudo-module id). The rules:
 
 - A module's symbols are **private** unless `.export`ed.
-- `.import "m"` is a **splat**: `m`'s exports become resolvable in the importer. Resolution checks the module's own scope, then its splat-imports' export sets - there is **no bare fallback to the ambient scope**.
-- `.global name` **publishes** the local `name`'s value to the ambient scope; `.global::name` **reads** it. This is the entry-point handshake: a program does `.global start`; the format module reads `.global::start`. Values flow across modules through the ambient scope one hop per pass, which the multipass absorbs.
+- `.import "m"` is a **splat**: `m`'s exports become resolvable in the importer. Resolution checks the module's own scope, then its splat-imports' export sets.
+- There is **no ambient/global scope**. The entry-point handshake is an exported macro: the format module exports (say) `output_sfotty_exe start`, the program calls it passing its entry label, and after expansion the `.word start` in the format script is an ordinary intra-module reference in the program - no cross-module value flow, no extra pass.
 
 Because labels are defined during _render_ (when addresses are known) but belong to a specific module's scope, each label item carries its `moduleId`, and render defines it via `scopes.defineLocal(moduleId, ...)`.
 
 ## Macros
 
-Macros are a static, syntactic step ([src/macros.ts](src/macros.ts)) that runs once per module _before_ the multipass - `expandMacros` is mapped over each loaded module's statements. It collects `.macro name params ... .endmacro` definitions (removing them from the stream), then replaces each call - an instruction whose mnemonic names a macro - with the body.
+Macros are a static, syntactic step ([src/macros.ts](src/macros.ts)) that runs once _before_ the multipass - `expandModules` collects every module's `.macro name params ... .endmacro` definitions (removing them from the stream), then replaces each call - an instruction whose mnemonic names a visible macro - with the body. Visibility mirrors symbol scoping: a module sees its own macros plus the **exported** (`.export .macro`) ones of its imports, and a body's own macro calls resolve where the macro was _defined_, not where it was called.
 
-Expansion is hygienic: the body is `structuredClone`d per call (so the template isn't mutated), params are substituted by their argument expressions, and labels _defined_ in the body (plus `:=`/`=` names) are renamed with a per-expansion suffix (`name@N`) so repeated calls don't collide - while names merely _referenced_ (a shared `print` subroutine, say) are left alone. Nested calls expand recursively under a depth cap. Because it's purely syntactic and pre-multipass, the renamed labels just become ordinary module-scoped symbols.
+Expansion is hygienic with **lexical binding**. Per call, the body is `structuredClone`d (so the template isn't mutated) and each identifier is classified three ways: a _param_ substitutes to its argument expression (the caller's binding - params are the only call-site channel); a name _defined_ in the body (labels, `:=`/`=`) renames with a per-expansion suffix (`name@N`) so repeated calls don't collide; a _free_ name is stamped with the defining module's id (`Token.origin`) so it resolves in the defining module's scope - private helpers work in bodies without being exported, and the ca65-style "the includer defines the symbol" idiom is deliberately rejected. A param used in _defining_ position (`name: .res 1` under `.macro alloc name`) must be bound to a plain identifier and defines the symbol under the caller's name in the caller's scope - the outward channel. Nested calls expand recursively under a depth cap.
 
-This covers what guess needs: 0- or 1-argument macros called in instruction position - the mprint pattern (switch to RODATA, emit a string under a body-local label, switch back to CODE, load its address), expanded once per call site with distinct labels.
+Free names of macros that are never expanded are still checked structurally at the definition site (a name must be defined in the defining module or exported by its imports); expanded bodies get the same check for free via the normal strict-mode undefined-symbol path, whose spans point at the body tokens. Module-level directives (`.import`/`.export`/`.macro`) are rejected inside bodies.
+
+The exported-macro mechanism is also the **output-format channel**: lib.s exports `output_sfotty_exe start`, whose body defines the segments and the OUTPUT script; each program calls it once, passing its entry label.
 
 ## Syntax decisions worth knowing
 
 - **`=` vs `:=`.** `name = expr` defines a _constant_; `name := expr` (and `name:`) defines a _label_ (address-valued). The kind is recorded on the symbol; it carries no behavior yet but is the hook for future address attributes.
-- **`::`, not `.`, for scope resolution.** A member dot would collide with the dotted-keyword lexing (`.byte`, `.global`), so member access uses `::` (ca65-style): `mod::sym`, `.global::start`.
+- **`::`, not `.`, for scope resolution.** A member dot would collide with the dotted-keyword lexing (`.byte`, `.word`), so member access uses `::` (ca65-style): `mod::sym`. (Parsed but not yet evaluable - namespace imports are deferred.)
 - **The register-name lexing trap.** Bare `a`, `x`, `y` lex as registers, not identifiers (so `asl a` is accumulator mode). Tests and sample code must avoid them as symbol names - a recurring gotcha.
 - **Diagnostics carry raw offsets.** `Message` is `{ type, start, end, message }`. Across multiple modules these offsets are module-local and currently un-disambiguated by file; nice formatting via [src/source-file.ts](src/source-file.ts) is wired but not yet used by `assemble` (it's the CLI's job, deferred).
 
@@ -113,8 +115,8 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (rou
 - **`.if`/`.elseif`/`.else`/`.endif` + `.error`** - layout-time conditionals.
 - **Segment attributes** (`.define_segment "X", type:..., executable:...`) - the kind/exec flags and their keyword-arg syntax; emit-vs-reserve is currently chosen by `.emit`/`.emplace` alone.
 - **Relocation** - symbolic `.base()`/`.reloc`, and the `.base`/`.startof`/`.sizeof` builtins.
-- **Richer modules** - named/aliased/namespace imports (`name = .import`, `.import "m": a, b`), `name::sym` on a namespace, `.global X = expr` / `.global X:`, and `.export` of anything but an assignment.
-- **Richer macros** - multi-argument and operand-typed params, and exported/imported macros (today: 0- or 1-arg macros, called in instruction position).
+- **Richer modules** - named/aliased/namespace imports (`name = .import`, `.import "m": a, b`), `name::sym` on a namespace, and `.export` of anything but an assignment or a macro (notably labels).
+- **Richer macros** - multi-argument params (the call-site comma collides with indexed-operand syntax - unresolved), operand-typed and defaulted params, and exporting macro-defined symbols beyond the param-named-definition channel (fixed-name or derived names like `name_end`).
 - **Nicer diagnostics** - `Message` carries raw offsets with no module id, so the CLI prints messages without `file:line:col`; multi-module span formatting is unbuilt. (The CLI and standing run-in-the-core sample tests now exist - see `@sfotty-pie/cli`'s `build:samples` and `samples.test.ts`.)
 - **Cyclic _definition_ detection** - `A = B` / `B = A` converges to undefined and reports "undefined symbol" (no hang), not a precise cycle error.
 - **A pretty-printer / formatter** - the parser keeps every token and its trivia precisely so the AST can round-trip back to source; nothing consumes that yet.
@@ -134,7 +136,7 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (rou
 | [src/symbols.ts](src/symbols.ts)                   | `SymbolTable`: define-once, label/constant kind, persist-across-passes, fixpoint snapshot.  |
 | [src/scopes.ts](src/scopes.ts)                     | Per-module + ambient scopes over `SymbolTable` via qualified keys.                          |
 | [src/loader.ts](src/loader.ts)                     | `Host` contract and the module-graph loader (dedup, cycles, dependency order).              |
-| [src/macros.ts](src/macros.ts)                     | `expandMacros` - static, per-module macro expansion with label hygiene.                     |
+| [src/macros.ts](src/macros.ts)                     | `expandModules` - cross-module hygienic macro expansion (lexical binding).                  |
 | [src/layout.ts](src/layout.ts)                     | `Segment` and `render` - the segment/OUTPUT layout engine.                                  |
 | [src/assemble.ts](src/assemble.ts)                 | The orchestrator: `assemble()`, `collect`, and the multipass loop.                          |
 | [src/cli.ts](src/cli.ts)                           | The `spasm` CLI (`bin`): `spasm INPUT -o OUTPUT` over an async fs host.                     |

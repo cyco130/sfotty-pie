@@ -7,10 +7,12 @@ import {
 import { decodeStringLiteral, type Value } from "./value.ts";
 
 export interface EvalEnv {
-	/** Look up a symbol; `undefined` means "not resolved (yet)". */
-	resolve(name: string): Value | undefined;
-	/** Look up an ambient (`.global::name`) symbol, if the env supports it. */
-	resolveGlobal?(name: string): Value | undefined;
+	/**
+	 * Look up a symbol; `undefined` means "not resolved (yet)". `origin`, when
+	 * present, is the module the identifier lexically binds to (stamped by macro
+	 * expansion); otherwise the name resolves in the containing module.
+	 */
+	resolve(name: string, origin?: string): Value | undefined;
 	/** Value of `*` (the location counter), or `undefined` outside a section. */
 	locationCounter: bigint | undefined;
 	/** Report a hard error (type mismatch, divide-by-zero, bad escape). */
@@ -62,7 +64,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return BigInt(bytes[0]!);
 		}
 		case "identifier": {
-			const value = env.resolve(expr.text);
+			const value = env.resolve(expr.text, expr.origin);
 			if (value === undefined && env.strict) {
 				env.report(
 					`Undefined symbol "${expr.text}"`,
@@ -79,29 +81,12 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return prefix(expr, env);
 		case "infix-expression":
 			return infix(expr, env);
-		case "global":
+		case "member-expression":
 			env.report(
-				"`.global` is a namespace, not a value",
+				"Scope resolution (`mod::sym`) is not supported yet",
 				getExpressionLocation(expr),
 			);
 			return undefined;
-		case "member-expression": {
-			if (expr.object.type === "global") {
-				const value = env.resolveGlobal?.(expr.member.text);
-				if (value === undefined && env.strict) {
-					env.report(
-						`Undefined global "${expr.member.text}"`,
-						getExpressionLocation(expr),
-					);
-				}
-				return value;
-			}
-			env.report(
-				"Only `.global::name` member access is supported",
-				getExpressionLocation(expr),
-			);
-			return undefined;
-		}
 	}
 }
 

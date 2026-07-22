@@ -280,16 +280,48 @@ describe("modules", () => {
 		);
 	});
 
-	test(".global publishes to the ambient scope; .global:: reads it", async () => {
+	test("an exported macro is the entry-point channel (no globals)", async () => {
 		const host = memHost({
-			main: '.import "sys"\nstart:\n\tnop\n.global start\n',
-			sys: "entry := .global::start\n.byte <entry, >entry\n",
+			main: '.import "fmt"\nxex start\nstart:\n\tnop\n',
+			fmt: ".export .macro xex entry\n\t.word entry\n.endmacro\n",
 		});
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
-		// sys emits start's address (lo, hi); start ($0002) follows sys's 2 bytes,
-		// then the nop.
+		// The expanded .word emits start's address; start ($0002) follows it.
 		expect([...r.output]).toEqual([0x02, 0x00, 0xea]);
+	});
+
+	test("a non-exported macro stays private to its module", async () => {
+		const host = memHost({
+			main: '.import "fmt"\nhidden\n',
+			fmt: ".macro hidden\n\t.byte 1\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Unknown mnemonic "hidden"',
+		);
+	});
+
+	test("a macro body's free names bind where the macro is defined", async () => {
+		const host = memHost({
+			// lib's `secret` is private and not exported - the body still sees it,
+			// and the caller's own `secret` neither collides nor leaks in.
+			main: '.import "lib"\nsecret = 2\nput\n.byte secret\n',
+			lib: "secret = 1\n.export .macro put\n\t.byte secret\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([0x01, 0x02]);
+	});
+
+	test("a body's macro calls resolve where the macro is defined", async () => {
+		const host = memHost({
+			main: '.import "lib"\nouter\n',
+			lib: ".macro helper\n\t.byte 9\n.endmacro\n.export .macro outer\n\thelper\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([0x09]);
 	});
 
 	test("a module shared by a diamond loads once", async () => {
@@ -319,12 +351,12 @@ describe("modules", () => {
 
 	// The capstone: hello split into a program module + an imported system
 	// module (lib). Exercises splat import (STDOUT/EXIT), `.export`, the
-	// `.global start` <-> `.global::start` entry-point handshake, and segments
-	// living in lib while CODE/RODATA are filled by the program. Same 47 bytes
-	// as the single-file inlined golden.
-	const LIB = `start := .global::start
-.export EXIT := $0200
+	// exported format macro as the entry-point channel, and segments defined by
+	// the macro while CODE/RODATA are filled by the program. Same 47 bytes as
+	// the single-file inlined golden.
+	const LIB = `.export EXIT := $0200
 .export STDOUT := $0202
+.export .macro output_sfotty_exe start
 .define_segment "CODE"
 .define_segment "RODATA"
 .define_segment "DATA"
@@ -342,9 +374,10 @@ describe("modules", () => {
 \t.emit "RODATA"
 \t.emit "DATA"
 \t.emplace "BSS"
+.endmacro
 `;
 	const HELLO = `.import "./lib.s"
-.global start
+output_sfotty_exe start
 .segment "RODATA"
 message:
 \t.byte "Hello world!", $0a, 0
@@ -416,6 +449,41 @@ describe("macros", () => {
 	test("an argument-count mismatch is reported", () => {
 		expect(asm(".macro one v\n\t.byte v\n.endmacro\none\n").messages).toContain(
 			'Macro "one" expects 1 argument(s), got 0',
+		);
+	});
+
+	test("a param-named label defines a caller-visible symbol", () => {
+		const { bytes, symbols, messages } = asm(
+			".macro alloc name\nname: .res 1\n.endmacro\n.org $10\nalloc buffer\n.byte <buffer\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("buffer")).toBe(0x10n);
+		expect(bytes).toEqual([0x00, 0x10]);
+	});
+
+	test("a non-identifier argument can't be a defining name", () => {
+		expect(
+			asm(".macro alloc name\nname: .res 1\n.endmacro\nalloc 1+2\n").messages,
+		).toContain(
+			'Macro argument for "name" defines a name and must be a plain identifier',
+		);
+	});
+
+	test("an unused macro's free names are checked at the definition site", () => {
+		expect(asm(".macro bad\n\t.byte nope\n.endmacro\n").messages).toContain(
+			'Undefined symbol "nope" in macro "bad"',
+		);
+	});
+
+	test("an unused macro referencing defined names is fine", () => {
+		expect(
+			asm("FOO = 1\n.macro fine\n\t.byte FOO\n.endmacro\n").messages,
+		).toEqual([]);
+	});
+
+	test("module-level directives are rejected inside a body", () => {
+		expect(asm('.macro bad\n.import "x"\n.endmacro\n').messages).toContain(
+			"`.import` is not allowed inside a macro body",
 		);
 	});
 });

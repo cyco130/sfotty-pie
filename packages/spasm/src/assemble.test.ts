@@ -533,20 +533,52 @@ describe("macros", () => {
 		expect(asm("lda 1, 2\n").messages).toContain("Too many operands for LDA");
 	});
 
-	test("a param-named label defines a caller-visible symbol", () => {
+	test("an .out param defines a caller-visible symbol", () => {
 		const { bytes, symbols, messages } = asm(
-			".macro alloc name\nname: .res 1\n.endmacro\n.org $10\nalloc buffer\n.byte <buffer\n",
+			".macro alloc .out name\nname: .res 1\n.endmacro\n.org $10\nalloc buffer\n.byte <buffer\n",
 		);
 		expect(messages).toEqual([]);
 		expect(symbols.get("buffer")).toBe(0x10n);
 		expect(bytes).toEqual([0x00, 0x10]);
 	});
 
-	test("a non-identifier argument can't be a defining name", () => {
+	test("a non-identifier .out argument is rejected at the call", () => {
 		expect(
-			asm(".macro alloc name\nname: .res 1\n.endmacro\nalloc 1+2\n").messages,
+			asm(".macro alloc .out name\nname: .res 1\n.endmacro\nalloc 1+2\n")
+				.messages,
 		).toContain(
-			'Macro argument for "name" defines a name and must be a plain identifier',
+			'Argument for `.out` parameter "name" must be a plain identifier',
+		);
+	});
+
+	test("an .out param the body never defines is an error", () => {
+		expect(asm(".macro bad .out v\n\tnop\n.endmacro\n").messages).toContain(
+			'`.out` parameter "v" is never defined in the macro body',
+		);
+	});
+
+	test("a plain param defined by the body demands .out", () => {
+		expect(asm(".macro bad v\nv = 1\n.endmacro\n").messages).toContain(
+			'Parameter "v" is defined in the macro body - declare it `.out`',
+		);
+	});
+
+	test("forwarding to a nested .out position satisfies and demands .out", () => {
+		const { bytes, messages } = asm(
+			".macro inner .out n\nn = 7\n.endmacro\n" +
+				".macro outer .out m\n\tinner m\n.endmacro\n" +
+				"outer foo\n.byte foo\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
+		// The flip side: a plain param forwarded to an .out position is an error.
+		expect(
+			asm(
+				".macro inner .out n\nn = 7\n.endmacro\n" +
+					".macro outer m\n\tinner m\n.endmacro\nouter foo\n",
+			).messages,
+		).toContain(
+			'Parameter "m" is defined in the macro body - declare it `.out`',
 		);
 	});
 

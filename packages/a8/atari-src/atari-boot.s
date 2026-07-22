@@ -11,7 +11,7 @@
 ; The boot continuation entry is at load+6 - the image's first byte after
 ; the header - so programs put their continuation stub at the top of CODE.
 
-.export .macro output_atari_boot init, load, sectors
+.export .macro output_atari_boot init, load, .out sectors
 	.define_segment "CODE"
 	.define_segment "RODATA"
 	.define_segment "DATA"

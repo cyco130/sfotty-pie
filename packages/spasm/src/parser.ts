@@ -223,10 +223,17 @@ class Parser {
 			case "macro": {
 				this.#consume();
 				const nameToken = this.#expect("identifier");
-				const params: Token<"identifier">[] = [];
-				while (this.#token.type === "identifier") {
-					params.push(this.#token);
-					this.#consume();
+				const params: MacroParam[] = [];
+				while (
+					this.#token.type === "identifier" ||
+					this.#token.type === "out"
+				) {
+					let outToken: Token<"out"> | null = null;
+					if (this.#token.type === "out") {
+						outToken = this.#token;
+						this.#consume();
+					}
+					params.push({ outToken, nameToken: this.#expect("identifier") });
 					// Separating commas are optional, matching the call site.
 					if ((this.#token.type as TokenType) === ",") this.#consume();
 				}
@@ -921,11 +928,18 @@ export interface SegmentShorthand {
 	keyword: Token<"code" | "rodata" | "data" | "bss" | "zeropage">;
 }
 
+/** A macro parameter; `.out` marks the outward channel (the caller's plain
+ * identifier receives a definition made by the body). */
+export interface MacroParam {
+	outToken: Token<"out"> | null;
+	nameToken: Token<"identifier">;
+}
+
 export interface Macro {
 	type: "macro";
 	macroToken: Token<"macro">;
 	nameToken: Token<"identifier">;
-	params: Token<"identifier">[];
+	params: MacroParam[];
 	body: Statement[];
 }
 

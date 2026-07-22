@@ -80,7 +80,9 @@ function content(c: StatementContent): string {
 		case "segment-shorthand":
 			return c.keyword.text;
 		case "macro":
-			return `.macro ${c.nameToken.text}${c.params.map((p) => ` ${p.text}`).join("")}`;
+			return `.macro ${c.nameToken.text}${c.params
+				.map((p) => ` ${p.outToken ? ".out " : ""}${p.nameToken.text}`)
+				.join("")}`;
 	}
 }
 
@@ -250,7 +252,7 @@ describe("directives", () => {
 		expect(m?.type).toBe("macro");
 		if (m?.type === "macro") {
 			expect(m.nameToken.text).toBe("mprint");
-			expect(m.params.map((p) => p.text)).toEqual(["str"]);
+			expect(m.params.map((p) => p.nameToken.text)).toEqual(["str"]);
 			expect(m.body).toHaveLength(2); // .rodata, .byte
 		}
 	});
@@ -260,7 +262,18 @@ describe("directives", () => {
 		const m = s!.content;
 		expect(m?.type).toBe("macro");
 		if (m?.type === "macro") {
-			expect(m.params.map((p) => p.text)).toEqual(["src", "dest"]);
+			expect(m.params.map((p) => p.nameToken.text)).toEqual(["src", "dest"]);
+		}
+	});
+
+	test(".out marks a parameter", () => {
+		expect(dump(".macro m init, load, .out sectors\n.endmacro")).toEqual([
+			".macro m init load .out sectors",
+		]);
+		const [s] = parseOk(".macro m p, .out q\n.endmacro\n");
+		const m = s!.content;
+		if (m?.type === "macro") {
+			expect(m.params.map((p) => !!p.outToken)).toEqual([false, true]);
 		}
 	});
 

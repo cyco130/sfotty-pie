@@ -52,6 +52,7 @@ export const DOT_KEYWORDS = [
 	"emplace",
 	"import",
 	"export",
+	"out",
 	"res",
 	"code",
 	"rodata",

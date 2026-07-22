@@ -1,11 +1,12 @@
 import type { Token } from "./lexer.ts";
 import type { LoadedModule } from "./loader.ts";
-import type {
-	Expression,
-	Macro,
-	Operand,
-	Statement,
-	StatementContent,
+import {
+	getOperandLocation,
+	type Expression,
+	type Macro,
+	type Operand,
+	type Statement,
+	type StatementContent,
 } from "./parser.ts";
 import { exportedNames } from "./scopes.ts";
 
@@ -98,6 +99,15 @@ export function expandModules(
 		}
 		return undefined;
 	};
+
+	// `.out` contract checks, for every macro, used or not. The callee's
+	// signature is known here, so forwarding (passing a param on to a nested
+	// call's `.out` position) is recognized per argument position.
+	for (const module of modules) {
+		for (const macro of macros.get(module.id)!.own.values()) {
+			validateParams(macro, (name) => lookup(module.id, name)?.macro, report);
+		}
+	}
 
 	let counter = 0;
 	const expanded = new Set<Macro>();
@@ -229,7 +239,65 @@ function callArgs(
 		);
 		return undefined;
 	}
+	for (let i = 0; i < args.length; i++) {
+		const param = macro.params[i]!;
+		const arg = args[i]!;
+		if (
+			param.outToken &&
+			(arg.type !== "simple-operand" || arg.expression.type !== "identifier")
+		) {
+			report(
+				`Argument for \`.out\` parameter "${param.nameToken.text}" must be a plain identifier`,
+				getOperandLocation(arg),
+			);
+			return undefined;
+		}
+	}
 	return args;
+}
+
+// The `.out` contract: an `.out` param must be defined by the body (a label,
+// an assignment, or forwarding to a nested call's `.out` position) - reads
+// are additionally allowed; a plain param must not be defined or forwarded.
+function validateParams(
+	macro: Macro,
+	getMacro: (name: string) => Macro | undefined,
+	report: Reporter,
+): void {
+	if (!macro.params.length) return;
+	const defined = localNames(macro.body);
+	const forwarded = new Set<string>();
+	for (const statement of macro.body) {
+		const content = statement.content;
+		if (content?.type !== "instruction") continue;
+		const callee = getMacro(content.mnemonic.text);
+		if (!callee) continue;
+		content.operands.forEach((operand, i) => {
+			if (
+				callee.params[i]?.outToken &&
+				operand.type === "simple-operand" &&
+				operand.expression.type === "identifier"
+			) {
+				forwarded.add(operand.expression.text);
+			}
+		});
+	}
+	for (const param of macro.params) {
+		const name = param.nameToken.text;
+		if (param.outToken) {
+			if (!defined.has(name) && !forwarded.has(name)) {
+				report(
+					`\`.out\` parameter "${name}" is never defined in the macro body`,
+					tokenSpan(param.nameToken),
+				);
+			}
+		} else if (defined.has(name) || forwarded.has(name)) {
+			report(
+				`Parameter "${name}" is defined in the macro body - declare it \`.out\``,
+				tokenSpan(param.nameToken),
+			);
+		}
+	}
 }
 
 function expandCall(
@@ -241,7 +309,7 @@ function expandCall(
 ): Statement[] {
 	const subst = new Map<string, Substitution>();
 	macro.params.forEach((param, i) => {
-		subst.set(param.text, { kind: "operand", operand: args[i]! });
+		subst.set(param.nameToken.text, { kind: "operand", operand: args[i]! });
 	});
 	const suffix = `@${gensym()}`;
 	for (const name of localNames(macro.body)) {
@@ -459,7 +527,7 @@ function validateBody(
 	report: Reporter,
 ): void {
 	const bound = localNames(macro.body);
-	for (const param of macro.params) bound.add(param.text);
+	for (const param of macro.params) bound.add(param.nameToken.text);
 
 	const check = (expr: Expression): void => {
 		switch (expr.type) {

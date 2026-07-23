@@ -110,12 +110,34 @@ class Parser {
 				const operator = this.#token;
 				if (operator.type === "=" || operator.type === ":=") {
 					this.#consume();
+					// `name = .import "m"` - a namespaced import: the module's
+					// export dict binds to `name`.
+					if (operator.type === "=" && this.#token.type === "import") {
+						const importToken = this.#token;
+						this.#consume();
+						return {
+							type: "import",
+							importToken,
+							specToken: this.#expect("string"),
+							binding: identifier,
+						};
+					}
 					return {
 						type: "assignment",
 						identifier,
 						operatorToken: operator,
 						expression: this.#expression(1),
 					};
+				}
+
+				// `ns::name args` - a namespaced macro call (no opcode has a path).
+				if (operator.type === "::") {
+					const memberTokens: Token<"identifier">[] = [];
+					while (this.#token.type === "::") {
+						this.#consume();
+						memberTokens.push(this.#expect("identifier"));
+					}
+					return { ...this.#instruction(identifier), memberTokens };
 				}
 
 				return this.#instruction(identifier);
@@ -194,6 +216,7 @@ class Parser {
 					type: "import",
 					importToken: token,
 					specToken: this.#expect("string"),
+					binding: null,
 				};
 			}
 
@@ -850,6 +873,9 @@ export interface Label {
 export interface Instruction {
 	type: "instruction";
 	mnemonic: Token<"identifier">;
+	/** Path segments of a namespaced macro call (`ns::m args`); real
+	 * instructions never carry these. */
+	memberTokens?: Token<"identifier">[];
 	operands: Operand[];
 }
 
@@ -956,6 +982,8 @@ export interface Import {
 	type: "import";
 	importToken: Token<"import">;
 	specToken: Token<"string">;
+	/** `name = .import "m"` binds the module's export dict; null = splat. */
+	binding: Token<"identifier"> | null;
 }
 
 export interface Export {

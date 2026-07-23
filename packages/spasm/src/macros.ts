@@ -43,10 +43,22 @@ export function expandModules(
 ): LoadedModule[] {
 	// Collect each module's macro definitions, removing them from its stream.
 	const macros = new Map<string, ModuleMacros>();
-	const imports = new Map<string, readonly string[]>();
+	const splats = new Map<string, readonly string[]>();
+	const bindings = new Map<string, ReadonlyMap<string, string>>();
 	const stripped = new Map<string, Statement[]>();
 	for (const module of modules) {
-		imports.set(module.id, module.imports);
+		splats.set(
+			module.id,
+			module.imports.filter((i) => i.binding === null).map((i) => i.id),
+		);
+		bindings.set(
+			module.id,
+			new Map(
+				module.imports
+					.filter((i) => i.binding !== null)
+					.map((i) => [i.binding!, i.id]),
+			),
+		);
 		const own = new Map<string, Macro>();
 		const exported = new Set<string>();
 		const rest: Statement[] = [];
@@ -83,19 +95,36 @@ export function expandModules(
 		stripped.set(module.id, rest);
 	}
 
-	// Lexical lookup: own macros, then the imports' exported ones (first import
-	// wins, mirroring symbol resolution).
+	// Lexical lookup: own macros, then the splat imports' exported ones (first
+	// import wins, mirroring symbol resolution).
 	const lookup = (
 		fromId: string,
 		name: string,
 	): { macro: Macro; definingId: string } | undefined => {
 		const own = macros.get(fromId)?.own.get(name);
 		if (own) return { macro: own, definingId: fromId };
-		for (const importId of imports.get(fromId) ?? []) {
+		for (const importId of splats.get(fromId) ?? []) {
 			const theirs = macros.get(importId);
 			if (theirs?.exported.has(name)) {
 				return { macro: theirs.own.get(name)!, definingId: importId };
 			}
+		}
+		return undefined;
+	};
+
+	// A namespaced call `ns::name args`: the root must be a namespace binding
+	// of the calling scope, the segment an exported macro of the bound module.
+	const lookupPath = (
+		fromId: string,
+		call: Extract<StatementContent, { type: "instruction" }>,
+	): { macro: Macro; definingId: string } | undefined => {
+		const path = call.memberTokens!;
+		const bound = bindings.get(fromId)?.get(call.mnemonic.text);
+		if (bound === undefined || path.length !== 1) return undefined;
+		const theirs = macros.get(bound);
+		const name = path[0]!.text;
+		if (theirs?.exported.has(name)) {
+			return { macro: theirs.own.get(name)!, definingId: bound };
 		}
 		return undefined;
 	};
@@ -131,6 +160,40 @@ export function expandModules(
 		const out: Statement[] = [];
 		for (const statement of statements) {
 			const content = statement.content;
+			if (content?.type === "instruction" && content.memberTokens?.length) {
+				// A path is necessarily a macro call - no opcode has `::`.
+				const found = lookupPath(scopeId, content);
+				if (!found) {
+					report(
+						`Unknown macro "${[content.mnemonic, ...content.memberTokens]
+							.map((t) => t.text)
+							.join("::")}"`,
+						tokenSpan(content.mnemonic),
+					);
+					continue;
+				}
+				expanded.add(found.macro);
+				const args = callArgs(content, found.macro, report);
+				if (args) {
+					const body = expandCall(
+						found.macro,
+						found.definingId,
+						args,
+						() => ++counter,
+						report,
+					);
+					if (statement.labels.length && body.length) {
+						body[0] = {
+							...body[0]!,
+							labels: [...statement.labels, ...body[0]!.labels],
+						};
+					} else if (statement.labels.length) {
+						out.push({ ...statement, content: null });
+					}
+					out.push(...expand(body, found.definingId, depth + 1));
+				}
+				continue;
+			}
 			if (content?.type === "instruction") {
 				const found = lookup(scopeId, content.mnemonic.text);
 				if (found) {
@@ -180,8 +243,9 @@ export function expandModules(
 			if (expanded.has(macro)) continue;
 			if (!visible) {
 				visible = definedNames(module.statements);
-				for (const importId of module.imports) {
-					const imported = expandedById.get(importId);
+				for (const record of module.imports) {
+					if (record.binding !== null) continue; // reachable via the binding
+					const imported = expandedById.get(record.id);
 					if (imported) {
 						for (const name of exportedNames(imported)) visible.add(name);
 					}
@@ -510,7 +574,8 @@ function substituteExpr(
 	}
 }
 
-// Top-level defining occurrences of a module, post-expansion.
+// Top-level defining occurrences of a module, post-expansion. Namespace
+// bindings count - `ns::x` in an unexpanded body roots at `ns`.
 function definedNames(statements: readonly Statement[]): Set<string> {
 	const names = new Set<string>();
 	for (const statement of statements) {
@@ -519,6 +584,9 @@ function definedNames(statements: readonly Statement[]): Set<string> {
 		if (content?.type === "assignment") names.add(content.identifier.text);
 		if (content?.type === "export" && content.content.type === "assignment") {
 			names.add(content.content.identifier.text);
+		}
+		if (content?.type === "import" && content.binding) {
+			names.add(content.binding.text);
 		}
 	}
 	return names;

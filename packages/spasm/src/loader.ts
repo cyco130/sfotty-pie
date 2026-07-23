@@ -12,12 +12,19 @@ export interface Host {
 	read(id: string): string | Promise<string>;
 }
 
+/** One resolved `.import`: `binding` is the namespace name, or null for a
+ * splat import. */
+export interface ImportRecord {
+	id: string;
+	binding: string | null;
+}
+
 export interface LoadedModule {
 	id: string;
 	sourceFile: SourceFile;
 	statements: Statement[];
-	/** Resolved ids of the modules this one `.import`s (for splat scoping). */
-	imports: string[];
+	/** This module's resolved imports, in source order. */
+	imports: ImportRecord[];
 }
 
 /**
@@ -57,10 +64,10 @@ export async function loadModules(
 			const { module, errors } = parse(sourceFile);
 			diagnostics.push(...errors);
 
-			const imports: string[] = [];
+			const imports: ImportRecord[] = [];
 			for (const statement of module.statements) {
 				if (statement.content?.type === "import") {
-					const { specToken } = statement.content;
+					const { specToken, binding } = statement.content;
 					const span: readonly [number, number] = [
 						specToken.start,
 						specToken.end,
@@ -73,7 +80,7 @@ export async function loadModules(
 						report(diagnostics, span, `Cannot resolve module "${specifier}"`);
 					}
 					if (depId !== undefined) {
-						imports.push(depId);
+						imports.push({ id: depId, binding: binding?.text ?? null });
 						await load(depId, span);
 					}
 				}

@@ -55,10 +55,14 @@ function list(items: Byte["list"]): string {
 
 function content(c: StatementContent): string {
 	switch (c.type) {
-		case "instruction":
+		case "instruction": {
+			const head = [c.mnemonic, ...(c.memberTokens ?? [])]
+				.map((t) => t.text)
+				.join("::");
 			return c.operands.length
-				? `${c.mnemonic.text} ${c.operands.map(operand).join(", ")}`
-				: c.mnemonic.text;
+				? `${head} ${c.operands.map(operand).join(", ")}`
+				: head;
+		}
 		case "assignment":
 			return `${c.identifier.text} ${c.operatorToken.text} ${expr(c.expression)}`;
 		case "org":
@@ -76,7 +80,7 @@ function content(c: StatementContent): string {
 		case "emplace":
 			return `.emplace ${c.nameToken.text}`;
 		case "import":
-			return `.import ${c.specToken.text}`;
+			return `${c.binding ? `${c.binding.text} = ` : ""}.import ${c.specToken.text}`;
 		case "export":
 			return `.export ${content(c.content)}`;
 		case "res":
@@ -231,6 +235,10 @@ describe("directives", () => {
 
 	test("module directives", () => {
 		expect(dump('.import "./lib.s"')).toEqual(['.import "./lib.s"']);
+		expect(dump('lib = .import "./lib.s"')).toEqual([
+			'lib = .import "./lib.s"',
+		]);
+		expect(dump("gfx::draw 1, 2")).toEqual(["gfx::draw 1, 2"]);
 		expect(dump(".export EXIT := $0200")).toEqual([".export EXIT := $0200"]);
 		expect(dump(".export .macro output_sfotty_exe start\n.endmacro")).toEqual([
 			".export .macro output_sfotty_exe start",

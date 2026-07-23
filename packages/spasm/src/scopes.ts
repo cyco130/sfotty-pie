@@ -7,18 +7,32 @@ type Span = readonly [number, number];
 
 /**
  * Per-module symbol scopes layered over one `SymbolTable` via qualified keys.
- * A name resolves to a module's own symbol, or to an exported symbol of a
- * module it splat-imports. Module export sets and import lists are structural,
- * computed once.
+ * A name resolves to a module's own symbol, to an exported symbol of a module
+ * it splat-imports, or - when its root is a namespace binding
+ * (`lib = .import "m"`) - to an exported symbol of the bound module via
+ * `lib::name`. Module export sets and import lists are structural, computed
+ * once.
  */
 export class Scopes {
 	#table = new SymbolTable();
 	#exports = new Map<string, ReadonlySet<string>>();
-	#imports = new Map<string, readonly string[]>();
+	#splats = new Map<string, readonly string[]>();
+	#bindings = new Map<string, ReadonlyMap<string, string>>();
 
 	constructor(modules: readonly LoadedModule[]) {
 		for (const module of modules) {
-			this.#imports.set(module.id, module.imports);
+			this.#splats.set(
+				module.id,
+				module.imports.filter((i) => i.binding === null).map((i) => i.id),
+			);
+			this.#bindings.set(
+				module.id,
+				new Map(
+					module.imports
+						.filter((i) => i.binding !== null)
+						.map((i) => [i.binding!, i.id]),
+				),
+			);
 			this.#exports.set(module.id, exportedNames(module));
 		}
 	}
@@ -65,14 +79,26 @@ export class Scopes {
 	}
 
 	// The qualified key `name` resolves to from `moduleId`, or undefined.
-	// `name` may itself be qualified (a dictionary path `N\0key`); the export
-	// check tests its root - exporting a dict exports its entries.
+	// `name` may itself be qualified (a dictionary path `N\0key`); export
+	// checks test the relevant root - exporting a dict exports its entries.
 	#scopeKey(moduleId: string, name: string): string | undefined {
 		const own = moduleId + SEP + name;
 		if (this.#table.has(own)) return own;
 		const sep = name.indexOf(SEP);
 		const root = sep === -1 ? name : name.slice(0, sep);
-		for (const importId of this.#imports.get(moduleId) ?? []) {
+
+		// A namespace binding: `lib::rest` reaches the bound module's exports.
+		const bound = this.#bindings.get(moduleId)?.get(root);
+		if (bound !== undefined) {
+			if (sep === -1) return undefined; // bare `lib` is not a value
+			const rest = name.slice(sep + 1);
+			const restSep = rest.indexOf(SEP);
+			const restRoot = restSep === -1 ? rest : rest.slice(0, restSep);
+			if (this.#exports.get(bound)?.has(restRoot)) return bound + SEP + rest;
+			return undefined;
+		}
+
+		for (const importId of this.#splats.get(moduleId) ?? []) {
 			if (this.#exports.get(importId)?.has(root)) return importId + SEP + name;
 		}
 		return undefined;

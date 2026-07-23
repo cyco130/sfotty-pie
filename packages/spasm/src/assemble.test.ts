@@ -699,3 +699,74 @@ describe("namespaces (dict-valued symbols)", () => {
 		expect(bytes).toEqual([64]);
 	});
 });
+
+describe("namespaced imports", () => {
+	test("binds the module's exports: symbols, dicts, and macros", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\nlib::put 5\n.byte lib::FOO, lib::N::V\n',
+			lib:
+				".export FOO = 7\n.export N = { V: 3 }\n" +
+				".export .macro put v\n\t.byte v\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([5, 7, 3]);
+	});
+
+	test("non-exported symbols stay hidden behind a binding", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte lib::SECRET\n',
+			lib: "SECRET = 1\n.export FOO = 7\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Undefined symbol "lib::SECRET"',
+		);
+	});
+
+	test("a non-exported macro is unknown through a binding", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\nlib::hidden\n',
+			lib: ".macro hidden\n\t.byte 1\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Unknown macro "lib::hidden"',
+		);
+	});
+
+	test("names don't splat-leak from a namespaced import", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte FOO\n',
+			lib: ".export FOO = 7\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Undefined symbol "FOO"',
+		);
+	});
+
+	test("the binding name is define-once", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\nlib = 5\n',
+			lib: ".export FOO = 7\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Symbol "lib" is already defined',
+		);
+	});
+
+	test("a body's namespaced references resolve in the defining module", async () => {
+		const host = memHost({
+			main: '.import "liba"\nouter\n',
+			liba:
+				'libb = .import "libb"\n' +
+				".export .macro outer\n\tlibb::inner\n\t.byte libb::VAL\n.endmacro\n",
+			libb: ".export VAL = 4\n.export .macro inner\n\t.byte 9\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([9, 4]);
+	});
+});

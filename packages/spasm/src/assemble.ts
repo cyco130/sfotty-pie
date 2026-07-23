@@ -215,7 +215,20 @@ function collect(
 
 			switch (content.type) {
 				case "import":
-					break; // resolved by the loader
+					// Resolved by the loader; a namespace binding also claims its
+					// name in this module's scope (define-once, like a dict root).
+					if (content.binding) {
+						const { text, start, end } = content.binding;
+						if (
+							scopes.defineLocal(moduleId, text, undefined, "namespace", [
+								start,
+								end,
+							])
+						) {
+							report(`Symbol "${text}" is already defined`, [start, end]);
+						}
+					}
+					break;
 				case "define-segment":
 					getSegment(segmentName(content.nameToken, report));
 					break;

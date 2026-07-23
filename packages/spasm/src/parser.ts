@@ -538,7 +538,8 @@ class Parser {
 			case "-":
 			case "<":
 			case ">":
-			case "!": {
+			case "!":
+			case "~": {
 				const operator = token;
 				this.#consume();
 				const expression = this.#expression(100);
@@ -686,15 +687,20 @@ class Parser {
 			case ">":
 				return this.#infix(this.#token, precedence, 4, head);
 
+			// `|` sits with the additive operators, `& ^ << >>` with the
+			// multiplicative ones - the ca65 split.
 			case "+":
 			case "-":
+			case "|":
 				return this.#infix(this.#token, precedence, 5, head);
 
-			// `^` (XOR) sits with the multiplicative operators, ca65-style.
 			case "*":
 			case "/":
 			case "%":
 			case "^":
+			case "&":
+			case "<<":
+			case ">>":
 				return this.#infix(this.#token, precedence, 6, head);
 		}
 
@@ -1239,7 +1245,7 @@ export interface GroupedExpression {
 
 export interface PrefixExpression {
 	type: "prefix-expression";
-	operator: Token<"+" | "-" | "<" | ">" | "!">;
+	operator: Token<"+" | "-" | "<" | ">" | "!" | "~">;
 	expression: Expression;
 }
 
@@ -1247,7 +1253,22 @@ export interface InfixExpression {
 	type: "infix-expression";
 	left: Expression;
 	operator: Token<
-		"*" | "/" | "%" | "^" | "+" | "-" | "=" | "!=" | "<" | ">" | "||" | "&&"
+		| "*"
+		| "/"
+		| "%"
+		| "^"
+		| "&"
+		| "<<"
+		| ">>"
+		| "+"
+		| "-"
+		| "|"
+		| "="
+		| "!="
+		| "<"
+		| ">"
+		| "||"
+		| "&&"
 	>;
 	right: Expression;
 }

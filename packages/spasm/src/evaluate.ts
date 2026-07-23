@@ -333,6 +333,10 @@ function prefix(expr: PrefixExpression, env: EvalEnv): Value | undefined {
 			return (v >> 8n) & 0xffn; // high byte
 		case "!":
 			return v === 0n ? 1n : 0n;
+		case "~":
+			// Arbitrary-precision complement: ~$0C is -$0D, and the byte/word
+			// truncation does the right thing ($F3) by arithmetic.
+			return ~v;
 	}
 }
 
@@ -360,6 +364,20 @@ function infix(expr: InfixExpression, env: EvalEnv): Value | undefined {
 			return l * r;
 		case "^":
 			return l ^ r;
+		case "&":
+			return l & r;
+		case "|":
+			return l | r;
+		case "<<":
+		case ">>":
+			if (r < 0n) {
+				env.report(
+					"Shift count must not be negative",
+					getExpressionLocation(expr.right),
+				);
+				return undefined;
+			}
+			return op === "<<" ? l << r : l >> r;
 		case "/":
 		case "%":
 			if (r === 0n) {

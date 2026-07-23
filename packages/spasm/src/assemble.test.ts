@@ -960,3 +960,30 @@ describe("line continuation", () => {
 		expect(bytes).toEqual([1, 2, 3, 0xa9, 5]);
 	});
 });
+
+describe("bitwise operators", () => {
+	test("and, or, not", () => {
+		expect(asm(".byte $F0 & $3C, $0C | $30, ~0 & $FF\n").bytes).toEqual([
+			0x30, 0x3c, 0xff,
+		]);
+	});
+
+	test("~ in an immediate encodes the complement by arithmetic", () => {
+		// ~$0C = -$0D as an unbounded integer; the byte truncation yields $F3.
+		expect(asm("MASK = $0C\n\tand #~MASK\n").bytes).toEqual([0x29, 0xf3]);
+	});
+
+	test("shifts, at multiplicative precedence", () => {
+		expect(asm(".byte 1 << 4, $80 >> 3\n").bytes).toEqual([16, 16]);
+		// & and << bind tighter than |; | sits with + -.
+		expect(asm(".word 1 << 8 | 2, 1 | 2 & 2\n").bytes).toEqual([
+			0x02, 0x01, 0x03, 0x00,
+		]);
+	});
+
+	test("a negative shift count is an error", () => {
+		expect(asm(".byte 1 << (0 - 1)\n").messages).toContain(
+			"Shift count must not be negative",
+		);
+	});
+});

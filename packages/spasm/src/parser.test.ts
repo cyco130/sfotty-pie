@@ -268,6 +268,15 @@ describe("directives", () => {
 		expect(dump(".byte a2 ^ 3")).toEqual([".byte (a2 ^ 3)"]);
 	});
 
+	test("bitwise operators and the << vs < < distinction", () => {
+		expect(dump("lda #p & q | r")).toEqual(["lda #((p & q) | r)"]);
+		expect(dump("lda #p << q")).toEqual(["lda #(p << q)"]);
+		// A space separates a comparison from a low-byte prefix; without it,
+		// the shift lexes greedily.
+		expect(dump("lda #p < <q")).toEqual(["lda #(p < <q)"]);
+		expect(dump("lda #~p")).toEqual(["lda #~p"]);
+	});
+
 	test("attribute tails and attribute builtins", () => {
 		expect(dump("BUF := $0600, size: 3")).toEqual(["BUF := $0600, size: 3"]);
 		expect(dump(".byte .sizeof(BUF)")).toEqual([".byte .sizeof(BUF)"]);

@@ -123,12 +123,16 @@ const REGEXES = [
 	[/'(?:[^'\r\n\\]|\\.)*'/, "character"],
 	[/'(?:[^'\r\n\\]|\\.)*/, "error:character"],
 
-	// Multi character punctuation (must precede the single-character ":")
+	// Multi character punctuation (must precede its single-character prefixes).
+	// Note `<<` vs `< <`: the shift lexes greedily, so comparing against a
+	// low byte (`a < <b`) needs the space - same tension as ca65.
 	[/\|\|/, "||"],
 	[/&&/, "&&"],
 	[/!=/, "!="],
 	[/:=/, ":="],
 	[/::/, "::"],
+	[/<</, "<<"],
+	[/>>/, ">>"],
 
 	// Single character punctuation
 	[/#/, "#"],
@@ -142,6 +146,7 @@ const REGEXES = [
 	[/=/, "="],
 
 	[/!/, "!"],
+	[/~/, "~"],
 	[/</, "<"],
 	[/>/, ">"],
 	[/\+/, "+"],
@@ -150,6 +155,8 @@ const REGEXES = [
 	[/\//, "/"],
 	[/%/, "%"],
 	[/\^/, "^"],
+	[/&/, "&"],
+	[/\|/, "|"],
 ] as const;
 
 const BIG_REGEX = new RegExp(

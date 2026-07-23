@@ -28,8 +28,12 @@ export interface EvalEnv {
 	): { kind: SymbolKind; attributes: SymbolAttributes } | undefined;
 	/** Value of `*` (the location counter), or `undefined` outside a section. */
 	locationCounter: bigint | undefined;
-	/** Report a hard error (type mismatch, divide-by-zero, bad escape). */
-	report(message: string, span: readonly [number, number]): void;
+	/**
+	 * Report a hard error (type mismatch, divide-by-zero, bad escape). `file`
+	 * overrides the module the span refers into - hygiene-stamped tokens point
+	 * into their defining module's source.
+	 */
+	report(message: string, span: readonly [number, number], file?: string): void;
 	/**
 	 * When set, an unresolved symbol is reported as undefined. The assemble loop
 	 * turns this on so the final (converged) pass flags genuinely-missing names,
@@ -86,6 +90,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				env.report(
 					`Undefined symbol "${expr.text}"`,
 					getExpressionLocation(expr),
+					expr.origin,
 				);
 			}
 			return value;
@@ -130,6 +135,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				env.report(
 					`Undefined symbol "${path.display}"`,
 					getExpressionLocation(expr),
+					path.root.origin,
 				);
 			}
 			return value;
@@ -233,7 +239,11 @@ function attributeValue(call: BuiltinCall, env: EvalEnv): Value | undefined {
 	const info = env.attributesOf(name, origin);
 	if (info === undefined) {
 		if (env.strict) {
-			env.report(`Undefined symbol "${display}"`, getExpressionLocation(arg));
+			env.report(
+				`Undefined symbol "${display}"`,
+				getExpressionLocation(arg),
+				origin,
+			);
 		}
 		return undefined;
 	}

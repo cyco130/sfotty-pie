@@ -28,7 +28,11 @@ export interface AssembleResult {
 	diagnostics: Message[];
 }
 
-type Reporter = (message: string, span: readonly [number, number]) => void;
+type Reporter = (
+	message: string,
+	span: readonly [number, number],
+	file?: string,
+) => void;
 
 // Function values interned per definition site (see defineAssignment).
 const functionValues = new WeakMap<Assignment, FunctionValue>();
@@ -56,6 +60,7 @@ export function assemble(
 	const diagnostics: Message[] = [];
 	const sourceFile = new SourceFile(name, sourceOrEntry);
 	const { module, errors } = parse(sourceFile);
+	for (const error of errors) error.file = name;
 	diagnostics.push(...errors);
 	const modules: LoadedModule[] = [
 		{ id: name, sourceFile, statements: module.statements, imports: [] },
@@ -83,12 +88,13 @@ function assembleModules(
 	priorDiagnostics: Message[],
 ): AssembleResult {
 	// Macro expansion is static and runs once, before the multipass.
-	const expandReport: Reporter = (message, span) => {
+	const expandReport: Reporter = (message, span, file) => {
 		priorDiagnostics.push({
 			type: "error",
 			start: span[0],
 			end: span[1],
 			message,
+			file,
 		});
 	};
 	const modules = expandModules(loaded, expandReport);
@@ -110,12 +116,13 @@ function assembleModules(
 		const snapshot = scopes.snapshot();
 		scopes.beginPass();
 		diagnostics = [];
-		const report: Reporter = (message, span) => {
+		const report: Reporter = (message, span, file) => {
 			diagnostics.push({
 				type: "error",
 				start: span[0],
 				end: span[1],
 				message,
+				file,
 			});
 		};
 
@@ -128,7 +135,7 @@ function assembleModules(
 			"OUTPUT",
 			(moduleId, name, value, kind, span) => {
 				if (scopes.defineLocal(moduleId, name, value, kind, span)) {
-					report(`Symbol "${name}" is already defined`, span);
+					report(`Symbol "${name}" is already defined`, span, moduleId);
 				}
 			},
 			(expression, moduleId, location) =>
@@ -162,10 +169,27 @@ function assembleModules(
 		});
 	}
 
+	// Render each diagnostic to `file:line:col: type: message` with the source
+	// line and a caret, when its module is known.
+	const sourceFiles = new Map(loaded.map((m) => [m.id, m.sourceFile]));
+	const all = [...priorDiagnostics, ...diagnostics];
+	for (const message of all) {
+		const sourceFile =
+			message.file === undefined ? undefined : sourceFiles.get(message.file);
+		message.formatted = sourceFile
+			? sourceFile.formatMessage(
+					message.start,
+					message.end,
+					`${message.type}: ${message.message}`,
+					true,
+				)
+			: `${message.type}: ${message.message}`;
+	}
+
 	return {
 		output: new Uint8Array(output),
 		symbols: scopes.resolvedFor(entryId),
-		diagnostics: [...priorDiagnostics, ...diagnostics],
+		diagnostics: all,
 	};
 }
 
@@ -232,15 +256,21 @@ function collect(
 								end,
 							])
 						) {
-							report(`Symbol "${text}" is already defined`, [start, end]);
+							report(
+								`Symbol "${text}" is already defined`,
+								[start, end],
+								moduleId,
+							);
 						}
 					}
 					break;
 				case "define-segment":
-					getSegment(segmentName(content.nameToken, report));
+					getSegment(segmentName(content.nameToken, report, moduleId));
 					break;
 				case "segment":
-					current = getSegment(segmentName(content.nameToken, report));
+					current = getSegment(
+						segmentName(content.nameToken, report, moduleId),
+					);
 					break;
 				case "segment-shorthand":
 					// `.code` -> "CODE", `.rodata` -> "RODATA", etc.
@@ -250,7 +280,8 @@ function collect(
 				case "emplace":
 					current.items.push({
 						kind: content.type,
-						segment: segmentName(content.nameToken, report),
+						segment: segmentName(content.nameToken, report, moduleId),
+						moduleId,
 						span: [content.nameToken.start, content.nameToken.end],
 					});
 					break;
@@ -264,10 +295,11 @@ function collect(
 							report,
 						);
 					} else {
-						report("Only a definition can be exported", [
-							content.exportToken.start,
-							content.exportToken.end,
-						]);
+						report(
+							"Only a definition can be exported",
+							[content.exportToken.start, content.exportToken.end],
+							moduleId,
+						);
 					}
 					break;
 				case "assignment":
@@ -310,9 +342,14 @@ function bytesEqual(a: readonly number[], b: readonly number[]): boolean {
 function segmentName(
 	token: { text: string; start: number; end: number },
 	report: Reporter,
+	file: string,
 ): string {
 	return decodeStringLiteral(token.text, (escape) =>
-		report(`Unknown escape sequence "\\${escape}"`, [token.start, token.end]),
+		report(
+			`Unknown escape sequence "\\${escape}"`,
+			[token.start, token.end],
+			file,
+		),
 	);
 }
 
@@ -327,7 +364,7 @@ function moduleEnv(
 		attributesOf: (name, origin) =>
 			scopes.attributesOf(origin ?? moduleId, name),
 		locationCounter: location,
-		report,
+		report: (message, span, file) => report(message, span, file ?? moduleId),
 		strict: true,
 	};
 }
@@ -359,31 +396,33 @@ function defineAssignment(
 			};
 			functionValues.set(assignment, fn);
 		}
-		evaluateAttributes(assignment, env, report); // functions carry none
+		evaluateAttributes(assignment, env, report, definitionModule); // none allowed
 		if (scopes.defineLocal(definitionModule, text, fn, "function", span)) {
-			report(`Symbol "${text}" is already defined`, span);
+			report(`Symbol "${text}" is already defined`, span, definitionModule);
 		}
 		return;
 	}
 
 	if (assignment.expression.type === "dict-literal") {
 		if (assignment.operatorToken.type === ":=") {
-			report("A dictionary is a value, not an address - define it with `=`", [
-				assignment.operatorToken.start,
-				assignment.operatorToken.end,
-			]);
+			report(
+				"A dictionary is a value, not an address - define it with `=`",
+				[assignment.operatorToken.start, assignment.operatorToken.end],
+				definitionModule,
+			);
 		}
 		if (assignment.attributes.length) {
 			const key = assignment.attributes[0]!.key;
-			report("Only labels have attributes - use `:=` for an address", [
-				key.start,
-				key.end,
-			]);
+			report(
+				"Only labels have attributes - use `:=` for an address",
+				[key.start, key.end],
+				definitionModule,
+			);
 		}
 		if (
 			scopes.defineLocal(definitionModule, text, undefined, "namespace", span)
 		) {
-			report(`Symbol "${text}" is already defined`, span);
+			report(`Symbol "${text}" is already defined`, span, definitionModule);
 		}
 		defineDict(
 			assignment.expression,
@@ -399,11 +438,16 @@ function defineAssignment(
 
 	const value = evaluate(assignment.expression, env);
 	const kind = assignment.operatorToken.type === ":=" ? "label" : "constant";
-	const attributes = evaluateAttributes(assignment, env, report);
+	const attributes = evaluateAttributes(
+		assignment,
+		env,
+		report,
+		definitionModule,
+	);
 	if (
 		scopes.defineLocal(definitionModule, text, value, kind, span, attributes)
 	) {
-		report(`Symbol "${text}" is already defined`, span);
+		report(`Symbol "${text}" is already defined`, span, definitionModule);
 	}
 }
 
@@ -414,15 +458,17 @@ function evaluateAttributes(
 	assignment: Assignment,
 	env: EvalEnv,
 	report: Reporter,
+	file: string,
 ): SymbolAttributes | undefined {
 	const isLabel = assignment.operatorToken.type === ":=";
 	if (!isLabel) {
 		const first = assignment.attributes[0];
 		if (first) {
-			report("Only labels have attributes - use `:=` for an address", [
-				first.key.start,
-				first.key.end,
-			]);
+			report(
+				"Only labels have attributes - use `:=` for an address",
+				[first.key.start, first.key.end],
+				file,
+			);
 		}
 		return undefined;
 	}
@@ -435,11 +481,11 @@ function evaluateAttributes(
 			attribute.key.end,
 		];
 		if (attribute.key.text !== "size") {
-			report(`Unknown attribute "${attribute.key.text}"`, keySpan);
+			report(`Unknown attribute "${attribute.key.text}"`, keySpan, file);
 			continue;
 		}
 		if (sizeDeclared) {
-			report(`Attribute "size" is already set`, keySpan);
+			report(`Attribute "size" is already set`, keySpan, file);
 			continue;
 		}
 		sizeDeclared = true;
@@ -448,6 +494,7 @@ function evaluateAttributes(
 			report(
 				"`size:` requires a number",
 				getExpressionLocation(attribute.value),
+				file,
 			);
 			continue;
 		}
@@ -455,6 +502,7 @@ function evaluateAttributes(
 			report(
 				"`size:` must not be negative",
 				getExpressionLocation(attribute.value),
+				file,
 			);
 			continue;
 		}
@@ -484,7 +532,7 @@ function defineDict(
 			if (
 				scopes.defineLocal(definitionModule, name, undefined, "namespace", span)
 			) {
-				report(`Symbol "${path}" is already defined`, span);
+				report(`Symbol "${path}" is already defined`, span, definitionModule);
 			}
 			defineDict(
 				entry.value,
@@ -498,7 +546,7 @@ function defineDict(
 		} else {
 			const value = evaluate(entry.value, env);
 			if (scopes.defineLocal(definitionModule, name, value, "constant", span)) {
-				report(`Symbol "${path}" is already defined`, span);
+				report(`Symbol "${path}" is already defined`, span, definitionModule);
 			}
 		}
 	}
@@ -524,7 +572,7 @@ function collectContent(
 			const value = evaluate(content.expression, env);
 			if (value === undefined) return location; // keep; resolves later
 			if (typeof value !== "bigint") {
-				report(
+				env.report(
 					"`.org` requires a numeric address",
 					getExpressionLocation(content.expression),
 				);
@@ -538,8 +586,7 @@ function collectContent(
 		case "word": {
 			const size = content.type === "byte" ? 1 : 2;
 			const bytes: number[] = [];
-			for (const [expr] of content.list)
-				emitData(expr, env, bytes, size, report);
+			for (const [expr] of content.list) emitData(expr, env, bytes, size);
 			output.items.push({ kind: "bytes", bytes });
 			return location + BigInt(bytes.length);
 		}
@@ -564,7 +611,10 @@ function collectContent(
 			// misused real instructions - encode reports the arity error below.
 			const expr = operandExpression(content.operands[0] ?? null);
 			const value = expr ? evaluate(expr, env) : undefined;
-			const bytes = encodeInstruction(content, value, { location, report });
+			const bytes = encodeInstruction(content, value, {
+				location,
+				report: env.report,
+			});
 			output.items.push({ kind: "bytes", bytes });
 			return location + BigInt(bytes.length);
 		}
@@ -586,7 +636,6 @@ function emitData(
 	env: EvalEnv,
 	output: number[],
 	size: 1 | 2,
-	report: Reporter,
 ): void {
 	const value = evaluate(expr, env);
 	const span = getExpressionLocation(expr);
@@ -597,14 +646,14 @@ function emitData(
 	}
 
 	if (typeof value === "object") {
-		report("A function is not data - apply it with `(...)`", span);
+		env.report("A function is not data - apply it with `(...)`", span);
 		for (let i = 0; i < size; i++) output.push(0);
 		return;
 	}
 
 	if (typeof value === "string") {
 		if (size === 2) {
-			report("A string is not allowed in `.word`", span);
+			env.report("A string is not allowed in `.word`", span);
 			output.push(0, 0);
 			return;
 		}
@@ -614,11 +663,11 @@ function emitData(
 
 	if (size === 1) {
 		if (value < -128n || value > 255n)
-			report(`Byte value out of range: ${value}`, span);
+			env.report(`Byte value out of range: ${value}`, span);
 		output.push(Number(value & 0xffn));
 	} else {
 		if (value < -32768n || value > 65535n)
-			report(`Word value out of range: ${value}`, span);
+			env.report(`Word value out of range: ${value}`, span);
 		const word = Number(value & 0xffffn);
 		output.push(word & 0xff, (word >> 8) & 0xff);
 	}

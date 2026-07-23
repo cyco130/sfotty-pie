@@ -10,7 +10,11 @@ import {
 } from "./parser.ts";
 import { exportedNames } from "./scopes.ts";
 
-type Reporter = (message: string, span: readonly [number, number]) => void;
+type Reporter = (
+	message: string,
+	span: readonly [number, number],
+	file?: string,
+) => void;
 
 // A param substitutes to an argument operand; a body-local label renames.
 type Substitution =
@@ -84,11 +88,12 @@ export function expandModules(
 				report(
 					`Macro "${name}" is already defined`,
 					tokenSpan(macro.nameToken),
+					module.id,
 				);
 			} else {
 				own.set(name, macro);
 				if (isExported) exported.add(name);
-				checkBody(macro, report);
+				checkBody(macro, report, module.id);
 			}
 		}
 		macros.set(module.id, { own, exported });
@@ -134,7 +139,12 @@ export function expandModules(
 	// call's `.out` position) is recognized per argument position.
 	for (const module of modules) {
 		for (const macro of macros.get(module.id)!.own.values()) {
-			validateParams(macro, (name) => lookup(module.id, name)?.macro, report);
+			validateParams(
+				macro,
+				(name) => lookup(module.id, name)?.macro,
+				report,
+				module.id,
+			);
 		}
 	}
 
@@ -152,7 +162,11 @@ export function expandModules(
 		if (depth > MAX_DEPTH) {
 			const first = statements[0];
 			if (first) {
-				report("Macro expansion too deep (recursion?)", statementSpan(first));
+				report(
+					"Macro expansion too deep (recursion?)",
+					statementSpan(first),
+					scopeId,
+				);
 			}
 			return statements;
 		}
@@ -169,11 +183,12 @@ export function expandModules(
 							.map((t) => t.text)
 							.join("::")}"`,
 						tokenSpan(content.mnemonic),
+						scopeId,
 					);
 					continue;
 				}
 				expanded.add(found.macro);
-				const args = callArgs(content, found.macro, report);
+				const args = callArgs(content, found.macro, report, scopeId);
 				if (args) {
 					const body = expandCall(
 						found.macro,
@@ -198,7 +213,7 @@ export function expandModules(
 				const found = lookup(scopeId, content.mnemonic.text);
 				if (found) {
 					expanded.add(found.macro);
-					const args = callArgs(content, found.macro, report);
+					const args = callArgs(content, found.macro, report, scopeId);
 					if (args) {
 						const body = expandCall(
 							found.macro,
@@ -256,6 +271,7 @@ export function expandModules(
 				visible,
 				(name) => lookup(module.id, name) !== undefined,
 				report,
+				module.id,
 			);
 		}
 	}
@@ -266,7 +282,7 @@ export function expandModules(
 // Module-level directives can't appear in a macro body: the loader resolves
 // imports from top-level statements only, and an export or a nested macro
 // definition would escape the expansion.
-function checkBody(macro: Macro, report: Reporter): void {
+function checkBody(macro: Macro, report: Reporter, file: string): void {
 	for (const statement of macro.body) {
 		const content = statement.content;
 		const keyword =
@@ -281,6 +297,7 @@ function checkBody(macro: Macro, report: Reporter): void {
 			report(
 				`\`.${content.type}\` is not allowed inside a macro body`,
 				tokenSpan(keyword),
+				file,
 			);
 		}
 	}
@@ -294,12 +311,14 @@ function callArgs(
 	call: Extract<StatementContent, { type: "instruction" }>,
 	macro: Macro,
 	report: Reporter,
+	file: string,
 ): Operand[] | undefined {
 	const args = call.operands;
 	if (args.length !== macro.params.length) {
 		report(
 			`Macro "${macro.nameToken.text}" expects ${macro.params.length} argument(s), got ${args.length}`,
 			tokenSpan(call.mnemonic),
+			file,
 		);
 		return undefined;
 	}
@@ -313,6 +332,7 @@ function callArgs(
 			report(
 				`Argument for \`.out\` parameter "${param.nameToken.text}" must be a plain identifier`,
 				getOperandLocation(arg),
+				file,
 			);
 			return undefined;
 		}
@@ -327,6 +347,7 @@ function validateParams(
 	macro: Macro,
 	getMacro: (name: string) => Macro | undefined,
 	report: Reporter,
+	file: string,
 ): void {
 	if (!macro.params.length) return;
 	const defined = localNames(macro.body);
@@ -353,12 +374,14 @@ function validateParams(
 				report(
 					`\`.out\` parameter "${name}" is never defined in the macro body`,
 					tokenSpan(param.nameToken),
+					file,
 				);
 			}
 		} else if (defined.has(name) || forwarded.has(name)) {
 			report(
 				`Parameter "${name}" is defined in the macro body - declare it \`.out\``,
 				tokenSpan(param.nameToken),
+				file,
 			);
 		}
 	}
@@ -410,7 +433,7 @@ function substituteStatement(
 	report: Reporter,
 ): void {
 	for (const label of statement.labels) {
-		label.identifier = substituteName(label.identifier, subst, report);
+		label.identifier = substituteName(label.identifier, subst, origin, report);
 	}
 	if (statement.content) {
 		substituteContent(statement.content, subst, origin, report);
@@ -423,6 +446,7 @@ function substituteStatement(
 function substituteName(
 	identifier: Token<"identifier">,
 	subst: Map<string, Substitution>,
+	origin: string,
 	report: Reporter,
 ): Token<"identifier"> {
 	const s = subst.get(identifier.text);
@@ -437,6 +461,7 @@ function substituteName(
 		report(
 			`Macro argument for "${identifier.text}" defines a name and must be a plain identifier`,
 			tokenSpan(identifier),
+			origin,
 		);
 	}
 	return identifier;
@@ -484,7 +509,12 @@ function substituteContent(
 				...attribute,
 				value: substituteExpr(attribute.value, subst, origin, report),
 			}));
-			content.identifier = substituteName(content.identifier, subst, report);
+			content.identifier = substituteName(
+				content.identifier,
+				subst,
+				origin,
+				report,
+			);
 			break;
 		}
 		case "instruction":
@@ -545,6 +575,7 @@ function substituteExpr(
 				report(
 					`Macro argument "${expr.text}" has an operand value and can only be used as a whole operand`,
 					tokenSpan(expr),
+					origin,
 				);
 				return expr;
 			}
@@ -646,6 +677,7 @@ function validateBody(
 	visible: ReadonlySet<string>,
 	isMacro: (name: string) => boolean,
 	report: Reporter,
+	file: string,
 ): void {
 	const bound = localNames(macro.body);
 	for (const param of macro.params) bound.add(param.nameToken.text);
@@ -657,6 +689,7 @@ function validateBody(
 					report(
 						`Undefined symbol "${expr.text}" in macro "${macro.nameToken.text}"`,
 						tokenSpan(expr),
+						file,
 					);
 				}
 				break;

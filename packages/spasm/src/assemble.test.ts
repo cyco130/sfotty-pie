@@ -987,3 +987,49 @@ describe("bitwise operators", () => {
 		);
 	});
 });
+
+describe("diagnostics with locations", () => {
+	test("errors carry their module and a formatted file:line:col", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte OK\n',
+			lib: ".export OK = 1\n.byte NOPE\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find((d) => d.message.includes("NOPE"))!;
+		expect(error.file).toBe("lib");
+		expect(error.formatted).toMatch(/^lib:2:7: error: Undefined symbol "NOPE"/);
+		// The formatted message shows the source line and a caret under the span.
+		expect(error.formatted).toContain("\n.byte NOPE\n");
+		expect(error.formatted).toMatch(/\n {6}\^{4}$/);
+	});
+
+	test("an error inside a macro body points into the macro's file", async () => {
+		const host = memHost({
+			main: '.import "lib"\nput\n',
+			lib: ".export .macro put\n\t.byte MISSING\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find((d) => d.message.includes("MISSING"))!;
+		// The span is a body token: hygiene's origin doubles as the file.
+		expect(error.file).toBe("lib");
+		expect(error.formatted).toMatch(/^lib:2:8: error: Undefined symbol/);
+	});
+
+	test("parse errors are attributed to their module", async () => {
+		const host = memHost({
+			main: '.import "lib"\nnop\n',
+			lib: ".segment CODE\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics[0]!;
+		expect(error.file).toBe("lib");
+		expect(error.formatted).toMatch(/^lib:1:10: error: /);
+	});
+
+	test("single-source diagnostics use the given name", () => {
+		const { messages } = asm("lda undef\n");
+		expect(messages).toEqual(['Undefined symbol "undef"']);
+		const r = assemble("lda undef\n", "prog.s");
+		expect(r.diagnostics[0]!.formatted).toMatch(/^prog\.s:1:5: error: /);
+	});
+});

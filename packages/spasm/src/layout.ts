@@ -28,6 +28,7 @@ export type Item =
 	| {
 			kind: "emit" | "emplace";
 			segment: string;
+			moduleId: string;
 			span: readonly [number, number];
 	  };
 
@@ -59,7 +60,11 @@ export type EvaluateAt = (
 	location: bigint,
 ) => Value | undefined;
 
-type Reporter = (message: string, span: readonly [number, number]) => void;
+type Reporter = (
+	message: string,
+	span: readonly [number, number],
+	file?: string,
+) => void;
 
 export interface RenderResult {
 	bytes: number[];
@@ -116,11 +121,12 @@ export function render(
 					const value = evaluateAt(item.expression, item.moduleId, lc);
 					let count = 0n; // unresolved this pass -> 0; later passes settle it
 					if (value !== undefined && typeof value !== "bigint") {
-						report("`.res` requires a numeric count", item.span);
+						report("`.res` requires a numeric count", item.span, item.moduleId);
 					} else if (value !== undefined && value < 0n) {
 						report(
 							"`.res` count is negative - content overflows the fill boundary",
 							item.span,
+							item.moduleId,
 						);
 					} else if (value !== undefined) {
 						count = value;
@@ -137,13 +143,18 @@ export function render(
 				case "emplace": {
 					const sub = segments.get(item.segment);
 					if (!sub) {
-						report(`Unknown segment "${item.segment}"`, item.span);
+						report(
+							`Unknown segment "${item.segment}"`,
+							item.span,
+							item.moduleId,
+						);
 						break;
 					}
 					if (onStack.has(sub.name)) {
 						report(
 							`Circular .${item.kind} of segment "${sub.name}"`,
 							item.span,
+							item.moduleId,
 						);
 						break;
 					}

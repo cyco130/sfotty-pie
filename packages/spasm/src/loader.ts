@@ -44,10 +44,16 @@ export async function loadModules(
 	const load = async (
 		id: string,
 		importedAt?: readonly [number, number],
+		importerId?: string,
 	): Promise<void> => {
 		if (loaded.has(id)) return; // already loaded (dedup)
 		if (onStack.has(id)) {
-			report(diagnostics, importedAt, `Import cycle through "${id}"`);
+			report(
+				diagnostics,
+				importedAt,
+				`Import cycle through "${id}"`,
+				importerId,
+			);
 			return;
 		}
 		onStack.add(id);
@@ -56,12 +62,13 @@ export async function loadModules(
 		try {
 			source = await host.read(id);
 		} catch {
-			report(diagnostics, importedAt, `Cannot read module "${id}"`);
+			report(diagnostics, importedAt, `Cannot read module "${id}"`, importerId);
 		}
 
 		if (source !== undefined) {
 			const sourceFile = new SourceFile(id, source);
 			const { module, errors } = parse(sourceFile);
+			for (const error of errors) error.file = id;
 			diagnostics.push(...errors);
 
 			const imports: ImportRecord[] = [];
@@ -77,11 +84,16 @@ export async function loadModules(
 					try {
 						depId = await host.resolve(specifier, id);
 					} catch {
-						report(diagnostics, span, `Cannot resolve module "${specifier}"`);
+						report(
+							diagnostics,
+							span,
+							`Cannot resolve module "${specifier}"`,
+							id,
+						);
 					}
 					if (depId !== undefined) {
 						imports.push({ id: depId, binding: binding?.text ?? null });
-						await load(depId, span);
+						await load(depId, span, id);
 					}
 				}
 			}
@@ -106,7 +118,8 @@ function report(
 	diagnostics: Message[],
 	span: readonly [number, number] | undefined,
 	message: string,
+	file?: string,
 ): void {
 	const [start, end] = span ?? [0, 0];
-	diagnostics.push({ type: "error", start, end, message });
+	diagnostics.push({ type: "error", start, end, message, file });
 }

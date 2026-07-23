@@ -35,7 +35,7 @@ for (const { source, out, constant, doc } of LOADERS) {
 
 	for (const diagnostic of result.diagnostics) {
 		process.stderr.write(
-			`${source}: ${diagnostic.type}: ${diagnostic.message}\n`,
+			`${diagnostic.formatted ?? `${diagnostic.type}: ${diagnostic.message}`}\n`,
 		);
 	}
 	if (result.diagnostics.some((d) => d.type === "error")) {

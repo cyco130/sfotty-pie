@@ -9,7 +9,7 @@ import type { Value } from "./value.ts";
 export interface EncodeContext {
 	/** Address of this instruction's first byte, for relative branch offsets. */
 	location: bigint | undefined;
-	report(message: string, span: readonly [number, number]): void;
+	report(message: string, span: readonly [number, number], file?: string): void;
 }
 
 const OPERAND_BYTES: Record<Mode, number> = {

@@ -108,7 +108,7 @@ The exported-macro mechanism is also the **output-format channel**: lib.s export
 - **`::`, not `.`, for dictionary/scope access.** A member dot would collide with the dotted-keyword lexing (`.byte`, `.word`), so access uses `::` (ca65-style): `NOTES::C4`. Evaluates against dict-valued symbols (see Values); namespace _imports_ (`name = .import "m"`, macros through dicts) are still deferred.
 - **Line continuation is `\` before the newline** (trailing blanks allowed, comments not - a comment swallows the backslash). Lexer-level: the whole sequence is whitespace trivia, so the parser never sees the line break.
 - **The register-name lexing trap.** Bare `a`, `x`, `y` lex as registers, not identifiers (so `asl a` is accumulator mode). Tests and sample code must avoid them as symbol names - a recurring gotcha.
-- **Diagnostics carry raw offsets.** `Message` is `{ type, start, end, message }`. Across multiple modules these offsets are module-local and currently un-disambiguated by file; nice formatting via [src/source-file.ts](src/source-file.ts) is wired but not yet used by `assemble` (it's the CLI's job, deferred).
+- **Diagnostics carry their module and arrive pre-formatted.** `Message` is `{ type, start, end, message, file?, formatted? }`: every reporter threads the owning module id, and `assemble` renders `formatted` (`file:line:col: type: message` + source line + caret) via [src/source-file.ts](src/source-file.ts). Attribution rides hygiene: an error on a macro-body token carries the body's `origin`, so it points into the macro's file, not the call site's. Consumers print `formatted ?? message`.
 
 ## The opcode table
 
@@ -123,7 +123,7 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (rou
 - **Relocation** - symbolic `.base()`/`.reloc`, and the `.base`/`.startof`/`.sizeof` builtins.
 - **Richer modules** - named/aliased imports (`.import "m": a, b` and aliases), the `.namespace ... .endnamespace` inline-module block, and `.export` of anything but an assignment or a macro (notably labels). (Dict-valued symbols, `::` access, and namespaced imports `name = .import "m"` - macros included - are done.)
 - **Richer macros** - keyword arguments and defaulted params, operand introspection builtins (`.mode()`/`.value()`), and exporting macro-defined symbols beyond the param-named-definition channel (fixed-name or derived names like `name_end`).
-- **Nicer diagnostics** - `Message` carries raw offsets with no module id, so the CLI prints messages without `file:line:col`; multi-module span formatting is unbuilt. (The CLI and standing run-in-the-core sample tests now exist - see `@sfotty-pie/cli`'s `build:samples` and `samples.test.ts`.)
+- **Diagnostic polish** - file:line:col + caret formatting is done; still open: `shortName` shortening for path-id hosts, colorized output, and multi-span notes (e.g. "previously defined here").
 - **Cyclic _definition_ detection** - `A = B` / `B = A` converges to undefined and reports "undefined symbol" (no hang), not a precise cycle error.
 - **A pretty-printer / formatter** - the parser keeps every token and its trivia precisely so the AST can round-trip back to source; nothing consumes that yet.
 

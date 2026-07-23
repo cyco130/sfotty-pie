@@ -855,6 +855,10 @@ export interface Message {
 	start: number;
 	end: number;
 	message: string;
+	/** Module id the span refers into, for file:line:col attribution. */
+	file?: string;
+	/** Pre-rendered `file:line:col: type: message` + source line + caret. */
+	formatted?: string;
 }
 
 export class ParseError implements Message {
@@ -884,6 +888,8 @@ export class ParseError implements Message {
 	message: string;
 	start: number;
 	end: number;
+	file?: string;
+	formatted?: string;
 }
 
 export function getExpressionLocation(

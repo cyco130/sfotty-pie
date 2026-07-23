@@ -106,6 +106,23 @@ class Parser {
 				const identifier = token;
 				this.#consume();
 
+				// `NAME(params) = expr` - an expression macro (a function-valued
+				// symbol). Speculative: `(` after an identifier in statement
+				// position is usually a macro-call operand (`mva (src),y`), so on
+				// any shape mismatch we back up and reparse as an instruction.
+				if (this.#token.type === "(") {
+					const saved = this.#save();
+					const fn = this.#tryFunctionParams();
+					if (fn) {
+						return this.#finishAssignment(
+							identifier,
+							fn.operatorToken,
+							fn.params,
+						);
+					}
+					this.#restore(saved);
+				}
+
 				// `=` defines a constant, `:=` defines a label (an address).
 				const operator = this.#token;
 				if (operator.type === "=" || operator.type === ":=") {
@@ -122,23 +139,7 @@ class Parser {
 							binding: identifier,
 						};
 					}
-					const expression = this.#expression(1);
-					// The attribute tail: `, key: value, ...`. Unambiguous - the
-					// RHS expression never consumes a top-level comma.
-					const attributes: Attribute[] = [];
-					while (this.#token.type === ",") {
-						this.#consume();
-						const key = this.#expect("identifier");
-						const colonToken = this.#expect(":");
-						attributes.push({ key, colonToken, value: this.#expression(1) });
-					}
-					return {
-						type: "assignment",
-						identifier,
-						operatorToken: operator,
-						expression,
-						attributes,
-					};
+					return this.#finishAssignment(identifier, operator, null);
 				}
 
 				// `ns::name args` - a namespaced macro call (no opcode has a path).
@@ -517,8 +518,12 @@ class Parser {
 	#expressionHead(): Expression | null {
 		const token = this.#token;
 		switch (token.type) {
-			// Primary expressions
-			case "identifier":
+			// Primary expressions. An identifier (or `::` path) hugging `(` is a
+			// function application.
+			case "identifier": {
+				this.#consume();
+				return this.#callTail(this.#memberTail(token));
+			}
 			case "decimal":
 			case "hexadecimal":
 			case "string":
@@ -623,6 +628,33 @@ class Parser {
 	}
 
 	// Apply any `::member` scope-resolution postfixes (tightest binding).
+	// `callee(arg, ...)` - function application; chains for a call returning a
+	// function.
+	#callTail(callee: Expression): Expression {
+		if (this.#token.type !== "(") return callee;
+		const openingBracketToken = this.#token;
+		this.#consume();
+		const args: Expression[] = [];
+		if ((this.#token.type as TokenType) !== ")") {
+			for (;;) {
+				args.push(this.#expression(1));
+				if ((this.#token.type as TokenType) === ",") {
+					this.#consume();
+					continue;
+				}
+				break;
+			}
+		}
+		const closingBracketToken = this.#expect(")");
+		return this.#callTail({
+			type: "call-expression",
+			callee,
+			openingBracketToken,
+			args,
+			closingBracketToken,
+		});
+	}
+
 	#memberTail(object: Expression): Expression {
 		let head = object;
 		while (this.#token.type === "::") {
@@ -658,9 +690,11 @@ class Parser {
 			case "-":
 				return this.#infix(this.#token, precedence, 5, head);
 
+			// `^` (XOR) sits with the multiplicative operators, ca65-style.
 			case "*":
 			case "/":
 			case "%":
+			case "^":
 				return this.#infix(this.#token, precedence, 6, head);
 		}
 
@@ -702,6 +736,71 @@ class Parser {
 
 	#skipNewlines(): void {
 		while (this.#token.type === "newline") this.#consume();
+	}
+
+	// Speculation support: snapshot/restore the lexer position and the two
+	// buffered tokens, so a tentative parse can back out without side effects.
+	#save(): { position: number; token: Token; lookahead: Token } {
+		return {
+			position: this.#lexer.position,
+			token: this.#token,
+			lookahead: this.#lookahead,
+		};
+	}
+
+	#restore(state: { position: number; token: Token; lookahead: Token }): void {
+		this.#lexer.position = state.position;
+		this.#token = state.token;
+		this.#lookahead = state.lookahead;
+	}
+
+	// At `(` after a statement-position identifier: try to read a function
+	// parameter list followed by `=`. Returns null (without consuming the `=`
+	// check's token) when the shape doesn't match - the caller restores.
+	#tryFunctionParams(): {
+		params: Token<"identifier">[];
+		operatorToken: Token<"=">;
+	} | null {
+		this.#consume(); // the "("
+		const params: Token<"identifier">[] = [];
+		while (this.#token.type === "identifier") {
+			params.push(this.#token);
+			this.#consume();
+			// Separating commas are optional, matching macro params.
+			if ((this.#token.type as TokenType) === ",") this.#consume();
+		}
+		if ((this.#token.type as TokenType) !== ")") return null;
+		this.#consume();
+		if (this.#token.type !== "=") return null;
+		const operatorToken = this.#token;
+		this.#consume();
+		return { params, operatorToken };
+	}
+
+	// The shared back half of a definition: RHS expression plus the attribute
+	// tail (`, key: value, ...` - unambiguous, the RHS never consumes a
+	// top-level comma).
+	#finishAssignment(
+		identifier: Token<"identifier">,
+		operatorToken: Token<"=" | ":=">,
+		params: Token<"identifier">[] | null,
+	): Assignment {
+		const expression = this.#expression(1);
+		const attributes: Attribute[] = [];
+		while (this.#token.type === ",") {
+			this.#consume();
+			const key = this.#expect("identifier");
+			const colonToken = this.#expect(":");
+			attributes.push({ key, colonToken, value: this.#expression(1) });
+		}
+		return {
+			type: "assignment",
+			identifier,
+			operatorToken,
+			expression,
+			attributes,
+			params,
+		};
 	}
 
 	// Call the lexer, skipping whitespace tokens
@@ -809,6 +908,11 @@ export function getExpressionLocation(
 			];
 		case "builtin-call":
 			return [expression.keyword.start, expression.closingBracketToken.end];
+		case "call-expression":
+			return [
+				getExpressionLocation(expression.callee)[0],
+				expression.closingBracketToken.end,
+			];
 		case "prefix-expression":
 			return [
 				expression.operator.start,
@@ -903,6 +1007,9 @@ export interface Assignment {
 	expression: Expression;
 	/** Placement attributes; only `:=` definitions may carry them. */
 	attributes: Attribute[];
+	/** Parameters of an expression macro (`DOUBLE(x) = 2 * x`); null for a
+	 * plain definition. */
+	params: Token<"identifier">[] | null;
 }
 
 export interface Label {
@@ -1070,7 +1177,17 @@ export type Expression =
 	| InfixExpression
 	| MemberExpression
 	| DictLiteral
-	| BuiltinCall;
+	| BuiltinCall
+	| CallExpression;
+
+/** Function application: `DOUBLE(2)`, `lib::DOUBLE(2)`. */
+export interface CallExpression {
+	type: "call-expression";
+	callee: Expression;
+	openingBracketToken: Token<"(">;
+	args: Expression[];
+	closingBracketToken: Token<")">;
+}
 
 /** `.attributes(X)` / `.sizeof(X)` - attribute-reading builtins. */
 export interface BuiltinCall {
@@ -1130,7 +1247,7 @@ export interface InfixExpression {
 	type: "infix-expression";
 	left: Expression;
 	operator: Token<
-		"*" | "/" | "%" | "+" | "-" | "=" | "!=" | "<" | ">" | "||" | "&&"
+		"*" | "/" | "%" | "^" | "+" | "-" | "=" | "!=" | "<" | ">" | "||" | "&&"
 	>;
 	right: Expression;
 }

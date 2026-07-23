@@ -115,7 +115,7 @@ export function render(
 				case "res": {
 					const value = evaluateAt(item.expression, item.moduleId, lc);
 					let count = 0n; // unresolved this pass -> 0; later passes settle it
-					if (typeof value === "string") {
+					if (value !== undefined && typeof value !== "bigint") {
 						report("`.res` requires a numeric count", item.span);
 					} else if (value !== undefined && value < 0n) {
 						report(

@@ -15,7 +15,7 @@ function memHost(files: Record<string, string>): Host {
 
 function asm(src: string): {
 	bytes: number[];
-	symbols: Map<string, bigint | string>;
+	symbols: Map<string, import("./value.ts").Value>;
 	messages: string[];
 } {
 	const result = assemble(src, "t");
@@ -854,5 +854,109 @@ describe("placement attributes", () => {
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		expect([...r.output]).toEqual([7]);
+	});
+});
+
+describe("expression macros (function-valued symbols)", () => {
+	test("definition and application", () => {
+		const { bytes, messages } = asm(
+			"DOUBLE(v) = 2 * v\n.byte DOUBLE(3), DOUBLE(DOUBLE(2))\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([6, 8]);
+	});
+
+	test("multiple parameters", () => {
+		const { bytes, messages } = asm(
+			"NIBBLES(hi, lo) = hi * 16 + lo\n.byte NIBBLES(2, 5)\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0x25]);
+	});
+
+	test("aliasing: a function is a value", () => {
+		const { bytes, messages } = asm(
+			"DOUBLE(v) = 2 * v\nD = DOUBLE\n.byte D(4)\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([8]);
+	});
+
+	test("forward reference to a function resolves via the multipass", () => {
+		const { bytes, messages } = asm(".byte D(1)\nD(v) = v + 9\n");
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([10]);
+	});
+
+	test("arity and non-function calls are errors", () => {
+		expect(asm("DOUBLE(v) = 2 * v\n.byte DOUBLE(1, 2)\n").messages).toContain(
+			'"DOUBLE" expects 1 argument(s), got 2',
+		);
+		expect(asm("K = 5\n.byte K(2)\n").messages).toContain(
+			'"K" is not a function',
+		);
+	});
+
+	test("a function is not data or an operand", () => {
+		expect(asm("D(v) = v\n.byte D\n").messages).toContain(
+			"A function is not data - apply it with `(...)`",
+		);
+		expect(asm("D(v) = v\n\tlda D\n").messages).toContain(
+			"Operand must be a number, not a function",
+		);
+	});
+
+	test("runaway recursion hits the depth cap", () => {
+		expect(asm("R(v) = R(v)\n.byte R(1)\n").messages).toContain(
+			"Expression macro application too deep (recursion?)",
+		);
+	});
+
+	test("body free names bind in the defining module", async () => {
+		const host = memHost({
+			// lib's SCALE is private; the exported function still sees it, and the
+			// caller's own SCALE neither collides nor leaks in.
+			main: '.import "lib"\nSCALE = 100\n.byte TIMES(3), SCALE\n',
+			lib: "SCALE = 4\n.export TIMES(v) = SCALE * v\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([12, 100]);
+	});
+
+	test("functions apply through namespaced imports", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte lib::TIMES(5)\n',
+			lib: "SCALE = 4\n.export TIMES(v) = SCALE * v\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([20]);
+	});
+
+	test("function params shadow code-macro substitution", () => {
+		// The macro param `v` and the function param `v` collide: the function
+		// body's `v` must stay the function's own (F(1) = 2), while the call
+		// argument `v` IS macro-substituted (F(5) = 10). The function itself is
+		// body-local (hygiene renames it), used inside the body.
+		const { bytes, messages } = asm(
+			".macro emitdouble v\nF(v) = v * 2\n\t.byte F(1), F(v)\n.endmacro\nemitdouble 5\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([2, 10]);
+	});
+});
+
+describe("bitwise xor", () => {
+	test("^ evaluates at multiplicative precedence", () => {
+		expect(asm(".byte 5 ^ 3, 1 + 2 ^ 2\n").bytes).toEqual([6, 1]);
+	});
+});
+
+describe("line continuation", () => {
+	test("statements continue across a backslash-newline", () => {
+		const { bytes, messages } = asm(".byte 1, \\\n\t2, 3\nlda \\\n\t#5\n");
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 2, 3, 0xa9, 5]);
 	});
 });

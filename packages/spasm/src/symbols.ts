@@ -11,9 +11,10 @@ export const SEP = "\0";
 /**
  * A label is address-valued (`name:` / `name := expr`); a constant is
  * `name = expr`; a namespace is a dict-valued `name = { ... }` (the dict node
- * itself - its entries are ordinary constants under qualified names).
+ * itself - its entries are ordinary constants under qualified names); a
+ * function is an expression macro (`DOUBLE(x) = 2 * x`).
  */
-export type SymbolKind = "label" | "constant" | "namespace";
+export type SymbolKind = "label" | "constant" | "namespace" | "function";
 
 /**
  * Assembler-opaque placement attributes: tracked and surfaced, never

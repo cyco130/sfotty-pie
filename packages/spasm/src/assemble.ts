@@ -16,7 +16,11 @@ import {
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
 import { SEP, type SymbolAttributes } from "./symbols.ts";
-import { decodeStringLiteral, type Value } from "./value.ts";
+import {
+	decodeStringLiteral,
+	type FunctionValue,
+	type Value,
+} from "./value.ts";
 
 export interface AssembleResult {
 	output: Uint8Array;
@@ -25,6 +29,9 @@ export interface AssembleResult {
 }
 
 type Reporter = (message: string, span: readonly [number, number]) => void;
+
+// Function values interned per definition site (see defineAssignment).
+const functionValues = new WeakMap<Assignment, FunctionValue>();
 
 /**
  * Assemble a single source string (no module imports). Synchronous - there is
@@ -337,6 +344,28 @@ function defineAssignment(
 	const span: readonly [number, number] = [start, end];
 	const definitionModule = origin ?? moduleId;
 
+	if (assignment.params) {
+		// An expression macro: a function-valued symbol. Interned per definition
+		// site so the value is identity-stable across passes (the fixpoint
+		// compares by identity). The body's free names resolve in this module -
+		// stamped tokens carry their own origins.
+		let fn = functionValues.get(assignment);
+		if (!fn) {
+			fn = {
+				type: "function",
+				params: assignment.params.map((p) => p.text),
+				body: assignment.expression,
+				moduleId,
+			};
+			functionValues.set(assignment, fn);
+		}
+		evaluateAttributes(assignment, env, report); // functions carry none
+		if (scopes.defineLocal(definitionModule, text, fn, "function", span)) {
+			report(`Symbol "${text}" is already defined`, span);
+		}
+		return;
+	}
+
 	if (assignment.expression.type === "dict-literal") {
 		if (assignment.operatorToken.type === ":=") {
 			report("A dictionary is a value, not an address - define it with `=`", [
@@ -415,7 +444,7 @@ function evaluateAttributes(
 		}
 		sizeDeclared = true;
 		const value = evaluate(attribute.value, env);
-		if (typeof value === "string") {
+		if (value !== undefined && typeof value !== "bigint") {
 			report(
 				"`size:` requires a number",
 				getExpressionLocation(attribute.value),
@@ -564,6 +593,12 @@ function emitData(
 
 	if (value === undefined) {
 		for (let i = 0; i < size; i++) output.push(0); // placeholder
+		return;
+	}
+
+	if (typeof value === "object") {
+		report("A function is not data - apply it with `(...)`", span);
+		for (let i = 0; i < size; i++) output.push(0);
 		return;
 	}
 

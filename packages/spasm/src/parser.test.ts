@@ -27,6 +27,8 @@ function expr(e: Expression): string {
 				.join(", ")}}`;
 		case "builtin-call":
 			return `.${e.keyword.text.replace(/^\./, "")}(${expr(e.argument)})`;
+		case "call-expression":
+			return `${expr(e.callee)}(${e.args.map(expr).join(", ")})`;
 		default:
 			return e.text;
 	}
@@ -66,7 +68,9 @@ function content(c: StatementContent): string {
 				: head;
 		}
 		case "assignment":
-			return `${c.identifier.text} ${c.operatorToken.text} ${expr(c.expression)}${c.attributes
+			return `${c.identifier.text}${
+				c.params ? `(${c.params.map((p) => p.text).join(", ")})` : ""
+			} ${c.operatorToken.text} ${expr(c.expression)}${c.attributes
 				.map((a) => `, ${a.key.text}: ${expr(a.value)}`)
 				.join("")}`;
 		case "org":
@@ -251,6 +255,17 @@ describe("directives", () => {
 
 	test("scope resolution with ::", () => {
 		expect(dump("lda #foo::bar")).toEqual(["lda #foo::bar"]);
+	});
+
+	test("expression macros: definition, application, xor", () => {
+		expect(dump("DOUBLE(v) = 2 * v")).toEqual(["DOUBLE(v) = (2 * v)"]);
+		expect(dump("NIBBLES(hi, lo) = hi * 16 + lo")).toEqual([
+			"NIBBLES(hi, lo) = ((hi * 16) + lo)",
+		]);
+		expect(dump(".byte lib::F(1, DOUBLE(2))")).toEqual([
+			".byte lib::F(1, DOUBLE(2))",
+		]);
+		expect(dump(".byte a2 ^ 3")).toEqual([".byte (a2 ^ 3)"]);
 	});
 
 	test("attribute tails and attribute builtins", () => {

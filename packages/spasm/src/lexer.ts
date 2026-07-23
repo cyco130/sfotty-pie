@@ -84,8 +84,11 @@ const REGEXES = [
 	[/$/, "eof"],
 	[/\n|\r\n?/, "newline"],
 
-	// Whitespaces
+	// Whitespaces. A backslash before the line break is a line continuation:
+	// the whole sequence (trailing blanks allowed, comments not) is trivia, so
+	// the newline never reaches the parser.
 	[/[ \t]+/, "whitespace"],
+	[/\\[ \t]*(?:\n|\r\n?)/, "whitespace"],
 	[/;[^\n\r]*/, "comment"],
 
 	// Keywords
@@ -146,6 +149,7 @@ const REGEXES = [
 	[/\*/, "*"],
 	[/\//, "/"],
 	[/%/, "%"],
+	[/\^/, "^"],
 ] as const;
 
 const BIG_REGEX = new RegExp(

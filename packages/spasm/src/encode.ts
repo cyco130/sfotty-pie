@@ -153,8 +153,13 @@ function encodeOperand(
 	if (size === 0) return [];
 
 	if (value === undefined) return new Array<number>(size).fill(0); // unresolved
-	if (typeof value === "string") {
-		context.report("Operand must be a number, not a string", span);
+	if (typeof value !== "bigint") {
+		context.report(
+			typeof value === "string"
+				? "Operand must be a number, not a string"
+				: "Operand must be a number, not a function",
+			span,
+		);
 		return new Array<number>(size).fill(0);
 	}
 

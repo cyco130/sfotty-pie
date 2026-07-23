@@ -468,11 +468,17 @@ function substituteContent(
 			content.count = substituteExpr(content.count, subst, origin, report);
 			break;
 		case "assignment": {
+			// An expression macro's params shadow the (code) macro's substitution
+			// inside its body - `F(x) = x + 1` keeps its own `x`.
+			const shadowed = content.params
+				? new Set(content.params.map((p) => p.text))
+				: undefined;
 			content.expression = substituteExpr(
 				content.expression,
 				subst,
 				origin,
 				report,
+				shadowed,
 			);
 			content.attributes = content.attributes.map((attribute) => ({
 				...attribute,
@@ -522,9 +528,13 @@ function substituteExpr(
 	subst: Map<string, Substitution>,
 	origin: string,
 	report: Reporter,
+	shadowed?: ReadonlySet<string>,
 ): Expression {
 	switch (expr.type) {
 		case "identifier": {
+			// An expression-macro param: neither substituted nor stamped - it
+			// binds at application time.
+			if (shadowed?.has(expr.text)) return expr;
 			const s = subst.get(expr.text);
 			if (s?.kind === "operand") {
 				// Operand is a super-type of simple values: only a simple operand
@@ -547,36 +557,62 @@ function substituteExpr(
 		case "prefix-expression":
 			return {
 				...expr,
-				expression: substituteExpr(expr.expression, subst, origin, report),
+				expression: substituteExpr(
+					expr.expression,
+					subst,
+					origin,
+					report,
+					shadowed,
+				),
 			};
 		case "infix-expression":
 			return {
 				...expr,
-				left: substituteExpr(expr.left, subst, origin, report),
-				right: substituteExpr(expr.right, subst, origin, report),
+				left: substituteExpr(expr.left, subst, origin, report, shadowed),
+				right: substituteExpr(expr.right, subst, origin, report, shadowed),
 			};
 		case "grouped-expression":
 			return {
 				...expr,
-				expression: substituteExpr(expr.expression, subst, origin, report),
+				expression: substituteExpr(
+					expr.expression,
+					subst,
+					origin,
+					report,
+					shadowed,
+				),
 			};
 		case "member-expression":
 			return {
 				...expr,
-				object: substituteExpr(expr.object, subst, origin, report),
+				object: substituteExpr(expr.object, subst, origin, report, shadowed),
 			};
 		case "dict-literal":
 			return {
 				...expr,
 				entries: expr.entries.map((entry) => ({
 					...entry,
-					value: substituteExpr(entry.value, subst, origin, report),
+					value: substituteExpr(entry.value, subst, origin, report, shadowed),
 				})),
+			};
+		case "call-expression":
+			return {
+				...expr,
+				callee: substituteExpr(expr.callee, subst, origin, report, shadowed),
+				args: expr.args.map((arg) =>
+					substituteExpr(arg, subst, origin, report, shadowed),
+				),
 			};
 		case "builtin-call":
 			return {
 				...expr,
-				argument: substituteExpr(expr.argument, subst, origin, report),
+				argument: substituteExpr(
+					expr.argument,
+					subst,
+					origin,
+					report,
+					shadowed,
+				),
 			};
 		default:
 			return expr; // literals and `*`
@@ -641,6 +677,10 @@ function validateBody(
 			case "builtin-call":
 				check(expr.argument);
 				break;
+			case "call-expression":
+				check(expr.callee);
+				for (const arg of expr.args) check(arg);
+				break;
 			default:
 				break;
 		}
@@ -660,10 +700,15 @@ function validateBody(
 			case "res":
 				check(content.count);
 				break;
-			case "assignment":
+			case "assignment": {
+				// An expression macro's params are bound within its own body.
+				const added = (content.params ?? []).filter((p) => !bound.has(p.text));
+				for (const p of added) bound.add(p.text);
 				check(content.expression);
 				for (const attribute of content.attributes) check(attribute.value);
+				for (const p of added) bound.delete(p.text);
 				break;
+			}
 			case "instruction":
 				if (isMacro(content.mnemonic.text)) break;
 				for (const operand of content.operands) {

@@ -36,7 +36,11 @@ export interface EvalEnv {
 	 * while leaving it off for plain evaluation (where unresolved just defers).
 	 */
 	strict?: boolean;
+	/** Function-application nesting depth, for the recursion cap. */
+	depth?: number;
 }
+
+const MAX_APPLICATION_DEPTH = 64;
 
 /**
  * Evaluate an expression. Returns `undefined` if any part is unresolved (a
@@ -129,6 +133,52 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				);
 			}
 			return value;
+		}
+		case "call-expression": {
+			const fn = evaluate(expr.callee, env);
+			if (fn === undefined) return undefined; // unresolved; strict reported
+			if (typeof fn !== "object" || fn.type !== "function") {
+				env.report(
+					`${calleeName(expr.callee)} is not a function`,
+					getExpressionLocation(expr.callee),
+				);
+				return undefined;
+			}
+			if (expr.args.length !== fn.params.length) {
+				env.report(
+					`${calleeName(expr.callee)} expects ${fn.params.length} argument(s), got ${expr.args.length}`,
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			const depth = (env.depth ?? 0) + 1;
+			if (depth > MAX_APPLICATION_DEPTH) {
+				env.report(
+					"Expression macro application too deep (recursion?)",
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			// Eager arguments, evaluated in the caller's scope; the body's free
+			// names default to the defining module (lexical hygiene) by forcing
+			// the origin - params shadow via the bindings overlay.
+			const bindings = new Map<string, Value | undefined>();
+			fn.params.forEach((param, i) => {
+				bindings.set(param, evaluate(expr.args[i]!, env));
+			});
+			const inner: EvalEnv = {
+				resolve: (name, origin) =>
+					origin === undefined && bindings.has(name)
+						? bindings.get(name)
+						: env.resolve(name, origin ?? fn.moduleId),
+				attributesOf: (name, origin) =>
+					env.attributesOf(name, origin ?? fn.moduleId),
+				locationCounter: env.locationCounter,
+				report: env.report,
+				strict: env.strict,
+				depth,
+			};
+			return evaluate(fn.body, inner);
 		}
 		case "builtin-call":
 			if (expr.keyword.type === "sizeof") {
@@ -239,7 +289,17 @@ function flattenPath(
 	};
 }
 
-/** Coerce an evaluated operand to a number, reporting if it's a string. */
+// A short display name for a callee in diagnostics.
+function calleeName(callee: Expression): string {
+	if (callee.type === "identifier") return `"${callee.text}"`;
+	if (callee.type === "member-expression") {
+		const path = flattenPath(callee);
+		if (path) return `"${path.display}"`;
+	}
+	return "The expression";
+}
+
+/** Coerce an evaluated operand to a number, reporting if it isn't one. */
 function asNumber(
 	value: Value | undefined,
 	expr: Expression,
@@ -247,6 +307,13 @@ function asNumber(
 ): bigint | undefined {
 	if (typeof value === "string") {
 		env.report("Expected a number, got a string", getExpressionLocation(expr));
+		return undefined;
+	}
+	if (typeof value === "object") {
+		env.report(
+			"Expected a number, got a function - apply it with `(...)`",
+			getExpressionLocation(expr),
+		);
 		return undefined;
 	}
 	return value; // bigint | undefined
@@ -291,6 +358,8 @@ function infix(expr: InfixExpression, env: EvalEnv): Value | undefined {
 	switch (op) {
 		case "*":
 			return l * r;
+		case "^":
+			return l ^ r;
 		case "/":
 		case "%":
 			if (r === 0n) {

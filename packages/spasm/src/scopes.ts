@@ -96,6 +96,8 @@ export class Scopes {
 		const prefix = moduleId + SEP;
 		const out = new Map<string, Value>();
 		for (const [key, value] of this.#table.resolved()) {
+			// Functions are static machinery, not result data.
+			if (typeof value === "object") continue;
 			if (key.startsWith(prefix)) {
 				out.set(key.slice(prefix.length).split(SEP).join("::"), value);
 			}

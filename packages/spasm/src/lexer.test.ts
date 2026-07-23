@@ -282,3 +282,25 @@ end:
 		]);
 	});
 });
+
+describe("line continuation", () => {
+	test("backslash-newline is whitespace, not a newline", () => {
+		expect(one("\\\n")).toBe("whitespace");
+		expect(one("\\  \t\r\n")).toBe("whitespace");
+		expect(code(".byte 1, \\\n 2")).toEqual([
+			["byte", ".byte"],
+			["decimal", "1"],
+			[",", ","],
+			["decimal", "2"],
+		]);
+	});
+
+	test("a comment swallows a trailing backslash (no continuation)", () => {
+		const ts = tokens("; c \\\nnop");
+		expect(ts.some((t) => t.type === "newline")).toBe(true);
+	});
+
+	test("a bare backslash is still an error", () => {
+		expect(code("\\5").some(([type]) => type === "error")).toBe(true);
+	});
+});

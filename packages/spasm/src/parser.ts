@@ -122,11 +122,22 @@ class Parser {
 							binding: identifier,
 						};
 					}
+					const expression = this.#expression(1);
+					// The attribute tail: `, key: value, ...`. Unambiguous - the
+					// RHS expression never consumes a top-level comma.
+					const attributes: Attribute[] = [];
+					while (this.#token.type === ",") {
+						this.#consume();
+						const key = this.#expect("identifier");
+						const colonToken = this.#expect(":");
+						attributes.push({ key, colonToken, value: this.#expression(1) });
+					}
 					return {
 						type: "assignment",
 						identifier,
 						operatorToken: operator,
-						expression: this.#expression(1),
+						expression,
+						attributes,
 					};
 				}
 
@@ -534,6 +545,25 @@ class Parser {
 				};
 			}
 
+			// Builtin calls: a dot-keyword hugging `(` is the call meaning of the
+			// parenthesis. `.attributes(X)` yields the symbol's attribute dict
+			// (member-accessed with `::`); `.sizeof(X)` is its `size` shorthand.
+			case "attributes":
+			case "sizeof": {
+				const keyword = token;
+				this.#consume();
+				const openingBracketToken = this.#expect("(");
+				const argument = this.#expression(1);
+				const closingBracketToken = this.#expect(")");
+				return this.#memberTail({
+					type: "builtin-call",
+					keyword,
+					openingBracketToken,
+					argument,
+					closingBracketToken,
+				});
+			}
+
 			// Dictionary literal. `{` opens a context where newlines separate
 			// entries like commas do (each nesting level handles its own), and
 			// `key: value` uses the call-site association mark - a keyword-arg
@@ -777,6 +807,8 @@ export function getExpressionLocation(
 				expression.openingBraceToken.start,
 				expression.closingBraceToken.end,
 			];
+		case "builtin-call":
+			return [expression.keyword.start, expression.closingBracketToken.end];
 		case "prefix-expression":
 			return [
 				expression.operator.start,
@@ -857,11 +889,20 @@ export type StatementContent =
 	| SegmentShorthand
 	| Macro;
 
+/** One `key: value` in a definition's attribute tail (`X := $0300, size: 2`). */
+export interface Attribute {
+	key: Token<"identifier">;
+	colonToken: Token<":">;
+	value: Expression;
+}
+
 export interface Assignment {
 	type: "assignment";
 	identifier: Token<"identifier">;
 	operatorToken: Token<"=" | ":=">;
 	expression: Expression;
+	/** Placement attributes; only `:=` definitions may carry them. */
+	attributes: Attribute[];
 }
 
 export interface Label {
@@ -1028,7 +1069,17 @@ export type Expression =
 	| PrefixExpression
 	| InfixExpression
 	| MemberExpression
-	| DictLiteral;
+	| DictLiteral
+	| BuiltinCall;
+
+/** `.attributes(X)` / `.sizeof(X)` - attribute-reading builtins. */
+export interface BuiltinCall {
+	type: "builtin-call";
+	keyword: Token<"attributes" | "sizeof">;
+	openingBracketToken: Token<"(">;
+	argument: Expression;
+	closingBracketToken: Token<")">;
+}
 
 export interface DictEntry {
 	// Keys are ordinary identifiers - register names stay reserved here too,

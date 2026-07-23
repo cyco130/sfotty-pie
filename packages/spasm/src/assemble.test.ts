@@ -770,3 +770,89 @@ describe("namespaced imports", () => {
 		expect([...r.output]).toEqual([9, 4]);
 	});
 });
+
+describe("placement attributes", () => {
+	test(".sizeof and .attributes()::size read a declared size", () => {
+		const { bytes, messages } = asm(
+			"BUF := $0600, size: 3\n.byte .sizeof(BUF), .attributes(BUF)::size\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([3, 3]);
+	});
+
+	test("an equate defaults to size 1; a label to 0", () => {
+		const { bytes, messages } = asm(
+			"PORTA := $D300\nstart:\n.byte .sizeof(PORTA), .sizeof(start)\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 0]);
+	});
+
+	test("a size may forward-reference", () => {
+		const { bytes, messages } = asm(
+			"BUF := $0600, size: LEN\nLEN = 2\n.byte .sizeof(BUF)\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([2]);
+	});
+
+	test("constants have no attributes", () => {
+		expect(asm("K = 5\n.byte .sizeof(K)\n").messages).toContain(
+			'Only labels have attributes - "K" is a constant',
+		);
+		expect(asm("K = 5, size: 2\n").messages).toContain(
+			"Only labels have attributes - use `:=` for an address",
+		);
+	});
+
+	test("unknown attribute keys error on both sides", () => {
+		expect(asm("B := 1, foo: 2\n").messages).toContain(
+			'Unknown attribute "foo"',
+		);
+		expect(asm("B := 1\n.byte .attributes(B)::foo\n").messages).toContain(
+			'Unknown attribute "foo"',
+		);
+	});
+
+	test("a bare .attributes() is not a value", () => {
+		expect(asm("B := 1\n.byte .attributes(B)\n").messages).toContain(
+			"`.attributes(...)` is a dictionary - access an attribute with `::`",
+		);
+	});
+
+	test("size must be a non-negative number, set once", () => {
+		expect(asm('B := 1, size: "x"\n').messages).toContain(
+			"`size:` requires a number",
+		);
+		expect(asm("B := 1, size: -1\n").messages).toContain(
+			"`size:` must not be negative",
+		);
+		expect(asm("B := 1, size: 2, size: 3\n").messages).toContain(
+			'Attribute "size" is already set',
+		);
+	});
+
+	test("attributes travel through exports and namespaced imports", async () => {
+		const host = memHost({
+			main:
+				'lib = .import "lib"\n.import "lib"\n' +
+				".byte .sizeof(BUF), .sizeof(lib::BUF)\n",
+			lib: ".export BUF := $0600, size: 3\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([3, 3]);
+	});
+
+	test(".sizeof in a macro body is hygienic", async () => {
+		const host = memHost({
+			main: '.import "lib"\nput\n',
+			lib:
+				"BUF := $0600, size: 7\n" +
+				".export .macro put\n\t.byte .sizeof(BUF)\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([7]);
+	});
+});

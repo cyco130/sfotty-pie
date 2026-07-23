@@ -25,6 +25,8 @@ function expr(e: Expression): string {
 			return `{${e.entries
 				.map((entry) => `${entry.key.text}: ${expr(entry.value)}`)
 				.join(", ")}}`;
+		case "builtin-call":
+			return `.${e.keyword.text.replace(/^\./, "")}(${expr(e.argument)})`;
 		default:
 			return e.text;
 	}
@@ -64,7 +66,9 @@ function content(c: StatementContent): string {
 				: head;
 		}
 		case "assignment":
-			return `${c.identifier.text} ${c.operatorToken.text} ${expr(c.expression)}`;
+			return `${c.identifier.text} ${c.operatorToken.text} ${expr(c.expression)}${c.attributes
+				.map((a) => `, ${a.key.text}: ${expr(a.value)}`)
+				.join("")}`;
 		case "org":
 			return `.org ${expr(c.expression)}`;
 		case "byte":
@@ -247,6 +251,14 @@ describe("directives", () => {
 
 	test("scope resolution with ::", () => {
 		expect(dump("lda #foo::bar")).toEqual(["lda #foo::bar"]);
+	});
+
+	test("attribute tails and attribute builtins", () => {
+		expect(dump("BUF := $0600, size: 3")).toEqual(["BUF := $0600, size: 3"]);
+		expect(dump(".byte .sizeof(BUF)")).toEqual([".byte .sizeof(BUF)"]);
+		expect(dump(".byte .attributes(BUF)::size")).toEqual([
+			".byte .attributes(BUF)::size",
+		]);
 	});
 
 	test("dictionary literals", () => {

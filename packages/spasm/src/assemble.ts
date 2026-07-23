@@ -15,7 +15,7 @@ import {
 	type StatementContent,
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
-import { SEP } from "./symbols.ts";
+import { SEP, type SymbolAttributes } from "./symbols.ts";
 import { decodeStringLiteral, type Value } from "./value.ts";
 
 export interface AssembleResult {
@@ -317,6 +317,8 @@ function moduleEnv(
 ): EvalEnv {
 	return {
 		resolve: (name, origin) => scopes.resolve(origin ?? moduleId, name),
+		attributesOf: (name, origin) =>
+			scopes.attributesOf(origin ?? moduleId, name),
 		locationCounter: location,
 		report,
 		strict: true,
@@ -342,6 +344,13 @@ function defineAssignment(
 				assignment.operatorToken.end,
 			]);
 		}
+		if (assignment.attributes.length) {
+			const key = assignment.attributes[0]!.key;
+			report("Only labels have attributes - use `:=` for an address", [
+				key.start,
+				key.end,
+			]);
+		}
 		if (
 			scopes.defineLocal(definitionModule, text, undefined, "namespace", span)
 		) {
@@ -361,9 +370,68 @@ function defineAssignment(
 
 	const value = evaluate(assignment.expression, env);
 	const kind = assignment.operatorToken.type === ":=" ? "label" : "constant";
-	if (scopes.defineLocal(definitionModule, text, value, kind, span)) {
+	const attributes = evaluateAttributes(assignment, env, report);
+	if (
+		scopes.defineLocal(definitionModule, text, value, kind, span, attributes)
+	) {
 		report(`Symbol "${text}" is already defined`, span);
 	}
+}
+
+// The placement-attribute tail of a definition. Only labels (`:=`) carry
+// attributes; an equate defaults to `size: 1` (one byte) unless declared.
+// `size` is the only key so far, and it must be a non-negative number.
+function evaluateAttributes(
+	assignment: Assignment,
+	env: EvalEnv,
+	report: Reporter,
+): SymbolAttributes | undefined {
+	const isLabel = assignment.operatorToken.type === ":=";
+	if (!isLabel) {
+		const first = assignment.attributes[0];
+		if (first) {
+			report("Only labels have attributes - use `:=` for an address", [
+				first.key.start,
+				first.key.end,
+			]);
+		}
+		return undefined;
+	}
+
+	const attributes: SymbolAttributes = { size: 1n };
+	let sizeDeclared = false;
+	for (const attribute of assignment.attributes) {
+		const keySpan: readonly [number, number] = [
+			attribute.key.start,
+			attribute.key.end,
+		];
+		if (attribute.key.text !== "size") {
+			report(`Unknown attribute "${attribute.key.text}"`, keySpan);
+			continue;
+		}
+		if (sizeDeclared) {
+			report(`Attribute "size" is already set`, keySpan);
+			continue;
+		}
+		sizeDeclared = true;
+		const value = evaluate(attribute.value, env);
+		if (typeof value === "string") {
+			report(
+				"`size:` requires a number",
+				getExpressionLocation(attribute.value),
+			);
+			continue;
+		}
+		if (value !== undefined && value < 0n) {
+			report(
+				"`size:` must not be negative",
+				getExpressionLocation(attribute.value),
+			);
+			continue;
+		}
+		attributes.size = value; // may be undefined this pass; resolves later
+	}
+	return attributes;
 }
 
 // Lower a dictionary literal to qualified symbols: entry `key` of dict `N`

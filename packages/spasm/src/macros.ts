@@ -474,6 +474,10 @@ function substituteContent(
 				origin,
 				report,
 			);
+			content.attributes = content.attributes.map((attribute) => ({
+				...attribute,
+				value: substituteExpr(attribute.value, subst, origin, report),
+			}));
 			content.identifier = substituteName(content.identifier, subst, report);
 			break;
 		}
@@ -569,6 +573,11 @@ function substituteExpr(
 					value: substituteExpr(entry.value, subst, origin, report),
 				})),
 			};
+		case "builtin-call":
+			return {
+				...expr,
+				argument: substituteExpr(expr.argument, subst, origin, report),
+			};
 		default:
 			return expr; // literals and `*`
 	}
@@ -629,6 +638,9 @@ function validateBody(
 			case "dict-literal":
 				for (const entry of expr.entries) check(entry.value);
 				break;
+			case "builtin-call":
+				check(expr.argument);
+				break;
 			default:
 				break;
 		}
@@ -650,6 +662,7 @@ function validateBody(
 				break;
 			case "assignment":
 				check(content.expression);
+				for (const attribute of content.attributes) check(attribute.value);
 				break;
 			case "instruction":
 				if (isMacro(content.mnemonic.text)) break;

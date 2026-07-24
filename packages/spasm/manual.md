@@ -258,7 +258,7 @@ A module's symbols are **private by default**. `.export` publishes them, in seve
 .endmacro
 ```
 
-Bare `.export name` may appear any number of times and anywhere in the module; it is an error only if `name` is never defined at all. Exporting a [dictionary](#dictionaries) exports its entries.
+Bare `.export name` may appear anywhere in the module relative to the definition; it is an error if `name` is never defined at all. Each symbol may be exported only once. Exporting a [dictionary](#dictionaries) exports its entries.
 
 Importing has two forms:
 

@@ -1058,15 +1058,37 @@ describe("diagnostics with locations", () => {
 });
 
 describe("export name forms", () => {
-	test(".export name exports an elsewhere-defined symbol, repeatably", async () => {
+	test(".export name exports an elsewhere-defined symbol", async () => {
 		const host = memHost({
 			main: '.import "lib"\n.byte FOO\nlda entry\n',
-			lib: ".export FOO\n.export FOO\nFOO = 7\n.export entry\nentry:\n\tnop\n",
+			lib: ".export FOO\nFOO = 7\n.export entry\nentry:\n\tnop\n",
 		});
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		// lib collects first: entry/nop at 0; then main's byte and a zp lda.
 		expect([...r.output]).toEqual([0xea, 7, 0xa5, 0x00]);
+	});
+
+	test("exporting the same symbol twice is an error", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte FOO\n',
+			lib: ".export FOO\n.export FOO\nFOO = 7\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Symbol "FOO" is already exported');
+		expect(error.formatted).toMatch(/^lib:2:9: error: /);
+	});
+
+	test("a bare re-export of a defining export is an error too", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte FOO\n',
+			lib: ".export FOO = 7\n.export FOO\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([
+			'Symbol "FOO" is already exported',
+		]);
 	});
 
 	test(".export label: defines and exports in place", async () => {

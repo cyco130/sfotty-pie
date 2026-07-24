@@ -169,12 +169,31 @@ function assembleModules(
 		});
 	}
 
-	// A bare `.export name` must name a definition made somewhere in its module.
+	// A bare `.export name` must name a definition made somewhere in its
+	// module, and a symbol may be exported only once (exported macros live in
+	// the mnemonic namespace and have their own duplicate check).
 	for (const module of modules) {
+		const exported = new Set<string>();
 		for (const statement of module.statements) {
 			const content = statement.content;
+			if (content?.type !== "export") continue;
+			const nameToken =
+				content.nameToken ??
+				(content.content?.type === "assignment"
+					? content.content.identifier
+					: undefined);
+			if (!nameToken) continue;
+			if (exported.has(nameToken.text)) {
+				diagnostics.push({
+					type: "error",
+					start: nameToken.start,
+					end: nameToken.end,
+					message: `Symbol "${nameToken.text}" is already exported`,
+					file: module.id,
+				});
+			}
+			exported.add(nameToken.text);
 			if (
-				content?.type === "export" &&
 				content.nameToken &&
 				!content.definesLabel &&
 				!scopes.isDefined(module.id, content.nameToken.text)

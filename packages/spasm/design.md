@@ -31,7 +31,7 @@ Everything exported lives in [src/index.ts](src/index.ts):
 - `assemble(source, name?): AssembleResult` - assemble a single source string (no imports). **Synchronous** (no `Host`, so no I/O).
 - `assemble(entry, host): Promise<AssembleResult>` - assemble a project rooted at module id `entry`, reaching other modules through a `Host`. **Asynchronous**, because the host is.
 - `AssembleResult` - `{ output: Uint8Array, symbols: Map<string, Value>, diagnostics: Message[] }`. `output` is meaningful only when `diagnostics` is empty.
-- `Host` - `{ resolve(specifier, fromId): string | Promise<string>; read(id): string | Promise<string> }` (re-exported from the loader). Both may throw (or reject); the loader turns that into a diagnostic.
+- `Host` - `{ resolve(specifier, fromId): string | Promise<string>; read(id): string | Promise<string>; shortName?(id): string }` (re-exported from the loader). `resolve`/`read` may throw (or reject); the loader turns that into a diagnostic. `shortName` is the optional display name for formatted diagnostics (the CLI passes cwd-relative paths when shorter); ids stay canonical in `Message.file`.
 - `Message`, `Value` - the diagnostic and value types.
 
 **Sync core, async edge.** The `Host` is the only I/O and is consulted entirely upfront - `loadModules` (the loader) is the single async boundary, awaiting `resolve`/`read` while building the module graph. Everything after the graph is built (macro expansion, the multipass) is synchronous and shared by both entry points; the single-source overload just builds a one-module graph by parsing in-process, with no async at all. This keeps lexer/parser/evaluator/encoder sync and ready to port to a web or URL-backed host by swapping the `Host` alone.
@@ -123,7 +123,7 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (rou
 - **Relocation** - symbolic `.base()`/`.reloc`, and the `.base`/`.startof`/`.sizeof` builtins.
 - **Richer modules** - named/aliased imports (`.import "m": a, b` and aliases) and the `.namespace ... .endnamespace` inline-module block. (Dict-valued symbols, `::` access, namespaced imports `name = .import "m"` - macros included - and the label/bare export forms are done.)
 - **Richer macros** - keyword arguments and defaulted params, operand introspection builtins (`.mode()`/`.value()`), and exporting macro-defined symbols beyond the param-named-definition channel (fixed-name or derived names like `name_end`).
-- **Diagnostic polish** - file:line:col + caret formatting and multi-span notes ("previously defined here" and cycle chains) are done; still open: `shortName` shortening for path-id hosts and colorized output.
+- **Diagnostic polish** - file:line:col + caret formatting, multi-span notes ("previously defined here" and cycle chains), and `shortName` shortening (cwd-relative in the CLI) are done; still open: colorized output.
 - **Cyclic _definition_ detection** - `A = B` / `B = A` converges to undefined and reports "undefined symbol" (no hang), not a precise cycle error.
 - **A pretty-printer / formatter** - the parser keeps every token and its trivia precisely so the AST can round-trip back to source; nothing consumes that yet.
 

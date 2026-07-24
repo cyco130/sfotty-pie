@@ -11,10 +11,13 @@ import { decodeStringLiteral } from "./value.ts";
  * How the assembler reaches modules. `resolve` turns an `.import` specifier
  * into a canonical id (relative to the importing module); `read` returns a
  * module's source. Both may throw - the loader turns that into a diagnostic.
+ * `shortName`, when provided, gives a module's display name for formatted
+ * diagnostics (e.g. a cwd-relative path); ids stay canonical everywhere else.
  */
 export interface Host {
 	resolve(specifier: string, fromId: string): string | Promise<string>;
 	read(id: string): string | Promise<string>;
+	shortName?(id: string): string;
 }
 
 /** One resolved `.import`: `binding` is the namespace name, or null for a
@@ -92,7 +95,7 @@ export async function loadModules(
 		}
 
 		if (source !== undefined) {
-			const sourceFile = new SourceFile(id, source);
+			const sourceFile = new SourceFile(id, source, host.shortName?.(id) ?? id);
 			const { module, errors } = parse(sourceFile);
 			for (const error of errors) error.file = id;
 			diagnostics.push(...errors);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { assemble, type Host } from "./index.ts";
 
@@ -17,10 +17,15 @@ async function main(): Promise<void> {
 	}
 
 	// Node-like module resolution: ids are absolute paths, and a relative
-	// specifier resolves against the importing file's directory.
+	// specifier resolves against the importing file's directory. Diagnostics
+	// print cwd-relative paths when that's shorter.
 	const host: Host = {
 		resolve: (specifier, fromId) => resolve(dirname(fromId), specifier),
 		read: (id) => readFile(id, "utf8"),
+		shortName: (id) => {
+			const rel = relative(process.cwd(), id);
+			return rel.length < id.length ? rel : id;
+		},
 	};
 
 	const result = await assemble(resolve(input), host);

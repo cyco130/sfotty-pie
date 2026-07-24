@@ -1055,6 +1055,19 @@ describe("diagnostics with locations", () => {
 		const r = assemble("lda undef\n", "prog.s");
 		expect(r.diagnostics[0]!.formatted).toMatch(/^prog\.s:1:5: error: /);
 	});
+
+	test("a host shortName shortens the printed path, not the id", async () => {
+		const host: Host = {
+			resolve: (specifier) => specifier,
+			read: () => "lda undef\n",
+			shortName: (id) => id.split("/").pop()!,
+		};
+		const r = await assemble("/deep/path/main.s", host);
+		const error = r.diagnostics[0]!;
+		// The module id stays canonical; only the formatted rendering shortens.
+		expect(error.file).toBe("/deep/path/main.s");
+		expect(error.formatted).toMatch(/^main\.s:1:5: error: /);
+	});
 });
 
 describe("diagnostic notes", () => {

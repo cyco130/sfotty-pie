@@ -85,10 +85,10 @@ const REGEXES = [
 	[/\n|\r\n?/, "newline"],
 
 	// Whitespaces. A backslash before the line break is a line continuation:
-	// the whole sequence (trailing blanks allowed, comments not) is trivia, so
-	// the newline never reaches the parser.
+	// the whole sequence (trailing blanks and a trailing comment allowed) is
+	// trivia, so the newline never reaches the parser.
 	[/[ \t]+/, "whitespace"],
-	[/\\[ \t]*(?:\n|\r\n?)/, "whitespace"],
+	[/\\[ \t]*(?:;[^\n\r]*)?(?:\n|\r\n?)/, "whitespace"],
 	[/;[^\n\r]*/, "comment"],
 
 	// Keywords

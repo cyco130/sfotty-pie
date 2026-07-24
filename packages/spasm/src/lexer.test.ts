@@ -295,6 +295,16 @@ describe("line continuation", () => {
 		]);
 	});
 
+	test("a comment may follow the backslash", () => {
+		expect(one("\\ ; note\n")).toBe("whitespace");
+		expect(code(".byte 1, \\ ; note\n 2")).toEqual([
+			["byte", ".byte"],
+			["decimal", "1"],
+			[",", ","],
+			["decimal", "2"],
+		]);
+	});
+
 	test("a comment swallows a trailing backslash (no continuation)", () => {
 		const ts = tokens("; c \\\nnop");
 		expect(ts.some((t) => t.type === "newline")).toBe(true);

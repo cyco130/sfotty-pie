@@ -68,10 +68,10 @@ label: mnemonic operands ; comment
 
 Every part is optional. A statement may start with any number of `name:` labels (usually zero or one), which may also stand on a line of their own. Comments run from `;` to the end of the line. Blank lines are ignored.
 
-A backslash at the end of a line (trailing blanks allowed, but not a comment - a comment would swallow the backslash) continues the statement onto the next line:
+A backslash at the end of a line continues the statement onto the next line. Trailing blanks and a comment may follow the backslash (but the backslash must come first - inside a comment it is just comment text):
 
 ```
-	.byte 1, 2, 3, \
+	.byte 1, 2, 3, \ ; six bytes
 	      4, 5, 6
 ```
 

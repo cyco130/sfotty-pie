@@ -43,14 +43,16 @@ test("buildBootDisk lays out loader, size, and data", () => {
 	expect([...data.subarray(0, 2)]).toEqual([0xff, 0xff]);
 });
 
-test("booting the disk loads and runs the executable", () => {
-	const disk = buildBootDisk(XEX);
+// Play OS: copy the boot sectors to their load address, present mid-boot
+// state, and call the boot init vector (header bytes 4-5), like the real
+// boot would. Runs until the executable spins at its RUNAD target ($3013 in
+// both test files) and returns the machine for assertions.
+function bootAndRun(xex: Uint8Array): Atari {
+	const disk = buildBootDisk(xex);
 	const machine = new Atari({ os: recognizableOs(10240) });
 	machine.insertDisk(disk);
 	const cpu = machine.cpu; // the machine's own CPU, which its built-in SIO drives
 
-	// Play OS: copy the boot sectors to their load address and call the boot
-	// init vector (header bytes 4-5), like the real boot would.
 	for (let sector = 1; sector <= 3; sector++) {
 		const data = disk.readSector(sector)!;
 		for (let i = 0; i < data.length; i++) {
@@ -80,12 +82,17 @@ test("booting the disk loads and runs the executable", () => {
 	// the operand while writes are still pending.
 	for (
 		let i = 0;
-		i < 100_000 && !(cpu.PC === 0x3013 && cpu.state === DECODE);
+		i < 2_000_000 && !(cpu.PC === 0x3013 && cpu.state === DECODE);
 		i++
 	) {
 		cpu.cycle();
 	}
 	expect(cpu.PC).toBe(0x3013);
+	return machine;
+}
+
+test("booting the disk loads and runs the executable", () => {
+	const machine = bootAndRun(XEX);
 
 	// The data chunk arrived...
 	expect(machine.mmu.read(0x2000, ReadOptions.NONE)).toBe(0x11);
@@ -103,4 +110,31 @@ test("booting the disk loads and runs the executable", () => {
 	// hook re-boots the disk instead of re-entering the spent loader.
 	expect(machine.mmu.read(0x0c, ReadOptions.NONE)).toBe(0x77);
 	expect(machine.mmu.read(0x0d, ReadOptions.NONE)).toBe(0xe4);
+});
+
+// A file sized an exact multiple of 128 completely fills its last sector.
+// The loader's copy loop used to refill the buffer eagerly when it emptied,
+// prefetching one sector past the file's last - a sector the boot disk
+// doesn't have - and dying with a disk error.
+test("a file that exactly fills its last sector boots", () => {
+	// A data chunk at $2000 padding the file to 384 bytes, then the same
+	// RUNAD chunk as XEX: code at $3010 (inc $3101, spin at $3013).
+	// prettier-ignore
+	const tail = [
+		0x10, 0x30, 0x15, 0x30, 0xee, 0x01, 0x31, 0x4c, 0x13, 0x30,
+		0xe0, 0x02, 0xe1, 0x02, 0x10, 0x30,
+	];
+	const padData = 384 - 2 - 4 - tail.length;
+	const end = 0x2000 + padData - 1;
+	// prettier-ignore
+	const xex = Uint8Array.from([
+		0xff, 0xff,
+		0x00, 0x20, end & 0xff, end >> 8,
+		...new Array(padData).fill(0xaa),
+		...tail,
+	]);
+	expect(xex.length % 128).toBe(0);
+
+	const machine = bootAndRun(xex);
+	expect(machine.mmu.read(0x3101, ReadOptions.NONE)).toBe(1);
 });

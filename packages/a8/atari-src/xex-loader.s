@@ -122,7 +122,16 @@ copy_next:
 copy_incx:
 	inx
 	bpl copy
-	bmi refill
+
+	; Buffer exhausted mid-copy: refill only if more bytes are wanted.
+	; An eager refill here would prefetch one sector past the file's last
+	; sector when a request ends exactly on a sector boundary - for a
+	; file sized an exact multiple of 128, that sector doesn't exist and
+	; the boot dies with a disk error.
+	lda count
+	ora count + 1
+	bne refill
+	; X = 128 = empty, recorded below
 
 copy_done:
 	stx buffer_offset

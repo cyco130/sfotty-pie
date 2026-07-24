@@ -97,12 +97,13 @@ describe("segments", () => {
 	});
 
 	test("emplace reserves address space without emitting bytes", () => {
-		const { bytes, symbols } = asm(
+		const { bytes, symbols, messages } = asm(
 			'.define_segment "BSS"\n.define_segment "CODE"\n' +
 				'.segment "OUTPUT"\n.org $0200\n.emplace "BSS"\n.org $0400\n.emit "CODE"\n' +
-				'.segment "BSS"\nbuf:\n\t.byte 0, 0, 0\n' +
+				'.segment "BSS"\nbuf:\n\t.res 3\n' +
 				'.segment "CODE"\n\tlda buf\n',
 		);
+		expect(messages).toEqual([]);
 		expect(symbols.get("buf")).toBe(0x0200n); // got an address...
 		expect(bytes).toEqual([0xad, 0x00, 0x02]); // ...but BSS emitted no file bytes
 	});
@@ -200,6 +201,87 @@ describe("segments", () => {
 			'.segment "OUTPUT"\n.org $0400\n.emit "A"\n.segment "A"\n.byte 1\n',
 		);
 		expect(messages).toEqual([]);
+	});
+
+	test("a defined but never-placed segment is reported", () => {
+		const { messages } = asm('.define_segment "CODW"\n.byte 1\n');
+		expect(messages).toEqual([
+			'Segment "CODW" is never placed - `.emit`, `.emplace`, or `.discard` it',
+		]);
+	});
+
+	test("a switched-to but never-placed segment is reported", () => {
+		const { messages } = asm('.segment "A"\n.byte 1\n');
+		expect(messages).toEqual([
+			'Segment "A" is never placed - `.emit`, `.emplace`, or `.discard` it',
+		]);
+	});
+
+	test(".discard satisfies the consumption check and drops the bytes", () => {
+		const { bytes, messages } = asm(
+			'.discard "A"\n.byte 9\n.segment "A"\n.byte 1\n',
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([9]); // A's content never reaches the file
+	});
+
+	test("discarding an unknown segment is reported", () => {
+		expect(asm('.discard "NOPE"\n.byte 1\n').messages).toEqual([
+			'Unknown segment "NOPE"',
+		]);
+	});
+
+	test("discarding a placed segment is contradictory", () => {
+		const r = assemble(
+			'.segment "OUTPUT"\n.emit "A"\n.discard "A"\n.segment "A"\n.byte 1\n',
+			"t",
+		);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Segment "A" is discarded but also placed');
+		expect(error.notes?.[0]?.message).toBe("Placed here");
+	});
+
+	test("a duplicate discard is reported with the first site", () => {
+		const r = assemble(
+			'.discard "A"\n.discard "A"\n.segment "A"\n.byte 1\n',
+			"t",
+		);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Segment "A" is already discarded');
+		expect(error.notes?.[0]?.message).toBe("First discarded here");
+	});
+
+	test("byte-emitting content in an emplaced segment is reported", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0200\n.emplace "BSS"\n' +
+				'.segment "BSS"\nbuf: .res 3\n.byte 1\n\tnop\n',
+		);
+		expect(messages).toEqual([
+			'Emplaced segment "BSS" contains byte-emitting content - only `.res` is allowed',
+			'Emplaced segment "BSS" contains byte-emitting content - only `.res` is allowed',
+		]);
+	});
+
+	test("the emplaced-content rule applies transitively", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0200\n.emplace "A"\n' +
+				'.segment "A"\n.emplace "B"\n' +
+				'.segment "B"\n.byte 1\n',
+		);
+		expect(messages).toEqual([
+			'Emplaced segment "B" contains byte-emitting content - only `.res` is allowed',
+		]);
+	});
+
+	test(".emit inside an emplaced segment is reported", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0200\n.emplace "A"\n' +
+				'.segment "A"\n.emit "B"\n' +
+				'.segment "B"\n.res 2\n',
+		);
+		expect(messages).toEqual([
+			"Cannot `.emit` inside an emplaced segment - use `.emplace`",
+		]);
 	});
 
 	// The lib.s-inlined hello, exercising the whole engine: cross-segment refs

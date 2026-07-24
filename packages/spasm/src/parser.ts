@@ -222,6 +222,15 @@ class Parser {
 				};
 			}
 
+			case "discard": {
+				this.#consume();
+				return {
+					type: "discard",
+					discardToken: token,
+					nameToken: this.#expect("string"),
+				};
+			}
+
 			case "import": {
 				this.#consume();
 				return {
@@ -1125,6 +1134,7 @@ export type StatementContent =
 	| Segment
 	| Emit
 	| Emplace
+	| Discard
 	| Import
 	| Export
 	| Res
@@ -1295,6 +1305,14 @@ export interface Emit {
 export interface Emplace {
 	type: "emplace";
 	emplaceToken: Token<"emplace">;
+	nameToken: Token<"string">;
+}
+
+/** `.discard "X"` - deliberately drop a segment (satisfies the every-segment-
+ * is-consumed check without placing it). */
+export interface Discard {
+	type: "discard";
+	discardToken: Token<"discard">;
 	nameToken: Token<"string">;
 }
 

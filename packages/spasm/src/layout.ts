@@ -10,7 +10,13 @@ import type { Value } from "./value.ts";
  * segment at the current location.
  */
 export type Item =
-	| { kind: "bytes"; bytes: number[] }
+	| {
+			kind: "bytes";
+			bytes: number[];
+			/** The originating statement, for "emplaced segment emits bytes". */
+			moduleId: string;
+			span: readonly [number, number];
+	  }
 	| { kind: "org"; addr: bigint }
 	| {
 			kind: "label";
@@ -127,7 +133,11 @@ export function render(
 			: [];
 	};
 
-	function renderSegment(segment: Segment, baseLC: bigint): number[] {
+	function renderSegment(
+		segment: Segment,
+		baseLC: bigint,
+		emplaced: boolean,
+	): number[] {
 		bases.set(segment.name, baseLC);
 		onStack.add(segment.name);
 		stackList.push(segment.name);
@@ -138,6 +148,15 @@ export function render(
 		for (const item of segment.items) {
 			switch (item.kind) {
 				case "bytes":
+					// An emplaced segment reserves address space but never reaches
+					// the file - real content there would be silently dropped.
+					if (emplaced && item.bytes.length > 0) {
+						report(
+							`Emplaced segment "${segment.name}" contains byte-emitting content - only \`.res\` is allowed`,
+							item.span,
+							item.moduleId,
+						);
+					}
 					bytes.push(...item.bytes);
 					lc += BigInt(item.bytes.length);
 					break;
@@ -209,7 +228,18 @@ export function render(
 						span: item.span,
 						moduleId: item.moduleId,
 					});
-					const subBytes = renderSegment(sub, lc);
+					if (emplaced && item.kind === "emit") {
+						report(
+							"Cannot `.emit` inside an emplaced segment - use `.emplace`",
+							item.span,
+							item.moduleId,
+						);
+					}
+					const subBytes = renderSegment(
+						sub,
+						lc,
+						emplaced || item.kind === "emplace",
+					);
 					if (item.kind === "emit") bytes.push(...subBytes);
 					lc += BigInt(subBytes.length); // emplace reserves without emitting
 					break;
@@ -224,6 +254,6 @@ export function render(
 	}
 
 	const root = segments.get(rootName);
-	const bytes = root ? renderSegment(root, 0n) : [];
+	const bytes = root ? renderSegment(root, 0n, false) : [];
 	return { bytes, bases, resSizes, sizes };
 }

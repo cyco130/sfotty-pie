@@ -163,7 +163,60 @@ function assembleModules(
 		// Collect content into segments (defining constants), then render OUTPUT
 		// to bytes (defining labels). Everything evaluates against the previous
 		// pass's symbol values and segment bases; this pass produces the new ones.
-		const segments = collect(modules, scopes, report, bases, resSizes, sizes);
+		const { segments, firstSeen, discards } = collect(
+			modules,
+			scopes,
+			report,
+			bases,
+			resSizes,
+			sizes,
+		);
+
+		// Segment sanitation: every defined segment must be consumed - placed
+		// with `.emit`/`.emplace` somewhere, or deliberately dropped with
+		// `.discard`. This is the typo net: a stray `.segment "CODW"` must not
+		// silently orphan its bytes.
+		const placedAt = new Map<string, SegmentSite>();
+		for (const segment of segments.values()) {
+			for (const item of segment.items) {
+				if (
+					(item.kind === "emit" || item.kind === "emplace") &&
+					!placedAt.has(item.segment)
+				) {
+					placedAt.set(item.segment, {
+						span: item.span,
+						moduleId: item.moduleId,
+					});
+				}
+			}
+		}
+		for (const [name, site] of discards) {
+			if (!segments.has(name)) {
+				report(`Unknown segment "${name}"`, site.span, site.moduleId);
+				continue;
+			}
+			const placed = placedAt.get(name);
+			if (placed) {
+				report(
+					`Segment "${name}" is discarded but also placed`,
+					site.span,
+					site.moduleId,
+					[noteAt("Placed here", placed.span, placed.moduleId)],
+				);
+			}
+		}
+		for (const name of segments.keys()) {
+			if (name === "OUTPUT" || placedAt.has(name) || discards.has(name)) {
+				continue;
+			}
+			const seen = firstSeen.get(name);
+			report(
+				`Segment "${name}" is never placed - \`.emit\`, \`.emplace\`, or \`.discard\` it`,
+				seen?.span ?? [0, 0],
+				seen?.moduleId,
+			);
+		}
+
 		const result = render(
 			segments,
 			"OUTPUT",
@@ -308,6 +361,20 @@ function assembleModules(
  * at its base from the previous render - so instructions get a pc for branch
  * offsets (same-segment branches are base-invariant, so this converges).
  */
+/** A source location a segment-level diagnostic can point at. */
+interface SegmentSite {
+	span: readonly [number, number];
+	moduleId: string;
+}
+
+interface CollectResult {
+	segments: Map<string, Segment>;
+	/** Each segment's first `.define_segment`/`.segment` site, for diagnostics. */
+	firstSeen: Map<string, SegmentSite>;
+	/** Each `.discard`ed segment's (first) discard site. */
+	discards: Map<string, SegmentSite>;
+}
+
 function collect(
 	modules: readonly LoadedModule[],
 	scopes: Scopes,
@@ -315,8 +382,10 @@ function collect(
 	bases: Map<string, bigint>,
 	resSizes: Map<string, bigint>,
 	sizes: Map<string, bigint>,
-): Map<string, Segment> {
+): CollectResult {
 	const segments = new Map<string, Segment>();
+	const firstSeen = new Map<string, SegmentSite>();
+	const discards = new Map<string, SegmentSite>();
 	const getSegment = (name: string): Segment => {
 		let segment = segments.get(name);
 		if (!segment) {
@@ -376,18 +445,56 @@ function collect(
 						}
 					}
 					break;
-				case "define-segment":
-					getSegment(segmentName(content.nameToken, report, moduleId));
+				case "define-segment": {
+					const name = segmentName(content.nameToken, report, moduleId);
+					getSegment(name);
+					if (!firstSeen.has(name)) {
+						firstSeen.set(name, {
+							span: [content.nameToken.start, content.nameToken.end],
+							moduleId,
+						});
+					}
 					break;
-				case "segment":
-					current = getSegment(
-						segmentName(content.nameToken, report, moduleId),
-					);
+				}
+				case "segment": {
+					const name = segmentName(content.nameToken, report, moduleId);
+					current = getSegment(name);
+					if (!firstSeen.has(name)) {
+						firstSeen.set(name, {
+							span: [content.nameToken.start, content.nameToken.end],
+							moduleId,
+						});
+					}
 					break;
-				case "segment-shorthand":
+				}
+				case "segment-shorthand": {
 					// `.code` -> "CODE", `.rodata` -> "RODATA", etc.
-					current = getSegment(content.keyword.text.slice(1).toUpperCase());
+					const name = content.keyword.text.slice(1).toUpperCase();
+					current = getSegment(name);
+					if (!firstSeen.has(name)) {
+						firstSeen.set(name, {
+							span: [content.keyword.start, content.keyword.end],
+							moduleId,
+						});
+					}
 					break;
+				}
+				case "discard": {
+					const name = segmentName(content.nameToken, report, moduleId);
+					const span: readonly [number, number] = [
+						content.nameToken.start,
+						content.nameToken.end,
+					];
+					const prior = discards.get(name);
+					if (prior) {
+						report(`Segment "${name}" is already discarded`, span, moduleId, [
+							noteAt("First discarded here", prior.span, prior.moduleId),
+						]);
+					} else {
+						discards.set(name, { span, moduleId });
+					}
+					break;
+				}
 				case "emit":
 				case "emplace": {
 					const placed = segmentName(content.nameToken, report, moduleId);
@@ -512,7 +619,7 @@ function collect(
 		for (const statement of module.statements) collectStatement(statement);
 	}
 
-	return segments;
+	return { segments, firstSeen, discards };
 }
 
 /**
@@ -853,10 +960,17 @@ function collectContent(
 
 		case "byte":
 		case "word": {
+			const keyword =
+				content.type === "byte" ? content.byteToken : content.wordToken;
 			const size = content.type === "byte" ? 1 : 2;
 			const bytes: number[] = [];
 			for (const [expr] of content.list) emitData(expr, env, bytes, size);
-			output.items.push({ kind: "bytes", bytes });
+			output.items.push({
+				kind: "bytes",
+				bytes,
+				moduleId,
+				span: [keyword.start, keyword.end],
+			});
 			return location + BigInt(bytes.length);
 		}
 
@@ -884,7 +998,12 @@ function collectContent(
 				location,
 				report: env.report,
 			});
-			output.items.push({ kind: "bytes", bytes });
+			output.items.push({
+				kind: "bytes",
+				bytes,
+				moduleId,
+				span: [content.mnemonic.start, content.mnemonic.end],
+			});
 			return location + BigInt(bytes.length);
 		}
 

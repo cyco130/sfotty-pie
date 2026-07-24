@@ -216,6 +216,11 @@ A **segment** is a named collector of bytes, labels, and reservations. At any po
 
 Placement is what turns a segment's labels into absolute addresses: a label's value is the segment's base (where it was placed) plus the label's offset within the segment. Segments may emit other segments, forming a tree rooted at `OUTPUT`. Placing an unknown segment, placing one circularly, or placing the same segment more than once (which would give its labels two contradictory addresses) are all errors.
 
+Two sanitation rules keep the segment plumbing honest:
+
+- **Every defined segment must be consumed.** A segment you `.define_segment` or `.segment` into must be `.emit`ted or `.emplace`d somewhere - or deliberately dropped with **`.discard "NAME"`**. A typo like `.segment "CODW"` is therefore an error, never silently orphaned bytes. A discarded segment's content stays out of the file entirely, and referencing its labels is an undefined-symbol error; discarding a segment that is also placed is its own error.
+- **An emplaced segment may only reserve.** `.res`, labels, and nested `.emplace` are fine; anything that would emit bytes - instructions, `.byte`, `.word`, or a nested `.emit` - is an error, because emplaced content never reaches the file and real bytes there would be silently dropped.
+
 **`.org expr` sets the run address, not the file position.** Spasm tracks two counters: the location counter `*` (the address code runs at, which labels resolve to) and the file offset (how many bytes have been written). `.org` jumps the location counter and writes nothing, so a file header can sit at file offset 0 with no run address while the code after `.org $2000` runs at `$2000` yet is stored right after the header. `.emplace` advances the location counter without advancing the file offset for the same reason.
 
 Putting it together, an Atari XEX-style layout reads:
@@ -548,6 +553,7 @@ If the pass cap is hit without convergence (rare - it requires pathological layo
 | `.code` `.rodata` `.data` `.bss` `.zeropage`     | [Segments and output layout](#segments-and-output-layout) |
 | `.emit "NAME"`                                   | [Segments and output layout](#segments-and-output-layout) |
 | `.emplace "NAME"`                                | [Segments and output layout](#segments-and-output-layout) |
+| `.discard "NAME"`                                | [Segments and output layout](#segments-and-output-layout) |
 | `.if cond` / `.elseif cond` / `.else` / `.endif` | [Conditional assembly](#conditional-assembly)             |
 | `.error message`                                 | [Conditional assembly](#conditional-assembly)             |
 | `.import "spec"` / `name = .import "spec"`       | [Modules](#modules)                                       |

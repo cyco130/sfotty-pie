@@ -87,6 +87,8 @@ function content(c: StatementContent): string {
 			return `.emit ${c.nameToken.text}`;
 		case "emplace":
 			return `.emplace ${c.nameToken.text}`;
+		case "discard":
+			return `.discard ${c.nameToken.text}`;
 		case "import":
 			return `${c.binding ? `${c.binding.text} = ` : ""}.import ${c.specToken.text}`;
 		case "export":

@@ -50,6 +50,7 @@ export const DOT_KEYWORDS = [
 	"define_segment",
 	"emit",
 	"emplace",
+	"discard",
 	"import",
 	"export",
 	"out",

@@ -14,7 +14,7 @@ export class Lexer {
 			this.position++;
 
 			return {
-				type: "error",
+				type: "invalid",
 				text: this.#source.slice(start, this.position),
 				start,
 				end: this.position,
@@ -63,6 +63,11 @@ export const DOT_KEYWORDS = [
 	"endmacro",
 	"attributes",
 	"sizeof",
+	"if",
+	"elseif",
+	"else",
+	"endif",
+	"error",
 ] as const;
 
 const REGISTER_NAMES = ["a", "x", "y"] as const;
@@ -100,7 +105,7 @@ const REGEXES = [
 			] as const,
 	),
 
-	[/\.[a-zA-Z_][a-zA-Z_0-9]*/, "error:keyword"],
+	[/\.[a-zA-Z_][a-zA-Z_0-9]*/, "invalid:keyword"],
 
 	...REGISTER_NAMES.map(
 		(keyword) =>
@@ -120,11 +125,11 @@ const REGEXES = [
 
 	// String literals (single-line: a raw line break ends recovery here)
 	[/"(?:[^"\r\n\\]|\\.)*"/, "string"],
-	[/"(?:[^"\r\n\\]|\\.)*/, "error:string"],
+	[/"(?:[^"\r\n\\]|\\.)*/, "invalid:string"],
 
 	// Character literals (single-line)
 	[/'(?:[^'\r\n\\]|\\.)*'/, "character"],
-	[/'(?:[^'\r\n\\]|\\.)*/, "error:character"],
+	[/'(?:[^'\r\n\\]|\\.)*/, "invalid:character"],
 
 	// Multi character punctuation (must precede its single-character prefixes).
 	// Note `<<` vs `< <`: the shift lexes greedily, so comparing against a
@@ -169,7 +174,7 @@ const BIG_REGEX = new RegExp(
 	}).join("|"),
 );
 
-export type TokenType = (typeof REGEXES)[number][1] | "error";
+export type TokenType = (typeof REGEXES)[number][1] | "invalid";
 
 export type Token<T extends TokenType = TokenType> = Distribute<T>;
 
@@ -183,8 +188,10 @@ interface TypedToken<T extends TokenType = TokenType> {
 	/**
 	 * The module id an identifier lexically binds to. Macro expansion stamps
 	 * this on the free identifiers of an expanded body (hygiene: they resolve
-	 * where the macro was defined, not where it was called). Absent everywhere
-	 * else - an unstamped identifier binds to its containing module.
+	 * where the macro was defined, not where it was called), and on `.if`/
+	 * `.error` keywords (so keyword-spanned diagnostics attribute to the
+	 * macro's file). Absent everywhere else - an unstamped identifier binds to
+	 * its containing module.
 	 */
 	origin?: string;
 }

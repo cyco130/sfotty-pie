@@ -14,6 +14,7 @@ For the JavaScript API and the CLI, see the [readme](./readme.md); for the assem
 - [Instructions and addressing modes](#instructions-and-addressing-modes)
 - [Data and fill directives](#data-and-fill-directives)
 - [Segments and output layout](#segments-and-output-layout)
+- [Conditional assembly](#conditional-assembly)
 - [Modules](#modules)
 - [Macros](#macros)
 - [Expression macros](#expression-macros)
@@ -239,6 +240,65 @@ chunk_end:
 In practice a layout script like this lives in a [format macro](#the-format-macro-pattern) so programs can apply it with one line.
 
 Two scoping notes. Segments are **build-global, keyed by name**: a `.segment "CODE"` in one module and an `.emit "CODE"` in another meet in the same segment (this is what lets a format module place a program's code). Symbols, by contrast, stay module-scoped. And when several modules write to the same segment, their content accumulates in module load order - imported modules first, importers after, source order within each module. Each module starts collecting into `OUTPUT`; a `.segment` switch does not carry over from one module to the next.
+
+## Conditional assembly
+
+`.if` selects statements to assemble based on a condition, with the full power of the multipass engine behind it - the condition may read anything the layout knows, including `*`, label addresses, and distances:
+
+```
+.if mode = 2
+	.byte 2
+.elseif mode = 3
+	.byte 3
+.else
+	.byte 0
+.endif
+```
+
+The first arm whose condition is nonzero is assembled; the others are skipped entirely. `.elseif` arms and the final `.else` are optional, and blocks nest.
+
+**Arm selection is re-decided every pass.** Because conditions may depend on addresses, and addresses depend on which arms are taken, `.if` participates in the same fixpoint as operand sizing: each pass picks arms using the previous pass's values, and assembly ends when nothing changes. Two rules make this converge and keep every intermediate result valid:
+
+- **An unresolved condition skips its arm**, so everything falls through to `.else` (or to nothing) until the values settle. If a condition is still unresolved on the final pass, its undefined names are reported just like any other undefined symbol.
+- **Write the `.else` arm as the pessimistic, always-correct form.** Selection should only ever move from `.else` to a more specific arm as values resolve - the exact analog of the assembler starting an operand at absolute and shrinking it to zero page. A condition written the other way around can oscillate; the assembler's convergence backstop catches that with a "did not converge" warning rather than a wrong program.
+
+The classic use is a span-dependent branch - a `jne` that reaches any distance, using the short form when the target is close enough:
+
+```
+.macro jne target
+	.if target - * < 130 && * - target < 127
+		bne target
+	.else
+		beq skip
+		jmp target
+skip:
+	.endif
+.endmacro
+```
+
+While `target` is unresolved the long form is used; once the distance is known and fits, the expansion shrinks to a single `bne`. (`130` and `127` account for the branch reaching from `* + 2`.)
+
+**Arms are scopes.** A name defined inside an arm - a label like `skip:` above, or a constant - is local to that arm: it cannot be referenced from outside, and both arms may define the same name without colliding. This is what keeps the program's set of definitions stable while arm selection flips during iteration. To name "the address of whichever arm wins", put the label on the `.if` itself - both arms start there:
+
+```
+handler: .if fast_path
+	; short version
+.else
+	; general version
+.endif
+```
+
+To select a _value_ conditionally, use an expression instead of an `.if` (comparison operators return 1 or 0): `size = 2 + (big > 255)`. Arms are also emit-only: `.import`, `.export`, and `.macro` are not allowed inside them, and a macro parameter (including `.out`) may not be defined inside an arm. Everything else - including `.segment` switches, which persist past the `.endif` like any other statement - is ordinary.
+
+**`.error message`** reports an assembly error with the given string. On its own it fires unconditionally; inside an `.if` it fires only when its arm is taken, and like all diagnostics it is evaluated against the _converged_ layout - so address-dependent bounds checks fire exactly when the final program actually overflows, never spuriously mid-iteration:
+
+```
+.org $80
+	.emplace "ZEROPAGE"
+.if * > $100
+.error "Zero page overflow"
+.endif
+```
 
 ## Modules
 
@@ -477,28 +537,30 @@ If the pass cap is hit without convergence (rare - it requires pathological layo
 
 ## Directive reference
 
-| Directive                                    | Section                                                   |
-| -------------------------------------------- | --------------------------------------------------------- |
-| `.byte values...`                            | [Data and fill directives](#data-and-fill-directives)     |
-| `.word values...`                            | [Data and fill directives](#data-and-fill-directives)     |
-| `.res count`                                 | [Data and fill directives](#data-and-fill-directives)     |
-| `.org address`                               | [Segments and output layout](#segments-and-output-layout) |
-| `.segment "NAME"`                            | [Segments and output layout](#segments-and-output-layout) |
-| `.define_segment "NAME"`                     | [Segments and output layout](#segments-and-output-layout) |
-| `.code` `.rodata` `.data` `.bss` `.zeropage` | [Segments and output layout](#segments-and-output-layout) |
-| `.emit "NAME"`                               | [Segments and output layout](#segments-and-output-layout) |
-| `.emplace "NAME"`                            | [Segments and output layout](#segments-and-output-layout) |
-| `.import "spec"` / `name = .import "spec"`   | [Modules](#modules)                                       |
-| `.export ...`                                | [Modules](#modules)                                       |
-| `.macro name params` ... `.endmacro`         | [Macros](#macros)                                         |
-| `.out` (parameter marker)                    | [Macros](#macros)                                         |
-| `.attributes(SYM)` / `.sizeof(SYM)`          | [Symbol attributes](#symbol-attributes)                   |
+| Directive                                        | Section                                                   |
+| ------------------------------------------------ | --------------------------------------------------------- |
+| `.byte values...`                                | [Data and fill directives](#data-and-fill-directives)     |
+| `.word values...`                                | [Data and fill directives](#data-and-fill-directives)     |
+| `.res count`                                     | [Data and fill directives](#data-and-fill-directives)     |
+| `.org address`                                   | [Segments and output layout](#segments-and-output-layout) |
+| `.segment "NAME"`                                | [Segments and output layout](#segments-and-output-layout) |
+| `.define_segment "NAME"`                         | [Segments and output layout](#segments-and-output-layout) |
+| `.code` `.rodata` `.data` `.bss` `.zeropage`     | [Segments and output layout](#segments-and-output-layout) |
+| `.emit "NAME"`                                   | [Segments and output layout](#segments-and-output-layout) |
+| `.emplace "NAME"`                                | [Segments and output layout](#segments-and-output-layout) |
+| `.if cond` / `.elseif cond` / `.else` / `.endif` | [Conditional assembly](#conditional-assembly)             |
+| `.error message`                                 | [Conditional assembly](#conditional-assembly)             |
+| `.import "spec"` / `name = .import "spec"`       | [Modules](#modules)                                       |
+| `.export ...`                                    | [Modules](#modules)                                       |
+| `.macro name params` ... `.endmacro`             | [Macros](#macros)                                         |
+| `.out` (parameter marker)                        | [Macros](#macros)                                         |
+| `.attributes(SYM)` / `.sizeof(SYM)`              | [Symbol attributes](#symbol-attributes)                   |
 
 ## Not yet implemented
 
 Spasm's syntax is still evolving. Notable planned constructs that do **not** exist yet, so you aren't left wondering:
 
-- Conditional assembly (`.if`/`.else`/`.endif` and a static `#if` family) and `.error`.
+- The static `#if` family: conditionals decided once, before layout, that may alter program structure (gate imports, exports, and macro definitions - everything the iterative `.if` deliberately cannot).
 - Backtick-quoted symbol names (for names that collide with `a`/`x`/`y` or aren't valid identifiers).
 - `@local` labels (macro-body hygiene covers the common case today).
 - Operand size assertions (`lda .word addr` to force absolute).

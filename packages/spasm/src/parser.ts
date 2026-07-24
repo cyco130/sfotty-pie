@@ -288,6 +288,29 @@ class Parser {
 				return { type: "segment-shorthand", keyword: token };
 			}
 
+			case "if":
+				return this.#ifBlock(token);
+
+			case "error": {
+				this.#consume();
+				return {
+					type: "error-directive",
+					errorToken: token,
+					message: this.#expression(1),
+				};
+			}
+
+			// An arm/end keyword only appears inside `#ifBlock`'s body loop; in
+			// statement position it's stray (or carries a label, which arms and
+			// `.endif` can't).
+			case "elseif":
+			case "else":
+			case "endif": {
+				const error = new ParseError(token, ["a statement"]);
+				error.message = `\`.${token.type}\` without a matching \`.if\``;
+				throw error;
+			}
+
 			case "macro": {
 				this.#consume();
 				const nameToken = this.#expect("identifier");
@@ -319,6 +342,55 @@ class Parser {
 		}
 
 		return null;
+	}
+
+	// `.if cond ... [.elseif cond ...]* [.else ...] .endif` - a conditional
+	// block. Arms hold ordinary statements; nested `.if`s consume their own
+	// `.endif` recursively via `#statement`.
+	#ifBlock(ifToken: Token<"if">): IfBlock {
+		this.#consume();
+		const arms: IfArm[] = [];
+		let arm: IfArm = {
+			keyword: ifToken,
+			condition: this.#expression(1),
+			body: [],
+		};
+		this.#expect("newline");
+
+		for (;;) {
+			const token = this.#token;
+			switch (token.type) {
+				case "elseif": {
+					if (arm.condition === null) {
+						throw new ParseError(token, ['".endif" (".else" is final)']);
+					}
+					arms.push(arm);
+					this.#consume();
+					arm = { keyword: token, condition: this.#expression(1), body: [] };
+					this.#expect("newline");
+					break;
+				}
+				case "else": {
+					if (arm.condition === null) {
+						throw new ParseError(token, ['".endif" (".else" is final)']);
+					}
+					arms.push(arm);
+					this.#consume();
+					arm = { keyword: token, condition: null, body: [] };
+					this.#expect("newline");
+					break;
+				}
+				case "endif": {
+					arms.push(arm);
+					this.#consume();
+					return { type: "if-block", arms, endifToken: token };
+				}
+				case "eof":
+					throw new ParseError(token, ['".endif"']);
+				default:
+					arm.body.push(this.#statement());
+			}
+		}
 	}
 
 	// Operands are comma-separated. A comma followed by a register name binds
@@ -1057,7 +1129,41 @@ export type StatementContent =
 	| Export
 	| Res
 	| SegmentShorthand
-	| Macro;
+	| Macro
+	| IfBlock
+	| ErrorDirective;
+
+/**
+ * One arm of an `.if` block: the opening keyword, its condition (null for
+ * `.else`), and the arm's statements. Names defined inside an arm are local
+ * to it (see the arm-scoping pass in macros.ts).
+ */
+export interface IfArm {
+	keyword: Token<"if" | "elseif" | "else">;
+	condition: Expression | null;
+	body: Statement[];
+}
+
+/**
+ * `.if cond ... [.elseif cond ...]* [.else ...] .endif`. Arm selection is
+ * re-decided every pass: the first arm whose condition is resolved and
+ * nonzero wins; an unresolved condition is skipped, so everything falls to
+ * `.else` until the conditions settle - write the `.else` arm as the
+ * pessimistic (always-correct) form.
+ */
+export interface IfBlock {
+	type: "if-block";
+	arms: IfArm[];
+	endifToken: Token<"endif">;
+}
+
+/** `.error expr` - report the (string) message when collected, on the
+ * converged pass only. */
+export interface ErrorDirective {
+	type: "error-directive";
+	errorToken: Token<"error">;
+	message: Expression;
+}
 
 /** One `key: value` in a definition's attribute tail (`X := $0300, size: 2`). */
 export interface Attribute {

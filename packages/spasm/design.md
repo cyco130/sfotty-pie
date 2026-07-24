@@ -20,9 +20,10 @@ source -> lex -> parse -> +------------- multipass loop -------------+ -> bytes
 2. **Parse** ([src/parser.ts](src/parser.ts)) - recursive descent for statements, a Pratt parser for expressions, producing a CST-ish AST that keeps its tokens (and trivia) for a future pretty-printer.
 3. **Load** ([src/loader.ts](src/loader.ts)) - resolve and parse the `.import` closure into a module graph.
 4. **Expand macros** ([src/macros.ts](src/macros.ts)) - a static rewrite of every module's statements before assembly; macros are visible across modules via `.export .macro` and expansion is hygienic (see below).
-5. **Assemble** ([src/assemble.ts](src/assemble.ts)) - the multipass loop: each pass _collects_ content into segments (evaluating expressions and encoding instructions) and then _renders_ the OUTPUT segment to bytes, until the symbol table reaches a fixpoint.
+5. **Scope `.if` arms** ([src/macros.ts](src/macros.ts), `scopeIfArms`) - another static rewrite: names defined inside `.if` arms rename to arm-locals, so the outside-visible definition set is pass-invariant while arm selection iterates (see Conditional assembly).
+6. **Assemble** ([src/assemble.ts](src/assemble.ts)) - the multipass loop: each pass _collects_ content into segments (evaluating expressions, selecting `.if` arms, and encoding instructions) and then _renders_ the OUTPUT segment to bytes, until the symbol table reaches a fixpoint.
 
-Steps 1-4 happen once; step 5 iterates.
+Steps 1-5 happen once; step 6 iterates.
 
 ## Public API surface
 
@@ -46,7 +47,7 @@ A 6502 program can't be assembled in one linear pass: `lda foo` is 2 bytes if `f
 
 - **Evaluate against the previous pass.** Within a pass, every expression resolves names and segment bases from the values the _previous_ pass produced. The first pass sees everything as unresolved.
 - **Pessimistic, shrink-only sizing.** An unresolved operand is sized at its largest (absolute); once its value is known it can only shrink (to zero page). Monotone shrinking converges, and every intermediate state is a _valid_ program - so a non-converging build can still emit valid (if suboptimal) bytes.
-- **Converge on symbol AND byte stability.** A pass snapshots the symbol table, runs, and compares - and the output bytes must also match the previous pass's. Symbols alone miss non-symbol state that feeds bytes (segment bases, `*`-relative `.res` counts - and, later, iterative-`.if` branch flips, which are emit-only and often symbol-invisible); bytes alone would stop early on placeholder streaks while values are still propagating one hop per pass. Each side catches what the other can't see: emplaced segments contribute no bytes but move labels. The cap (statement count + 1, min 8) is a backstop, not the normal exit; overshooting emits a warning, not an error.
+- **Converge on symbol AND byte stability.** A pass snapshots the symbol table, runs, and compares - and the output bytes must also match the previous pass's. Symbols alone miss non-symbol state that feeds bytes (segment bases, `*`-relative `.res` counts, and iterative-`.if` arm flips, which are emit-only and often symbol-invisible); bytes alone would stop early on placeholder streaks while values are still propagating one hop per pass. Each side catches what the other can't see: emplaced segments contribute no bytes but move labels. The cap (statement count + 1, min 8) is a backstop, not the normal exit; overshooting emits a warning, not an error.
 
 The symbol table ([src/symbols.ts](src/symbols.ts)) is built for this: values **persist across passes** (so a forward reference resolves to last pass's value rather than clobbering to `undefined`), while a per-pass "seen" set enforces **define-once** (a second definition in the same pass is the error; the first is kept). `undefined` means "not resolved yet," distinct from `has()` ("defined, regardless of value").
 
@@ -100,6 +101,15 @@ Expansion is hygienic with **lexical binding**. Per call, the body is `structure
 
 Free names of macros that are never expanded are still checked structurally at the definition site (a name must be defined in the defining module or exported by its imports); expanded bodies get the same check for free via the normal strict-mode undefined-symbol path, whose spans point at the body tokens. Module-level directives (`.import`/`.export`/`.macro`) are rejected inside bodies.
 
+## Conditional assembly (`.if` / `.error`)
+
+`.if`/`.elseif`/`.else`/`.endif` is the **iterative** conditional stratum: arm selection is re-decided every pass by `selectArm` in [src/assemble.ts](src/assemble.ts) (conditions read anything the layout knows - `*`, addresses, distances), and collect walks only the taken arm. Two decisions make it converge:
+
+- **An unresolved condition skips its arm**, falling through to `.else` (or nothing) - and strict mode reports the unresolved names on the converged pass, exactly like an unresolved `lda sym` emits absolute and errors. The documented convention is therefore that **`.else` holds the pessimistic, always-correct form** (the `jne` macro's long `beq`/`jmp`), so selection only moves else -> specific as values settle - the branch-flip analog of shrink-only sizing. A condition written the other way can oscillate; byte-stable convergence plus the pass cap catches that with the non-convergence warning.
+- **Arms are scopes** (`scopeIfArms` in [src/macros.ts](src/macros.ts), a static pass after expansion): a name defined inside an arm renames to a per-arm local (`name@ifN`), reusing the macro-substitution machinery, with nested arms shadowing. This makes the ghost-label hazard _unrepresentable_ - a definition can't flip in and out of the outside-visible set with an address-dependent condition, so the fixpoint never chases a moving definition target, and no per-pass symbol GC is needed (stale arm-locals in the table are unreachable, hence inert). The "whichever arm wins" idiom is a label on the `.if` statement itself; conditional _values_ use expressions (`size = 2 + (big > 255)`); a name defined in _every_ arm staying outside-visible is a noted possible future relaxation (it would still be pass-invariant). Arms are emit-only: `.import`/`.export`/`.macro` are rejected inside them, and macro params (`.out` included) may not be defined in an arm.
+
+`.error expr` reports its (string) message when collected - unconditionally at top level, only in taken arms inside `.if` - and rides the existing converged-pass-only diagnostics, so address-dependent bounds checks (`.if * > $0100` / `.error "Zero page overflow"`) fire against the settled layout, never spuriously mid-iteration.
+
 The exported-macro mechanism is also the **output-format channel**: lib.s exports `output_sfotty_exe start`, whose body defines the segments and the OUTPUT script; each program calls it once, passing its entry label.
 
 ## Syntax decisions worth knowing
@@ -118,7 +128,7 @@ The exported-macro mechanism is also the **output-format channel**: lib.s export
 
 All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (roughly in priority order - **nicer diagnostics** is the highest-value next step now that there's a CLI):
 
-- **`.if`/`.elseif`/`.else`/`.endif` + `.error`** - layout-time conditionals.
+- **The static `#if` stratum** - hash conditionals decided once, pre-fixpoint, that may alter structure (gate imports/exports/macros); prelude-ordered imports come with it. (The iterative `.if`/`.elseif`/`.else`/`.endif` + `.error` are done - see Conditional assembly.)
 - **Segment attributes** (`.define_segment "X", type:..., executable:...`) - the kind/exec flags and their keyword-arg syntax; emit-vs-reserve is currently chosen by `.emit`/`.emplace` alone.
 - **Relocation** - symbolic `.base()`/`.reloc`, and the `.base`/`.startof`/`.sizeof` builtins.
 - **Richer modules** - named/aliased imports (`.import "m": a, b` and aliases) and the `.namespace ... .endnamespace` inline-module block. (Dict-valued symbols, `::` access, namespaced imports `name = .import "m"` - macros included - and the label/bare export forms are done.)
@@ -142,7 +152,7 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (rou
 | [src/symbols.ts](src/symbols.ts)                   | `SymbolTable`: define-once, label/constant kind, persist-across-passes, fixpoint snapshot.  |
 | [src/scopes.ts](src/scopes.ts)                     | Per-module + ambient scopes over `SymbolTable` via qualified keys.                          |
 | [src/loader.ts](src/loader.ts)                     | `Host` contract and the module-graph loader (dedup, cycles, dependency order).              |
-| [src/macros.ts](src/macros.ts)                     | `expandModules` - cross-module hygienic macro expansion (lexical binding).                  |
+| [src/macros.ts](src/macros.ts)                     | `expandModules` - cross-module hygienic macro expansion; `scopeIfArms` - `.if` arm scoping. |
 | [src/layout.ts](src/layout.ts)                     | `Segment` and `render` - the segment/OUTPUT layout engine.                                  |
 | [src/assemble.ts](src/assemble.ts)                 | The orchestrator: `assemble()`, `collect`, and the multipass loop.                          |
 | [src/cli.ts](src/cli.ts)                           | The `spasm` CLI (`bin`): `spasm INPUT -o OUTPUT` over an async fs host.                     |

@@ -2,7 +2,7 @@ import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
 import { render, Segment } from "./layout.ts";
 import { loadModules, type Host, type LoadedModule } from "./loader.ts";
-import { expandModules } from "./macros.ts";
+import { expandModules, scopeIfArms } from "./macros.ts";
 import { Scopes } from "./scopes.ts";
 import {
 	getExpressionLocation,
@@ -10,9 +10,12 @@ import {
 	type Assignment,
 	type DictLiteral,
 	type Expression,
+	type IfArm,
+	type IfBlock,
 	type Message,
 	type MessageNote,
 	type Operand,
+	type Statement,
 	type StatementContent,
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
@@ -110,17 +113,35 @@ function assembleModules(
 		});
 	};
 	const modules = expandModules(loaded, expandReport);
+	// Arm-scope `.if` blocks (also a static, run-once step): names defined
+	// inside arms become arm-local so the outside-visible definition set stays
+	// pass-invariant while arm selection iterates.
+	scopeIfArms(modules, expandReport);
 
 	const scopes = new Scopes(modules);
 	let output: number[] = [];
 	let diagnostics: Message[] = [];
 	let bases = new Map<string, bigint>(); // segment bases from the previous render
 	let resSizes = new Map<string, bigint>(); // `res` sizes from the previous render
+	let sizes = new Map<string, bigint>(); // segment sizes from the previous render
 
 	// Pessimistic shrink-only sizing is monotone; label values still flow a hop
 	// per pass (render defines them after collect). The cap is a generous
-	// backstop.
-	const statementCount = modules.reduce((n, m) => n + m.statements.length, 0);
+	// backstop; `.if` arm statements count too.
+	const countStatements = (statements: readonly Statement[]): number =>
+		statements.reduce(
+			(n, s) =>
+				n +
+				1 +
+				(s.content?.type === "if-block"
+					? s.content.arms.reduce((m, a) => m + countStatements(a.body), 0)
+					: 0),
+			0,
+		);
+	const statementCount = modules.reduce(
+		(n, m) => n + countStatements(m.statements),
+		0,
+	);
 	const cap = Math.max(statementCount + 1, 8);
 	let converged = false;
 
@@ -142,7 +163,7 @@ function assembleModules(
 		// Collect content into segments (defining constants), then render OUTPUT
 		// to bytes (defining labels). Everything evaluates against the previous
 		// pass's symbol values and segment bases; this pass produces the new ones.
-		const segments = collect(modules, scopes, report, bases, resSizes);
+		const segments = collect(modules, scopes, report, bases, resSizes, sizes);
 		const result = render(
 			segments,
 			"OUTPUT",
@@ -159,17 +180,29 @@ function assembleModules(
 			report,
 		);
 		const previous = output;
+		const previousBases = bases;
+		const previousResSizes = resSizes;
+		const previousSizes = sizes;
 		output = result.bytes;
 		bases = result.bases;
 		resSizes = result.resSizes;
+		sizes = result.sizes;
 
-		// Converged only when both the symbol table AND the output bytes are
-		// stable. Symbols alone miss non-symbol state that feeds bytes (segment
-		// bases, `.res` counts); bytes alone would stop early on placeholder
-		// streaks while values are still propagating. Each check catches what
-		// the other can't see (emplaced segments are byte-invisible but
-		// label-visible).
-		if (!scopes.changedSince(snapshot) && bytesEqual(output, previous)) {
+		// Converged only when the symbol table, the output bytes, AND the
+		// layout-feedback maps are all stable. Symbols alone miss non-symbol
+		// state that feeds bytes (segment bases, `.res` counts); bytes alone
+		// would stop early on placeholder streaks while values are still
+		// propagating; and the feedback maps catch what neither can see - a
+		// segment placed under an `.if` bounds check may be byte- and
+		// symbol-invisible while its size is still one pass from reaching
+		// collect's `*`.
+		if (
+			!scopes.changedSince(snapshot) &&
+			bytesEqual(output, previous) &&
+			mapsEqual(bases, previousBases) &&
+			mapsEqual(resSizes, previousResSizes) &&
+			mapsEqual(sizes, previousSizes)
+		) {
 			converged = true;
 			break;
 		}
@@ -281,6 +314,7 @@ function collect(
 	report: Reporter,
 	bases: Map<string, bigint>,
 	resSizes: Map<string, bigint>,
+	sizes: Map<string, bigint>,
 ): Map<string, Segment> {
 	const segments = new Map<string, Segment>();
 	const getSegment = (name: string): Segment => {
@@ -303,7 +337,7 @@ function collect(
 		const moduleId = module.id;
 		let current = getSegment("OUTPUT"); // reset per module
 
-		for (const statement of module.statements) {
+		const collectStatement = (statement: Statement): void => {
 			for (const label of statement.labels) {
 				current.items.push({
 					kind: "label",
@@ -317,7 +351,7 @@ function collect(
 			}
 
 			const content = statement.content;
-			if (!content) continue;
+			if (!content) return;
 
 			switch (content.type) {
 				case "import":
@@ -355,14 +389,24 @@ function collect(
 					current = getSegment(content.keyword.text.slice(1).toUpperCase());
 					break;
 				case "emit":
-				case "emplace":
+				case "emplace": {
+					const placed = segmentName(content.nameToken, report, moduleId);
 					current.items.push({
 						kind: content.type,
-						segment: segmentName(content.nameToken, report, moduleId),
+						segment: placed,
 						moduleId,
 						span: [content.nameToken.start, content.nameToken.end],
 					});
+					// Advance the running location by the placed segment's
+					// previous-pass size, so `*` after a placement (an `.if`
+					// bounds check, say) is meaningful - one pass of lag the
+					// fixpoint absorbs, like `resSizes`.
+					locations.set(
+						current.name,
+						locationOf(current.name) + (sizes.get(placed) ?? 0n),
+					);
 					break;
+				}
 				case "export":
 					if (content.nameToken) {
 						// `.export name:` defines the label here; bare `.export name`
@@ -401,6 +445,54 @@ function collect(
 						report,
 					);
 					break;
+				case "if-block": {
+					// Re-decided every pass: collect only the taken arm. Segment
+					// switches inside an arm behave like any other statement (they
+					// persist past the `.endif`); only names are arm-scoped.
+					const arm = selectArm(
+						content,
+						moduleId,
+						scopes,
+						locationOf(current.name),
+						report,
+					);
+					for (const armStatement of arm?.body ?? []) {
+						collectStatement(armStatement);
+					}
+					break;
+				}
+				case "error-directive": {
+					const env = moduleEnv(
+						moduleId,
+						scopes,
+						locationOf(current.name),
+						report,
+					);
+					// The keyword's hygiene origin attributes a macro-body `.error`
+					// to the macro's file.
+					const file = content.errorToken.origin ?? moduleId;
+					const value = evaluate(content.message, env);
+					// Unresolved parts were already strict-reported; like every
+					// diagnostic, the message survives only on the converged pass.
+					if (value === undefined) break;
+					if (typeof value !== "string") {
+						env.report(
+							"`.error` requires a string message",
+							getExpressionLocation(content.message),
+							file,
+						);
+						break;
+					}
+					report(
+						value,
+						[
+							content.errorToken.start,
+							getExpressionLocation(content.message)[1],
+						],
+						file,
+					);
+					break;
+				}
 				default:
 					locations.set(
 						current.name,
@@ -415,16 +507,61 @@ function collect(
 						),
 					);
 			}
-		}
+		};
+
+		for (const statement of module.statements) collectStatement(statement);
 	}
 
 	return segments;
+}
+
+/**
+ * Pick an `.if` block's taken arm: the first arm whose condition is resolved
+ * and nonzero, or the condition-less `.else`. An unresolved condition skips
+ * its arm, so everything falls through to `.else` until the values settle -
+ * which is why the `.else` arm should hold the pessimistic (always-correct)
+ * form. Strict mode reports the unresolved names on the converged pass.
+ */
+function selectArm(
+	block: IfBlock,
+	moduleId: string,
+	scopes: Scopes,
+	location: bigint,
+	report: Reporter,
+): IfArm | undefined {
+	const env = moduleEnv(moduleId, scopes, location, report);
+	for (const arm of block.arms) {
+		if (arm.condition === null) return arm; // `.else`
+		const value = evaluate(arm.condition, env);
+		if (value === undefined) continue;
+		if (typeof value !== "bigint") {
+			env.report(
+				"`.if` requires a numeric condition",
+				getExpressionLocation(arm.condition),
+				arm.keyword.origin,
+			);
+			continue;
+		}
+		if (value !== 0n) return arm;
+	}
+	return undefined;
 }
 
 function bytesEqual(a: readonly number[], b: readonly number[]): boolean {
 	if (a.length !== b.length) return false;
 	for (let i = 0; i < a.length; i++) {
 		if (a[i] !== b[i]) return false;
+	}
+	return true;
+}
+
+function mapsEqual(
+	a: ReadonlyMap<string, bigint>,
+	b: ReadonlyMap<string, bigint>,
+): boolean {
+	if (a.size !== b.size) return false;
+	for (const [key, value] of a) {
+		if (b.get(key) !== value) return false;
 	}
 	return true;
 }

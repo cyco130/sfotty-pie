@@ -1163,6 +1163,184 @@ describe("diagnostic notes", () => {
 	});
 });
 
+describe("conditional assembly (.if/.elseif/.else/.endif)", () => {
+	test("a true condition takes its arm", () => {
+		expect(asm(".if 1\n.byte 1\n.else\n.byte 2\n.endif\n").bytes).toEqual([1]);
+	});
+
+	test("a false condition falls through to .else", () => {
+		expect(asm(".if 0\n.byte 1\n.else\n.byte 2\n.endif\n").bytes).toEqual([2]);
+	});
+
+	test(".elseif chains take the first true arm", () => {
+		const src = (v: number) =>
+			`V = ${v}\n.if V = 1\n.byte 1\n.elseif V = 2\n.byte 2\n.else\n.byte 3\n.endif\n`;
+		expect(asm(src(1)).bytes).toEqual([1]);
+		expect(asm(src(2)).bytes).toEqual([2]);
+		expect(asm(src(9)).bytes).toEqual([3]);
+	});
+
+	test("no matching arm and no .else collects nothing", () => {
+		expect(asm(".if 0\n.byte 1\n.endif\n.byte 9\n").bytes).toEqual([9]);
+	});
+
+	test("an unresolved condition falls to .else and errors at convergence", () => {
+		const { bytes, messages } = asm(
+			".if nope\n.byte 1\n.else\n.byte 2\n.endif\n",
+		);
+		expect(bytes).toEqual([2]);
+		expect(messages).toEqual(['Undefined symbol "nope"']);
+	});
+
+	test("a non-numeric condition is a type error", () => {
+		expect(asm('.if "x"\n.byte 1\n.endif\n').messages).toContain(
+			"`.if` requires a numeric condition",
+		);
+	});
+
+	test("a span-dependent condition converges (backward, near)", () => {
+		const { bytes, messages } = asm(
+			".org $0400\nstart:\n\tnop\n.if start - * < 130 && * - start < 127\n\tbne start\n.else\n\tbeq skip\n\tjmp start\nskip:\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xea, 0xd0, 0xfd]); // nop; bne start
+	});
+
+	test("a span-dependent condition converges (backward, far)", () => {
+		const { bytes, messages } = asm(
+			".org $0400\nstart:\n\tnop\n.res 200\n.if start - * < 130 && * - start < 127\n\tbne start\n.else\n\tbeq skip\n\tjmp start\nskip:\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		// nop, 200 fill bytes, then the long form: beq +3; jmp start.
+		expect(bytes).toHaveLength(206);
+		expect(bytes.slice(-5)).toEqual([0xf0, 0x03, 0x4c, 0x00, 0x04]);
+	});
+
+	test("a forward target starts long (pessimistic) and shrinks to short", () => {
+		const { bytes, messages } = asm(
+			".org $0400\n.if fwd - * < 130 && * - fwd < 127\n\tbne fwd\n.else\n\tbeq skip\n\tjmp fwd\nskip:\n.endif\n\tnop\nfwd:\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xd0, 0x01, 0xea]); // bne fwd; nop
+	});
+
+	test("arm-local names are invisible outside the arm", () => {
+		const { bytes, messages } = asm(".if 1\ntmp: .byte 5\n.endif\n\tlda tmp\n");
+		expect(messages).toEqual(['Undefined symbol "tmp"']);
+		expect(bytes).toEqual([5, 0xad, 0, 0]);
+	});
+
+	test("both arms may define the same name without colliding", () => {
+		const { bytes, messages } = asm(
+			".if 1\nv = 1\n.byte v\n.else\nv = 2\n.byte v\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1]);
+	});
+
+	test("a label on the .if statement names the winning arm's address", () => {
+		const { bytes, symbols, messages } = asm(
+			".org $0400\nentry: .if 1\n\tnop\n.endif\n.word entry\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("entry")).toBe(0x0400n);
+		expect(bytes).toEqual([0xea, 0x00, 0x04]);
+	});
+
+	test("nested arms shadow the outer arm's locals", () => {
+		const { bytes, messages } = asm(
+			".if 1\nn = 1\n.if 1\nn = 2\n.byte n\n.endif\n.byte n\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([2, 1]);
+	});
+
+	test("module-level directives are rejected inside arms", () => {
+		expect(asm(".if 1\n.export foo = 1\n.endif\n").messages).toContain(
+			"`.export` is not allowed inside an `.if` arm",
+		);
+	});
+
+	test("a macro parameter can gate an .if in the body", () => {
+		const { bytes, messages } = asm(
+			".macro maybe_byte flag, v\n.if flag\n.byte v\n.endif\n.endmacro\n" +
+				"maybe_byte 1, 7\nmaybe_byte 0, 8\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
+	});
+
+	test("a jne-style macro picks short or long per call site", () => {
+		const { bytes, messages } = asm(
+			".macro jne target\n" +
+				".if target - * < 130 && * - target < 127\n\tbne target\n" +
+				".else\n\tbeq skip\n\tjmp target\nskip:\n.endif\n" +
+				".endmacro\n" +
+				".org $0400\nstart:\n\tnop\n\tjne start\n.res 200\n\tjne start\n",
+		);
+		expect(messages).toEqual([]);
+		// Near call: bne; far call: beq skip; jmp start (skip is per-expansion).
+		expect(bytes.slice(0, 3)).toEqual([0xea, 0xd0, 0xfd]);
+		expect(bytes.slice(-5)).toEqual([0xf0, 0x03, 0x4c, 0x00, 0x04]);
+	});
+
+	test("a parameter defined inside an arm is rejected at the definition site", () => {
+		expect(
+			asm(".macro m .out name\n.if 1\nname: .byte 1\n.endif\n.endmacro\n")
+				.messages,
+		).toContain(
+			'Parameter "name" is defined inside an `.if` arm - arm definitions are arm-local',
+		);
+	});
+});
+
+describe(".error", () => {
+	test("fires when its arm is taken", () => {
+		expect(asm('.if 1\n.error "boom"\n.endif\n').messages).toEqual(["boom"]);
+	});
+
+	test("does not fire in an untaken arm", () => {
+		expect(asm('.if 0\n.error "boom"\n.endif\n').messages).toEqual([]);
+	});
+
+	test("an address-dependent bounds check fires only on overflow", () => {
+		const src = (n: number) =>
+			`.org 0\n.res ${n}\n.if * > 2\n.error "overflow"\n.endif\n`;
+		expect(asm(src(2)).messages).toEqual([]);
+		expect(asm(src(3)).messages).toEqual(["overflow"]);
+	});
+
+	test("a bounds check after a placement sees the placed segment's size", () => {
+		// `*` after an `.emit`/`.emplace` advances by the previous render's
+		// segment size (fed back like `.res` sizes), so the format-macro idiom
+		// "emplace, then check the boundary" works.
+		const src = (n: number) =>
+			'.segment "OUTPUT"\n.org $80\n.emplace "ZP"\n' +
+			'.if * > $100\n.error "zp overflow"\n.endif\n' +
+			`.segment "ZP"\n.res ${n}\n`;
+		expect(asm(src(128)).messages).toEqual([]);
+		expect(asm(src(200)).messages).toEqual(["zp overflow"]);
+	});
+
+	test("a macro-body .error attributes to the macro's file", async () => {
+		const host = memHost({
+			main: '.import "lib"\ncheck\n',
+			lib: '.export .macro check\n.if 1\n.error "boom"\n.endif\n.endmacro\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe("boom");
+		expect(error.file).toBe("lib");
+		expect(error.formatted).toMatch(/^lib:3:1 - error: boom/);
+	});
+
+	test("the message must be a string", () => {
+		expect(asm(".error 42\n").messages).toEqual([
+			"`.error` requires a string message",
+		]);
+	});
+});
+
 describe("export name forms", () => {
 	test(".export name exports an elsewhere-defined symbol", async () => {
 		const host = memHost({

@@ -78,6 +78,12 @@ export interface RenderResult {
 	 * sizes (one pass of lag, absorbed by the fixpoint).
 	 */
 	resSizes: Map<string, bigint>;
+	/**
+	 * Rendered byte length of each segment. Fed back like `resSizes`: collect
+	 * advances its running location by a placed segment's previous-pass size,
+	 * so `*` after an `.emit`/`.emplace` (a bounds check, say) is meaningful.
+	 */
+	sizes: Map<string, bigint>;
 }
 
 /**
@@ -97,6 +103,7 @@ export function render(
 ): RenderResult {
 	const bases = new Map<string, bigint>();
 	const resSizes = new Map<string, bigint>();
+	const sizes = new Map<string, bigint>();
 	const onStack = new Set<string>();
 	// The placement site (`.emit`/`.emplace` item) of each placed segment, for
 	// "first placed here" and cycle-chain notes; the root has no site.
@@ -212,10 +219,11 @@ export function render(
 
 		onStack.delete(segment.name);
 		stackList.pop();
+		sizes.set(segment.name, BigInt(bytes.length));
 		return bytes;
 	}
 
 	const root = segments.get(rootName);
 	const bytes = root ? renderSegment(root, 0n) : [];
-	return { bytes, bases, resSizes };
+	return { bytes, bases, resSizes, sizes };
 }

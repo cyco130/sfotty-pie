@@ -234,6 +234,38 @@ class Parser {
 
 			case "export": {
 				this.#consume();
+				if (this.#token.type === "identifier") {
+					// `.export name:` defines a label here AND exports it;
+					// `.export name` exports a definition made elsewhere (repeat
+					// exports are fine). `.export name = ...` / `name := ...` /
+					// `name(...) = ...` still parse as exported definitions below.
+					if (this.#lookahead.type === ":") {
+						const nameToken = this.#token;
+						this.#consume();
+						this.#consume();
+						return {
+							type: "export",
+							exportToken: token,
+							content: null,
+							nameToken,
+							definesLabel: true,
+						};
+					}
+					if (
+						this.#lookahead.type !== "=" &&
+						this.#lookahead.type !== ":=" &&
+						this.#lookahead.type !== "("
+					) {
+						const nameToken = this.#token;
+						this.#consume();
+						return {
+							type: "export",
+							exportToken: token,
+							content: null,
+							nameToken,
+						};
+					}
+				}
 				const content = this.#statementContent();
 				if (!content) {
 					throw new ParseError(this.#token, ["a definition to export"]);
@@ -1149,7 +1181,12 @@ export interface Import {
 export interface Export {
 	type: "export";
 	exportToken: Token<"export">;
-	content: StatementContent;
+	/** The exported definition; null for the name forms below. */
+	content: StatementContent | null;
+	/** `.export name` (export an existing definition - repeatable) or
+	 * `.export name:` (define a label here and export it). */
+	nameToken?: Token<"identifier">;
+	definesLabel?: boolean;
 }
 
 export interface Res {

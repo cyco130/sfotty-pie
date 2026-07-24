@@ -74,7 +74,7 @@ export function expandModules(
 				macro = content;
 			} else if (
 				content?.type === "export" &&
-				content.content.type === "macro"
+				content.content?.type === "macro"
 			) {
 				macro = content.content;
 				isExported = true;
@@ -658,8 +658,15 @@ function definedNames(statements: readonly Statement[]): Set<string> {
 		for (const label of statement.labels) names.add(label.identifier.text);
 		const content = statement.content;
 		if (content?.type === "assignment") names.add(content.identifier.text);
-		if (content?.type === "export" && content.content.type === "assignment") {
+		if (content?.type === "export" && content.content?.type === "assignment") {
 			names.add(content.content.identifier.text);
+		}
+		if (
+			content?.type === "export" &&
+			content.nameToken &&
+			content.definesLabel
+		) {
+			names.add(content.nameToken.text);
 		}
 		if (content?.type === "import" && content.binding) {
 			names.add(content.binding.text);

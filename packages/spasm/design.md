@@ -83,7 +83,7 @@ A build is a graph of modules reached through a `Host`. The loader ([src/loader.
 
 Scoping ([src/scopes.ts](src/scopes.ts)) layers per-module scopes and one ambient scope over a single `SymbolTable` via qualified keys (`moduleId \0 name`; the ambient scope uses a reserved pseudo-module id). The rules:
 
-- A module's symbols are **private** unless `.export`ed.
+- A module's symbols are **private** unless `.export`ed. Four export forms: `.export name = expr` / `name := expr` (exported definition), `.export name(params) = expr` (exported expression macro), `.export name:` (define a label here and export it), and bare `.export name` (export a definition made elsewhere in the module - repeatable; a name never defined anywhere is an error after convergence).
 - `.import "m"` is a **splat**: `m`'s exports become resolvable in the importer. Resolution checks the module's own scope, then its splat-imports' export sets.
 - `lib = .import "m"` is a **namespaced import**: the module's exports bind to `lib` - `lib::FOO` for symbols (chaining into exported dicts: `lib::N::V`), `lib::mva args` in statement position for exported macros (a path is necessarily a macro call - no opcode has `::`). Nothing splat-leaks; the binding name is define-once in the importer's scope (kind `namespace`, like a dict root); bare `lib` is not a value. A macro body's namespaced references and calls resolve through the _defining_ module's bindings (lexical, like everything else).
 - There is **no ambient/global scope**. The entry-point handshake is an exported macro: the format module exports (say) `output_sfotty_exe start`, the program calls it passing its entry label, and after expansion the `.word start` in the format script is an ordinary intra-module reference in the program - no cross-module value flow, no extra pass.
@@ -121,7 +121,7 @@ All four samples (hello/echo/cat/guess) now assemble and run. Not yet built (rou
 - **`.if`/`.elseif`/`.else`/`.endif` + `.error`** - layout-time conditionals.
 - **Segment attributes** (`.define_segment "X", type:..., executable:...`) - the kind/exec flags and their keyword-arg syntax; emit-vs-reserve is currently chosen by `.emit`/`.emplace` alone.
 - **Relocation** - symbolic `.base()`/`.reloc`, and the `.base`/`.startof`/`.sizeof` builtins.
-- **Richer modules** - named/aliased imports (`.import "m": a, b` and aliases), the `.namespace ... .endnamespace` inline-module block, and `.export` of anything but an assignment or a macro (notably labels). (Dict-valued symbols, `::` access, and namespaced imports `name = .import "m"` - macros included - are done.)
+- **Richer modules** - named/aliased imports (`.import "m": a, b` and aliases) and the `.namespace ... .endnamespace` inline-module block. (Dict-valued symbols, `::` access, namespaced imports `name = .import "m"` - macros included - and the label/bare export forms are done.)
 - **Richer macros** - keyword arguments and defaulted params, operand introspection builtins (`.mode()`/`.value()`), and exporting macro-defined symbols beyond the param-named-definition channel (fixed-name or derived names like `name_end`).
 - **Diagnostic polish** - file:line:col + caret formatting is done; still open: `shortName` shortening for path-id hosts, colorized output, and multi-span notes (e.g. "previously defined here").
 - **Cyclic _definition_ detection** - `A = B` / `B = A` converges to undefined and reports "undefined symbol" (no hang), not a precise cycle error.

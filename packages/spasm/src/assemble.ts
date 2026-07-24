@@ -169,6 +169,27 @@ function assembleModules(
 		});
 	}
 
+	// A bare `.export name` must name a definition made somewhere in its module.
+	for (const module of modules) {
+		for (const statement of module.statements) {
+			const content = statement.content;
+			if (
+				content?.type === "export" &&
+				content.nameToken &&
+				!content.definesLabel &&
+				!scopes.isDefined(module.id, content.nameToken.text)
+			) {
+				diagnostics.push({
+					type: "error",
+					start: content.nameToken.start,
+					end: content.nameToken.end,
+					message: `Exported symbol "${content.nameToken.text}" is never defined`,
+					file: module.id,
+				});
+			}
+		}
+	}
+
 	// Render each diagnostic to `file:line:col: type: message` with the source
 	// line and a caret, when its module is known.
 	const sourceFiles = new Map(loaded.map((m) => [m.id, m.sourceFile]));
@@ -286,7 +307,19 @@ function collect(
 					});
 					break;
 				case "export":
-					if (content.content.type === "assignment") {
+					if (content.nameToken) {
+						// `.export name:` defines the label here; bare `.export name`
+						// only affects the export set (validated after convergence).
+						if (content.definesLabel) {
+							current.items.push({
+								kind: "label",
+								moduleId: content.nameToken.origin ?? moduleId,
+								name: content.nameToken.text,
+								symbolKind: "label",
+								span: [content.nameToken.start, content.nameToken.end],
+							});
+						}
+					} else if (content.content?.type === "assignment") {
 						defineAssignment(
 							content.content,
 							moduleId,

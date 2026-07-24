@@ -1033,3 +1033,38 @@ describe("diagnostics with locations", () => {
 		expect(r.diagnostics[0]!.formatted).toMatch(/^prog\.s:1:5: error: /);
 	});
 });
+
+describe("export name forms", () => {
+	test(".export name exports an elsewhere-defined symbol, repeatably", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte FOO\nlda entry\n',
+			lib: ".export FOO\n.export FOO\nFOO = 7\n.export entry\nentry:\n\tnop\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		// lib collects first: entry/nop at 0; then main's byte and a zp lda.
+		expect([...r.output]).toEqual([0xea, 7, 0xa5, 0x00]);
+	});
+
+	test(".export label: defines and exports in place", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.word start\n',
+			lib: "\t.byte 9\n.export start:\n\tnop\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		// lib collects first: byte at 0, start = 1 (the nop); then main's word.
+		expect([...r.output]).toEqual([9, 0xea, 0x01, 0x00]);
+	});
+
+	test("a bare export of a never-defined name is an error", async () => {
+		const host = memHost({
+			main: '.import "lib"\nnop\n',
+			lib: ".export NOPE\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Exported symbol "NOPE" is never defined');
+		expect(error.formatted).toMatch(/^lib:1:9: error: /);
+	});
+});

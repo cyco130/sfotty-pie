@@ -90,7 +90,9 @@ function content(c: StatementContent): string {
 		case "import":
 			return `${c.binding ? `${c.binding.text} = ` : ""}.import ${c.specToken.text}`;
 		case "export":
-			return `.export ${content(c.content)}`;
+			return c.nameToken
+				? `.export ${c.nameToken.text}${c.definesLabel ? ":" : ""}`
+				: `.export ${content(c.content!)}`;
 		case "res":
 			return `.res ${expr(c.count)}`;
 		case "segment-shorthand":
@@ -248,6 +250,8 @@ describe("directives", () => {
 		]);
 		expect(dump("gfx::draw 1, 2")).toEqual(["gfx::draw 1, 2"]);
 		expect(dump(".export EXIT := $0200")).toEqual([".export EXIT := $0200"]);
+		expect(dump(".export start")).toEqual([".export start"]);
+		expect(dump(".export start:")).toEqual([".export start:"]);
 		expect(dump(".export .macro output_sfotty_exe start\n.endmacro")).toEqual([
 			".export .macro output_sfotty_exe start",
 		]);

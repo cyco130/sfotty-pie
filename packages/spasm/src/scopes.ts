@@ -69,6 +69,11 @@ export class Scopes {
 		);
 	}
 
+	/** Whether `name` is defined in `moduleId`'s own scope (any value state). */
+	isDefined(moduleId: string, name: string): boolean {
+		return this.#table.has(moduleId + SEP + name);
+	}
+
 	/** Resolve `name` as seen from `moduleId`: own scope, then splat imports. */
 	resolve(moduleId: string, name: string): Value | undefined {
 		const key = this.#scopeKey(moduleId, name);
@@ -143,7 +148,9 @@ export function exportedNames(module: {
 	const names = new Set<string>();
 	for (const statement of module.statements) {
 		const content = statement.content;
-		if (content?.type === "export" && content.content.type === "assignment") {
+		if (content?.type !== "export") continue;
+		if (content.nameToken) names.add(content.nameToken.text);
+		else if (content.content?.type === "assignment") {
 			names.add(content.content.identifier.text);
 		}
 	}

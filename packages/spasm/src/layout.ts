@@ -1,4 +1,4 @@
-import type { Expression } from "./parser.ts";
+import type { Expression, MessageNote } from "./parser.ts";
 import type { SymbolKind } from "./symbols.ts";
 import type { Value } from "./value.ts";
 
@@ -64,6 +64,7 @@ type Reporter = (
 	message: string,
 	span: readonly [number, number],
 	file?: string,
+	notes?: MessageNote[],
 ) => void;
 
 export interface RenderResult {
@@ -97,10 +98,32 @@ export function render(
 	const bases = new Map<string, bigint>();
 	const resSizes = new Map<string, bigint>();
 	const onStack = new Set<string>();
+	// The placement site (`.emit`/`.emplace` item) of each placed segment, for
+	// "first placed here" and cycle-chain notes; the root has no site.
+	const placements = new Map<
+		string,
+		{ span: readonly [number, number]; moduleId: string }
+	>();
+	const stackList: string[] = [];
+
+	const placementNote = (message: string, name: string): MessageNote[] => {
+		const site = placements.get(name);
+		return site
+			? [
+					{
+						message,
+						start: site.span[0],
+						end: site.span[1],
+						file: site.moduleId,
+					},
+				]
+			: [];
+	};
 
 	function renderSegment(segment: Segment, baseLC: bigint): number[] {
 		bases.set(segment.name, baseLC);
 		onStack.add(segment.name);
+		stackList.push(segment.name);
 
 		let lc = baseLC;
 		let resIndex = 0;
@@ -151,10 +174,16 @@ export function render(
 						break;
 					}
 					if (onStack.has(sub.name)) {
+						// The chain of in-progress placements, outermost first, walks
+						// the cycle for the reader.
+						const cycle = stackList.slice(stackList.indexOf(sub.name));
 						report(
 							`Circular .${item.kind} of segment "${sub.name}"`,
 							item.span,
 							item.moduleId,
+							cycle.flatMap((name) =>
+								placementNote(`While placing "${name}"`, name),
+							),
 						);
 						break;
 					}
@@ -165,9 +194,14 @@ export function render(
 							`Segment "${sub.name}" is placed more than once`,
 							item.span,
 							item.moduleId,
+							placementNote("First placed here", sub.name),
 						);
 						break;
 					}
+					placements.set(sub.name, {
+						span: item.span,
+						moduleId: item.moduleId,
+					});
 					const subBytes = renderSegment(sub, lc);
 					if (item.kind === "emit") bytes.push(...subBytes);
 					lc += BigInt(subBytes.length); // emplace reserves without emitting
@@ -177,6 +211,7 @@ export function render(
 		}
 
 		onStack.delete(segment.name);
+		stackList.pop();
 		return bytes;
 	}
 

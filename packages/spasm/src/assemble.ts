@@ -11,6 +11,7 @@ import {
 	type DictLiteral,
 	type Expression,
 	type Message,
+	type MessageNote,
 	type Operand,
 	type StatementContent,
 } from "./parser.ts";
@@ -32,7 +33,17 @@ type Reporter = (
 	message: string,
 	span: readonly [number, number],
 	file?: string,
+	notes?: MessageNote[],
 ) => void;
+
+/** A "previously ..." note pointing at `span` in `file`. */
+function noteAt(
+	message: string,
+	span: readonly [number, number],
+	file: string,
+): MessageNote {
+	return { message, start: span[0], end: span[1], file };
+}
 
 // Function values interned per definition site (see defineAssignment).
 const functionValues = new WeakMap<Assignment, FunctionValue>();
@@ -88,13 +99,14 @@ function assembleModules(
 	priorDiagnostics: Message[],
 ): AssembleResult {
 	// Macro expansion is static and runs once, before the multipass.
-	const expandReport: Reporter = (message, span, file) => {
+	const expandReport: Reporter = (message, span, file, notes) => {
 		priorDiagnostics.push({
 			type: "error",
 			start: span[0],
 			end: span[1],
 			message,
 			file,
+			notes,
 		});
 	};
 	const modules = expandModules(loaded, expandReport);
@@ -116,13 +128,14 @@ function assembleModules(
 		const snapshot = scopes.snapshot();
 		scopes.beginPass();
 		diagnostics = [];
-		const report: Reporter = (message, span, file) => {
+		const report: Reporter = (message, span, file, notes) => {
 			diagnostics.push({
 				type: "error",
 				start: span[0],
 				end: span[1],
 				message,
 				file,
+				notes,
 			});
 		};
 
@@ -134,8 +147,11 @@ function assembleModules(
 			segments,
 			"OUTPUT",
 			(moduleId, name, value, kind, span) => {
-				if (scopes.defineLocal(moduleId, name, value, kind, span)) {
-					report(`Symbol "${name}" is already defined`, span, moduleId);
+				const prior = scopes.defineLocal(moduleId, name, value, kind, span);
+				if (prior) {
+					report(`Symbol "${name}" is already defined`, span, moduleId, [
+						noteAt("First defined here", prior, moduleId),
+					]);
 				}
 			},
 			(expression, moduleId, location) =>
@@ -173,7 +189,7 @@ function assembleModules(
 	// module, and a symbol may be exported only once (exported macros live in
 	// the mnemonic namespace and have their own duplicate check).
 	for (const module of modules) {
-		const exported = new Set<string>();
+		const exported = new Map<string, readonly [number, number]>();
 		for (const statement of module.statements) {
 			const content = statement.content;
 			if (content?.type !== "export") continue;
@@ -183,16 +199,19 @@ function assembleModules(
 					? content.content.identifier
 					: undefined);
 			if (!nameToken) continue;
-			if (exported.has(nameToken.text)) {
+			const priorExport = exported.get(nameToken.text);
+			if (priorExport) {
 				diagnostics.push({
 					type: "error",
 					start: nameToken.start,
 					end: nameToken.end,
 					message: `Symbol "${nameToken.text}" is already exported`,
 					file: module.id,
+					notes: [noteAt("First exported here", priorExport, module.id)],
 				});
+			} else {
+				exported.set(nameToken.text, [nameToken.start, nameToken.end]);
 			}
-			exported.add(nameToken.text);
 			if (
 				content.nameToken &&
 				!content.definesLabel &&
@@ -210,20 +229,27 @@ function assembleModules(
 	}
 
 	// Render each diagnostic to `file:line:col: type: message` with the source
-	// line and a caret, when its module is known.
+	// line and a caret, when its module is known; notes follow as `note:`
+	// blocks in the same shape.
 	const sourceFiles = new Map(loaded.map((m) => [m.id, m.sourceFile]));
+	const formatOne = (
+		span: { start: number; end: number; file?: string },
+		text: string,
+	): string => {
+		const sourceFile =
+			span.file === undefined ? undefined : sourceFiles.get(span.file);
+		return sourceFile
+			? sourceFile.formatMessage(span.start, span.end, text, true)
+			: text;
+	};
 	const all = [...priorDiagnostics, ...diagnostics];
 	for (const message of all) {
-		const sourceFile =
-			message.file === undefined ? undefined : sourceFiles.get(message.file);
-		message.formatted = sourceFile
-			? sourceFile.formatMessage(
-					message.start,
-					message.end,
-					`${message.type}: ${message.message}`,
-					true,
-				)
-			: `${message.type}: ${message.message}`;
+		message.formatted = [
+			formatOne(message, `${message.type}: ${message.message}`),
+			...(message.notes ?? []).map((note) =>
+				formatOne(note, `note: ${note.message}`),
+			),
+		].join("\n");
 	}
 
 	return {
@@ -290,16 +316,19 @@ function collect(
 					// name in this module's scope (define-once, like a dict root).
 					if (content.binding) {
 						const { text, start, end } = content.binding;
-						if (
-							scopes.defineLocal(moduleId, text, undefined, "namespace", [
-								start,
-								end,
-							])
-						) {
+						const prior = scopes.defineLocal(
+							moduleId,
+							text,
+							undefined,
+							"namespace",
+							[start, end],
+						);
+						if (prior) {
 							report(
 								`Symbol "${text}" is already defined`,
 								[start, end],
 								moduleId,
+								[noteAt("First defined here", prior, moduleId)],
 							);
 						}
 					}
@@ -449,8 +478,17 @@ function defineAssignment(
 			functionValues.set(assignment, fn);
 		}
 		evaluateAttributes(assignment, env, report, definitionModule); // none allowed
-		if (scopes.defineLocal(definitionModule, text, fn, "function", span)) {
-			report(`Symbol "${text}" is already defined`, span, definitionModule);
+		const prior = scopes.defineLocal(
+			definitionModule,
+			text,
+			fn,
+			"function",
+			span,
+		);
+		if (prior) {
+			report(`Symbol "${text}" is already defined`, span, definitionModule, [
+				noteAt("First defined here", prior, definitionModule),
+			]);
 		}
 		return;
 	}
@@ -471,10 +509,17 @@ function defineAssignment(
 				definitionModule,
 			);
 		}
-		if (
-			scopes.defineLocal(definitionModule, text, undefined, "namespace", span)
-		) {
-			report(`Symbol "${text}" is already defined`, span, definitionModule);
+		const prior = scopes.defineLocal(
+			definitionModule,
+			text,
+			undefined,
+			"namespace",
+			span,
+		);
+		if (prior) {
+			report(`Symbol "${text}" is already defined`, span, definitionModule, [
+				noteAt("First defined here", prior, definitionModule),
+			]);
 		}
 		defineDict(
 			assignment.expression,
@@ -496,10 +541,18 @@ function defineAssignment(
 		report,
 		definitionModule,
 	);
-	if (
-		scopes.defineLocal(definitionModule, text, value, kind, span, attributes)
-	) {
-		report(`Symbol "${text}" is already defined`, span, definitionModule);
+	const prior = scopes.defineLocal(
+		definitionModule,
+		text,
+		value,
+		kind,
+		span,
+		attributes,
+	);
+	if (prior) {
+		report(`Symbol "${text}" is already defined`, span, definitionModule, [
+			noteAt("First defined here", prior, definitionModule),
+		]);
 	}
 }
 
@@ -526,7 +579,7 @@ function evaluateAttributes(
 	}
 
 	const attributes: SymbolAttributes = { size: 1n };
-	let sizeDeclared = false;
+	let sizeDeclaredAt: readonly [number, number] | undefined;
 	for (const attribute of assignment.attributes) {
 		const keySpan: readonly [number, number] = [
 			attribute.key.start,
@@ -536,11 +589,13 @@ function evaluateAttributes(
 			report(`Unknown attribute "${attribute.key.text}"`, keySpan, file);
 			continue;
 		}
-		if (sizeDeclared) {
-			report(`Attribute "size" is already set`, keySpan, file);
+		if (sizeDeclaredAt) {
+			report(`Attribute "size" is already set`, keySpan, file, [
+				noteAt("First set here", sizeDeclaredAt, file),
+			]);
 			continue;
 		}
-		sizeDeclared = true;
+		sizeDeclaredAt = keySpan;
 		const value = evaluate(attribute.value, env);
 		if (value !== undefined && typeof value !== "bigint") {
 			report(
@@ -581,10 +636,17 @@ function defineDict(
 		const path = display + "::" + entry.key.text;
 		const span: readonly [number, number] = [entry.key.start, entry.key.end];
 		if (entry.value.type === "dict-literal") {
-			if (
-				scopes.defineLocal(definitionModule, name, undefined, "namespace", span)
-			) {
-				report(`Symbol "${path}" is already defined`, span, definitionModule);
+			const prior = scopes.defineLocal(
+				definitionModule,
+				name,
+				undefined,
+				"namespace",
+				span,
+			);
+			if (prior) {
+				report(`Symbol "${path}" is already defined`, span, definitionModule, [
+					noteAt("First defined here", prior, definitionModule),
+				]);
 			}
 			defineDict(
 				entry.value,
@@ -597,8 +659,17 @@ function defineDict(
 			);
 		} else {
 			const value = evaluate(entry.value, env);
-			if (scopes.defineLocal(definitionModule, name, value, "constant", span)) {
-				report(`Symbol "${path}" is already defined`, span, definitionModule);
+			const prior = scopes.defineLocal(
+				definitionModule,
+				name,
+				value,
+				"constant",
+				span,
+			);
+			if (prior) {
+				report(`Symbol "${path}" is already defined`, span, definitionModule, [
+					noteAt("First defined here", prior, definitionModule),
+				]);
 			}
 		}
 	}

@@ -884,6 +884,18 @@ export interface ParsedModule {
 	errors: ParseError[];
 }
 
+/**
+ * A secondary span attached to a `Message` - "previously defined here",
+ * "imported here", and the like. Notes carry no notes of their own.
+ */
+export interface MessageNote {
+	start: number;
+	end: number;
+	message: string;
+	/** Module id the span refers into, for file:line:col attribution. */
+	file?: string;
+}
+
 export interface Message {
 	type: "error" | "warning" | "info";
 	start: number;
@@ -891,7 +903,12 @@ export interface Message {
 	message: string;
 	/** Module id the span refers into, for file:line:col attribution. */
 	file?: string;
-	/** Pre-rendered `file:line:col: type: message` + source line + caret. */
+	/** Related locations, rendered as `note:` lines after the message. */
+	notes?: MessageNote[];
+	/**
+	 * Pre-rendered `file:line:col: type: message` + source line + caret,
+	 * followed by one such block per note.
+	 */
 	formatted?: string;
 }
 

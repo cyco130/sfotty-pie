@@ -1057,6 +1057,94 @@ describe("diagnostics with locations", () => {
 	});
 });
 
+describe("diagnostic notes", () => {
+	test("a duplicate symbol notes the first definition", () => {
+		const r = assemble("FOO = 1\nFOO = 2\n", "t");
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Symbol "FOO" is already defined');
+		expect(error.notes).toEqual([
+			{ message: "First defined here", start: 0, end: 3, file: "t" },
+		]);
+		// The note renders as its own file:line:col block after the error.
+		expect(error.formatted).toMatch(/^t:2:1: error: /);
+		expect(error.formatted).toContain("\nt:1:1: note: First defined here\n");
+		expect(error.formatted).toMatch(/\n\^{3}$/);
+	});
+
+	test("a duplicate label notes the first definition", () => {
+		const r = assemble("here:\nhere:\n", "t");
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Symbol "here" is already defined');
+		expect(error.notes).toEqual([
+			{ message: "First defined here", start: 0, end: 4, file: "t" },
+		]);
+	});
+
+	test("a duplicate export notes the first export", () => {
+		const r = assemble(".export FOO = 1\n.export FOO\n", "t");
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Symbol "FOO" is already exported');
+		expect(error.notes).toEqual([
+			{ message: "First exported here", start: 8, end: 11, file: "t" },
+		]);
+	});
+
+	test("a duplicate macro notes the first definition", () => {
+		const r = assemble(
+			".macro m\n\tnop\n.endmacro\n.macro m\n\tnop\n.endmacro\n",
+			"t",
+		);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Macro "m" is already defined');
+		expect(error.notes?.[0]?.message).toBe("First defined here");
+		expect(error.formatted).toContain("note: First defined here");
+	});
+
+	test("a double placement notes the first placement", () => {
+		const r = assemble(
+			'.segment "OUTPUT"\n.emit "A"\n.emit "A"\n.segment "A"\n.byte 1\n',
+			"t",
+		);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Segment "A" is placed more than once');
+		expect(error.notes?.[0]?.message).toBe("First placed here");
+		expect(error.formatted).toMatch(/note: First placed here\n\.emit "A"/);
+	});
+
+	test("a circular placement notes the chain of open placements", () => {
+		const r = assemble(
+			'.segment "OUTPUT"\n.emit "A"\n' +
+				'.segment "A"\n.emit "B"\n' +
+				'.segment "B"\n.emit "A"\n',
+			"t",
+		);
+		const error = r.diagnostics.find((d) => d.message.includes("Circular"))!;
+		expect(error.notes?.map((n) => n.message)).toEqual([
+			'While placing "A"',
+			'While placing "B"',
+		]);
+	});
+
+	test("an import cycle notes the chain of open imports", async () => {
+		const host = memHost({
+			main: '.import "a"\nnop\n',
+			a: '.import "b"\n',
+			b: '.import "a"\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find((d) =>
+			d.message.includes("Import cycle"),
+		)!;
+		expect(error.file).toBe("b");
+		expect(error.notes).toEqual([
+			{ message: 'While importing "a"', start: 8, end: 11, file: "main" },
+			{ message: 'While importing "b"', start: 8, end: 11, file: "a" },
+		]);
+		expect(error.formatted).toContain('main:1:9: note: While importing "a"');
+		expect(error.formatted).toContain('a:1:9: note: While importing "b"');
+	});
+});
+
 describe("export name forms", () => {
 	test(".export name exports an elsewhere-defined symbol", async () => {
 		const host = memHost({

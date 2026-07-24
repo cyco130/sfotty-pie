@@ -4,6 +4,7 @@ import {
 	getOperandLocation,
 	type Expression,
 	type Macro,
+	type MessageNote,
 	type Operand,
 	type Statement,
 	type StatementContent,
@@ -14,6 +15,7 @@ type Reporter = (
 	message: string,
 	span: readonly [number, number],
 	file?: string,
+	notes?: MessageNote[],
 ) => void;
 
 // A param substitutes to an argument operand; a body-local label renames.
@@ -84,11 +86,20 @@ export function expandModules(
 				continue;
 			}
 			const name = macro.nameToken.text;
-			if (own.has(name)) {
+			const prior = own.get(name);
+			if (prior) {
 				report(
 					`Macro "${name}" is already defined`,
 					tokenSpan(macro.nameToken),
 					module.id,
+					[
+						{
+							message: "First defined here",
+							start: prior.nameToken.start,
+							end: prior.nameToken.end,
+							file: module.id,
+						},
+					],
 				);
 			} else {
 				own.set(name, macro);

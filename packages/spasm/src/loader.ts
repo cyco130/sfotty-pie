@@ -1,4 +1,9 @@
-import { parse, type Message, type Statement } from "./parser.ts";
+import {
+	parse,
+	type Message,
+	type MessageNote,
+	type Statement,
+} from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
 import { decodeStringLiteral } from "./value.ts";
 
@@ -39,6 +44,13 @@ export async function loadModules(
 ): Promise<LoadedModule[]> {
 	const loaded = new Map<string, LoadedModule>();
 	const onStack = new Set<string>();
+	// The in-progress import chain, for cycle notes: where each module on the
+	// stack was imported from (the entry module has no import site).
+	const stack: Array<{
+		id: string;
+		span?: readonly [number, number];
+		importerId?: string;
+	}> = [];
 	const order: LoadedModule[] = [];
 
 	const load = async (
@@ -48,15 +60,29 @@ export async function loadModules(
 	): Promise<void> => {
 		if (loaded.has(id)) return; // already loaded (dedup)
 		if (onStack.has(id)) {
+			const cycle = stack.slice(stack.findIndex((entry) => entry.id === id));
+			const notes: MessageNote[] = [];
+			for (const entry of cycle) {
+				if (entry.span && entry.importerId !== undefined) {
+					notes.push({
+						message: `While importing "${entry.id}"`,
+						start: entry.span[0],
+						end: entry.span[1],
+						file: entry.importerId,
+					});
+				}
+			}
 			report(
 				diagnostics,
 				importedAt,
 				`Import cycle through "${id}"`,
 				importerId,
+				notes,
 			);
 			return;
 		}
 		onStack.add(id);
+		stack.push({ id, span: importedAt, importerId });
 
 		let source: string | undefined;
 		try {
@@ -108,6 +134,7 @@ export async function loadModules(
 		}
 
 		onStack.delete(id);
+		stack.pop();
 	};
 
 	await load(entryId);
@@ -119,7 +146,8 @@ function report(
 	span: readonly [number, number] | undefined,
 	message: string,
 	file?: string,
+	notes?: MessageNote[],
 ): void {
 	const [start, end] = span ?? [0, 0];
-	diagnostics.push({ type: "error", start, end, message, file });
+	diagnostics.push({ type: "error", start, end, message, file, notes });
 }

@@ -1,3 +1,4 @@
+import { Codes } from "./codes.ts";
 import { OPCODES, type Mode } from "./opcodes.ts";
 import {
 	getOperandLocation,
@@ -9,7 +10,12 @@ import type { Value } from "./value.ts";
 export interface EncodeContext {
 	/** Address of this instruction's first byte, for relative branch offsets. */
 	location: bigint | undefined;
-	report(message: string, span: readonly [number, number], file?: string): void;
+	report(
+		code: string,
+		message: string,
+		span: readonly [number, number],
+		file?: string,
+	): void;
 }
 
 const OPERAND_BYTES: Record<Mode, number> = {
@@ -64,13 +70,18 @@ export function encodeInstruction(
 	const nameSpan: readonly [number, number] = [mnemonic.start, mnemonic.end];
 
 	if (!modes) {
-		context.report(`Unknown mnemonic "${mnemonic.text}"`, nameSpan);
+		context.report(
+			Codes.UnknownMnemonic,
+			`Unknown mnemonic "${mnemonic.text}"`,
+			nameSpan,
+		);
 		return [];
 	}
 
 	// Operand lists exist for macro calls; a real instruction takes at most one.
 	if (operands.length > 1) {
 		context.report(
+			Codes.TooManyOperands,
 			`Too many operands for ${name}`,
 			getOperandLocation(operands[1]!),
 		);
@@ -82,6 +93,7 @@ export function encodeInstruction(
 	const opcode = modes[mode];
 	if (opcode === undefined) {
 		context.report(
+			Codes.NoSuchAddressingMode,
 			`${name} has no ${MODE_NAMES[mode]} addressing mode`,
 			nameSpan,
 		);
@@ -155,6 +167,7 @@ function encodeOperand(
 	if (value === undefined) return new Array<number>(size).fill(0); // unresolved
 	if (typeof value !== "bigint") {
 		context.report(
+			Codes.OperandType,
 			typeof value === "string"
 				? "Operand must be a number, not a string"
 				: "Operand must be a number, not a function",
@@ -175,7 +188,11 @@ function byte(
 	context: EncodeContext,
 ): number {
 	if (value < -128n || value > 255n) {
-		context.report(`Byte value out of range: ${value}`, span);
+		context.report(
+			Codes.ByteOutOfRange,
+			`Byte value out of range: ${value}`,
+			span,
+		);
 	}
 	return Number(value & 0xffn);
 }
@@ -186,7 +203,11 @@ function word(
 	context: EncodeContext,
 ): number {
 	if (value < -32768n || value > 65535n) {
-		context.report(`Word value out of range: ${value}`, span);
+		context.report(
+			Codes.WordOutOfRange,
+			`Word value out of range: ${value}`,
+			span,
+		);
 	}
 	return Number(value & 0xffffn);
 }
@@ -199,7 +220,11 @@ function branchByte(
 	if (context.location === undefined) return 0; // offset not computable yet
 	const offset = target - (context.location + 2n);
 	if (offset < -128n || offset > 127n) {
-		context.report(`Branch target out of range (${offset} bytes)`, span);
+		context.report(
+			Codes.BranchOutOfRange,
+			`Branch target out of range (${offset} bytes)`,
+			span,
+		);
 		return 0;
 	}
 	return Number(offset & 0xffn);

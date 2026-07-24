@@ -16,7 +16,7 @@ function encodeSrc(
 	const reports: string[] = [];
 	const bytes = encodeInstruction(content, opts.value, {
 		location: opts.location,
-		report: (message) => reports.push(message),
+		report: (_code, message) => reports.push(message),
 	});
 	return { bytes, reports };
 }

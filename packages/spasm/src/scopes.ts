@@ -110,6 +110,18 @@ export class Scopes {
 		return out;
 	}
 
+	/**
+	 * The qualified key `name` would resolve to from `moduleId`, or undefined.
+	 * Public for diagnostics (e.g. matching an undefined reference to a label
+	 * in a discarded segment): the import branches test structural export
+	 * *sets*, so they answer correctly even for names that were never defined.
+	 * The own-scope branch requires a table entry, so callers interested in
+	 * never-defined own-module names must check the direct key themselves.
+	 */
+	resolutionTarget(moduleId: string, name: string): string | undefined {
+		return this.#scopeKey(moduleId, name);
+	}
+
 	// The qualified key `name` resolves to from `moduleId`, or undefined.
 	// `name` may itself be qualified (a dictionary path `N\0key`); export
 	// checks test the relevant root - exporting a dict exports its entries.

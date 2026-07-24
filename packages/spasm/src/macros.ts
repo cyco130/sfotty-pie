@@ -1,3 +1,4 @@
+import { Codes } from "./codes.ts";
 import type { Token } from "./lexer.ts";
 import type { LoadedModule } from "./loader.ts";
 import {
@@ -12,10 +13,11 @@ import {
 import { exportedNames } from "./scopes.ts";
 
 type Reporter = (
+	code: string,
 	message: string,
 	span: readonly [number, number],
 	file?: string,
-	notes?: MessageNote[],
+	options?: { notes?: MessageNote[]; symbol?: string },
 ) => void;
 
 // A param substitutes to an argument operand; a body-local label renames.
@@ -89,17 +91,20 @@ export function expandModules(
 			const prior = own.get(name);
 			if (prior) {
 				report(
+					Codes.MacroAlreadyDefined,
 					`Macro "${name}" is already defined`,
 					tokenSpan(macro.nameToken),
 					module.id,
-					[
-						{
-							message: "First defined here",
-							start: prior.nameToken.start,
-							end: prior.nameToken.end,
-							file: module.id,
-						},
-					],
+					{
+						notes: [
+							{
+								message: "First defined here",
+								start: prior.nameToken.start,
+								end: prior.nameToken.end,
+								file: module.id,
+							},
+						],
+					},
 				);
 			} else {
 				own.set(name, macro);
@@ -174,6 +179,7 @@ export function expandModules(
 			const first = statements[0];
 			if (first) {
 				report(
+					Codes.ExpansionTooDeep,
 					"Macro expansion too deep (recursion?)",
 					statementSpan(first),
 					scopeId,
@@ -190,6 +196,7 @@ export function expandModules(
 				const found = lookupPath(scopeId, content);
 				if (!found) {
 					report(
+						Codes.UnknownMacro,
 						`Unknown macro "${[content.mnemonic, ...content.memberTokens]
 							.map((t) => t.text)
 							.join("::")}"`,
@@ -307,6 +314,7 @@ function checkBody(macro: Macro, report: Reporter, file: string): void {
 							: undefined;
 			if (content && keyword) {
 				report(
+					Codes.DirectiveInMacroBody,
 					`\`.${content.type}\` is not allowed inside a macro body`,
 					tokenSpan(keyword),
 					file,
@@ -333,6 +341,7 @@ function callArgs(
 	const args = call.operands;
 	if (args.length !== macro.params.length) {
 		report(
+			Codes.MacroArity,
 			`Macro "${macro.nameToken.text}" expects ${macro.params.length} argument(s), got ${args.length}`,
 			tokenSpan(call.mnemonic),
 			file,
@@ -347,6 +356,7 @@ function callArgs(
 			(arg.type !== "simple-operand" || arg.expression.type !== "identifier")
 		) {
 			report(
+				Codes.OutArgumentShape,
 				`Argument for \`.out\` parameter "${param.nameToken.text}" must be a plain identifier`,
 				getOperandLocation(arg),
 				file,
@@ -401,6 +411,7 @@ function validateParams(
 		const name = param.nameToken.text;
 		if (inArm.has(name)) {
 			report(
+				Codes.ParamDefinedInArm,
 				`Parameter "${name}" is defined inside an \`.if\` arm - arm definitions are arm-local`,
 				tokenSpan(param.nameToken),
 				file,
@@ -408,6 +419,7 @@ function validateParams(
 		} else if (param.outToken) {
 			if (!direct.has(name)) {
 				report(
+					Codes.OutNeverDefined,
 					`\`.out\` parameter "${name}" is never defined in the macro body`,
 					tokenSpan(param.nameToken),
 					file,
@@ -415,6 +427,7 @@ function validateParams(
 			}
 		} else if (direct.has(name)) {
 			report(
+				Codes.ParamNeedsOut,
 				`Parameter "${name}" is defined in the macro body - declare it \`.out\``,
 				tokenSpan(param.nameToken),
 				file,
@@ -514,6 +527,7 @@ function substituteName(
 			return structuredClone(s.operand.expression);
 		}
 		report(
+			Codes.ArgumentMustBeIdentifier,
 			`Macro argument for "${identifier.text}" defines a name and must be a plain identifier`,
 			tokenSpan(identifier),
 			origin,
@@ -647,6 +661,7 @@ function substituteExpr(
 					return structuredClone(s.operand.expression);
 				}
 				report(
+					Codes.ShapedArgumentInExpression,
 					`Macro argument "${expr.text}" has an operand value and can only be used as a whole operand`,
 					tokenSpan(expr),
 					origin,
@@ -768,6 +783,7 @@ function validateBody(
 			case "identifier":
 				if (!bound.has(expr.text) && !visible.has(expr.text)) {
 					report(
+						Codes.UndefinedInMacroBody,
 						`Undefined symbol "${expr.text}" in macro "${macro.nameToken.text}"`,
 						tokenSpan(expr),
 						file,
@@ -914,6 +930,7 @@ function scopeStatements(
 								: undefined;
 				if (inner && keyword) {
 					report(
+						Codes.DirectiveInIfArm,
 						`\`.${inner.type}\` is not allowed inside an \`.if\` arm`,
 						tokenSpan(keyword),
 						file,

@@ -22,7 +22,7 @@ function evalSrc(
 		resolve: (name) => opts.symbols?.[name],
 		attributesOf: () => undefined,
 		locationCounter: opts.pc,
-		report: (message) => reports.push(message),
+		report: (_code, message) => reports.push(message),
 	};
 	return { value: evaluate(content.expression, env), reports };
 }

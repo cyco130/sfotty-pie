@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { assemble } from "./assemble.ts";
+import { Codes } from "./codes.ts";
 import type { Host } from "./loader.ts";
 
 /** An in-memory host: module ids are their own specifiers (identity resolve). */
@@ -240,6 +241,58 @@ describe("segments", () => {
 		expect(error.formatted).toContain(
 			'note: Defined here, in discarded segment "A"',
 		);
+	});
+
+	test("a cross-module reference into a discarded segment is explained too", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.discard "SOUND"\n\tjsr sfx_beep\n',
+			lib: '.export sfx_beep\n.segment "SOUND"\nsfx_beep:\n\trts\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find(
+			(d) => d.message === 'Undefined symbol "sfx_beep"',
+		)!;
+		expect(error.file).toBe("main");
+		expect(error.notes?.map((n) => [n.message, n.file])).toEqual([
+			['Defined here, in discarded segment "SOUND"', "lib"],
+			["Discarded here", "main"],
+		]);
+		// The bare `.export sfx_beep` in lib gets the same explanation.
+		const exportError = r.diagnostics.find(
+			(d) => d.code === Codes.ExportNeverDefined,
+		)!;
+		expect(exportError.notes?.map((n) => n.message)).toEqual([
+			'Defined here, in discarded segment "SOUND"',
+			"Discarded here",
+		]);
+	});
+
+	test("a namespaced reference into a discarded segment is explained", async () => {
+		const host = memHost({
+			main: 'snd = .import "lib"\n.discard "SOUND"\n\tjsr snd::sfx_beep\n',
+			lib: '.export sfx_beep\n.segment "SOUND"\nsfx_beep:\n\trts\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find(
+			(d) => d.message === 'Undefined symbol "snd::sfx_beep"',
+		)!;
+		expect(error.notes?.map((n) => n.message)).toContain(
+			'Defined here, in discarded segment "SOUND"',
+		);
+	});
+
+	test("an unrelated undefined symbol with the same name is not annotated", async () => {
+		const host = memHost({
+			// main does NOT import lib's exports, so its `sfx_beep` cannot
+			// resolve to the discarded label - no note.
+			main: '.import "layout"\n\tjsr sfx_beep\n',
+			layout: '.discard "SOUND"\n.segment "SOUND"\nsfx_beep_local:\n\trts\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find(
+			(d) => d.message === 'Undefined symbol "sfx_beep"',
+		)!;
+		expect(error.notes).toBeUndefined();
 	});
 
 	test("discarding an unknown segment is reported", () => {
@@ -1120,14 +1173,14 @@ describe("diagnostics with locations", () => {
 		const error = r.diagnostics.find((d) => d.message.includes("NOPE"))!;
 		expect(error.file).toBe("lib");
 		expect(error.formatted).toMatch(
-			/^lib:2:7 - error: Undefined symbol "NOPE"/,
+			/^lib:2:7 - error SP2001: Undefined symbol "NOPE"/,
 		);
 		// The excerpt shows a line-number gutter and squiggles under the span.
 		expect(error.formatted).toContain("\n\n2 .byte NOPE\n");
 		expect(error.formatted).toMatch(/\n {8}~{4}$/);
 		// The colored twin carries ANSI codes.
 		expect(error.formattedColor).toContain("\x1b[36mlib\x1b[0m");
-		expect(error.formattedColor).toContain("\x1b[31merror\x1b[0m");
+		expect(error.formattedColor).toContain("\x1b[31merror SP2001\x1b[0m");
 	});
 
 	test("an error inside a macro body points into the macro's file", async () => {
@@ -1139,7 +1192,9 @@ describe("diagnostics with locations", () => {
 		const error = r.diagnostics.find((d) => d.message.includes("MISSING"))!;
 		// The span is a body token: hygiene's origin doubles as the file.
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:2:8 - error: Undefined symbol/);
+		expect(error.formatted).toMatch(
+			/^lib:2:8 - error SP2001: Undefined symbol/,
+		);
 	});
 
 	test("parse errors are attributed to their module", async () => {
@@ -1150,14 +1205,16 @@ describe("diagnostics with locations", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:1:10 - error: /);
+		expect(error.formatted).toMatch(/^lib:1:10 - error SP1001: /);
 	});
 
 	test("single-source diagnostics use the given name", () => {
 		const { messages } = asm("lda undef\n");
 		expect(messages).toEqual(['Undefined symbol "undef"']);
 		const r = assemble("lda undef\n", "prog.s");
-		expect(r.diagnostics[0]!.formatted).toMatch(/^prog\.s:1:5 - error: /);
+		expect(r.diagnostics[0]!.formatted).toMatch(
+			/^prog\.s:1:5 - error SP2001: /,
+		);
 	});
 
 	test("a host shortName shortens the printed path, not the id", async () => {
@@ -1170,7 +1227,27 @@ describe("diagnostics with locations", () => {
 		const error = r.diagnostics[0]!;
 		// The module id stays canonical; only the formatted rendering shortens.
 		expect(error.file).toBe("/deep/path/main.s");
-		expect(error.formatted).toMatch(/^main\.s:1:5 - error: /);
+		expect(error.formatted).toMatch(/^main\.s:1:5 - error SP2001: /);
+	});
+});
+
+describe("diagnostic codes", () => {
+	test("every diagnostic carries a stable code", () => {
+		const r = assemble("lda undef\nFOO = 1\nFOO = 2\n", "t");
+		expect(r.diagnostics.map((d) => d.code)).toEqual([
+			Codes.UndefinedSymbol,
+			Codes.AlreadyDefined,
+		]);
+	});
+
+	test("undefined-symbol diagnostics carry the symbol name", () => {
+		const r = assemble("lda undef\n", "t");
+		expect(r.diagnostics[0]!.symbol).toBe("undef");
+	});
+
+	test("the code registry has no duplicate codes", () => {
+		const values = Object.values(Codes);
+		expect(new Set(values).size).toBe(values.length);
 	});
 });
 
@@ -1183,7 +1260,7 @@ describe("diagnostic notes", () => {
 			{ message: "First defined here", start: 0, end: 3, file: "t" },
 		]);
 		// The note renders as its own file:line:col block after the error.
-		expect(error.formatted).toMatch(/^t:2:1 - error: /);
+		expect(error.formatted).toMatch(/^t:2:1 - error SP2002: /);
 		expect(error.formatted).toContain("\n\nt:1:1 - note: First defined here\n");
 		expect(error.formatted).toMatch(/\n {2}~{3}$/);
 	});
@@ -1430,7 +1507,7 @@ describe(".error", () => {
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe("boom");
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:3:1 - error: boom/);
+		expect(error.formatted).toMatch(/^lib:3:1 - error SP3022: boom/);
 	});
 
 	test("the message must be a string", () => {
@@ -1460,7 +1537,7 @@ describe("export name forms", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe('Symbol "FOO" is already exported');
-		expect(error.formatted).toMatch(/^lib:2:9 - error: /);
+		expect(error.formatted).toMatch(/^lib:2:9 - error SP2003: /);
 	});
 
 	test("a bare re-export of a defining export is an error too", async () => {
@@ -1493,6 +1570,6 @@ describe("export name forms", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe('Exported symbol "NOPE" is never defined');
-		expect(error.formatted).toMatch(/^lib:1:9 - error: /);
+		expect(error.formatted).toMatch(/^lib:1:9 - error SP2004: /);
 	});
 });

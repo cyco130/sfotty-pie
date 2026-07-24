@@ -1,3 +1,4 @@
+import { Codes } from "./codes.ts";
 import type { Token } from "./lexer.ts";
 import {
 	getExpressionLocation,
@@ -5,6 +6,7 @@ import {
 	type Expression,
 	type InfixExpression,
 	type MemberExpression,
+	type MessageNote,
 	type PrefixExpression,
 } from "./parser.ts";
 import { SEP, type SymbolAttributes, type SymbolKind } from "./symbols.ts";
@@ -31,9 +33,16 @@ export interface EvalEnv {
 	/**
 	 * Report a hard error (type mismatch, divide-by-zero, bad escape). `file`
 	 * overrides the module the span refers into - hygiene-stamped tokens point
-	 * into their defining module's source.
+	 * into their defining module's source. `options.symbol` carries the
+	 * qualified symbol name on symbol-related diagnostics.
 	 */
-	report(message: string, span: readonly [number, number], file?: string): void;
+	report(
+		code: string,
+		message: string,
+		span: readonly [number, number],
+		file?: string,
+		options?: { notes?: MessageNote[]; symbol?: string },
+	): void;
 	/**
 	 * When set, an unresolved symbol is reported as undefined. The assemble loop
 	 * turns this on so the final (converged) pass flags genuinely-missing names,
@@ -63,6 +72,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 		case "string":
 			return decodeStringLiteral(expr.text, (escape) =>
 				env.report(
+					Codes.UnknownEscape,
 					`Unknown escape sequence "\\${escape}"`,
 					getExpressionLocation(expr),
 				),
@@ -70,6 +80,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 		case "character": {
 			const decoded = decodeStringLiteral(expr.text, (escape) =>
 				env.report(
+					Codes.UnknownEscape,
 					`Unknown escape sequence "\\${escape}"`,
 					getExpressionLocation(expr),
 				),
@@ -79,6 +90,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			const bytes = new TextEncoder().encode(decoded);
 			if (bytes.length !== 1) {
 				env.report(
+					Codes.CharacterNotSingleByte,
 					"A character literal must be a single byte",
 					getExpressionLocation(expr),
 				);
@@ -90,9 +102,11 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			const value = env.resolve(expr.text, expr.origin);
 			if (value === undefined && env.strict) {
 				env.report(
+					Codes.UndefinedSymbol,
 					`Undefined symbol "${expr.text}"`,
 					getExpressionLocation(expr),
 					expr.origin,
+					{ symbol: expr.text },
 				);
 			}
 			return value;
@@ -115,7 +129,11 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				const bad = base.keys.find((k) => k.text !== "size");
 				if (bad || base.keys.length !== 1) {
 					const at = bad ?? base.keys[1]!;
-					env.report(`Unknown attribute "${at.text}"`, [at.start, at.end]);
+					env.report(
+						Codes.UnknownAttributeKey,
+						`Unknown attribute "${at.text}"`,
+						[at.start, at.end],
+					);
 					return undefined;
 				}
 				return attributeValue(base.object, env);
@@ -127,6 +145,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			const path = flattenPath(expr);
 			if (!path) {
 				env.report(
+					Codes.ScopeResolutionOnValue,
 					"`::` requires a namespace name on its left",
 					getExpressionLocation(expr),
 				);
@@ -135,9 +154,11 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			const value = env.resolve(path.qualified, path.root.origin);
 			if (value === undefined && env.strict) {
 				env.report(
+					Codes.UndefinedSymbol,
 					`Undefined symbol "${path.display}"`,
 					getExpressionLocation(expr),
 					path.root.origin,
+					{ symbol: path.qualified },
 				);
 			}
 			return value;
@@ -147,6 +168,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			if (fn === undefined) return undefined; // unresolved; strict reported
 			if (typeof fn !== "object" || fn.type !== "function") {
 				env.report(
+					Codes.NotAFunction,
 					`${calleeName(expr.callee)} is not a function`,
 					getExpressionLocation(expr.callee),
 				);
@@ -154,6 +176,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			}
 			if (expr.args.length !== fn.params.length) {
 				env.report(
+					Codes.FunctionArity,
 					`${calleeName(expr.callee)} expects ${fn.params.length} argument(s), got ${expr.args.length}`,
 					getExpressionLocation(expr),
 				);
@@ -162,6 +185,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			const depth = (env.depth ?? 0) + 1;
 			if (depth > MAX_APPLICATION_DEPTH) {
 				env.report(
+					Codes.ApplicationTooDeep,
 					"Expression macro application too deep (recursion?)",
 					getExpressionLocation(expr),
 				);
@@ -194,12 +218,14 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				return attributeValue(expr, env);
 			}
 			env.report(
+				Codes.AttributesNeedsMember,
 				"`.attributes(...)` is a dictionary - access an attribute with `::`",
 				getExpressionLocation(expr),
 			);
 			return undefined;
 		case "dict-literal":
 			env.report(
+				Codes.DictionaryPosition,
 				"A dictionary literal can only be the right-hand side of a `=` definition",
 				getExpressionLocation(expr),
 			);
@@ -222,6 +248,7 @@ function attributeValue(call: BuiltinCall, env: EvalEnv): Value | undefined {
 		const path = flattenPath(arg);
 		if (!path) {
 			env.report(
+				Codes.AttributesArgument,
 				"`.attributes()` takes a symbol name",
 				getExpressionLocation(arg),
 			);
@@ -232,6 +259,7 @@ function attributeValue(call: BuiltinCall, env: EvalEnv): Value | undefined {
 		origin = path.root.origin;
 	} else {
 		env.report(
+			Codes.AttributesArgument,
 			"`.attributes()` takes a symbol name",
 			getExpressionLocation(arg),
 		);
@@ -242,15 +270,18 @@ function attributeValue(call: BuiltinCall, env: EvalEnv): Value | undefined {
 	if (info === undefined) {
 		if (env.strict) {
 			env.report(
+				Codes.UndefinedSymbol,
 				`Undefined symbol "${display}"`,
 				getExpressionLocation(arg),
 				origin,
+				{ symbol: name },
 			);
 		}
 		return undefined;
 	}
 	if (info.kind !== "label") {
 		env.report(
+			Codes.OnlyLabelsHaveAttributes,
 			`Only labels have attributes - "${display}" is a ${info.kind}`,
 			getExpressionLocation(arg),
 		);
@@ -318,11 +349,16 @@ function asNumber(
 	env: EvalEnv,
 ): bigint | undefined {
 	if (typeof value === "string") {
-		env.report("Expected a number, got a string", getExpressionLocation(expr));
+		env.report(
+			Codes.ExpectedNumber,
+			"Expected a number, got a string",
+			getExpressionLocation(expr),
+		);
 		return undefined;
 	}
 	if (typeof value === "object") {
 		env.report(
+			Codes.ExpectedNumber,
 			"Expected a number, got a function - apply it with `(...)`",
 			getExpressionLocation(expr),
 		);
@@ -384,6 +420,7 @@ function infix(expr: InfixExpression, env: EvalEnv): Value | undefined {
 		case ">>":
 			if (r < 0n) {
 				env.report(
+					Codes.NegativeShift,
 					"Shift count must not be negative",
 					getExpressionLocation(expr.right),
 				);
@@ -394,6 +431,7 @@ function infix(expr: InfixExpression, env: EvalEnv): Value | undefined {
 		case "%":
 			if (r === 0n) {
 				env.report(
+					Codes.DivisionByZero,
 					op === "/" ? "Division by zero" : "Modulo by zero",
 					getExpressionLocation(expr.right),
 				);

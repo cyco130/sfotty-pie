@@ -1,3 +1,4 @@
+import { Codes } from "./codes.ts";
 import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
 import { render, Segment } from "./layout.ts";
@@ -33,10 +34,11 @@ export interface AssembleResult {
 }
 
 type Reporter = (
+	code: string,
 	message: string,
 	span: readonly [number, number],
 	file?: string,
-	notes?: MessageNote[],
+	options?: { notes?: MessageNote[]; symbol?: string },
 ) => void;
 
 /** A "previously ..." note pointing at `span` in `file`. */
@@ -102,14 +104,16 @@ function assembleModules(
 	priorDiagnostics: Message[],
 ): AssembleResult {
 	// Macro expansion is static and runs once, before the multipass.
-	const expandReport: Reporter = (message, span, file, notes) => {
+	const expandReport: Reporter = (code, message, span, file, options) => {
 		priorDiagnostics.push({
 			type: "error",
+			code,
 			start: span[0],
 			end: span[1],
 			message,
 			file,
-			notes,
+			notes: options?.notes,
+			symbol: options?.symbol,
 		});
 	};
 	const modules = expandModules(loaded, expandReport);
@@ -153,14 +157,16 @@ function assembleModules(
 		const snapshot = scopes.snapshot();
 		scopes.beginPass();
 		diagnostics = [];
-		const report: Reporter = (message, span, file, notes) => {
+		const report: Reporter = (code, message, span, file, options) => {
 			diagnostics.push({
 				type: "error",
+				code,
 				start: span[0],
 				end: span[1],
 				message,
 				file,
-				notes,
+				notes: options?.notes,
+				symbol: options?.symbol,
 			});
 		};
 
@@ -198,16 +204,22 @@ function assembleModules(
 		}
 		for (const [name, site] of discards) {
 			if (!segments.has(name)) {
-				report(`Unknown segment "${name}"`, site.span, site.moduleId);
+				report(
+					Codes.UnknownSegment,
+					`Unknown segment "${name}"`,
+					site.span,
+					site.moduleId,
+				);
 				continue;
 			}
 			const placed = placedAt.get(name);
 			if (placed) {
 				report(
+					Codes.DiscardedButPlaced,
 					`Segment "${name}" is discarded but also placed`,
 					site.span,
 					site.moduleId,
-					[noteAt("Placed here", placed.span, placed.moduleId)],
+					{ notes: [noteAt("Placed here", placed.span, placed.moduleId)] },
 				);
 			}
 		}
@@ -217,6 +229,7 @@ function assembleModules(
 			}
 			const seen = firstSeen.get(name);
 			report(
+				Codes.NeverPlaced,
 				`Segment "${name}" is never placed - \`.emit\`, \`.emplace\`, or \`.discard\` it`,
 				seen?.span ?? [0, 0],
 				seen?.moduleId,
@@ -229,9 +242,13 @@ function assembleModules(
 			(moduleId, name, value, kind, span) => {
 				const prior = scopes.defineLocal(moduleId, name, value, kind, span);
 				if (prior) {
-					report(`Symbol "${name}" is already defined`, span, moduleId, [
-						noteAt("First defined here", prior, moduleId),
-					]);
+					report(
+						Codes.AlreadyDefined,
+						`Symbol "${name}" is already defined`,
+						span,
+						moduleId,
+						{ notes: [noteAt("First defined here", prior, moduleId)] },
+					);
 				}
 			},
 			(expression, moduleId, location) =>
@@ -271,6 +288,7 @@ function assembleModules(
 		// The last pass's state is valid (pessimistic), just possibly suboptimal.
 		diagnostics.push({
 			type: "warning",
+			code: Codes.DidNotConverge,
 			start: 0,
 			end: 0,
 			message: `Assembly did not converge after ${cap} passes; some operands may be larger than necessary.`,
@@ -280,31 +298,41 @@ function assembleModules(
 	// A reference to a label in a discarded segment is an ordinary undefined
 	// symbol (the label is never rendered, deliberately) - but bare "undefined"
 	// is baffling when the definition is right there in the source, so explain
-	// with notes pointing at the definition and the discard.
+	// with notes pointing at the definition and the discard. Matching is
+	// structural: the diagnostic's `symbol` is resolved from its module via the
+	// same scope-resolution rules a real reference uses, so cross-module
+	// references (splat or namespaced imports) annotate too, and an unrelated
+	// same-named symbol elsewhere never does.
+	const discardedLabels = new Map<
+		string,
+		{ segment: string; label: MessageNote; discard: SegmentSite }
+	>();
 	for (const [segName, discardSite] of finalDiscards) {
 		const segment = finalSegments.get(segName);
 		if (!segment) continue;
 		for (const item of segment.items) {
 			if (item.kind !== "label") continue;
-			const expected = `Undefined symbol "${item.name}"`;
-			for (const diagnostic of diagnostics) {
-				if (
-					diagnostic.message === expected &&
-					diagnostic.file === item.moduleId
-				) {
-					(diagnostic.notes ??= []).push(
-						noteAt(
-							`Defined here, in discarded segment "${segName}"`,
-							item.span,
-							item.moduleId,
-						),
-						noteAt("Discarded here", discardSite.span, discardSite.moduleId),
-					);
-				}
-			}
+			discardedLabels.set(item.moduleId + SEP + item.name, {
+				segment: segName,
+				label: noteAt(
+					`Defined here, in discarded segment "${segName}"`,
+					item.span,
+					item.moduleId,
+				),
+				discard: discardSite,
+			});
 		}
 	}
-
+	const discardedLabelFor = (
+		fromModule: string | undefined,
+		symbol: string | undefined,
+	) => {
+		if (fromModule === undefined || symbol === undefined) return undefined;
+		const own = fromModule + SEP + symbol;
+		if (discardedLabels.has(own)) return discardedLabels.get(own);
+		const target = scopes.resolutionTarget(fromModule, symbol);
+		return target === undefined ? undefined : discardedLabels.get(target);
+	};
 	// A bare `.export name` must name a definition made somewhere in its
 	// module, and a symbol may be exported only once (exported macros live in
 	// the mnemonic namespace and have their own duplicate check).
@@ -323,6 +351,7 @@ function assembleModules(
 			if (priorExport) {
 				diagnostics.push({
 					type: "error",
+					code: Codes.AlreadyExported,
 					start: nameToken.start,
 					end: nameToken.end,
 					message: `Symbol "${nameToken.text}" is already exported`,
@@ -339,12 +368,34 @@ function assembleModules(
 			) {
 				diagnostics.push({
 					type: "error",
+					code: Codes.ExportNeverDefined,
 					start: content.nameToken.start,
 					end: content.nameToken.end,
 					message: `Exported symbol "${content.nameToken.text}" is never defined`,
 					file: module.id,
+					symbol: content.nameToken.text,
 				});
 			}
+		}
+	}
+
+	// The discarded-label annotation runs after all symbol diagnostics exist
+	// (the export walk above included - a bare export of a discarded label
+	// deserves the same explanation).
+	if (discardedLabels.size) {
+		for (const diagnostic of diagnostics) {
+			if (
+				diagnostic.code !== Codes.UndefinedSymbol &&
+				diagnostic.code !== Codes.ExportNeverDefined
+			) {
+				continue;
+			}
+			const hit = discardedLabelFor(diagnostic.file, diagnostic.symbol);
+			if (!hit) continue;
+			(diagnostic.notes ??= []).push(
+				hit.label,
+				noteAt("Discarded here", hit.discard.span, hit.discard.moduleId),
+			);
 		}
 	}
 
@@ -356,25 +407,26 @@ function assembleModules(
 	const formatOne = (
 		span: { start: number; end: number; file?: string },
 		kind: string,
+		code: string | undefined,
 		text: string,
 		color: boolean,
 	): string => {
 		const sourceFile =
 			span.file === undefined ? undefined : sourceFiles.get(span.file);
 		return sourceFile
-			? sourceFile.formatMessage(span.start, span.end, kind, text, {
+			? sourceFile.formatMessage(span.start, span.end, kind, code, text, {
 					showLine: true,
 					color,
 				})
-			: `${kind}: ${text}`;
+			: `${kind}${code === undefined ? "" : " " + code}: ${text}`;
 	};
 	const all = [...priorDiagnostics, ...diagnostics];
 	for (const message of all) {
 		const render = (color: boolean) =>
 			[
-				formatOne(message, message.type, message.message, color),
+				formatOne(message, message.type, message.code, message.message, color),
 				...(message.notes ?? []).map((note) =>
-					formatOne(note, "note", note.message, color),
+					formatOne(note, "note", undefined, note.message, color),
 				),
 			].join("\n\n");
 		message.formatted = render(false);
@@ -471,10 +523,11 @@ function collect(
 						);
 						if (prior) {
 							report(
+								Codes.AlreadyDefined,
 								`Symbol "${text}" is already defined`,
 								[start, end],
 								moduleId,
-								[noteAt("First defined here", prior, moduleId)],
+								{ notes: [noteAt("First defined here", prior, moduleId)] },
 							);
 						}
 					}
@@ -521,9 +574,17 @@ function collect(
 					];
 					const prior = discards.get(name);
 					if (prior) {
-						report(`Segment "${name}" is already discarded`, span, moduleId, [
-							noteAt("First discarded here", prior.span, prior.moduleId),
-						]);
+						report(
+							Codes.AlreadyDiscarded,
+							`Segment "${name}" is already discarded`,
+							span,
+							moduleId,
+							{
+								notes: [
+									noteAt("First discarded here", prior.span, prior.moduleId),
+								],
+							},
+						);
 					} else {
 						discards.set(name, { span, moduleId });
 					}
@@ -571,6 +632,7 @@ function collect(
 						);
 					} else {
 						report(
+							Codes.OnlyDefinitionExportable,
 							"Only a definition can be exported",
 							[content.exportToken.start, content.exportToken.end],
 							moduleId,
@@ -618,6 +680,7 @@ function collect(
 					if (value === undefined) break;
 					if (typeof value !== "string") {
 						env.report(
+							Codes.ErrorMessageType,
 							"`.error` requires a string message",
 							getExpressionLocation(content.message),
 							file,
@@ -625,6 +688,7 @@ function collect(
 						break;
 					}
 					report(
+						Codes.UserError,
 						value,
 						[
 							content.errorToken.start,
@@ -677,6 +741,7 @@ function selectArm(
 		if (value === undefined) continue;
 		if (typeof value !== "bigint") {
 			env.report(
+				Codes.IfConditionType,
 				"`.if` requires a numeric condition",
 				getExpressionLocation(arm.condition),
 				arm.keyword.origin,
@@ -714,6 +779,7 @@ function segmentName(
 ): string {
 	return decodeStringLiteral(token.text, (escape) =>
 		report(
+			Codes.UnknownEscape,
 			`Unknown escape sequence "\\${escape}"`,
 			[token.start, token.end],
 			file,
@@ -732,7 +798,8 @@ function moduleEnv(
 		attributesOf: (name, origin) =>
 			scopes.attributesOf(origin ?? moduleId, name),
 		locationCounter: location,
-		report: (message, span, file) => report(message, span, file ?? moduleId),
+		report: (code, message, span, file, options) =>
+			report(code, message, span, file ?? moduleId, options),
 		strict: true,
 	};
 }
@@ -773,9 +840,13 @@ function defineAssignment(
 			span,
 		);
 		if (prior) {
-			report(`Symbol "${text}" is already defined`, span, definitionModule, [
-				noteAt("First defined here", prior, definitionModule),
-			]);
+			report(
+				Codes.AlreadyDefined,
+				`Symbol "${text}" is already defined`,
+				span,
+				definitionModule,
+				{ notes: [noteAt("First defined here", prior, definitionModule)] },
+			);
 		}
 		return;
 	}
@@ -783,6 +854,7 @@ function defineAssignment(
 	if (assignment.expression.type === "dict-literal") {
 		if (assignment.operatorToken.type === ":=") {
 			report(
+				Codes.DictionaryIsAValue,
 				"A dictionary is a value, not an address - define it with `=`",
 				[assignment.operatorToken.start, assignment.operatorToken.end],
 				definitionModule,
@@ -791,6 +863,7 @@ function defineAssignment(
 		if (assignment.attributes.length) {
 			const key = assignment.attributes[0]!.key;
 			report(
+				Codes.OnlyLabelsHaveAttributes,
 				"Only labels have attributes - use `:=` for an address",
 				[key.start, key.end],
 				definitionModule,
@@ -804,9 +877,13 @@ function defineAssignment(
 			span,
 		);
 		if (prior) {
-			report(`Symbol "${text}" is already defined`, span, definitionModule, [
-				noteAt("First defined here", prior, definitionModule),
-			]);
+			report(
+				Codes.AlreadyDefined,
+				`Symbol "${text}" is already defined`,
+				span,
+				definitionModule,
+				{ notes: [noteAt("First defined here", prior, definitionModule)] },
+			);
 		}
 		defineDict(
 			assignment.expression,
@@ -837,9 +914,13 @@ function defineAssignment(
 		attributes,
 	);
 	if (prior) {
-		report(`Symbol "${text}" is already defined`, span, definitionModule, [
-			noteAt("First defined here", prior, definitionModule),
-		]);
+		report(
+			Codes.AlreadyDefined,
+			`Symbol "${text}" is already defined`,
+			span,
+			definitionModule,
+			{ notes: [noteAt("First defined here", prior, definitionModule)] },
+		);
 	}
 }
 
@@ -857,6 +938,7 @@ function evaluateAttributes(
 		const first = assignment.attributes[0];
 		if (first) {
 			report(
+				Codes.OnlyLabelsHaveAttributes,
 				"Only labels have attributes - use `:=` for an address",
 				[first.key.start, first.key.end],
 				file,
@@ -873,19 +955,29 @@ function evaluateAttributes(
 			attribute.key.end,
 		];
 		if (attribute.key.text !== "size") {
-			report(`Unknown attribute "${attribute.key.text}"`, keySpan, file);
+			report(
+				Codes.UnknownAttributeKey,
+				`Unknown attribute "${attribute.key.text}"`,
+				keySpan,
+				file,
+			);
 			continue;
 		}
 		if (sizeDeclaredAt) {
-			report(`Attribute "size" is already set`, keySpan, file, [
-				noteAt("First set here", sizeDeclaredAt, file),
-			]);
+			report(
+				Codes.SizeAlreadySet,
+				`Attribute "size" is already set`,
+				keySpan,
+				file,
+				{ notes: [noteAt("First set here", sizeDeclaredAt, file)] },
+			);
 			continue;
 		}
 		sizeDeclaredAt = keySpan;
 		const value = evaluate(attribute.value, env);
 		if (value !== undefined && typeof value !== "bigint") {
 			report(
+				Codes.SizeRequiresNumber,
 				"`size:` requires a number",
 				getExpressionLocation(attribute.value),
 				file,
@@ -894,6 +986,7 @@ function evaluateAttributes(
 		}
 		if (value !== undefined && value < 0n) {
 			report(
+				Codes.SizeNegative,
 				"`size:` must not be negative",
 				getExpressionLocation(attribute.value),
 				file,
@@ -931,9 +1024,13 @@ function defineDict(
 				span,
 			);
 			if (prior) {
-				report(`Symbol "${path}" is already defined`, span, definitionModule, [
-					noteAt("First defined here", prior, definitionModule),
-				]);
+				report(
+					Codes.AlreadyDefined,
+					`Symbol "${path}" is already defined`,
+					span,
+					definitionModule,
+					{ notes: [noteAt("First defined here", prior, definitionModule)] },
+				);
 			}
 			defineDict(
 				entry.value,
@@ -954,9 +1051,13 @@ function defineDict(
 				span,
 			);
 			if (prior) {
-				report(`Symbol "${path}" is already defined`, span, definitionModule, [
-					noteAt("First defined here", prior, definitionModule),
-				]);
+				report(
+					Codes.AlreadyDefined,
+					`Symbol "${path}" is already defined`,
+					span,
+					definitionModule,
+					{ notes: [noteAt("First defined here", prior, definitionModule)] },
+				);
 			}
 		}
 	}
@@ -983,6 +1084,7 @@ function collectContent(
 			if (value === undefined) return location; // keep; resolves later
 			if (typeof value !== "bigint") {
 				env.report(
+					Codes.OrgRequiresNumber,
 					"`.org` requires a numeric address",
 					getExpressionLocation(content.expression),
 				);
@@ -1068,14 +1170,22 @@ function emitData(
 	}
 
 	if (typeof value === "object") {
-		env.report("A function is not data - apply it with `(...)`", span);
+		env.report(
+			Codes.FunctionAsData,
+			"A function is not data - apply it with `(...)`",
+			span,
+		);
 		for (let i = 0; i < size; i++) output.push(0);
 		return;
 	}
 
 	if (typeof value === "string") {
 		if (size === 2) {
-			env.report("A string is not allowed in `.word`", span);
+			env.report(
+				Codes.StringInWord,
+				"A string is not allowed in `.word`",
+				span,
+			);
 			output.push(0, 0);
 			return;
 		}
@@ -1085,11 +1195,19 @@ function emitData(
 
 	if (size === 1) {
 		if (value < -128n || value > 255n)
-			env.report(`Byte value out of range: ${value}`, span);
+			env.report(
+				Codes.ByteOutOfRange,
+				`Byte value out of range: ${value}`,
+				span,
+			);
 		output.push(Number(value & 0xffn));
 	} else {
 		if (value < -32768n || value > 65535n)
-			env.report(`Word value out of range: ${value}`, span);
+			env.report(
+				Codes.WordOutOfRange,
+				`Word value out of range: ${value}`,
+				span,
+			);
 		const word = Number(value & 0xffffn);
 		output.push(word & 0xff, (word >> 8) & 0xff);
 	}

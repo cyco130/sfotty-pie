@@ -1,3 +1,4 @@
+import { Codes } from "./codes.ts";
 import {
 	parse,
 	type Message,
@@ -77,6 +78,7 @@ export async function loadModules(
 			}
 			report(
 				diagnostics,
+				Codes.ImportCycle,
 				importedAt,
 				`Import cycle through "${id}"`,
 				importerId,
@@ -91,7 +93,13 @@ export async function loadModules(
 		try {
 			source = await host.read(id);
 		} catch {
-			report(diagnostics, importedAt, `Cannot read module "${id}"`, importerId);
+			report(
+				diagnostics,
+				Codes.ModuleReadFailed,
+				importedAt,
+				`Cannot read module "${id}"`,
+				importerId,
+			);
 		}
 
 		if (source !== undefined) {
@@ -115,6 +123,7 @@ export async function loadModules(
 					} catch {
 						report(
 							diagnostics,
+							Codes.ModuleResolveFailed,
 							span,
 							`Cannot resolve module "${specifier}"`,
 							id,
@@ -146,11 +155,12 @@ export async function loadModules(
 
 function report(
 	diagnostics: Message[],
+	code: string,
 	span: readonly [number, number] | undefined,
 	message: string,
 	file?: string,
 	notes?: MessageNote[],
 ): void {
 	const [start, end] = span ?? [0, 0];
-	diagnostics.push({ type: "error", start, end, message, file, notes });
+	diagnostics.push({ type: "error", code, start, end, message, file, notes });
 }

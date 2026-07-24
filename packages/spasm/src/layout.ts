@@ -1,3 +1,4 @@
+import { Codes } from "./codes.ts";
 import type { Expression, MessageNote } from "./parser.ts";
 import type { SymbolKind } from "./symbols.ts";
 import type { Value } from "./value.ts";
@@ -67,10 +68,11 @@ export type EvaluateAt = (
 ) => Value | undefined;
 
 type Reporter = (
+	code: string,
 	message: string,
 	span: readonly [number, number],
 	file?: string,
-	notes?: MessageNote[],
+	options?: { notes?: MessageNote[]; symbol?: string },
 ) => void;
 
 export interface RenderResult {
@@ -152,6 +154,7 @@ export function render(
 					// the file - real content there would be silently dropped.
 					if (emplaced && item.bytes.length > 0) {
 						report(
+							Codes.EmplacedContent,
 							`Emplaced segment "${segment.name}" contains byte-emitting content - only \`.res\` is allowed`,
 							item.span,
 							item.moduleId,
@@ -170,9 +173,15 @@ export function render(
 					const value = evaluateAt(item.expression, item.moduleId, lc);
 					let count = 0n; // unresolved this pass -> 0; later passes settle it
 					if (value !== undefined && typeof value !== "bigint") {
-						report("`.res` requires a numeric count", item.span, item.moduleId);
+						report(
+							Codes.ResRequiresNumber,
+							"`.res` requires a numeric count",
+							item.span,
+							item.moduleId,
+						);
 					} else if (value !== undefined && value < 0n) {
 						report(
+							Codes.ResOverflow,
 							"`.res` count is negative - content overflows the fill boundary",
 							item.span,
 							item.moduleId,
@@ -193,6 +202,7 @@ export function render(
 					const sub = segments.get(item.segment);
 					if (!sub) {
 						report(
+							Codes.UnknownSegment,
 							`Unknown segment "${item.segment}"`,
 							item.span,
 							item.moduleId,
@@ -204,12 +214,15 @@ export function render(
 						// the cycle for the reader.
 						const cycle = stackList.slice(stackList.indexOf(sub.name));
 						report(
+							Codes.CircularPlacement,
 							`Circular .${item.kind} of segment "${sub.name}"`,
 							item.span,
 							item.moduleId,
-							cycle.flatMap((name) =>
-								placementNote(`While placing "${name}"`, name),
-							),
+							{
+								notes: cycle.flatMap((name) =>
+									placementNote(`While placing "${name}"`, name),
+								),
+							},
 						);
 						break;
 					}
@@ -217,10 +230,11 @@ export function render(
 					// two contradictory addresses for every label in it.
 					if (bases.has(sub.name)) {
 						report(
+							Codes.PlacedMoreThanOnce,
 							`Segment "${sub.name}" is placed more than once`,
 							item.span,
 							item.moduleId,
-							placementNote("First placed here", sub.name),
+							{ notes: placementNote("First placed here", sub.name) },
 						);
 						break;
 					}
@@ -230,6 +244,7 @@ export function render(
 					});
 					if (emplaced && item.kind === "emit") {
 						report(
+							Codes.EmitInsideEmplaced,
 							"Cannot `.emit` inside an emplaced segment - use `.emplace`",
 							item.span,
 							item.moduleId,

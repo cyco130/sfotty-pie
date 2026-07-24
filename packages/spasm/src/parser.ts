@@ -1,3 +1,4 @@
+import { Codes } from "./codes.ts";
 import {
 	DOT_KEYWORDS,
 	Lexer,
@@ -316,6 +317,7 @@ class Parser {
 			case "else":
 			case "endif": {
 				const error = new ParseError(token, ["a statement"]);
+				error.code = Codes.StrayConditionalKeyword;
 				error.message = `\`.${token.type}\` without a matching \`.if\``;
 				throw error;
 			}
@@ -979,11 +981,16 @@ export interface MessageNote {
 
 export interface Message {
 	type: "error" | "warning" | "info";
+	/** The diagnostic's stable code ("SP2001", ...) - see src/codes.ts. */
+	code: string;
 	start: number;
 	end: number;
 	message: string;
 	/** Module id the span refers into, for file:line:col attribution. */
 	file?: string;
+	/** For symbol-related diagnostics (undefined symbol, ...): the qualified
+	 * symbol name, machine-readable (dictionary paths NUL-joined). */
+	symbol?: string;
 	/** Related locations, rendered as `note:` lines after the message. */
 	notes?: MessageNote[];
 	/**
@@ -1019,6 +1026,7 @@ export class ParseError implements Message {
 	}
 
 	type = "error" as const;
+	code: string = Codes.Expected;
 	message: string;
 	start: number;
 	end: number;

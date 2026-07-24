@@ -55,30 +55,34 @@ export class SourceFile {
 	 * Render a tsc-style diagnostic block:
 	 *
 	 * ```
-	 * f.s:4:44 - error: message
+	 * f.s:4:44 - error SP2001: message
 	 *
 	 * 4 lda undef
 	 *       ~~~~~
 	 * ```
 	 *
-	 * With `color`, ANSI codes paint the parts (file cyan, line:col yellow,
-	 * the kind and the squiggles in the kind's color, the line-number gutter
-	 * inverse) - for tty output; the plain form is the machine-friendly one.
+	 * `code` is the diagnostic's stable code, printed after the kind (notes
+	 * have none). With `color`, ANSI codes paint the parts (file cyan,
+	 * line:col yellow, the kind + code and the squiggles in the kind's color,
+	 * the line-number gutter inverse) - for tty output; the plain form is the
+	 * machine-friendly one.
 	 */
 	formatMessage(
 		start: number,
 		end: number,
 		kind: string,
+		code: string | undefined,
 		message: string,
 		options: { showLine?: boolean; color?: boolean } = {},
 	): string {
 		const location = this.getLocation(start, end);
-		const paint = (text: string, code: string) =>
-			options.color ? `\x1b[${code}m${text}\x1b[0m` : text;
+		const paint = (text: string, colorCode: string) =>
+			options.color ? `\x1b[${colorCode}m${text}\x1b[0m` : text;
 		const kindCode = KIND_COLORS[kind] ?? KIND_COLORS["error"]!;
 
+		const label = code === undefined ? kind : `${kind} ${code}`;
 		const position = `${location.startLine}:${location.startColumn}`;
-		let out = `${paint(this.shortName, CYAN)}:${paint(position, YELLOW)} - ${paint(kind, kindCode)}: ${message}`;
+		let out = `${paint(this.shortName, CYAN)}:${paint(position, YELLOW)} - ${paint(label, kindCode)}: ${message}`;
 
 		if (options.showLine) {
 			const lineMatch = this.source.slice(location.lineStart).match(/[^\r\n]*/);

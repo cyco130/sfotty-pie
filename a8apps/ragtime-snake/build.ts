@@ -19,7 +19,8 @@ export async function buildGame(): Promise<Uint8Array> {
 	const useColor = process.stderr.isTTY && !process.env.NO_COLOR;
 	const rendered = result.diagnostics.map(
 		(d) =>
-			(useColor ? d.formattedColor : d.formatted) ?? `${d.type}: ${d.message}`,
+			(useColor ? d.formattedColor : d.formatted) ??
+			`${d.type} ${d.code}: ${d.message}`,
 	);
 	if (rendered.length) {
 		process.stderr.write(rendered.join("\n\n") + "\n");

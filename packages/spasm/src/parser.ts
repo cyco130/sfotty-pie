@@ -558,6 +558,7 @@ class Parser {
 			}
 			case "decimal":
 			case "hexadecimal":
+			case "binary":
 			case "string":
 			case "character":
 			case "*": {
@@ -930,6 +931,7 @@ export function getExpressionLocation(
 	switch (expression.type) {
 		case "decimal":
 		case "hexadecimal":
+		case "binary":
 		case "identifier":
 		case "string":
 		case "character":
@@ -1277,7 +1279,10 @@ export interface MemberExpression {
 	member: Token<"identifier">;
 }
 
-export type IntegerLiteral = Token<"decimal"> | Token<"hexadecimal">;
+export type IntegerLiteral =
+	| Token<"decimal">
+	| Token<"hexadecimal">
+	| Token<"binary">;
 
 export interface GroupedExpression {
 	type: "grouped-expression";

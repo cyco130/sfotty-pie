@@ -45,6 +45,26 @@ describe("single tokens", () => {
 		expect(one("1_000")).toBe("decimal");
 		expect(one("$ff")).toBe("hexadecimal");
 		expect(one("$0A_F0")).toBe("hexadecimal");
+		expect(one("%1010")).toBe("binary");
+		expect(one("%10_10")).toBe("binary");
+	});
+
+	test("% is modulo unless it hugs a binary digit", () => {
+		expect(code("a4 % 2")).toEqual([
+			["identifier", "a4"],
+			["%", "%"],
+			["decimal", "2"],
+		]);
+		expect(code("a4 % 10")).toEqual([
+			["identifier", "a4"],
+			["%", "%"],
+			["decimal", "10"],
+		]);
+		// The greedy lex: `%10` is a binary literal, so modulo needs the space.
+		expect(code("a4 %10")).toEqual([
+			["identifier", "a4"],
+			["binary", "%10"],
+		]);
 	});
 
 	test("string and character literals", () => {

@@ -58,6 +58,8 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return BigInt(expr.text.replace(/_/g, ""));
 		case "hexadecimal":
 			return BigInt("0x" + expr.text.slice(1).replace(/_/g, ""));
+		case "binary":
+			return BigInt("0b" + expr.text.slice(1).replace(/_/g, ""));
 		case "string":
 			return decodeStringLiteral(expr.text, (escape) =>
 				env.report(

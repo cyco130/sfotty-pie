@@ -85,7 +85,7 @@ A backslash at the end of a line continues the statement onto the next line. Tra
 
 ## Numbers, strings, and characters
 
-- Decimal: `123`. Hexadecimal: `$FF`. Underscores may be used as digit separators in both (`1_000_000`, `$FF_FF`). There are no binary, octal, `0x`, or `0b` forms.
+- Decimal: `123`. Hexadecimal: `$FF`. Binary: `%1010`. Underscores may be used as digit separators in all three (`1_000_000`, `$FF_FF`, `%1010_0101`). There are no octal, `0x`, or `0b` forms.
 - Numbers are unbounded integers. Arithmetic never overflows; values are range-checked only where bytes are emitted (a `.byte` operand must fit a byte, and so on).
 - String literals use double quotes: `"Hello"`. They are single-line, with the C-style escapes `\\`, `\"`, `\'`, `\n`, `\t`, `\r`, and `\0`. Strings encode to UTF-8 bytes with no terminator; `.byte "HI"` emits exactly two bytes, and a message supplies its own terminator (`.byte "HI", 0`).
 - Character literals use single quotes: `'A'` is the number 65. A character literal is a single byte in the target encoding (currently UTF-8), so `'ü'`, which encodes to two bytes, is an error.
@@ -132,7 +132,10 @@ Notes:
 - `*` in expression position is the current location counter (the run address): `jmp *` is an infinite loop, and `.res $2000 - *` fills up to `$2000`.
 - Parentheses group, but at the start of an instruction operand they can also mean indirect addressing; see [the disambiguation rule](#parentheses-indirect-addressing-vs-grouping).
 
-**Gotcha:** `<<` lexes greedily. Comparing against a low byte needs a space: `a < <b` (less-than low-byte-of-b), not `a << b` (shift).
+**Gotchas of greedy lexing:**
+
+- `<<` lexes greedily: comparing against a low byte needs a space, `a < <b` (less-than low-byte-of-b), not `a << b` (shift).
+- `%` hugging a binary digit is a binary literal: modulo by a number starting with 0 or 1 needs a space, `a % 10` (modulo ten), not `a %10` (the binary literal 2).
 
 ## Instructions and addressing modes
 
@@ -496,7 +499,6 @@ If the pass cap is hit without convergence (rare - it requires pathological layo
 Spasm's syntax is still evolving. Notable planned constructs that do **not** exist yet, so you aren't left wondering:
 
 - Conditional assembly (`.if`/`.else`/`.endif` and a static `#if` family) and `.error`.
-- Binary literals (`%1010`).
 - Backtick-quoted symbol names (for names that collide with `a`/`x`/`y` or aren't valid identifiers).
 - `@local` labels (macro-body hygiene covers the common case today).
 - Operand size assertions (`lda .word addr` to force absolute).

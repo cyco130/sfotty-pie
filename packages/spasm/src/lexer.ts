@@ -111,9 +111,12 @@ const REGEXES = [
 	),
 	[/[a-zA-Z_][a-zA-Z_0-9]*/, "identifier"],
 
-	// Numeric literals
+	// Numeric literals. `%` hugging a binary digit is a binary literal, so the
+	// modulo operator needs a space before a right operand starting with 0 or 1
+	// (`a % 1`, not `a%1`) - the ca65 tension, resolved the same way.
 	[/[0-9_]+/, "decimal"],
 	[/\$[0-9_A-Fa-f]+/, "hexadecimal"],
+	[/%[01_]+/, "binary"],
 
 	// String literals (single-line: a raw line break ends recovery here)
 	[/"(?:[^"\r\n\\]|\\.)*"/, "string"],

@@ -213,7 +213,7 @@ A **segment** is a named collector of bytes, labels, and reservations. At any po
 - **`.emit "X"`** renders segment X at the current location and splices its bytes into the file.
 - **`.emplace "X"`** does the same address assignment but writes no bytes - the right placement for BSS-style segments whose contents don't ship in the file.
 
-Placement is what turns a segment's labels into absolute addresses: a label's value is the segment's base (where it was placed) plus the label's offset within the segment. Segments may emit other segments, forming a tree rooted at `OUTPUT`; a circular `.emit`/`.emplace` is an error, as is placing an unknown segment. Place each labeled segment exactly once - placing it twice would give its labels two contradictory addresses.
+Placement is what turns a segment's labels into absolute addresses: a label's value is the segment's base (where it was placed) plus the label's offset within the segment. Segments may emit other segments, forming a tree rooted at `OUTPUT`. Placing an unknown segment, placing one circularly, or placing the same segment more than once (which would give its labels two contradictory addresses) are all errors.
 
 **`.org expr` sets the run address, not the file position.** Spasm tracks two counters: the location counter `*` (the address code runs at, which labels resolve to) and the file offset (how many bytes have been written). `.org` jumps the location counter and writes nothing, so a file header can sit at file offset 0 with no run address while the code after `.org $2000` runs at `$2000` yet is stored right after the header. `.emplace` advances the location counter without advancing the file offset for the same reason.
 

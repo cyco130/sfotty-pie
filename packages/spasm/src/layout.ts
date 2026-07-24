@@ -158,6 +158,16 @@ export function render(
 						);
 						break;
 					}
+					// A second placement would assign the segment a second base -
+					// two contradictory addresses for every label in it.
+					if (bases.has(sub.name)) {
+						report(
+							`Segment "${sub.name}" is placed more than once`,
+							item.span,
+							item.moduleId,
+						);
+						break;
+					}
 					const subBytes = renderSegment(sub, lc);
 					if (item.kind === "emit") bytes.push(...subBytes);
 					lc += BigInt(subBytes.length); // emplace reserves without emitting

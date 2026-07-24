@@ -179,6 +179,29 @@ describe("segments", () => {
 		expect(messages).toContain('Circular .emit of segment "A"');
 	});
 
+	test("placing a segment twice is reported", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0400\n.emit "A"\n.emit "A"\n' +
+				'.segment "A"\n.byte 1\n',
+		);
+		expect(messages).toContain('Segment "A" is placed more than once');
+	});
+
+	test("an .emit after an .emplace of the same segment is also a double placement", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0400\n.emplace "A"\n.emit "A"\n' +
+				'.segment "A"\n.byte 1\n',
+		);
+		expect(messages).toContain('Segment "A" is placed more than once');
+	});
+
+	test("a single placement stays clean", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0400\n.emit "A"\n.segment "A"\n.byte 1\n',
+		);
+		expect(messages).toEqual([]);
+	});
+
 	// The lib.s-inlined hello, exercising the whole engine: cross-segment refs
 	// (vectors -> CODE's `start`, `lda message` -> RODATA), `.org`, emit/emplace.
 	// OUTPUT emits CODE before RODATA, so start=$0400 and message follows the code.

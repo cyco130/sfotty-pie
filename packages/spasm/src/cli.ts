@@ -26,7 +26,9 @@ async function main(): Promise<void> {
 	const result = await assemble(resolve(input), host);
 
 	for (const diagnostic of result.diagnostics) {
-		process.stderr.write(`${diagnostic.type}: ${diagnostic.message}\n`);
+		process.stderr.write(
+			`${diagnostic.formatted ?? `${diagnostic.type}: ${diagnostic.message}`}\n`,
+		);
 	}
 	if (result.diagnostics.some((d) => d.type === "error")) {
 		process.exit(1);

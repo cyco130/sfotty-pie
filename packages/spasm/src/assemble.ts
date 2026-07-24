@@ -2,20 +2,25 @@ import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
 import { render, Segment } from "./layout.ts";
 import { loadModules, type Host, type LoadedModule } from "./loader.ts";
-import { expandMacros } from "./macros.ts";
+import { expandModules } from "./macros.ts";
 import { Scopes } from "./scopes.ts";
 import {
 	getExpressionLocation,
 	parse,
 	type Assignment,
+	type DictLiteral,
 	type Expression,
-	type Global,
 	type Message,
 	type Operand,
 	type StatementContent,
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
-import { decodeStringLiteral, type Value } from "./value.ts";
+import { SEP, type SymbolAttributes } from "./symbols.ts";
+import {
+	decodeStringLiteral,
+	type FunctionValue,
+	type Value,
+} from "./value.ts";
 
 export interface AssembleResult {
 	output: Uint8Array;
@@ -23,7 +28,14 @@ export interface AssembleResult {
 	diagnostics: Message[];
 }
 
-type Reporter = (message: string, span: readonly [number, number]) => void;
+type Reporter = (
+	message: string,
+	span: readonly [number, number],
+	file?: string,
+) => void;
+
+// Function values interned per definition site (see defineAssignment).
+const functionValues = new WeakMap<Assignment, FunctionValue>();
 
 /**
  * Assemble a single source string (no module imports). Synchronous - there is
@@ -48,6 +60,7 @@ export function assemble(
 	const diagnostics: Message[] = [];
 	const sourceFile = new SourceFile(name, sourceOrEntry);
 	const { module, errors } = parse(sourceFile);
+	for (const error of errors) error.file = name;
 	diagnostics.push(...errors);
 	const modules: LoadedModule[] = [
 		{ id: name, sourceFile, statements: module.statements, imports: [] },
@@ -75,26 +88,26 @@ function assembleModules(
 	priorDiagnostics: Message[],
 ): AssembleResult {
 	// Macro expansion is static and runs once, before the multipass.
-	const expandReport: Reporter = (message, span) => {
+	const expandReport: Reporter = (message, span, file) => {
 		priorDiagnostics.push({
 			type: "error",
 			start: span[0],
 			end: span[1],
 			message,
+			file,
 		});
 	};
-	const modules = loaded.map((module) => ({
-		...module,
-		statements: expandMacros(module.statements, expandReport),
-	}));
+	const modules = expandModules(loaded, expandReport);
 
 	const scopes = new Scopes(modules);
 	let output: number[] = [];
 	let diagnostics: Message[] = [];
 	let bases = new Map<string, bigint>(); // segment bases from the previous render
+	let resSizes = new Map<string, bigint>(); // `res` sizes from the previous render
 
-	// Pessimistic shrink-only sizing is monotone; values also flow across modules
-	// through the ambient scope a hop per pass. The cap is a generous backstop.
+	// Pessimistic shrink-only sizing is monotone; label values still flow a hop
+	// per pass (render defines them after collect). The cap is a generous
+	// backstop.
 	const statementCount = modules.reduce((n, m) => n + m.statements.length, 0);
 	const cap = Math.max(statementCount + 1, 8);
 	let converged = false;
@@ -103,33 +116,44 @@ function assembleModules(
 		const snapshot = scopes.snapshot();
 		scopes.beginPass();
 		diagnostics = [];
-		const report: Reporter = (message, span) => {
+		const report: Reporter = (message, span, file) => {
 			diagnostics.push({
 				type: "error",
 				start: span[0],
 				end: span[1],
 				message,
+				file,
 			});
 		};
 
 		// Collect content into segments (defining constants), then render OUTPUT
 		// to bytes (defining labels). Everything evaluates against the previous
 		// pass's symbol values and segment bases; this pass produces the new ones.
-		const segments = collect(modules, scopes, report, bases);
+		const segments = collect(modules, scopes, report, bases, resSizes);
 		const result = render(
 			segments,
 			"OUTPUT",
 			(moduleId, name, value, kind, span) => {
 				if (scopes.defineLocal(moduleId, name, value, kind, span)) {
-					report(`Symbol "${name}" is already defined`, span);
+					report(`Symbol "${name}" is already defined`, span, moduleId);
 				}
 			},
+			(expression, moduleId, location) =>
+				evaluate(expression, moduleEnv(moduleId, scopes, location, report)),
 			report,
 		);
+		const previous = output;
 		output = result.bytes;
 		bases = result.bases;
+		resSizes = result.resSizes;
 
-		if (!scopes.changedSince(snapshot)) {
+		// Converged only when both the symbol table AND the output bytes are
+		// stable. Symbols alone miss non-symbol state that feeds bytes (segment
+		// bases, `.res` counts); bytes alone would stop early on placeholder
+		// streaks while values are still propagating. Each check catches what
+		// the other can't see (emplaced segments are byte-invisible but
+		// label-visible).
+		if (!scopes.changedSince(snapshot) && bytesEqual(output, previous)) {
 			converged = true;
 			break;
 		}
@@ -145,10 +169,48 @@ function assembleModules(
 		});
 	}
 
+	// A bare `.export name` must name a definition made somewhere in its module.
+	for (const module of modules) {
+		for (const statement of module.statements) {
+			const content = statement.content;
+			if (
+				content?.type === "export" &&
+				content.nameToken &&
+				!content.definesLabel &&
+				!scopes.isDefined(module.id, content.nameToken.text)
+			) {
+				diagnostics.push({
+					type: "error",
+					start: content.nameToken.start,
+					end: content.nameToken.end,
+					message: `Exported symbol "${content.nameToken.text}" is never defined`,
+					file: module.id,
+				});
+			}
+		}
+	}
+
+	// Render each diagnostic to `file:line:col: type: message` with the source
+	// line and a caret, when its module is known.
+	const sourceFiles = new Map(loaded.map((m) => [m.id, m.sourceFile]));
+	const all = [...priorDiagnostics, ...diagnostics];
+	for (const message of all) {
+		const sourceFile =
+			message.file === undefined ? undefined : sourceFiles.get(message.file);
+		message.formatted = sourceFile
+			? sourceFile.formatMessage(
+					message.start,
+					message.end,
+					`${message.type}: ${message.message}`,
+					true,
+				)
+			: `${message.type}: ${message.message}`;
+	}
+
 	return {
 		output: new Uint8Array(output),
 		symbols: scopes.resolvedFor(entryId),
-		diagnostics: [...priorDiagnostics, ...diagnostics],
+		diagnostics: all,
 	};
 }
 
@@ -164,6 +226,7 @@ function collect(
 	scopes: Scopes,
 	report: Reporter,
 	bases: Map<string, bigint>,
+	resSizes: Map<string, bigint>,
 ): Map<string, Segment> {
 	const segments = new Map<string, Segment>();
 	const getSegment = (name: string): Segment => {
@@ -190,7 +253,9 @@ function collect(
 			for (const label of statement.labels) {
 				current.items.push({
 					kind: "label",
-					moduleId,
+					// A macro-stamped label (a param-named definition threaded through
+					// an outer expansion) belongs to the module it binds to.
+					moduleId: label.identifier.origin ?? moduleId,
 					name: label.identifier.text,
 					symbolKind: "label",
 					span: [label.identifier.start, label.identifier.end],
@@ -202,12 +267,31 @@ function collect(
 
 			switch (content.type) {
 				case "import":
-					break; // resolved by the loader
+					// Resolved by the loader; a namespace binding also claims its
+					// name in this module's scope (define-once, like a dict root).
+					if (content.binding) {
+						const { text, start, end } = content.binding;
+						if (
+							scopes.defineLocal(moduleId, text, undefined, "namespace", [
+								start,
+								end,
+							])
+						) {
+							report(
+								`Symbol "${text}" is already defined`,
+								[start, end],
+								moduleId,
+							);
+						}
+					}
+					break;
 				case "define-segment":
-					getSegment(segmentName(content.nameToken, report));
+					getSegment(segmentName(content.nameToken, report, moduleId));
 					break;
 				case "segment":
-					current = getSegment(segmentName(content.nameToken, report));
+					current = getSegment(
+						segmentName(content.nameToken, report, moduleId),
+					);
 					break;
 				case "segment-shorthand":
 					// `.code` -> "CODE", `.rodata` -> "RODATA", etc.
@@ -217,12 +301,25 @@ function collect(
 				case "emplace":
 					current.items.push({
 						kind: content.type,
-						segment: segmentName(content.nameToken, report),
+						segment: segmentName(content.nameToken, report, moduleId),
+						moduleId,
 						span: [content.nameToken.start, content.nameToken.end],
 					});
 					break;
 				case "export":
-					if (content.content.type === "assignment") {
+					if (content.nameToken) {
+						// `.export name:` defines the label here; bare `.export name`
+						// only affects the export set (validated after convergence).
+						if (content.definesLabel) {
+							current.items.push({
+								kind: "label",
+								moduleId: content.nameToken.origin ?? moduleId,
+								name: content.nameToken.text,
+								symbolKind: "label",
+								span: [content.nameToken.start, content.nameToken.end],
+							});
+						}
+					} else if (content.content?.type === "assignment") {
 						defineAssignment(
 							content.content,
 							moduleId,
@@ -231,14 +328,12 @@ function collect(
 							report,
 						);
 					} else {
-						report("Only a definition can be exported", [
-							content.exportToken.start,
-							content.exportToken.end,
-						]);
+						report(
+							"Only a definition can be exported",
+							[content.exportToken.start, content.exportToken.end],
+							moduleId,
+						);
 					}
-					break;
-				case "global":
-					defineGlobal(content, moduleId, scopes, report);
 					break;
 				case "assignment":
 					defineAssignment(
@@ -258,6 +353,7 @@ function collect(
 							scopes,
 							locationOf(current.name),
 							current,
+							resSizes,
 							report,
 						),
 					);
@@ -268,12 +364,25 @@ function collect(
 	return segments;
 }
 
+function bytesEqual(a: readonly number[], b: readonly number[]): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) return false;
+	}
+	return true;
+}
+
 function segmentName(
 	token: { text: string; start: number; end: number },
 	report: Reporter,
+	file: string,
 ): string {
 	return decodeStringLiteral(token.text, (escape) =>
-		report(`Unknown escape sequence "\\${escape}"`, [token.start, token.end]),
+		report(
+			`Unknown escape sequence "\\${escape}"`,
+			[token.start, token.end],
+			file,
+		),
 	);
 }
 
@@ -284,10 +393,11 @@ function moduleEnv(
 	report: Reporter,
 ): EvalEnv {
 	return {
-		resolve: (name) => scopes.resolve(moduleId, name),
-		resolveGlobal: (name) => scopes.resolveAmbient(name),
+		resolve: (name, origin) => scopes.resolve(origin ?? moduleId, name),
+		attributesOf: (name, origin) =>
+			scopes.attributesOf(origin ?? moduleId, name),
 		locationCounter: location,
-		report,
+		report: (message, span, file) => report(message, span, file ?? moduleId),
 		strict: true,
 	};
 }
@@ -300,28 +410,178 @@ function defineAssignment(
 	report: Reporter,
 ): void {
 	const env = moduleEnv(moduleId, scopes, location, report);
+	const { text, start, end, origin } = assignment.identifier;
+	const span: readonly [number, number] = [start, end];
+	const definitionModule = origin ?? moduleId;
+
+	if (assignment.params) {
+		// An expression macro: a function-valued symbol. Interned per definition
+		// site so the value is identity-stable across passes (the fixpoint
+		// compares by identity). The body's free names resolve in this module -
+		// stamped tokens carry their own origins.
+		let fn = functionValues.get(assignment);
+		if (!fn) {
+			fn = {
+				type: "function",
+				params: assignment.params.map((p) => p.text),
+				body: assignment.expression,
+				moduleId,
+			};
+			functionValues.set(assignment, fn);
+		}
+		evaluateAttributes(assignment, env, report, definitionModule); // none allowed
+		if (scopes.defineLocal(definitionModule, text, fn, "function", span)) {
+			report(`Symbol "${text}" is already defined`, span, definitionModule);
+		}
+		return;
+	}
+
+	if (assignment.expression.type === "dict-literal") {
+		if (assignment.operatorToken.type === ":=") {
+			report(
+				"A dictionary is a value, not an address - define it with `=`",
+				[assignment.operatorToken.start, assignment.operatorToken.end],
+				definitionModule,
+			);
+		}
+		if (assignment.attributes.length) {
+			const key = assignment.attributes[0]!.key;
+			report(
+				"Only labels have attributes - use `:=` for an address",
+				[key.start, key.end],
+				definitionModule,
+			);
+		}
+		if (
+			scopes.defineLocal(definitionModule, text, undefined, "namespace", span)
+		) {
+			report(`Symbol "${text}" is already defined`, span, definitionModule);
+		}
+		defineDict(
+			assignment.expression,
+			definitionModule,
+			text,
+			text,
+			scopes,
+			env,
+			report,
+		);
+		return;
+	}
+
 	const value = evaluate(assignment.expression, env);
 	const kind = assignment.operatorToken.type === ":=" ? "label" : "constant";
-	const { text, start, end } = assignment.identifier;
-	const span: readonly [number, number] = [start, end];
-	if (scopes.defineLocal(moduleId, text, value, kind, span)) {
-		report(`Symbol "${text}" is already defined`, span);
+	const attributes = evaluateAttributes(
+		assignment,
+		env,
+		report,
+		definitionModule,
+	);
+	if (
+		scopes.defineLocal(definitionModule, text, value, kind, span, attributes)
+	) {
+		report(`Symbol "${text}" is already defined`, span, definitionModule);
 	}
 }
 
-// `.global name` publishes the module's local `name` to the ambient scope.
-function defineGlobal(
-	global: Global,
-	moduleId: string,
+// The placement-attribute tail of a definition. Only labels (`:=`) carry
+// attributes; an equate defaults to `size: 1` (one byte) unless declared.
+// `size` is the only key so far, and it must be a non-negative number.
+function evaluateAttributes(
+	assignment: Assignment,
+	env: EvalEnv,
+	report: Reporter,
+	file: string,
+): SymbolAttributes | undefined {
+	const isLabel = assignment.operatorToken.type === ":=";
+	if (!isLabel) {
+		const first = assignment.attributes[0];
+		if (first) {
+			report(
+				"Only labels have attributes - use `:=` for an address",
+				[first.key.start, first.key.end],
+				file,
+			);
+		}
+		return undefined;
+	}
+
+	const attributes: SymbolAttributes = { size: 1n };
+	let sizeDeclared = false;
+	for (const attribute of assignment.attributes) {
+		const keySpan: readonly [number, number] = [
+			attribute.key.start,
+			attribute.key.end,
+		];
+		if (attribute.key.text !== "size") {
+			report(`Unknown attribute "${attribute.key.text}"`, keySpan, file);
+			continue;
+		}
+		if (sizeDeclared) {
+			report(`Attribute "size" is already set`, keySpan, file);
+			continue;
+		}
+		sizeDeclared = true;
+		const value = evaluate(attribute.value, env);
+		if (value !== undefined && typeof value !== "bigint") {
+			report(
+				"`size:` requires a number",
+				getExpressionLocation(attribute.value),
+				file,
+			);
+			continue;
+		}
+		if (value !== undefined && value < 0n) {
+			report(
+				"`size:` must not be negative",
+				getExpressionLocation(attribute.value),
+				file,
+			);
+			continue;
+		}
+		attributes.size = value; // may be undefined this pass; resolves later
+	}
+	return attributes;
+}
+
+// Lower a dictionary literal to qualified symbols: entry `key` of dict `N`
+// becomes the symbol `N<SEP>key`, resolved by `N::key`. Nested dicts recurse;
+// entry values are ordinary expressions evaluated in the enclosing module's
+// env (their identifiers carry their own hygiene origins).
+function defineDict(
+	dict: DictLiteral,
+	definitionModule: string,
+	prefix: string,
+	display: string,
 	scopes: Scopes,
+	env: EvalEnv,
 	report: Reporter,
 ): void {
-	const { text, start, end } = global.nameToken;
-	const span: readonly [number, number] = [start, end];
-	const value = scopes.resolve(moduleId, text);
-	const kind = scopes.kindOf(moduleId, text) ?? "label";
-	if (scopes.defineAmbient(text, value, kind, span)) {
-		report(`Global "${text}" is already defined`, span);
+	for (const entry of dict.entries) {
+		const name = prefix + SEP + entry.key.text;
+		const path = display + "::" + entry.key.text;
+		const span: readonly [number, number] = [entry.key.start, entry.key.end];
+		if (entry.value.type === "dict-literal") {
+			if (
+				scopes.defineLocal(definitionModule, name, undefined, "namespace", span)
+			) {
+				report(`Symbol "${path}" is already defined`, span, definitionModule);
+			}
+			defineDict(
+				entry.value,
+				definitionModule,
+				name,
+				path,
+				scopes,
+				env,
+				report,
+			);
+		} else {
+			const value = evaluate(entry.value, env);
+			if (scopes.defineLocal(definitionModule, name, value, "constant", span)) {
+				report(`Symbol "${path}" is already defined`, span, definitionModule);
+			}
+		}
 	}
 }
 
@@ -335,6 +595,7 @@ function collectContent(
 	scopes: Scopes,
 	location: bigint,
 	output: Segment,
+	resSizes: Map<string, bigint>,
 	report: Reporter,
 ): bigint {
 	const env = moduleEnv(moduleId, scopes, location, report);
@@ -344,7 +605,7 @@ function collectContent(
 			const value = evaluate(content.expression, env);
 			if (value === undefined) return location; // keep; resolves later
 			if (typeof value !== "bigint") {
-				report(
+				env.report(
 					"`.org` requires a numeric address",
 					getExpressionLocation(content.expression),
 				);
@@ -358,33 +619,35 @@ function collectContent(
 		case "word": {
 			const size = content.type === "byte" ? 1 : 2;
 			const bytes: number[] = [];
-			for (const [expr] of content.list)
-				emitData(expr, env, bytes, size, report);
+			for (const [expr] of content.list) emitData(expr, env, bytes, size);
 			output.items.push({ kind: "bytes", bytes });
 			return location + BigInt(bytes.length);
 		}
 
 		case "res": {
-			// Reserve N zero bytes. In an emplaced segment they're never written
-			// (emplace renders for size only); in an emitted segment they're real.
-			const value = evaluate(content.count, env);
-			if (value === undefined) return location; // count resolves later
-			if (typeof value !== "bigint" || value < 0n) {
-				report(
-					"`.res` requires a non-negative count",
-					getExpressionLocation(content.count),
-				);
-				return location;
-			}
-			const count = Number(value);
-			output.items.push({ kind: "bytes", bytes: new Array(count).fill(0) });
-			return location + value;
+			// Deferred to render, where the count evaluates at the exact LC - a
+			// collect-time count would bake the previous pass's segment base into
+			// `*`-relative fills. Collect's running location advances by the
+			// previous render's size (one pass of lag the fixpoint absorbs).
+			const ordinal = output.items.filter((i) => i.kind === "res").length;
+			output.items.push({
+				kind: "res",
+				expression: content.count,
+				moduleId,
+				span: getExpressionLocation(content.count),
+			});
+			return location + (resSizes.get(output.name + "\0" + ordinal) ?? 0n);
 		}
 
 		case "instruction": {
-			const expr = operandExpression(content.operand);
+			// Multi-operand lists only occur on macro calls (gone by now) and on
+			// misused real instructions - encode reports the arity error below.
+			const expr = operandExpression(content.operands[0] ?? null);
 			const value = expr ? evaluate(expr, env) : undefined;
-			const bytes = encodeInstruction(content, value, { location, report });
+			const bytes = encodeInstruction(content, value, {
+				location,
+				report: env.report,
+			});
 			output.items.push({ kind: "bytes", bytes });
 			return location + BigInt(bytes.length);
 		}
@@ -406,7 +669,6 @@ function emitData(
 	env: EvalEnv,
 	output: number[],
 	size: 1 | 2,
-	report: Reporter,
 ): void {
 	const value = evaluate(expr, env);
 	const span = getExpressionLocation(expr);
@@ -416,9 +678,15 @@ function emitData(
 		return;
 	}
 
+	if (typeof value === "object") {
+		env.report("A function is not data - apply it with `(...)`", span);
+		for (let i = 0; i < size; i++) output.push(0);
+		return;
+	}
+
 	if (typeof value === "string") {
 		if (size === 2) {
-			report("A string is not allowed in `.word`", span);
+			env.report("A string is not allowed in `.word`", span);
 			output.push(0, 0);
 			return;
 		}
@@ -428,11 +696,11 @@ function emitData(
 
 	if (size === 1) {
 		if (value < -128n || value > 255n)
-			report(`Byte value out of range: ${value}`, span);
+			env.report(`Byte value out of range: ${value}`, span);
 		output.push(Number(value & 0xffn));
 	} else {
 		if (value < -32768n || value > 65535n)
-			report(`Word value out of range: ${value}`, span);
+			env.report(`Word value out of range: ${value}`, span);
 		const word = Number(value & 0xffffn);
 		output.push(word & 0xff, (word >> 8) & 0xff);
 	}

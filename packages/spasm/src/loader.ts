@@ -12,12 +12,19 @@ export interface Host {
 	read(id: string): string | Promise<string>;
 }
 
+/** One resolved `.import`: `binding` is the namespace name, or null for a
+ * splat import. */
+export interface ImportRecord {
+	id: string;
+	binding: string | null;
+}
+
 export interface LoadedModule {
 	id: string;
 	sourceFile: SourceFile;
 	statements: Statement[];
-	/** Resolved ids of the modules this one `.import`s (for splat scoping). */
-	imports: string[];
+	/** This module's resolved imports, in source order. */
+	imports: ImportRecord[];
 }
 
 /**
@@ -37,10 +44,16 @@ export async function loadModules(
 	const load = async (
 		id: string,
 		importedAt?: readonly [number, number],
+		importerId?: string,
 	): Promise<void> => {
 		if (loaded.has(id)) return; // already loaded (dedup)
 		if (onStack.has(id)) {
-			report(diagnostics, importedAt, `Import cycle through "${id}"`);
+			report(
+				diagnostics,
+				importedAt,
+				`Import cycle through "${id}"`,
+				importerId,
+			);
 			return;
 		}
 		onStack.add(id);
@@ -49,18 +62,19 @@ export async function loadModules(
 		try {
 			source = await host.read(id);
 		} catch {
-			report(diagnostics, importedAt, `Cannot read module "${id}"`);
+			report(diagnostics, importedAt, `Cannot read module "${id}"`, importerId);
 		}
 
 		if (source !== undefined) {
 			const sourceFile = new SourceFile(id, source);
 			const { module, errors } = parse(sourceFile);
+			for (const error of errors) error.file = id;
 			diagnostics.push(...errors);
 
-			const imports: string[] = [];
+			const imports: ImportRecord[] = [];
 			for (const statement of module.statements) {
 				if (statement.content?.type === "import") {
-					const { specToken } = statement.content;
+					const { specToken, binding } = statement.content;
 					const span: readonly [number, number] = [
 						specToken.start,
 						specToken.end,
@@ -70,11 +84,16 @@ export async function loadModules(
 					try {
 						depId = await host.resolve(specifier, id);
 					} catch {
-						report(diagnostics, span, `Cannot resolve module "${specifier}"`);
+						report(
+							diagnostics,
+							span,
+							`Cannot resolve module "${specifier}"`,
+							id,
+						);
 					}
 					if (depId !== undefined) {
-						imports.push(depId);
-						await load(depId, span);
+						imports.push({ id: depId, binding: binding?.text ?? null });
+						await load(depId, span, id);
 					}
 				}
 			}
@@ -99,7 +118,8 @@ function report(
 	diagnostics: Message[],
 	span: readonly [number, number] | undefined,
 	message: string,
+	file?: string,
 ): void {
 	const [start, end] = span ?? [0, 0];
-	diagnostics.push({ type: "error", start, end, message });
+	diagnostics.push({ type: "error", start, end, message, file });
 }

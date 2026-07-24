@@ -1,12 +1,35 @@
 import type { Value } from "./value.ts";
 
-/** A label is address-valued (`name:` / `name := expr`); a constant is `name = expr`. */
-export type SymbolKind = "label" | "constant";
+/**
+ * The qualified-name separator. A NUL can't appear in a module id or symbol
+ * name, so joined keys never collide. Used for module scoping (module NUL
+ * name) and dictionary entries (dict NUL key) alike; the user-facing spelling
+ * of a dictionary path is `::`.
+ */
+export const SEP = "\0";
+
+/**
+ * A label is address-valued (`name:` / `name := expr`); a constant is
+ * `name = expr`; a namespace is a dict-valued `name = { ... }` (the dict node
+ * itself - its entries are ordinary constants under qualified names); a
+ * function is an expression macro (`DOUBLE(x) = 2 * x`).
+ */
+export type SymbolKind = "label" | "constant" | "namespace" | "function";
+
+/**
+ * Assembler-opaque placement attributes: tracked and surfaced, never
+ * interpreted by the assembler itself. `size` so far; more (address space,
+ * load address) will join with the same shape.
+ */
+export interface SymbolAttributes {
+	size?: Value | undefined;
+}
 
 interface Entry {
 	value: Value | undefined;
 	kind: SymbolKind;
 	definedAt: readonly [number, number];
+	attributes: SymbolAttributes;
 }
 
 /**
@@ -32,11 +55,12 @@ export class SymbolTable {
 		value: Value | undefined,
 		kind: SymbolKind,
 		definedAt: readonly [number, number],
+		attributes: SymbolAttributes = {},
 	): readonly [number, number] | undefined {
 		const prior = this.#entries.get(name);
 		if (this.#definedThisPass.has(name)) return prior!.definedAt;
 		this.#definedThisPass.add(name);
-		this.#entries.set(name, { value, kind, definedAt });
+		this.#entries.set(name, { value, kind, definedAt, attributes });
 		return undefined;
 	}
 
@@ -77,5 +101,10 @@ export class SymbolTable {
 			if (entry.value !== undefined) out.set(name, entry.value);
 		}
 		return out;
+	}
+
+	/** A symbol's placement attributes; undefined when the symbol isn't known. */
+	attributesOf(name: string): SymbolAttributes | undefined {
+		return this.#entries.get(name)?.attributes;
 	}
 }

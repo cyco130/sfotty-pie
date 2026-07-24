@@ -9,33 +9,27 @@
 ; that line; CLOSE removes the B: device again.
 
 .import "./atari.s"
+.import "./atari-boot.s"
 
 ; Top of the free memory - 512 bytes
 LOAD_ADDRESS = $9a20
 ; Sector buffer, just past the loaded region
-buffer = LOAD_ADDRESS + 3*128
+buffer = LOAD_ADDRESS + boot_sectors * 128
 
 ; Zero page workspace. $CB-$D1 are unused by the OS and BASIC.
 old_e_handlers = $CB
 b_hatabs_offset = $CD
 e_hatabs_offset = $CE
 
-.define_segment "CODE"
-.define_segment "RODATA"
-.define_segment "DATA"
-
 ; -------------------------------------------------------------------------
 
-; The boot image: exactly three 128-byte sectors.
+; The boot image: exactly three 128-byte sectors, padded by the format.
 
-.segment "OUTPUT"
-.org LOAD_ADDRESS
+output_atari_boot init, LOAD_ADDRESS, boot_sectors
 
-	; Disk boot header
-	.byte 0				; flags
-	.byte 3				; number of boot sectors
-	.word LOAD_ADDRESS	; load address
-	.word init			; init address (goes to DOSINI)
+; The boot continuation lives at load+6, so it leads CODE.
+
+.segment "CODE"
 
 	; boot-continuation entry (carry clear = boot OK);
 	clc
@@ -45,11 +39,6 @@ e_hatabs_offset = $CE
 file_size:
 	.byte 0, 0, 0
 
-	; The build script pads the image to the full three sectors (384 bytes).
-	.emit "CODE"
-	.emit "RODATA"
-	.emit "DATA"
-
 ; -------------------------------------------------------------------------
 
 ; Global data (loaded with the boot image, so every boot starts fresh)
@@ -57,7 +46,7 @@ file_size:
 .segment "DATA"
 
 buffer_offset:	.byte 128	; read position in `buffer`; 128 = empty
-sector:			.word 4		; next sector to read
+sector:			.word boot_sectors + 1	; next sector to read
 e_input_offset:	.byte 0		; read position in `e_input`
 message_offset:	.res 1		; read position in `message` while printing
 e_handlers:		.res 12		; RAM copy of the E: handler table (GET BYTE patched)
@@ -134,7 +123,7 @@ find_e_entry:
 	sta old_e_handlers
 	lda HATABS+2,x
 	sta old_e_handlers + 1
-	ldy #HATABS_OFFSET_SPECIAL + 1 ; Move 6 vectors (12 bytes)
+	ldy #HatabsOffset::SPECIAL + 1 ; Move 6 vectors (12 bytes)
 copy_e_handlers:
 	lda (old_e_handlers),y
 	sta e_handlers,y
@@ -143,9 +132,9 @@ copy_e_handlers:
 
 ; Patch E: GET BYTE handler
 	lda #<(e_get_byte - 1)
-	sta e_handlers + HATABS_OFFSET_GET_BYTE
+	sta e_handlers + HatabsOffset::GET_BYTE
 	lda #>(e_get_byte - 1)
-	sta e_handlers + HATABS_OFFSET_GET_BYTE + 1
+	sta e_handlers + HatabsOffset::GET_BYTE + 1
 
 ; Replace E: handler pointer
 	lda #<e_handlers
@@ -250,12 +239,12 @@ b_get_byte:
 	sta file_size + 2
 	bcs not_eof
 
-	; Read past EOF, reset the file size to 0 and return ERR_EOF in Y
+	; Read past EOF, reset the file size to 0 and return Error::EOF in Y
 	lda #0
 	sta file_size
 	sta file_size + 1
 	sta file_size + 2
-	ldy #ERR_EOF
+	ldy #Error::EOF
 	rts
 
 not_eof:
@@ -289,7 +278,7 @@ fill_buffer:
 	sta DUNIT
 	lda #$40
 	sta DSTATS
-	lda #SIO_READ
+	lda #SioCommand::READ
 	sta DCOMND
 	lda sector
 	sta DAUX1

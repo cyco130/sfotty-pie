@@ -9,7 +9,7 @@ import type { Value } from "./value.ts";
 export interface EncodeContext {
 	/** Address of this instruction's first byte, for relative branch offsets. */
 	location: bigint | undefined;
-	report(message: string, span: readonly [number, number]): void;
+	report(message: string, span: readonly [number, number], file?: string): void;
 }
 
 const OPERAND_BYTES: Record<Mode, number> = {
@@ -58,7 +58,7 @@ export function encodeInstruction(
 	operandValue: Value | undefined,
 	context: EncodeContext,
 ): number[] {
-	const { mnemonic, operand } = instruction;
+	const { mnemonic, operands } = instruction;
 	const name = mnemonic.text.toUpperCase();
 	const modes = OPCODES[name];
 	const nameSpan: readonly [number, number] = [mnemonic.start, mnemonic.end];
@@ -67,6 +67,16 @@ export function encodeInstruction(
 		context.report(`Unknown mnemonic "${mnemonic.text}"`, nameSpan);
 		return [];
 	}
+
+	// Operand lists exist for macro calls; a real instruction takes at most one.
+	if (operands.length > 1) {
+		context.report(
+			`Too many operands for ${name}`,
+			getOperandLocation(operands[1]!),
+		);
+		return [];
+	}
+	const operand = operands[0] ?? null;
 
 	const mode = resolveMode(operand, operandValue, modes);
 	const opcode = modes[mode];
@@ -143,8 +153,13 @@ function encodeOperand(
 	if (size === 0) return [];
 
 	if (value === undefined) return new Array<number>(size).fill(0); // unresolved
-	if (typeof value === "string") {
-		context.report("Operand must be a number, not a string", span);
+	if (typeof value !== "bigint") {
+		context.report(
+			typeof value === "string"
+				? "Operand must be a number, not a string"
+				: "Operand must be a number, not a function",
+			span,
+		);
 		return new Array<number>(size).fill(0);
 	}
 

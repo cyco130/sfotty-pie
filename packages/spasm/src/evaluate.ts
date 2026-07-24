@@ -1,27 +1,50 @@
+import type { Token } from "./lexer.ts";
 import {
 	getExpressionLocation,
+	type BuiltinCall,
 	type Expression,
 	type InfixExpression,
+	type MemberExpression,
 	type PrefixExpression,
 } from "./parser.ts";
+import { SEP, type SymbolAttributes, type SymbolKind } from "./symbols.ts";
 import { decodeStringLiteral, type Value } from "./value.ts";
 
 export interface EvalEnv {
-	/** Look up a symbol; `undefined` means "not resolved (yet)". */
-	resolve(name: string): Value | undefined;
-	/** Look up an ambient (`.global::name`) symbol, if the env supports it. */
-	resolveGlobal?(name: string): Value | undefined;
+	/**
+	 * Look up a symbol; `undefined` means "not resolved (yet)". `origin`, when
+	 * present, is the module the identifier lexically binds to (stamped by macro
+	 * expansion); otherwise the name resolves in the containing module.
+	 */
+	resolve(name: string, origin?: string): Value | undefined;
+	/**
+	 * A symbol's kind and placement attributes, for `.attributes()`/
+	 * `.sizeof()`; `undefined` means the symbol isn't known (yet). Only
+	 * label-kind symbols carry attributes - the evaluator enforces that.
+	 */
+	attributesOf(
+		name: string,
+		origin?: string,
+	): { kind: SymbolKind; attributes: SymbolAttributes } | undefined;
 	/** Value of `*` (the location counter), or `undefined` outside a section. */
 	locationCounter: bigint | undefined;
-	/** Report a hard error (type mismatch, divide-by-zero, bad escape). */
-	report(message: string, span: readonly [number, number]): void;
+	/**
+	 * Report a hard error (type mismatch, divide-by-zero, bad escape). `file`
+	 * overrides the module the span refers into - hygiene-stamped tokens point
+	 * into their defining module's source.
+	 */
+	report(message: string, span: readonly [number, number], file?: string): void;
 	/**
 	 * When set, an unresolved symbol is reported as undefined. The assemble loop
 	 * turns this on so the final (converged) pass flags genuinely-missing names,
 	 * while leaving it off for plain evaluation (where unresolved just defers).
 	 */
 	strict?: boolean;
+	/** Function-application nesting depth, for the recursion cap. */
+	depth?: number;
 }
+
+const MAX_APPLICATION_DEPTH = 64;
 
 /**
  * Evaluate an expression. Returns `undefined` if any part is unresolved (a
@@ -62,11 +85,12 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return BigInt(bytes[0]!);
 		}
 		case "identifier": {
-			const value = env.resolve(expr.text);
+			const value = env.resolve(expr.text, expr.origin);
 			if (value === undefined && env.strict) {
 				env.report(
 					`Undefined symbol "${expr.text}"`,
 					getExpressionLocation(expr),
+					expr.origin,
 				);
 			}
 			return value;
@@ -79,33 +103,213 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return prefix(expr, env);
 		case "infix-expression":
 			return infix(expr, env);
-		case "global":
-			env.report(
-				"`.global` is a namespace, not a value",
-				getExpressionLocation(expr),
-			);
-			return undefined;
 		case "member-expression": {
-			if (expr.object.type === "global") {
-				const value = env.resolveGlobal?.(expr.member.text);
-				if (value === undefined && env.strict) {
-					env.report(
-						`Undefined global "${expr.member.text}"`,
-						getExpressionLocation(expr),
-					);
+			// `.attributes(X)::size` - member access on the attributes dict.
+			const base = memberBase(expr);
+			if (
+				base.object.type === "builtin-call" &&
+				base.object.keyword.type === "attributes"
+			) {
+				const bad = base.keys.find((k) => k.text !== "size");
+				if (bad || base.keys.length !== 1) {
+					const at = bad ?? base.keys[1]!;
+					env.report(`Unknown attribute "${at.text}"`, [at.start, at.end]);
+					return undefined;
 				}
-				return value;
+				return attributeValue(base.object, env);
+			}
+			// A dictionary path: `N::key` (chains for nested dicts). Entries live
+			// in the symbol table under qualified names, so this is an ordinary
+			// resolve with the joined key; the root's hygiene origin applies to
+			// the whole path.
+			const path = flattenPath(expr);
+			if (!path) {
+				env.report(
+					"`::` requires a namespace name on its left",
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			const value = env.resolve(path.qualified, path.root.origin);
+			if (value === undefined && env.strict) {
+				env.report(
+					`Undefined symbol "${path.display}"`,
+					getExpressionLocation(expr),
+					path.root.origin,
+				);
+			}
+			return value;
+		}
+		case "call-expression": {
+			const fn = evaluate(expr.callee, env);
+			if (fn === undefined) return undefined; // unresolved; strict reported
+			if (typeof fn !== "object" || fn.type !== "function") {
+				env.report(
+					`${calleeName(expr.callee)} is not a function`,
+					getExpressionLocation(expr.callee),
+				);
+				return undefined;
+			}
+			if (expr.args.length !== fn.params.length) {
+				env.report(
+					`${calleeName(expr.callee)} expects ${fn.params.length} argument(s), got ${expr.args.length}`,
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			const depth = (env.depth ?? 0) + 1;
+			if (depth > MAX_APPLICATION_DEPTH) {
+				env.report(
+					"Expression macro application too deep (recursion?)",
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			// Eager arguments, evaluated in the caller's scope; the body's free
+			// names default to the defining module (lexical hygiene) by forcing
+			// the origin - params shadow via the bindings overlay.
+			const bindings = new Map<string, Value | undefined>();
+			fn.params.forEach((param, i) => {
+				bindings.set(param, evaluate(expr.args[i]!, env));
+			});
+			const inner: EvalEnv = {
+				resolve: (name, origin) =>
+					origin === undefined && bindings.has(name)
+						? bindings.get(name)
+						: env.resolve(name, origin ?? fn.moduleId),
+				attributesOf: (name, origin) =>
+					env.attributesOf(name, origin ?? fn.moduleId),
+				locationCounter: env.locationCounter,
+				report: env.report,
+				strict: env.strict,
+				depth,
+			};
+			return evaluate(fn.body, inner);
+		}
+		case "builtin-call":
+			if (expr.keyword.type === "sizeof") {
+				// `.sizeof(X)` is shorthand for `.attributes(X)::size`.
+				return attributeValue(expr, env);
 			}
 			env.report(
-				"Only `.global::name` member access is supported",
+				"`.attributes(...)` is a dictionary - access an attribute with `::`",
 				getExpressionLocation(expr),
 			);
 			return undefined;
-		}
+		case "dict-literal":
+			env.report(
+				"A dictionary literal can only be the right-hand side of a `=` definition",
+				getExpressionLocation(expr),
+			);
+			return undefined;
 	}
 }
 
-/** Coerce an evaluated operand to a number, reporting if it's a string. */
+// The `size` attribute of the symbol named by an `.attributes`/`.sizeof`
+// argument. Undeclared size reads as 0 (labels are 0-sized for now; `:=`
+// equates bake a default of 1 at definition).
+function attributeValue(call: BuiltinCall, env: EvalEnv): Value | undefined {
+	const arg = call.argument;
+	let name: string;
+	let display: string;
+	let origin: string | undefined;
+	if (arg.type === "identifier") {
+		name = display = arg.text;
+		origin = arg.origin;
+	} else if (arg.type === "member-expression") {
+		const path = flattenPath(arg);
+		if (!path) {
+			env.report(
+				"`.attributes()` takes a symbol name",
+				getExpressionLocation(arg),
+			);
+			return undefined;
+		}
+		name = path.qualified;
+		display = path.display;
+		origin = path.root.origin;
+	} else {
+		env.report(
+			"`.attributes()` takes a symbol name",
+			getExpressionLocation(arg),
+		);
+		return undefined;
+	}
+
+	const info = env.attributesOf(name, origin);
+	if (info === undefined) {
+		if (env.strict) {
+			env.report(
+				`Undefined symbol "${display}"`,
+				getExpressionLocation(arg),
+				origin,
+			);
+		}
+		return undefined;
+	}
+	if (info.kind !== "label") {
+		env.report(
+			`Only labels have attributes - "${display}" is a ${info.kind}`,
+			getExpressionLocation(arg),
+		);
+		return undefined;
+	}
+	return "size" in info.attributes ? info.attributes.size : 0n;
+}
+
+// Collect a member chain's keys down to its base expression.
+function memberBase(expr: MemberExpression): {
+	object: Expression;
+	keys: { text: string; start: number; end: number }[];
+} {
+	const keys = [
+		{ text: expr.member.text, start: expr.member.start, end: expr.member.end },
+	];
+	let object = expr.object;
+	while (object.type === "member-expression") {
+		keys.unshift({
+			text: object.member.text,
+			start: object.member.start,
+			end: object.member.end,
+		});
+		object = object.object;
+	}
+	return { object, keys };
+}
+
+// Flatten `A::B::C` to its root identifier and joined keys; undefined when the
+// path doesn't bottom out at an identifier.
+function flattenPath(
+	expr: MemberExpression,
+):
+	| { root: Token<"identifier">; qualified: string; display: string }
+	| undefined {
+	const keys: string[] = [expr.member.text];
+	let object = expr.object;
+	while (object.type === "member-expression") {
+		keys.unshift(object.member.text);
+		object = object.object;
+	}
+	if (object.type !== "identifier") return undefined;
+	keys.unshift(object.text);
+	return {
+		root: object,
+		qualified: keys.join(SEP),
+		display: keys.join("::"),
+	};
+}
+
+// A short display name for a callee in diagnostics.
+function calleeName(callee: Expression): string {
+	if (callee.type === "identifier") return `"${callee.text}"`;
+	if (callee.type === "member-expression") {
+		const path = flattenPath(callee);
+		if (path) return `"${path.display}"`;
+	}
+	return "The expression";
+}
+
+/** Coerce an evaluated operand to a number, reporting if it isn't one. */
 function asNumber(
 	value: Value | undefined,
 	expr: Expression,
@@ -113,6 +317,13 @@ function asNumber(
 ): bigint | undefined {
 	if (typeof value === "string") {
 		env.report("Expected a number, got a string", getExpressionLocation(expr));
+		return undefined;
+	}
+	if (typeof value === "object") {
+		env.report(
+			"Expected a number, got a function - apply it with `(...)`",
+			getExpressionLocation(expr),
+		);
 		return undefined;
 	}
 	return value; // bigint | undefined
@@ -132,6 +343,10 @@ function prefix(expr: PrefixExpression, env: EvalEnv): Value | undefined {
 			return (v >> 8n) & 0xffn; // high byte
 		case "!":
 			return v === 0n ? 1n : 0n;
+		case "~":
+			// Arbitrary-precision complement: ~$0C is -$0D, and the byte/word
+			// truncation does the right thing ($F3) by arithmetic.
+			return ~v;
 	}
 }
 
@@ -157,6 +372,22 @@ function infix(expr: InfixExpression, env: EvalEnv): Value | undefined {
 	switch (op) {
 		case "*":
 			return l * r;
+		case "^":
+			return l ^ r;
+		case "&":
+			return l & r;
+		case "|":
+			return l | r;
+		case "<<":
+		case ">>":
+			if (r < 0n) {
+				env.report(
+					"Shift count must not be negative",
+					getExpressionLocation(expr.right),
+				);
+				return undefined;
+			}
+			return op === "<<" ? l << r : l >> r;
 		case "/":
 		case "%":
 			if (r === 0n) {

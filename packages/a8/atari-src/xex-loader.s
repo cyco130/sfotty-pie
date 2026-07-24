@@ -6,9 +6,12 @@
 ; honors the INITAD/RUNAD protocol like DOS does.
 
 .import "./atari.s"
+.import "./atari-boot.s"
 
-; Sector buffer, just past the loaded boot region ($0700-$087F)
-buffer = $0880
+; Loaded at the standard boot address
+LOAD_ADDRESS = $0700
+; Sector buffer, just past the loaded boot region
+buffer = LOAD_ADDRESS + boot_sectors * 128
 
 ; Boot error letters, shown at the top-left of the screen. Lowercase ATASCII
 ; equals the screen code, so they can be stored raw.
@@ -23,21 +26,15 @@ BOOT_ERROR_CHUNK = 'c'
 count = $20			; number of bytes to read
 load_address = $22	; address to read into
 
-.define_segment "CODE"
-.define_segment "DATA"
-
 ; -------------------------------------------------------------------------
 
-; The boot image: exactly three 128-byte sectors.
+; The boot image: exactly three 128-byte sectors, padded by the format.
 
-.segment "OUTPUT"
-.org $0700
+output_atari_boot init, LOAD_ADDRESS, boot_sectors
 
-	; Disk boot header
-	.byte 0			; flags
-	.byte 3			; number of boot sectors
-	.word $0700		; load address
-	.word init		; init address (goes to DOSINI)
+; The boot continuation lives at load+6, so it leads CODE.
+
+.segment "CODE"
 
 rtsadr:				; boot-continuation entry (carry clear = boot OK);
 	clc				; doubles as the INITAD/RUNAD default target
@@ -47,10 +44,6 @@ rtsadr:				; boot-continuation entry (carry clear = boot OK);
 file_size:
 	.byte 0, 0, 0
 
-	; The build script pads the image to the full three sectors (384 bytes).
-	.emit "CODE"
-	.emit "DATA"
-
 ; -------------------------------------------------------------------------
 
 ; Global data (loaded with the boot image, so every boot starts fresh)
@@ -59,7 +52,7 @@ file_size:
 
 first_chunk:	.byte 1		; is this the first chunk?
 buffer_offset:	.byte 128	; read position in `buffer`; 128 = empty
-sector:			.word 4		; next sector to read
+sector:			.word boot_sectors + 1	; next sector to read
 last_word:		.word 0		; last word read
 chunk_address:	.word 0		; chunk load address
 
@@ -276,7 +269,7 @@ fill_buffer:
 	sta DUNIT
 	lda #$40
 	sta DSTATS
-	lda #SIO_READ
+	lda #SioCommand::READ
 	sta DCOMND
 	lda sector
 	sta DAUX1

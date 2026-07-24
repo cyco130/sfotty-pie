@@ -15,7 +15,7 @@ function memHost(files: Record<string, string>): Host {
 
 function asm(src: string): {
 	bytes: number[];
-	symbols: Map<string, bigint | string>;
+	symbols: Map<string, import("./value.ts").Value>;
 	messages: string[];
 } {
 	const result = assemble(src, "t");
@@ -116,6 +116,48 @@ describe("segments", () => {
 		expect(asm(".byte $11\n.res 3\n.byte $22\n").bytes).toEqual([
 			0x11, 0, 0, 0, 0x22,
 		]);
+	});
+
+	test("a branch across a *-relative fill gets the right offset", () => {
+		// The fill size is render-resolved and fed back into collect's running
+		// location, so the branch pc after the fill is correct.
+		const { bytes, messages } = asm(
+			'.define_segment "CODE"\n' +
+				'.segment "OUTPUT"\n.org $0400\n.emit "CODE"\n' +
+				'.segment "CODE"\nstart:\n\tlda #1\n\t.res $0410 - *\n\tbeq start\n',
+		);
+		expect(messages).toEqual([]);
+		// lda #1, 14 fill bytes, then beq back: $0400 - ($0410 + 2) = -$12.
+		expect(bytes).toHaveLength(18);
+		expect(bytes.slice(-2)).toEqual([0xf0, 0xee]);
+	});
+
+	test("content past the fill boundary is an overflow error", () => {
+		expect(asm(".org $10\n.byte 1, 2, 3\n.res $12 - *\n").messages).toContain(
+			"`.res` count is negative - content overflows the fill boundary",
+		);
+	});
+
+	test("a string .res count is a type error", () => {
+		expect(asm('.res "x"\n').messages).toContain(
+			"`.res` requires a numeric count",
+		);
+	});
+
+	test("a *-relative .res fill in an emitted segment converges", () => {
+		// Regression: the fill count reads the segment base, which is not a
+		// symbol - with symbol-only convergence this exited after pass 1 with a
+		// stale base-0 count (8K of garbage). Byte-stable convergence keeps
+		// iterating until the fill settles.
+		const { bytes, messages } = asm(
+			'.define_segment "CODE"\n' +
+				'.segment "OUTPUT"\n.org $1f00\n.emit "CODE"\n' +
+				'.segment "CODE"\n\tlda #1\n\t.res $2000 - *\n\t.byte $aa\n',
+		);
+		expect(messages).toEqual([]);
+		// 2 bytes of code at $1f00, fill to $2000, one sentinel byte.
+		expect(bytes).toHaveLength(257);
+		expect(bytes[bytes.length - 1]).toBe(0xaa);
 	});
 
 	test("a segment shorthand switches the current segment", () => {
@@ -280,16 +322,48 @@ describe("modules", () => {
 		);
 	});
 
-	test(".global publishes to the ambient scope; .global:: reads it", async () => {
+	test("an exported macro is the entry-point channel (no globals)", async () => {
 		const host = memHost({
-			main: '.import "sys"\nstart:\n\tnop\n.global start\n',
-			sys: "entry := .global::start\n.byte <entry, >entry\n",
+			main: '.import "fmt"\nxex start\nstart:\n\tnop\n',
+			fmt: ".export .macro xex entry\n\t.word entry\n.endmacro\n",
 		});
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
-		// sys emits start's address (lo, hi); start ($0002) follows sys's 2 bytes,
-		// then the nop.
+		// The expanded .word emits start's address; start ($0002) follows it.
 		expect([...r.output]).toEqual([0x02, 0x00, 0xea]);
+	});
+
+	test("a non-exported macro stays private to its module", async () => {
+		const host = memHost({
+			main: '.import "fmt"\nhidden\n',
+			fmt: ".macro hidden\n\t.byte 1\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Unknown mnemonic "hidden"',
+		);
+	});
+
+	test("a macro body's free names bind where the macro is defined", async () => {
+		const host = memHost({
+			// lib's `secret` is private and not exported - the body still sees it,
+			// and the caller's own `secret` neither collides nor leaks in.
+			main: '.import "lib"\nsecret = 2\nput\n.byte secret\n',
+			lib: "secret = 1\n.export .macro put\n\t.byte secret\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([0x01, 0x02]);
+	});
+
+	test("a body's macro calls resolve where the macro is defined", async () => {
+		const host = memHost({
+			main: '.import "lib"\nouter\n',
+			lib: ".macro helper\n\t.byte 9\n.endmacro\n.export .macro outer\n\thelper\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([0x09]);
 	});
 
 	test("a module shared by a diamond loads once", async () => {
@@ -319,12 +393,12 @@ describe("modules", () => {
 
 	// The capstone: hello split into a program module + an imported system
 	// module (lib). Exercises splat import (STDOUT/EXIT), `.export`, the
-	// `.global start` <-> `.global::start` entry-point handshake, and segments
-	// living in lib while CODE/RODATA are filled by the program. Same 47 bytes
-	// as the single-file inlined golden.
-	const LIB = `start := .global::start
-.export EXIT := $0200
+	// exported format macro as the entry-point channel, and segments defined by
+	// the macro while CODE/RODATA are filled by the program. Same 47 bytes as
+	// the single-file inlined golden.
+	const LIB = `.export EXIT := $0200
 .export STDOUT := $0202
+.export .macro output_sfotty_exe start
 .define_segment "CODE"
 .define_segment "RODATA"
 .define_segment "DATA"
@@ -342,9 +416,10 @@ describe("modules", () => {
 \t.emit "RODATA"
 \t.emit "DATA"
 \t.emplace "BSS"
+.endmacro
 `;
 	const HELLO = `.import "./lib.s"
-.global start
+output_sfotty_exe start
 .segment "RODATA"
 message:
 \t.byte "Hello world!", $0a, 0
@@ -417,5 +492,579 @@ describe("macros", () => {
 		expect(asm(".macro one v\n\t.byte v\n.endmacro\none\n").messages).toContain(
 			'Macro "one" expects 1 argument(s), got 0',
 		);
+	});
+
+	test("multi-argument call passes whole operands (the mva pattern)", () => {
+		const { bytes, messages } = asm(
+			"ptr = $20\ndst = $22\n" +
+				".macro mva src, dest\n\tlda src\n\tsta dest\n.endmacro\n" +
+				"mva (ptr),y, (dst),y\n",
+		);
+		expect(messages).toEqual([]);
+		// lda (ptr),y / sta (dst),y - the ",y" shape survives substitution.
+		expect(bytes).toEqual([0xb1, 0x20, 0x91, 0x22]);
+	});
+
+	test("multi-argument call with plain expressions", () => {
+		const { bytes, messages } = asm(
+			".macro pair lo, hi\n\t.byte lo, hi\n.endmacro\npair 1, 2\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 2]);
+	});
+
+	test("an immediate argument splices as a whole operand", () => {
+		const { bytes, messages } = asm(
+			".macro put v\n\tlda v\n.endmacro\nput #$42\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xa9, 0x42]);
+	});
+
+	test("a shaped operand argument in expression position is a type error", () => {
+		expect(
+			asm(".macro bad v\n\t.byte v\n.endmacro\nbad (foo),y\n").messages,
+		).toContain(
+			'Macro argument "v" has an operand value and can only be used as a whole operand',
+		);
+	});
+
+	test("a real instruction rejects an operand list", () => {
+		expect(asm("lda 1, 2\n").messages).toContain("Too many operands for LDA");
+	});
+
+	test("an .out param defines a caller-visible symbol", () => {
+		const { bytes, symbols, messages } = asm(
+			".macro alloc .out name\nname: .res 1\n.endmacro\n.org $10\nalloc buffer\n.byte <buffer\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("buffer")).toBe(0x10n);
+		expect(bytes).toEqual([0x00, 0x10]);
+	});
+
+	test("a non-identifier .out argument is rejected at the call", () => {
+		expect(
+			asm(".macro alloc .out name\nname: .res 1\n.endmacro\nalloc 1+2\n")
+				.messages,
+		).toContain(
+			'Argument for `.out` parameter "name" must be a plain identifier',
+		);
+	});
+
+	test("an .out param the body never defines is an error", () => {
+		expect(asm(".macro bad .out v\n\tnop\n.endmacro\n").messages).toContain(
+			'`.out` parameter "v" is never defined in the macro body',
+		);
+	});
+
+	test("a plain param defined by the body demands .out", () => {
+		expect(asm(".macro bad v\nv = 1\n.endmacro\n").messages).toContain(
+			'Parameter "v" is defined in the macro body - declare it `.out`',
+		);
+	});
+
+	test("forwarding to a nested .out position satisfies and demands .out", () => {
+		const { bytes, messages } = asm(
+			".macro inner .out n\nn = 7\n.endmacro\n" +
+				".macro outer .out m\n\tinner m\n.endmacro\n" +
+				"outer foo\n.byte foo\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
+		// The flip side: a plain param forwarded to an .out position is an error.
+		expect(
+			asm(
+				".macro inner .out n\nn = 7\n.endmacro\n" +
+					".macro outer m\n\tinner m\n.endmacro\nouter foo\n",
+			).messages,
+		).toContain(
+			'Parameter "m" is defined in the macro body - declare it `.out`',
+		);
+	});
+
+	test("an unused macro's free names are checked at the definition site", () => {
+		expect(asm(".macro bad\n\t.byte nope\n.endmacro\n").messages).toContain(
+			'Undefined symbol "nope" in macro "bad"',
+		);
+	});
+
+	test("an unused macro referencing defined names is fine", () => {
+		expect(
+			asm("FOO = 1\n.macro fine\n\t.byte FOO\n.endmacro\n").messages,
+		).toEqual([]);
+	});
+
+	test("module-level directives are rejected inside a body", () => {
+		expect(asm('.macro bad\n.import "x"\n.endmacro\n').messages).toContain(
+			"`.import` is not allowed inside a macro body",
+		);
+	});
+});
+
+describe("namespaces (dict-valued symbols)", () => {
+	test("entries define and resolve via ::", () => {
+		const { bytes, symbols, messages } = asm(
+			"N = { V: 1, B: 2 }\n.byte N::V, N::B\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 2]);
+		expect(symbols.get("N::V")).toBe(1n);
+	});
+
+	test("multiline literal: newline separators, comments, trailing comma", () => {
+		const { bytes, messages } = asm(
+			"HATABS_OFFSET = {\n" +
+				"\tOPEN: 0 ; open vector\n" +
+				"\tCLOSE: 2\n" +
+				"\tGET_BYTE: 4, PUT_BYTE: 6,\n" +
+				"}\n" +
+				".byte HATABS_OFFSET::PUT_BYTE\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([6]);
+	});
+
+	test("nested dictionaries chain with ::", () => {
+		const { bytes, messages } = asm("N = { M: { W: 5 } }\n.byte N::M::W\n");
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([5]);
+	});
+
+	test("entry values may forward-reference (multipass)", () => {
+		const { bytes, messages } = asm(
+			"N = { V: LATER }\nLATER = 7\n.byte N::V\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
+	});
+
+	test("an unknown key is an undefined symbol with the full path", () => {
+		expect(asm("N = { V: 1 }\n.byte N::NOPE\n").messages).toContain(
+			'Undefined symbol "N::NOPE"',
+		);
+	});
+
+	test("duplicate keys are duplicate definitions", () => {
+		expect(asm("N = { V: 1, V: 2 }\n").messages).toContain(
+			'Symbol "N::V" is already defined',
+		);
+	});
+
+	test("the root name is define-once too", () => {
+		expect(asm("N = { V: 1 }\nN = 2\n").messages).toContain(
+			'Symbol "N" is already defined',
+		);
+	});
+
+	test("a dictionary is not a value in expression position", () => {
+		expect(asm(".byte { V: 1 }\n").messages).toContain(
+			"A dictionary literal can only be the right-hand side of a `=` definition",
+		);
+	});
+
+	test(":= rejects a dictionary", () => {
+		expect(asm("N := { V: 1 }\n").messages).toContain(
+			"A dictionary is a value, not an address - define it with `=`",
+		);
+	});
+
+	test("an exported dictionary's entries resolve through the import", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte N::V\n',
+			lib: ".export N = { V: 9 }\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([9]);
+	});
+
+	test("namespace references in macro bodies are hygienic", async () => {
+		const host = memHost({
+			// lib's N is private; the body still binds it, and the caller's own N
+			// neither collides nor leaks in.
+			main: '.import "lib"\nN = { V: 2 }\nput\n.byte N::V\n',
+			lib: "N = { V: 1 }\n.export .macro put\n\t.byte N::V\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([1, 2]);
+	});
+
+	test("a namespace passes through a macro parameter", () => {
+		const { bytes, messages } = asm(
+			"NOTES = { C4: 60, E4: 64 }\n" +
+				".macro play n\n\t.byte n::E4\n.endmacro\nplay NOTES\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([64]);
+	});
+});
+
+describe("namespaced imports", () => {
+	test("binds the module's exports: symbols, dicts, and macros", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\nlib::put 5\n.byte lib::FOO, lib::N::V\n',
+			lib:
+				".export FOO = 7\n.export N = { V: 3 }\n" +
+				".export .macro put v\n\t.byte v\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([5, 7, 3]);
+	});
+
+	test("non-exported symbols stay hidden behind a binding", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte lib::SECRET\n',
+			lib: "SECRET = 1\n.export FOO = 7\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Undefined symbol "lib::SECRET"',
+		);
+	});
+
+	test("a non-exported macro is unknown through a binding", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\nlib::hidden\n',
+			lib: ".macro hidden\n\t.byte 1\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Unknown macro "lib::hidden"',
+		);
+	});
+
+	test("names don't splat-leak from a namespaced import", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte FOO\n',
+			lib: ".export FOO = 7\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Undefined symbol "FOO"',
+		);
+	});
+
+	test("the binding name is define-once", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\nlib = 5\n',
+			lib: ".export FOO = 7\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Symbol "lib" is already defined',
+		);
+	});
+
+	test("a body's namespaced references resolve in the defining module", async () => {
+		const host = memHost({
+			main: '.import "liba"\nouter\n',
+			liba:
+				'libb = .import "libb"\n' +
+				".export .macro outer\n\tlibb::inner\n\t.byte libb::VAL\n.endmacro\n",
+			libb: ".export VAL = 4\n.export .macro inner\n\t.byte 9\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([9, 4]);
+	});
+});
+
+describe("placement attributes", () => {
+	test(".sizeof and .attributes()::size read a declared size", () => {
+		const { bytes, messages } = asm(
+			"BUF := $0600, size: 3\n.byte .sizeof(BUF), .attributes(BUF)::size\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([3, 3]);
+	});
+
+	test("an equate defaults to size 1; a label to 0", () => {
+		const { bytes, messages } = asm(
+			"PORTA := $D300\nstart:\n.byte .sizeof(PORTA), .sizeof(start)\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 0]);
+	});
+
+	test("a size may forward-reference", () => {
+		const { bytes, messages } = asm(
+			"BUF := $0600, size: LEN\nLEN = 2\n.byte .sizeof(BUF)\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([2]);
+	});
+
+	test("constants have no attributes", () => {
+		expect(asm("K = 5\n.byte .sizeof(K)\n").messages).toContain(
+			'Only labels have attributes - "K" is a constant',
+		);
+		expect(asm("K = 5, size: 2\n").messages).toContain(
+			"Only labels have attributes - use `:=` for an address",
+		);
+	});
+
+	test("unknown attribute keys error on both sides", () => {
+		expect(asm("B := 1, foo: 2\n").messages).toContain(
+			'Unknown attribute "foo"',
+		);
+		expect(asm("B := 1\n.byte .attributes(B)::foo\n").messages).toContain(
+			'Unknown attribute "foo"',
+		);
+	});
+
+	test("a bare .attributes() is not a value", () => {
+		expect(asm("B := 1\n.byte .attributes(B)\n").messages).toContain(
+			"`.attributes(...)` is a dictionary - access an attribute with `::`",
+		);
+	});
+
+	test("size must be a non-negative number, set once", () => {
+		expect(asm('B := 1, size: "x"\n').messages).toContain(
+			"`size:` requires a number",
+		);
+		expect(asm("B := 1, size: -1\n").messages).toContain(
+			"`size:` must not be negative",
+		);
+		expect(asm("B := 1, size: 2, size: 3\n").messages).toContain(
+			'Attribute "size" is already set',
+		);
+	});
+
+	test("attributes travel through exports and namespaced imports", async () => {
+		const host = memHost({
+			main:
+				'lib = .import "lib"\n.import "lib"\n' +
+				".byte .sizeof(BUF), .sizeof(lib::BUF)\n",
+			lib: ".export BUF := $0600, size: 3\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([3, 3]);
+	});
+
+	test(".sizeof in a macro body is hygienic", async () => {
+		const host = memHost({
+			main: '.import "lib"\nput\n',
+			lib:
+				"BUF := $0600, size: 7\n" +
+				".export .macro put\n\t.byte .sizeof(BUF)\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([7]);
+	});
+});
+
+describe("expression macros (function-valued symbols)", () => {
+	test("definition and application", () => {
+		const { bytes, messages } = asm(
+			"DOUBLE(v) = 2 * v\n.byte DOUBLE(3), DOUBLE(DOUBLE(2))\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([6, 8]);
+	});
+
+	test("multiple parameters", () => {
+		const { bytes, messages } = asm(
+			"NIBBLES(hi, lo) = hi * 16 + lo\n.byte NIBBLES(2, 5)\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0x25]);
+	});
+
+	test("aliasing: a function is a value", () => {
+		const { bytes, messages } = asm(
+			"DOUBLE(v) = 2 * v\nD = DOUBLE\n.byte D(4)\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([8]);
+	});
+
+	test("forward reference to a function resolves via the multipass", () => {
+		const { bytes, messages } = asm(".byte D(1)\nD(v) = v + 9\n");
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([10]);
+	});
+
+	test("arity and non-function calls are errors", () => {
+		expect(asm("DOUBLE(v) = 2 * v\n.byte DOUBLE(1, 2)\n").messages).toContain(
+			'"DOUBLE" expects 1 argument(s), got 2',
+		);
+		expect(asm("K = 5\n.byte K(2)\n").messages).toContain(
+			'"K" is not a function',
+		);
+	});
+
+	test("a function is not data or an operand", () => {
+		expect(asm("D(v) = v\n.byte D\n").messages).toContain(
+			"A function is not data - apply it with `(...)`",
+		);
+		expect(asm("D(v) = v\n\tlda D\n").messages).toContain(
+			"Operand must be a number, not a function",
+		);
+	});
+
+	test("runaway recursion hits the depth cap", () => {
+		expect(asm("R(v) = R(v)\n.byte R(1)\n").messages).toContain(
+			"Expression macro application too deep (recursion?)",
+		);
+	});
+
+	test("body free names bind in the defining module", async () => {
+		const host = memHost({
+			// lib's SCALE is private; the exported function still sees it, and the
+			// caller's own SCALE neither collides nor leaks in.
+			main: '.import "lib"\nSCALE = 100\n.byte TIMES(3), SCALE\n',
+			lib: "SCALE = 4\n.export TIMES(v) = SCALE * v\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([12, 100]);
+	});
+
+	test("functions apply through namespaced imports", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte lib::TIMES(5)\n',
+			lib: "SCALE = 4\n.export TIMES(v) = SCALE * v\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([20]);
+	});
+
+	test("function params shadow code-macro substitution", () => {
+		// The macro param `v` and the function param `v` collide: the function
+		// body's `v` must stay the function's own (F(1) = 2), while the call
+		// argument `v` IS macro-substituted (F(5) = 10). The function itself is
+		// body-local (hygiene renames it), used inside the body.
+		const { bytes, messages } = asm(
+			".macro emitdouble v\nF(v) = v * 2\n\t.byte F(1), F(v)\n.endmacro\nemitdouble 5\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([2, 10]);
+	});
+});
+
+describe("bitwise xor", () => {
+	test("^ evaluates at multiplicative precedence", () => {
+		expect(asm(".byte 5 ^ 3, 1 + 2 ^ 2\n").bytes).toEqual([6, 1]);
+	});
+});
+
+describe("line continuation", () => {
+	test("statements continue across a backslash-newline", () => {
+		const { bytes, messages } = asm(".byte 1, \\\n\t2, 3\nlda \\\n\t#5\n");
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 2, 3, 0xa9, 5]);
+	});
+});
+
+describe("bitwise operators", () => {
+	test("and, or, not", () => {
+		expect(asm(".byte $F0 & $3C, $0C | $30, ~0 & $FF\n").bytes).toEqual([
+			0x30, 0x3c, 0xff,
+		]);
+	});
+
+	test("~ in an immediate encodes the complement by arithmetic", () => {
+		// ~$0C = -$0D as an unbounded integer; the byte truncation yields $F3.
+		expect(asm("MASK = $0C\n\tand #~MASK\n").bytes).toEqual([0x29, 0xf3]);
+	});
+
+	test("shifts, at multiplicative precedence", () => {
+		expect(asm(".byte 1 << 4, $80 >> 3\n").bytes).toEqual([16, 16]);
+		// & and << bind tighter than |; | sits with + -.
+		expect(asm(".word 1 << 8 | 2, 1 | 2 & 2\n").bytes).toEqual([
+			0x02, 0x01, 0x03, 0x00,
+		]);
+	});
+
+	test("a negative shift count is an error", () => {
+		expect(asm(".byte 1 << (0 - 1)\n").messages).toContain(
+			"Shift count must not be negative",
+		);
+	});
+});
+
+describe("diagnostics with locations", () => {
+	test("errors carry their module and a formatted file:line:col", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte OK\n',
+			lib: ".export OK = 1\n.byte NOPE\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find((d) => d.message.includes("NOPE"))!;
+		expect(error.file).toBe("lib");
+		expect(error.formatted).toMatch(/^lib:2:7: error: Undefined symbol "NOPE"/);
+		// The formatted message shows the source line and a caret under the span.
+		expect(error.formatted).toContain("\n.byte NOPE\n");
+		expect(error.formatted).toMatch(/\n {6}\^{4}$/);
+	});
+
+	test("an error inside a macro body points into the macro's file", async () => {
+		const host = memHost({
+			main: '.import "lib"\nput\n',
+			lib: ".export .macro put\n\t.byte MISSING\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find((d) => d.message.includes("MISSING"))!;
+		// The span is a body token: hygiene's origin doubles as the file.
+		expect(error.file).toBe("lib");
+		expect(error.formatted).toMatch(/^lib:2:8: error: Undefined symbol/);
+	});
+
+	test("parse errors are attributed to their module", async () => {
+		const host = memHost({
+			main: '.import "lib"\nnop\n',
+			lib: ".segment CODE\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics[0]!;
+		expect(error.file).toBe("lib");
+		expect(error.formatted).toMatch(/^lib:1:10: error: /);
+	});
+
+	test("single-source diagnostics use the given name", () => {
+		const { messages } = asm("lda undef\n");
+		expect(messages).toEqual(['Undefined symbol "undef"']);
+		const r = assemble("lda undef\n", "prog.s");
+		expect(r.diagnostics[0]!.formatted).toMatch(/^prog\.s:1:5: error: /);
+	});
+});
+
+describe("export name forms", () => {
+	test(".export name exports an elsewhere-defined symbol, repeatably", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte FOO\nlda entry\n',
+			lib: ".export FOO\n.export FOO\nFOO = 7\n.export entry\nentry:\n\tnop\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		// lib collects first: entry/nop at 0; then main's byte and a zp lda.
+		expect([...r.output]).toEqual([0xea, 7, 0xa5, 0x00]);
+	});
+
+	test(".export label: defines and exports in place", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.word start\n',
+			lib: "\t.byte 9\n.export start:\n\tnop\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		// lib collects first: byte at 0, start = 1 (the nop); then main's word.
+		expect([...r.output]).toEqual([9, 0xea, 0x01, 0x00]);
+	});
+
+	test("a bare export of a never-defined name is an error", async () => {
+		const host = memHost({
+			main: '.import "lib"\nnop\n',
+			lib: ".export NOPE\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Exported symbol "NOPE" is never defined');
+		expect(error.formatted).toMatch(/^lib:1:9: error: /);
 	});
 });

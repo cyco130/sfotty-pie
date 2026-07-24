@@ -1,0 +1,23 @@
+{
+  "name": "@sfotty-pie/ragtime-snake",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Ragtime Snake - a game for the Atari 8-bit, assembled with spasm",
+  "type": "module",
+  "scripts": {
+    "build": "node build.ts",
+    "test": "pnpm run /^test:/",
+    "test:unit": "vitest run",
+    "test:typecheck": "tsc -p tsconfig.json",
+    "test:lint": "eslint . --max-warnings 0"
+  },
+  "devDependencies": {
+    "@cyco130/eslint-config": "^9.0.2",
+    "@sfotty-pie/a8": "workspace:*",
+    "@sfotty-pie/spasm": "workspace:*",
+    "@types/node": "^22.20.0",
+    "eslint": "^10.5.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

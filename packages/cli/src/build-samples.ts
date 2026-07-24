@@ -22,7 +22,7 @@ for (const name of ["hello", "echo", "cat", "guess"]) {
 
 	for (const diagnostic of result.diagnostics) {
 		process.stderr.write(
-			`${name}.s: ${diagnostic.type}: ${diagnostic.message}\n`,
+			`${diagnostic.formatted ?? `${diagnostic.type}: ${diagnostic.message}`}\n`,
 		);
 	}
 	if (result.diagnostics.some((d) => d.type === "error")) {

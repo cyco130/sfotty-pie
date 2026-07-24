@@ -52,7 +52,7 @@ export const DOT_KEYWORDS = [
 	"emplace",
 	"import",
 	"export",
-	"global",
+	"out",
 	"res",
 	"code",
 	"rodata",
@@ -61,6 +61,8 @@ export const DOT_KEYWORDS = [
 	"zeropage",
 	"macro",
 	"endmacro",
+	"attributes",
+	"sizeof",
 ] as const;
 
 const REGISTER_NAMES = ["a", "x", "y"] as const;
@@ -82,8 +84,11 @@ const REGEXES = [
 	[/$/, "eof"],
 	[/\n|\r\n?/, "newline"],
 
-	// Whitespaces
+	// Whitespaces. A backslash before the line break is a line continuation:
+	// the whole sequence (trailing blanks allowed, comments not) is trivia, so
+	// the newline never reaches the parser.
 	[/[ \t]+/, "whitespace"],
+	[/\\[ \t]*(?:\n|\r\n?)/, "whitespace"],
 	[/;[^\n\r]*/, "comment"],
 
 	// Keywords
@@ -118,23 +123,30 @@ const REGEXES = [
 	[/'(?:[^'\r\n\\]|\\.)*'/, "character"],
 	[/'(?:[^'\r\n\\]|\\.)*/, "error:character"],
 
-	// Multi character punctuation (must precede the single-character ":")
+	// Multi character punctuation (must precede its single-character prefixes).
+	// Note `<<` vs `< <`: the shift lexes greedily, so comparing against a
+	// low byte (`a < <b`) needs the space - same tension as ca65.
 	[/\|\|/, "||"],
 	[/&&/, "&&"],
 	[/!=/, "!="],
 	[/:=/, ":="],
 	[/::/, "::"],
+	[/<</, "<<"],
+	[/>>/, ">>"],
 
 	// Single character punctuation
 	[/#/, "#"],
 	[/\(/, "("],
 	[/\)/, ")"],
+	[/\{/, "{"],
+	[/\}/, "}"],
 	[/,/, ","],
 
 	[/:/, ":"],
 	[/=/, "="],
 
 	[/!/, "!"],
+	[/~/, "~"],
 	[/</, "<"],
 	[/>/, ">"],
 	[/\+/, "+"],
@@ -142,6 +154,9 @@ const REGEXES = [
 	[/\*/, "*"],
 	[/\//, "/"],
 	[/%/, "%"],
+	[/\^/, "^"],
+	[/&/, "&"],
+	[/\|/, "|"],
 ] as const;
 
 const BIG_REGEX = new RegExp(
@@ -162,6 +177,13 @@ interface TypedToken<T extends TokenType = TokenType> {
 	end: number;
 	before?: Array<SkippedToken>;
 	after?: Array<SkippedToken>;
+	/**
+	 * The module id an identifier lexically binds to. Macro expansion stamps
+	 * this on the free identifiers of an expanded body (hygiene: they resolve
+	 * where the macro was defined, not where it was called). Absent everywhere
+	 * else - an unstamped identifier binds to its containing module.
+	 */
+	origin?: string;
 }
 
 export type SkippedToken = Token<"whitespace" | "comment">;

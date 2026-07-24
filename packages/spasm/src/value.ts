@@ -1,9 +1,25 @@
+import type { Expression } from "./parser.ts";
+
 /**
- * A resolved compile-time value. Iteration 1: integers (`bigint`, so width is
- * never the limit) and strings. The typed-value system (operands, lists, dicts)
- * arrives with macros; this union grows additively then.
+ * An expression macro: a function-valued symbol (`DOUBLE(x) = 2 * x`). The
+ * only operations are application (`DOUBLE(2)`) and assignment aliasing
+ * (`D = DOUBLE`). The value is interned per definition site so it stays
+ * identity-stable across passes (the fixpoint compares values with `!==`).
  */
-export type Value = bigint | string;
+export interface FunctionValue {
+	type: "function";
+	params: readonly string[];
+	body: Expression;
+	/** The module the body's free names resolve in (lexical hygiene). */
+	moduleId: string;
+}
+
+/**
+ * A resolved compile-time value: integers (`bigint`, so width is never the
+ * limit), strings, and functions (expression macros). The typed-value system
+ * (operands, lists) grows this union additively.
+ */
+export type Value = bigint | string | FunctionValue;
 
 const ESCAPES: Record<string, string> = {
 	"\\": "\\",

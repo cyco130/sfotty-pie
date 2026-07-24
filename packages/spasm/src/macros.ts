@@ -1,123 +1,402 @@
-import type {
-	Expression,
-	Macro,
-	Operand,
-	Statement,
-	StatementContent,
+import type { Token } from "./lexer.ts";
+import type { LoadedModule } from "./loader.ts";
+import {
+	getOperandLocation,
+	type Expression,
+	type Macro,
+	type Operand,
+	type Statement,
+	type StatementContent,
 } from "./parser.ts";
+import { exportedNames } from "./scopes.ts";
 
-type Reporter = (message: string, span: readonly [number, number]) => void;
+type Reporter = (
+	message: string,
+	span: readonly [number, number],
+	file?: string,
+) => void;
 
-// A param substitutes to an argument expression; a body-local label renames.
+// A param substitutes to an argument operand; a body-local label renames.
 type Substitution =
-	| { kind: "expr"; expr: Expression }
+	| { kind: "operand"; operand: Operand }
 	| { kind: "rename"; name: string };
 
 const MAX_DEPTH = 64;
 
+interface ModuleMacros {
+	own: Map<string, Macro>;
+	exported: ReadonlySet<string>;
+}
+
 /**
- * Expand macros in a module's statements - a static, syntactic step that runs
- * once before assembly. `.macro` definitions are collected and removed; each
- * call (an instruction whose mnemonic names a macro) is replaced by the body
- * with params substituted and body-local labels renamed uniquely per expansion.
+ * Expand macros across a module graph - a static, syntactic step that runs
+ * once before assembly. `.macro` definitions (and `.export .macro` ones) are
+ * collected and removed from each module's stream; each call (an instruction
+ * whose mnemonic names a visible macro) is replaced by the body with params
+ * substituted and body-local labels renamed uniquely per expansion.
+ *
+ * Macro visibility mirrors symbol scoping: a module sees its own macros plus
+ * the *exported* macros of the modules it imports. Expansion is hygienic - a
+ * free name in a body is stamped with the defining module's id so it resolves
+ * where the macro was defined, not where it was called; params are the only
+ * call-site channel.
  */
-export function expandMacros(
-	statements: Statement[],
+export function expandModules(
+	modules: readonly LoadedModule[],
 	report: Reporter,
-): Statement[] {
-	const macros = new Map<string, Macro>();
-	const rest: Statement[] = [];
-	for (const statement of statements) {
-		const content = statement.content;
-		if (content?.type === "macro") {
-			if (macros.has(content.nameToken.text)) {
+): LoadedModule[] {
+	// Collect each module's macro definitions, removing them from its stream.
+	const macros = new Map<string, ModuleMacros>();
+	const splats = new Map<string, readonly string[]>();
+	const bindings = new Map<string, ReadonlyMap<string, string>>();
+	const stripped = new Map<string, Statement[]>();
+	for (const module of modules) {
+		splats.set(
+			module.id,
+			module.imports.filter((i) => i.binding === null).map((i) => i.id),
+		);
+		bindings.set(
+			module.id,
+			new Map(
+				module.imports
+					.filter((i) => i.binding !== null)
+					.map((i) => [i.binding!, i.id]),
+			),
+		);
+		const own = new Map<string, Macro>();
+		const exported = new Set<string>();
+		const rest: Statement[] = [];
+		for (const statement of module.statements) {
+			const content = statement.content;
+			let macro: Macro | undefined;
+			let isExported = false;
+			if (content?.type === "macro") {
+				macro = content;
+			} else if (
+				content?.type === "export" &&
+				content.content?.type === "macro"
+			) {
+				macro = content.content;
+				isExported = true;
+			}
+			if (!macro) {
+				rest.push(statement);
+				continue;
+			}
+			const name = macro.nameToken.text;
+			if (own.has(name)) {
 				report(
-					`Macro "${content.nameToken.text}" is already defined`,
-					tokenSpan(content.nameToken),
+					`Macro "${name}" is already defined`,
+					tokenSpan(macro.nameToken),
+					module.id,
 				);
 			} else {
-				macros.set(content.nameToken.text, content);
+				own.set(name, macro);
+				if (isExported) exported.add(name);
+				checkBody(macro, report, module.id);
 			}
-		} else {
-			rest.push(statement);
+		}
+		macros.set(module.id, { own, exported });
+		stripped.set(module.id, rest);
+	}
+
+	// Lexical lookup: own macros, then the splat imports' exported ones (first
+	// import wins, mirroring symbol resolution).
+	const lookup = (
+		fromId: string,
+		name: string,
+	): { macro: Macro; definingId: string } | undefined => {
+		const own = macros.get(fromId)?.own.get(name);
+		if (own) return { macro: own, definingId: fromId };
+		for (const importId of splats.get(fromId) ?? []) {
+			const theirs = macros.get(importId);
+			if (theirs?.exported.has(name)) {
+				return { macro: theirs.own.get(name)!, definingId: importId };
+			}
+		}
+		return undefined;
+	};
+
+	// A namespaced call `ns::name args`: the root must be a namespace binding
+	// of the calling scope, the segment an exported macro of the bound module.
+	const lookupPath = (
+		fromId: string,
+		call: Extract<StatementContent, { type: "instruction" }>,
+	): { macro: Macro; definingId: string } | undefined => {
+		const path = call.memberTokens!;
+		const bound = bindings.get(fromId)?.get(call.mnemonic.text);
+		if (bound === undefined || path.length !== 1) return undefined;
+		const theirs = macros.get(bound);
+		const name = path[0]!.text;
+		if (theirs?.exported.has(name)) {
+			return { macro: theirs.own.get(name)!, definingId: bound };
+		}
+		return undefined;
+	};
+
+	// `.out` contract checks, for every macro, used or not. The callee's
+	// signature is known here, so forwarding (passing a param on to a nested
+	// call's `.out` position) is recognized per argument position.
+	for (const module of modules) {
+		for (const macro of macros.get(module.id)!.own.values()) {
+			validateParams(
+				macro,
+				(name) => lookup(module.id, name)?.macro,
+				report,
+				module.id,
+			);
 		}
 	}
 
 	let counter = 0;
-	return expand(rest, macros, () => ++counter, report, 0);
-}
+	const expanded = new Set<Macro>();
 
-function expand(
-	statements: Statement[],
-	macros: Map<string, Macro>,
-	gensym: () => number,
-	report: Reporter,
-	depth: number,
-): Statement[] {
-	if (depth > MAX_DEPTH) {
-		const first = statements[0];
-		if (first) {
-			report("Macro expansion too deep (recursion?)", statementSpan(first));
+	// `scopeId` is the module whose macros are lexically in scope: the module
+	// being expanded for its top-level statements, the *defining* module for a
+	// body (so a body's own macro calls resolve where the macro was written).
+	const expand = (
+		statements: Statement[],
+		scopeId: string,
+		depth: number,
+	): Statement[] => {
+		if (depth > MAX_DEPTH) {
+			const first = statements[0];
+			if (first) {
+				report(
+					"Macro expansion too deep (recursion?)",
+					statementSpan(first),
+					scopeId,
+				);
+			}
+			return statements;
 		}
-		return statements;
-	}
 
-	const out: Statement[] = [];
-	for (const statement of statements) {
-		const content = statement.content;
-		if (content?.type === "instruction") {
-			const macro = macros.get(content.mnemonic.text);
-			if (macro) {
-				const args = callArgs(content, macro, report);
+		const out: Statement[] = [];
+		for (const statement of statements) {
+			const content = statement.content;
+			if (content?.type === "instruction" && content.memberTokens?.length) {
+				// A path is necessarily a macro call - no opcode has `::`.
+				const found = lookupPath(scopeId, content);
+				if (!found) {
+					report(
+						`Unknown macro "${[content.mnemonic, ...content.memberTokens]
+							.map((t) => t.text)
+							.join("::")}"`,
+						tokenSpan(content.mnemonic),
+						scopeId,
+					);
+					continue;
+				}
+				expanded.add(found.macro);
+				const args = callArgs(content, found.macro, report, scopeId);
 				if (args) {
-					const expanded = expandCall(macro, args, gensym);
-					// Carry the call's own labels onto the first expanded statement.
-					if (statement.labels.length && expanded.length) {
-						expanded[0] = {
-							...expanded[0]!,
-							labels: [...statement.labels, ...expanded[0]!.labels],
+					const body = expandCall(
+						found.macro,
+						found.definingId,
+						args,
+						() => ++counter,
+						report,
+					);
+					if (statement.labels.length && body.length) {
+						body[0] = {
+							...body[0]!,
+							labels: [...statement.labels, ...body[0]!.labels],
 						};
 					} else if (statement.labels.length) {
 						out.push({ ...statement, content: null });
 					}
-					out.push(...expand(expanded, macros, gensym, report, depth + 1));
+					out.push(...expand(body, found.definingId, depth + 1));
 				}
 				continue;
 			}
+			if (content?.type === "instruction") {
+				const found = lookup(scopeId, content.mnemonic.text);
+				if (found) {
+					expanded.add(found.macro);
+					const args = callArgs(content, found.macro, report, scopeId);
+					if (args) {
+						const body = expandCall(
+							found.macro,
+							found.definingId,
+							args,
+							() => ++counter,
+							report,
+						);
+						// Carry the call's own labels onto the first expanded statement.
+						if (statement.labels.length && body.length) {
+							body[0] = {
+								...body[0]!,
+								labels: [...statement.labels, ...body[0]!.labels],
+							};
+						} else if (statement.labels.length) {
+							out.push({ ...statement, content: null });
+						}
+						out.push(...expand(body, found.definingId, depth + 1));
+					}
+					continue;
+				}
+			}
+			out.push(statement);
 		}
-		out.push(statement);
+		return out;
+	};
+
+	const result = modules.map((module) => ({
+		...module,
+		statements: expand(stripped.get(module.id)!, module.id, 0),
+	}));
+
+	// Definition-site check for macros that were never expanded: every free name
+	// in the body must be resolvable where the macro is defined. (Expanded
+	// bodies get this for free - their stamped identifiers hit the normal
+	// undefined-symbol check during assembly.)
+	const expandedById = new Map(result.map((m) => [m.id, m]));
+	for (const module of result) {
+		const own = macros.get(module.id)!.own;
+		let visible: Set<string> | undefined; // built lazily; rarely needed
+		for (const macro of own.values()) {
+			if (expanded.has(macro)) continue;
+			if (!visible) {
+				visible = definedNames(module.statements);
+				for (const record of module.imports) {
+					if (record.binding !== null) continue; // reachable via the binding
+					const imported = expandedById.get(record.id);
+					if (imported) {
+						for (const name of exportedNames(imported)) visible.add(name);
+					}
+				}
+			}
+			validateBody(
+				macro,
+				visible,
+				(name) => lookup(module.id, name) !== undefined,
+				report,
+				module.id,
+			);
+		}
 	}
-	return out;
+
+	return result;
 }
 
+// Module-level directives can't appear in a macro body: the loader resolves
+// imports from top-level statements only, and an export or a nested macro
+// definition would escape the expansion.
+function checkBody(macro: Macro, report: Reporter, file: string): void {
+	for (const statement of macro.body) {
+		const content = statement.content;
+		const keyword =
+			content?.type === "import"
+				? content.importToken
+				: content?.type === "export"
+					? content.exportToken
+					: content?.type === "macro"
+						? content.macroToken
+						: undefined;
+		if (content && keyword) {
+			report(
+				`\`.${content.type}\` is not allowed inside a macro body`,
+				tokenSpan(keyword),
+				file,
+			);
+		}
+	}
+}
+
+// A macro argument is a whole *operand*, shape included - `mva (src),y, (dst),y`
+// passes two indirect-indexed operands. Operand is a super-type of simple
+// values: a simple operand is a plain expression and substitutes anywhere; a
+// shaped operand only substitutes as a whole operand (a type error elsewhere).
 function callArgs(
 	call: Extract<StatementContent, { type: "instruction" }>,
 	macro: Macro,
 	report: Reporter,
-): Expression[] | undefined {
-	const args: Expression[] = [];
-	const operand = call.operand;
-	if (operand && operand.type !== "accumulator-operand") {
-		args.push(operand.expression);
-	}
+	file: string,
+): Operand[] | undefined {
+	const args = call.operands;
 	if (args.length !== macro.params.length) {
 		report(
 			`Macro "${macro.nameToken.text}" expects ${macro.params.length} argument(s), got ${args.length}`,
 			tokenSpan(call.mnemonic),
+			file,
 		);
 		return undefined;
+	}
+	for (let i = 0; i < args.length; i++) {
+		const param = macro.params[i]!;
+		const arg = args[i]!;
+		if (
+			param.outToken &&
+			(arg.type !== "simple-operand" || arg.expression.type !== "identifier")
+		) {
+			report(
+				`Argument for \`.out\` parameter "${param.nameToken.text}" must be a plain identifier`,
+				getOperandLocation(arg),
+				file,
+			);
+			return undefined;
+		}
 	}
 	return args;
 }
 
+// The `.out` contract: an `.out` param must be defined by the body (a label,
+// an assignment, or forwarding to a nested call's `.out` position) - reads
+// are additionally allowed; a plain param must not be defined or forwarded.
+function validateParams(
+	macro: Macro,
+	getMacro: (name: string) => Macro | undefined,
+	report: Reporter,
+	file: string,
+): void {
+	if (!macro.params.length) return;
+	const defined = localNames(macro.body);
+	const forwarded = new Set<string>();
+	for (const statement of macro.body) {
+		const content = statement.content;
+		if (content?.type !== "instruction") continue;
+		const callee = getMacro(content.mnemonic.text);
+		if (!callee) continue;
+		content.operands.forEach((operand, i) => {
+			if (
+				callee.params[i]?.outToken &&
+				operand.type === "simple-operand" &&
+				operand.expression.type === "identifier"
+			) {
+				forwarded.add(operand.expression.text);
+			}
+		});
+	}
+	for (const param of macro.params) {
+		const name = param.nameToken.text;
+		if (param.outToken) {
+			if (!defined.has(name) && !forwarded.has(name)) {
+				report(
+					`\`.out\` parameter "${name}" is never defined in the macro body`,
+					tokenSpan(param.nameToken),
+					file,
+				);
+			}
+		} else if (defined.has(name) || forwarded.has(name)) {
+			report(
+				`Parameter "${name}" is defined in the macro body - declare it \`.out\``,
+				tokenSpan(param.nameToken),
+				file,
+			);
+		}
+	}
+}
+
 function expandCall(
 	macro: Macro,
-	args: Expression[],
+	definingId: string,
+	args: Operand[],
 	gensym: () => number,
+	report: Reporter,
 ): Statement[] {
 	const subst = new Map<string, Substitution>();
 	macro.params.forEach((param, i) => {
-		subst.set(param.text, { kind: "expr", expr: args[i]! });
+		subst.set(param.nameToken.text, { kind: "operand", operand: args[i]! });
 	});
 	const suffix = `@${gensym()}`;
 	for (const name of localNames(macro.body)) {
@@ -128,12 +407,14 @@ function expandCall(
 
 	// Clone the template so substitution (which mutates) is per-expansion.
 	const body = structuredClone(macro.body);
-	for (const statement of body) substituteStatement(statement, subst);
+	for (const statement of body) {
+		substituteStatement(statement, subst, definingId, report);
+	}
 	return body;
 }
 
 // Names defined inside the body (labels and assignments) are local to each
-// expansion; references to anything else resolve in the surrounding scope.
+// expansion; references to anything else bind in the defining module.
 function localNames(body: Statement[]): Set<string> {
 	const names = new Set<string>();
 	for (const statement of body) {
@@ -148,82 +429,337 @@ function localNames(body: Statement[]): Set<string> {
 function substituteStatement(
 	statement: Statement,
 	subst: Map<string, Substitution>,
+	origin: string,
+	report: Reporter,
 ): void {
 	for (const label of statement.labels) {
-		const s = subst.get(label.identifier.text);
-		if (s?.kind === "rename") {
-			label.identifier = { ...label.identifier, text: s.name };
-		}
+		label.identifier = substituteName(label.identifier, subst, origin, report);
 	}
-	if (statement.content) substituteContent(statement.content, subst);
+	if (statement.content) {
+		substituteContent(statement.content, subst, origin, report);
+	}
+}
+
+// A defining occurrence (a label or an assignment name). A param here must be
+// bound to a plain identifier - that's the outward channel: the definition
+// lands under the caller's name, in the caller's scope.
+function substituteName(
+	identifier: Token<"identifier">,
+	subst: Map<string, Substitution>,
+	origin: string,
+	report: Reporter,
+): Token<"identifier"> {
+	const s = subst.get(identifier.text);
+	if (s?.kind === "rename") return { ...identifier, text: s.name };
+	if (s?.kind === "operand") {
+		if (
+			s.operand.type === "simple-operand" &&
+			s.operand.expression.type === "identifier"
+		) {
+			return structuredClone(s.operand.expression);
+		}
+		report(
+			`Macro argument for "${identifier.text}" defines a name and must be a plain identifier`,
+			tokenSpan(identifier),
+			origin,
+		);
+	}
+	return identifier;
 }
 
 function substituteContent(
 	content: StatementContent,
 	subst: Map<string, Substitution>,
+	origin: string,
+	report: Reporter,
 ): void {
 	switch (content.type) {
 		case "byte":
 		case "word":
 			content.list = content.list.map(([e, comma]) => [
-				substituteExpr(e, subst),
+				substituteExpr(e, subst, origin, report),
 				comma,
 			]);
 			break;
 		case "org":
-			content.expression = substituteExpr(content.expression, subst);
+			content.expression = substituteExpr(
+				content.expression,
+				subst,
+				origin,
+				report,
+			);
 			break;
 		case "res":
-			content.count = substituteExpr(content.count, subst);
+			content.count = substituteExpr(content.count, subst, origin, report);
 			break;
 		case "assignment": {
-			content.expression = substituteExpr(content.expression, subst);
-			const s = subst.get(content.identifier.text);
-			if (s?.kind === "rename") {
-				content.identifier = { ...content.identifier, text: s.name };
-			}
+			// An expression macro's params shadow the (code) macro's substitution
+			// inside its body - `F(x) = x + 1` keeps its own `x`.
+			const shadowed = content.params
+				? new Set(content.params.map((p) => p.text))
+				: undefined;
+			content.expression = substituteExpr(
+				content.expression,
+				subst,
+				origin,
+				report,
+				shadowed,
+			);
+			content.attributes = content.attributes.map((attribute) => ({
+				...attribute,
+				value: substituteExpr(attribute.value, subst, origin, report),
+			}));
+			content.identifier = substituteName(
+				content.identifier,
+				subst,
+				origin,
+				report,
+			);
 			break;
 		}
 		case "instruction":
-			if (content.operand && content.operand.type !== "accumulator-operand") {
-				content.operand = {
-					...content.operand,
-					expression: substituteExpr(content.operand.expression, subst),
-				} as Operand;
-			}
+			content.operands = content.operands.map((operand) =>
+				substituteOperand(operand, subst, origin, report),
+			);
 			break;
-		// Other content (segment/emit/emplace/import/export/global/...) carries no
-		// substitutable expressions in a macro body for now.
+		// Segment directives carry no substitutable expressions; import/export/
+		// macro are rejected from bodies at collection.
 		default:
 			break;
 	}
 }
 
+// A param standing alone in operand position (`lda src`) splices the whole
+// argument operand, shape included. A param inside a composite operand
+// (`#src`, `src,x`, `(src),y`) is in expression position - `substituteExpr`
+// type-checks it there.
+function substituteOperand(
+	operand: Operand,
+	subst: Map<string, Substitution>,
+	origin: string,
+	report: Reporter,
+): Operand {
+	if (operand.type === "accumulator-operand") return operand;
+	if (
+		operand.type === "simple-operand" &&
+		operand.expression.type === "identifier"
+	) {
+		const s = subst.get(operand.expression.text);
+		if (s?.kind === "operand") return structuredClone(s.operand);
+	}
+	return {
+		...operand,
+		expression: substituteExpr(operand.expression, subst, origin, report),
+	} as Operand;
+}
+
 function substituteExpr(
 	expr: Expression,
 	subst: Map<string, Substitution>,
+	origin: string,
+	report: Reporter,
+	shadowed?: ReadonlySet<string>,
 ): Expression {
 	switch (expr.type) {
 		case "identifier": {
+			// An expression-macro param: neither substituted nor stamped - it
+			// binds at application time.
+			if (shadowed?.has(expr.text)) return expr;
 			const s = subst.get(expr.text);
-			if (s?.kind === "expr") return structuredClone(s.expr);
+			if (s?.kind === "operand") {
+				// Operand is a super-type of simple values: only a simple operand
+				// (a plain expression) has a value usable inside an expression.
+				if (s.operand.type === "simple-operand") {
+					return structuredClone(s.operand.expression);
+				}
+				report(
+					`Macro argument "${expr.text}" has an operand value and can only be used as a whole operand`,
+					tokenSpan(expr),
+					origin,
+				);
+				return expr;
+			}
 			if (s?.kind === "rename") return { ...expr, text: s.name };
-			return expr;
+			// A free name binds where the macro was defined (hygiene). An already
+			// stamped identifier (from an outer expansion's argument) keeps its
+			// binding.
+			return { ...expr, origin: expr.origin ?? origin };
 		}
 		case "prefix-expression":
-			return { ...expr, expression: substituteExpr(expr.expression, subst) };
+			return {
+				...expr,
+				expression: substituteExpr(
+					expr.expression,
+					subst,
+					origin,
+					report,
+					shadowed,
+				),
+			};
 		case "infix-expression":
 			return {
 				...expr,
-				left: substituteExpr(expr.left, subst),
-				right: substituteExpr(expr.right, subst),
+				left: substituteExpr(expr.left, subst, origin, report, shadowed),
+				right: substituteExpr(expr.right, subst, origin, report, shadowed),
 			};
 		case "grouped-expression":
-			return { ...expr, expression: substituteExpr(expr.expression, subst) };
+			return {
+				...expr,
+				expression: substituteExpr(
+					expr.expression,
+					subst,
+					origin,
+					report,
+					shadowed,
+				),
+			};
 		case "member-expression":
-			return { ...expr, object: substituteExpr(expr.object, subst) };
+			return {
+				...expr,
+				object: substituteExpr(expr.object, subst, origin, report, shadowed),
+			};
+		case "dict-literal":
+			return {
+				...expr,
+				entries: expr.entries.map((entry) => ({
+					...entry,
+					value: substituteExpr(entry.value, subst, origin, report, shadowed),
+				})),
+			};
+		case "call-expression":
+			return {
+				...expr,
+				callee: substituteExpr(expr.callee, subst, origin, report, shadowed),
+				args: expr.args.map((arg) =>
+					substituteExpr(arg, subst, origin, report, shadowed),
+				),
+			};
+		case "builtin-call":
+			return {
+				...expr,
+				argument: substituteExpr(
+					expr.argument,
+					subst,
+					origin,
+					report,
+					shadowed,
+				),
+			};
 		default:
-			return expr; // literals, `*`, `.global`
+			return expr; // literals and `*`
+	}
+}
+
+// Top-level defining occurrences of a module, post-expansion. Namespace
+// bindings count - `ns::x` in an unexpanded body roots at `ns`.
+function definedNames(statements: readonly Statement[]): Set<string> {
+	const names = new Set<string>();
+	for (const statement of statements) {
+		for (const label of statement.labels) names.add(label.identifier.text);
+		const content = statement.content;
+		if (content?.type === "assignment") names.add(content.identifier.text);
+		if (content?.type === "export" && content.content?.type === "assignment") {
+			names.add(content.content.identifier.text);
+		}
+		if (
+			content?.type === "export" &&
+			content.nameToken &&
+			content.definesLabel
+		) {
+			names.add(content.nameToken.text);
+		}
+		if (content?.type === "import" && content.binding) {
+			names.add(content.binding.text);
+		}
+	}
+	return names;
+}
+
+// Check an unexpanded body's free names against what's visible at the
+// definition site. Arguments of nested macro calls are skipped - a param used
+// as a defining occurrence would make the argument a fresh name, which only
+// expanding could tell apart from a reference.
+function validateBody(
+	macro: Macro,
+	visible: ReadonlySet<string>,
+	isMacro: (name: string) => boolean,
+	report: Reporter,
+	file: string,
+): void {
+	const bound = localNames(macro.body);
+	for (const param of macro.params) bound.add(param.nameToken.text);
+
+	const check = (expr: Expression): void => {
+		switch (expr.type) {
+			case "identifier":
+				if (!bound.has(expr.text) && !visible.has(expr.text)) {
+					report(
+						`Undefined symbol "${expr.text}" in macro "${macro.nameToken.text}"`,
+						tokenSpan(expr),
+						file,
+					);
+				}
+				break;
+			case "prefix-expression":
+			case "grouped-expression":
+				check(expr.expression);
+				break;
+			case "infix-expression":
+				check(expr.left);
+				check(expr.right);
+				break;
+			case "member-expression":
+				check(expr.object);
+				break;
+			case "dict-literal":
+				for (const entry of expr.entries) check(entry.value);
+				break;
+			case "builtin-call":
+				check(expr.argument);
+				break;
+			case "call-expression":
+				check(expr.callee);
+				for (const arg of expr.args) check(arg);
+				break;
+			default:
+				break;
+		}
+	};
+
+	for (const statement of macro.body) {
+		const content = statement.content;
+		if (!content) continue;
+		switch (content.type) {
+			case "byte":
+			case "word":
+				for (const [e] of content.list) check(e);
+				break;
+			case "org":
+				check(content.expression);
+				break;
+			case "res":
+				check(content.count);
+				break;
+			case "assignment": {
+				// An expression macro's params are bound within its own body.
+				const added = (content.params ?? []).filter((p) => !bound.has(p.text));
+				for (const p of added) bound.add(p.text);
+				check(content.expression);
+				for (const attribute of content.attributes) check(attribute.value);
+				for (const p of added) bound.delete(p.text);
+				break;
+			}
+			case "instruction":
+				if (isMacro(content.mnemonic.text)) break;
+				for (const operand of content.operands) {
+					if (operand.type !== "accumulator-operand") {
+						check(operand.expression);
+					}
+				}
+				break;
+			default:
+				break;
+		}
 	}
 }
 

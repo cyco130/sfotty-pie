@@ -21,6 +21,14 @@ function expr(e: Expression): string {
 			return `[${expr(e.expression)}]`;
 		case "member-expression":
 			return `${expr(e.object)}::${e.member.text}`;
+		case "dict-literal":
+			return `{${e.entries
+				.map((entry) => `${entry.key.text}: ${expr(entry.value)}`)
+				.join(", ")}}`;
+		case "builtin-call":
+			return `.${e.keyword.text.replace(/^\./, "")}(${expr(e.argument)})`;
+		case "call-expression":
+			return `${expr(e.callee)}(${e.args.map(expr).join(", ")})`;
 		default:
 			return e.text;
 	}
@@ -51,12 +59,20 @@ function list(items: Byte["list"]): string {
 
 function content(c: StatementContent): string {
 	switch (c.type) {
-		case "instruction":
-			return c.operand
-				? `${c.mnemonic.text} ${operand(c.operand)}`
-				: c.mnemonic.text;
+		case "instruction": {
+			const head = [c.mnemonic, ...(c.memberTokens ?? [])]
+				.map((t) => t.text)
+				.join("::");
+			return c.operands.length
+				? `${head} ${c.operands.map(operand).join(", ")}`
+				: head;
+		}
 		case "assignment":
-			return `${c.identifier.text} ${c.operatorToken.text} ${expr(c.expression)}`;
+			return `${c.identifier.text}${
+				c.params ? `(${c.params.map((p) => p.text).join(", ")})` : ""
+			} ${c.operatorToken.text} ${expr(c.expression)}${c.attributes
+				.map((a) => `, ${a.key.text}: ${expr(a.value)}`)
+				.join("")}`;
 		case "org":
 			return `.org ${expr(c.expression)}`;
 		case "byte":
@@ -72,17 +88,19 @@ function content(c: StatementContent): string {
 		case "emplace":
 			return `.emplace ${c.nameToken.text}`;
 		case "import":
-			return `.import ${c.specToken.text}`;
+			return `${c.binding ? `${c.binding.text} = ` : ""}.import ${c.specToken.text}`;
 		case "export":
-			return `.export ${content(c.content)}`;
-		case "global":
-			return `.global ${c.nameToken.text}`;
+			return c.nameToken
+				? `.export ${c.nameToken.text}${c.definesLabel ? ":" : ""}`
+				: `.export ${content(c.content!)}`;
 		case "res":
 			return `.res ${expr(c.count)}`;
 		case "segment-shorthand":
 			return c.keyword.text;
 		case "macro":
-			return `.macro ${c.nameToken.text}${c.params.map((p) => ` ${p.text}`).join("")}`;
+			return `.macro ${c.nameToken.text}${c.params
+				.map((p) => ` ${p.outToken ? ".out " : ""}${p.nameToken.text}`)
+				.join("")}`;
 	}
 }
 
@@ -160,6 +178,11 @@ describe("operands", () => {
 			"jmp ([(sym + 2)] * 2),x",
 		]);
 	});
+
+	test("operand lists: a comma before a non-register separates operands", () => {
+		expect(dump("mva (src),y, (dest),y")).toEqual(["mva (src),y, (dest),y"]);
+		expect(dump("pair 1, 2, #3")).toEqual(["pair 1, 2, #3"]);
+	});
 });
 
 describe("expression precedence and associativity", () => {
@@ -222,13 +245,64 @@ describe("directives", () => {
 
 	test("module directives", () => {
 		expect(dump('.import "./lib.s"')).toEqual(['.import "./lib.s"']);
-		expect(dump(".global start")).toEqual([".global start"]);
+		expect(dump('lib = .import "./lib.s"')).toEqual([
+			'lib = .import "./lib.s"',
+		]);
+		expect(dump("gfx::draw 1, 2")).toEqual(["gfx::draw 1, 2"]);
 		expect(dump(".export EXIT := $0200")).toEqual([".export EXIT := $0200"]);
+		expect(dump(".export start")).toEqual([".export start"]);
+		expect(dump(".export start:")).toEqual([".export start:"]);
+		expect(dump(".export .macro output_sfotty_exe start\n.endmacro")).toEqual([
+			".export .macro output_sfotty_exe start",
+		]);
 	});
 
 	test("scope resolution with ::", () => {
-		expect(dump("sym := .global::start")).toEqual(["sym := .global::start"]);
 		expect(dump("lda #foo::bar")).toEqual(["lda #foo::bar"]);
+	});
+
+	test("expression macros: definition, application, xor", () => {
+		expect(dump("DOUBLE(v) = 2 * v")).toEqual(["DOUBLE(v) = (2 * v)"]);
+		expect(dump("NIBBLES(hi, lo) = hi * 16 + lo")).toEqual([
+			"NIBBLES(hi, lo) = ((hi * 16) + lo)",
+		]);
+		expect(dump(".byte lib::F(1, DOUBLE(2))")).toEqual([
+			".byte lib::F(1, DOUBLE(2))",
+		]);
+		expect(dump(".byte a2 ^ 3")).toEqual([".byte (a2 ^ 3)"]);
+	});
+
+	test("bitwise operators and the << vs < < distinction", () => {
+		expect(dump("lda #p & q | r")).toEqual(["lda #((p & q) | r)"]);
+		expect(dump("lda #p << q")).toEqual(["lda #(p << q)"]);
+		// A space separates a comparison from a low-byte prefix; without it,
+		// the shift lexes greedily.
+		expect(dump("lda #p < <q")).toEqual(["lda #(p < <q)"]);
+		expect(dump("lda #~p")).toEqual(["lda #~p"]);
+	});
+
+	test("attribute tails and attribute builtins", () => {
+		expect(dump("BUF := $0600, size: 3")).toEqual(["BUF := $0600, size: 3"]);
+		expect(dump(".byte .sizeof(BUF)")).toEqual([".byte .sizeof(BUF)"]);
+		expect(dump(".byte .attributes(BUF)::size")).toEqual([
+			".byte .attributes(BUF)::size",
+		]);
+	});
+
+	test("dictionary literals", () => {
+		expect(dump("N = {OPEN: 0, CLOSE: 2}")).toEqual([
+			"N = {OPEN: 0, CLOSE: 2}",
+		]);
+		expect(dump("lda #NOTES::A4")).toEqual(["lda #NOTES::A4"]);
+		// Newlines separate entries inside braces; trailing comma accepted.
+		expect(dump("N = {\nC4: 1 ; comment\nB: 2,\n}")).toEqual([
+			"N = {C4: 1, B: 2}",
+		]);
+		// Register names are reserved as keys, like everywhere else - a future
+		// namespace-splat must be able to turn any key into a bare symbol.
+		expect(
+			parse(new SourceFile("t", "N = { A: 1 }\n")).errors,
+		).not.toHaveLength(0);
 	});
 
 	test(".res and segment shorthands", () => {
@@ -246,8 +320,28 @@ describe("directives", () => {
 		expect(m?.type).toBe("macro");
 		if (m?.type === "macro") {
 			expect(m.nameToken.text).toBe("mprint");
-			expect(m.params.map((p) => p.text)).toEqual(["str"]);
+			expect(m.params.map((p) => p.nameToken.text)).toEqual(["str"]);
 			expect(m.body).toHaveLength(2); // .rodata, .byte
+		}
+	});
+
+	test("macro params separate with optional commas", () => {
+		const [s] = parseOk(".macro mva src, dest\n.endmacro\n");
+		const m = s!.content;
+		expect(m?.type).toBe("macro");
+		if (m?.type === "macro") {
+			expect(m.params.map((p) => p.nameToken.text)).toEqual(["src", "dest"]);
+		}
+	});
+
+	test(".out marks a parameter", () => {
+		expect(dump(".macro m init, load, .out sectors\n.endmacro")).toEqual([
+			".macro m init load .out sectors",
+		]);
+		const [s] = parseOk(".macro m p, .out q\n.endmacro\n");
+		const m = s!.content;
+		if (m?.type === "macro") {
+			expect(m.params.map((p) => !!p.outToken)).toEqual([false, true]);
 		}
 	});
 

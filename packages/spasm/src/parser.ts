@@ -106,16 +106,50 @@ class Parser {
 				const identifier = token;
 				this.#consume();
 
+				// `NAME(params) = expr` - an expression macro (a function-valued
+				// symbol). Speculative: `(` after an identifier in statement
+				// position is usually a macro-call operand (`mva (src),y`), so on
+				// any shape mismatch we back up and reparse as an instruction.
+				if (this.#token.type === "(") {
+					const saved = this.#save();
+					const fn = this.#tryFunctionParams();
+					if (fn) {
+						return this.#finishAssignment(
+							identifier,
+							fn.operatorToken,
+							fn.params,
+						);
+					}
+					this.#restore(saved);
+				}
+
 				// `=` defines a constant, `:=` defines a label (an address).
 				const operator = this.#token;
 				if (operator.type === "=" || operator.type === ":=") {
 					this.#consume();
-					return {
-						type: "assignment",
-						identifier,
-						operatorToken: operator,
-						expression: this.#expression(1),
-					};
+					// `name = .import "m"` - a namespaced import: the module's
+					// export dict binds to `name`.
+					if (operator.type === "=" && this.#token.type === "import") {
+						const importToken = this.#token;
+						this.#consume();
+						return {
+							type: "import",
+							importToken,
+							specToken: this.#expect("string"),
+							binding: identifier,
+						};
+					}
+					return this.#finishAssignment(identifier, operator, null);
+				}
+
+				// `ns::name args` - a namespaced macro call (no opcode has a path).
+				if (operator.type === "::") {
+					const memberTokens: Token<"identifier">[] = [];
+					while (this.#token.type === "::") {
+						this.#consume();
+						memberTokens.push(this.#expect("identifier"));
+					}
+					return { ...this.#instruction(identifier), memberTokens };
 				}
 
 				return this.#instruction(identifier);
@@ -194,25 +228,49 @@ class Parser {
 					type: "import",
 					importToken: token,
 					specToken: this.#expect("string"),
+					binding: null,
 				};
 			}
 
 			case "export": {
 				this.#consume();
+				if (this.#token.type === "identifier") {
+					// `.export name:` defines a label here AND exports it;
+					// `.export name` exports a definition made elsewhere (repeat
+					// exports are fine). `.export name = ...` / `name := ...` /
+					// `name(...) = ...` still parse as exported definitions below.
+					if (this.#lookahead.type === ":") {
+						const nameToken = this.#token;
+						this.#consume();
+						this.#consume();
+						return {
+							type: "export",
+							exportToken: token,
+							content: null,
+							nameToken,
+							definesLabel: true,
+						};
+					}
+					if (
+						this.#lookahead.type !== "=" &&
+						this.#lookahead.type !== ":=" &&
+						this.#lookahead.type !== "("
+					) {
+						const nameToken = this.#token;
+						this.#consume();
+						return {
+							type: "export",
+							exportToken: token,
+							content: null,
+							nameToken,
+						};
+					}
+				}
 				const content = this.#statementContent();
 				if (!content) {
 					throw new ParseError(this.#token, ["a definition to export"]);
 				}
 				return { type: "export", exportToken: token, content };
-			}
-
-			case "global": {
-				this.#consume();
-				return {
-					type: "global",
-					globalToken: token,
-					nameToken: this.#expect("identifier"),
-				};
 			}
 
 			case "res": {
@@ -232,10 +290,19 @@ class Parser {
 			case "macro": {
 				this.#consume();
 				const nameToken = this.#expect("identifier");
-				const params: Token<"identifier">[] = [];
-				while (this.#token.type === "identifier") {
-					params.push(this.#token);
-					this.#consume();
+				const params: MacroParam[] = [];
+				while (
+					this.#token.type === "identifier" ||
+					this.#token.type === "out"
+				) {
+					let outToken: Token<"out"> | null = null;
+					if (this.#token.type === "out") {
+						outToken = this.#token;
+						this.#consume();
+					}
+					params.push({ outToken, nameToken: this.#expect("identifier") });
+					// Separating commas are optional, matching the call site.
+					if ((this.#token.type as TokenType) === ",") this.#consume();
 				}
 				this.#expect("newline");
 				const body: Statement[] = [];
@@ -253,14 +320,31 @@ class Parser {
 		return null;
 	}
 
+	// Operands are comma-separated. A comma followed by a register name binds
+	// to the preceding operand as its indexed suffix (registers are reserved
+	// words, so this is unambiguous - `#operand` consumes those commas itself);
+	// any other comma separates operands. Real mnemonics take at most one
+	// operand (the encoder enforces arity); macro calls take any number.
 	#instruction(identifier: Token<"identifier">): Instruction {
 		const mnemonic = identifier;
-		const operand = this.#operand();
+		const operands: Operand[] = [];
+		const first = this.#operand();
+		if (first) {
+			operands.push(first);
+			while (this.#token.type === ",") {
+				this.#consume();
+				const next = this.#operand();
+				if (!next) {
+					throw new ParseError(this.#token, ["an operand"]);
+				}
+				operands.push(next);
+			}
+		}
 
 		return {
 			type: "instruction",
 			mnemonic,
-			operand,
+			operands,
 		};
 	}
 
@@ -466,14 +550,17 @@ class Parser {
 	#expressionHead(): Expression | null {
 		const token = this.#token;
 		switch (token.type) {
-			// Primary expressions
-			case "identifier":
+			// Primary expressions. An identifier (or `::` path) hugging `(` is a
+			// function application.
+			case "identifier": {
+				this.#consume();
+				return this.#callTail(this.#memberTail(token));
+			}
 			case "decimal":
 			case "hexadecimal":
 			case "string":
 			case "character":
-			case "*":
-			case "global": {
+			case "*": {
 				this.#consume();
 				return this.#memberTail(token);
 			}
@@ -483,7 +570,8 @@ class Parser {
 			case "-":
 			case "<":
 			case ">":
-			case "!": {
+			case "!":
+			case "~": {
 				const operator = token;
 				this.#consume();
 				const expression = this.#expression(100);
@@ -492,6 +580,63 @@ class Parser {
 					type: "prefix-expression",
 					operator,
 					expression,
+				};
+			}
+
+			// Builtin calls: a dot-keyword hugging `(` is the call meaning of the
+			// parenthesis. `.attributes(X)` yields the symbol's attribute dict
+			// (member-accessed with `::`); `.sizeof(X)` is its `size` shorthand.
+			case "attributes":
+			case "sizeof": {
+				const keyword = token;
+				this.#consume();
+				const openingBracketToken = this.#expect("(");
+				const argument = this.#expression(1);
+				const closingBracketToken = this.#expect(")");
+				return this.#memberTail({
+					type: "builtin-call",
+					keyword,
+					openingBracketToken,
+					argument,
+					closingBracketToken,
+				});
+			}
+
+			// Dictionary literal. `{` opens a context where newlines separate
+			// entries like commas do (each nesting level handles its own), and
+			// `key: value` uses the call-site association mark - a keyword-arg
+			// list is a braceless dict literal.
+			case "{": {
+				const openingBraceToken = token;
+				this.#consume();
+				const entries: DictEntry[] = [];
+				this.#skipNewlines();
+				while (this.#token.type !== "}") {
+					const key = this.#expect("identifier");
+					const colonToken = this.#expect(":");
+					const value = this.#expression(1);
+					let commaToken: Token<","> | undefined;
+					let separated = false;
+					if (this.#token.type === ",") {
+						commaToken = this.#token;
+						this.#consume();
+						separated = true;
+					}
+					if ((this.#token.type as TokenType) === "newline") {
+						this.#skipNewlines();
+						separated = true;
+					}
+					entries.push({ key, colonToken, value, commaToken });
+					if (!separated && (this.#token.type as TokenType) !== "}") {
+						throw new ParseError(this.#token, ['","', "newline", '"}"']);
+					}
+				}
+				const closingBraceToken = this.#expect("}");
+				return {
+					type: "dict-literal",
+					openingBraceToken,
+					entries,
+					closingBraceToken,
 				};
 			}
 
@@ -516,6 +661,33 @@ class Parser {
 	}
 
 	// Apply any `::member` scope-resolution postfixes (tightest binding).
+	// `callee(arg, ...)` - function application; chains for a call returning a
+	// function.
+	#callTail(callee: Expression): Expression {
+		if (this.#token.type !== "(") return callee;
+		const openingBracketToken = this.#token;
+		this.#consume();
+		const args: Expression[] = [];
+		if ((this.#token.type as TokenType) !== ")") {
+			for (;;) {
+				args.push(this.#expression(1));
+				if ((this.#token.type as TokenType) === ",") {
+					this.#consume();
+					continue;
+				}
+				break;
+			}
+		}
+		const closingBracketToken = this.#expect(")");
+		return this.#callTail({
+			type: "call-expression",
+			callee,
+			openingBracketToken,
+			args,
+			closingBracketToken,
+		});
+	}
+
 	#memberTail(object: Expression): Expression {
 		let head = object;
 		while (this.#token.type === "::") {
@@ -547,13 +719,20 @@ class Parser {
 			case ">":
 				return this.#infix(this.#token, precedence, 4, head);
 
+			// `|` sits with the additive operators, `& ^ << >>` with the
+			// multiplicative ones - the ca65 split.
 			case "+":
 			case "-":
+			case "|":
 				return this.#infix(this.#token, precedence, 5, head);
 
 			case "*":
 			case "/":
 			case "%":
+			case "^":
+			case "&":
+			case "<<":
+			case ">>":
 				return this.#infix(this.#token, precedence, 6, head);
 		}
 
@@ -591,6 +770,75 @@ class Parser {
 		}
 
 		return this.#consume() as Token<T[number]>;
+	}
+
+	#skipNewlines(): void {
+		while (this.#token.type === "newline") this.#consume();
+	}
+
+	// Speculation support: snapshot/restore the lexer position and the two
+	// buffered tokens, so a tentative parse can back out without side effects.
+	#save(): { position: number; token: Token; lookahead: Token } {
+		return {
+			position: this.#lexer.position,
+			token: this.#token,
+			lookahead: this.#lookahead,
+		};
+	}
+
+	#restore(state: { position: number; token: Token; lookahead: Token }): void {
+		this.#lexer.position = state.position;
+		this.#token = state.token;
+		this.#lookahead = state.lookahead;
+	}
+
+	// At `(` after a statement-position identifier: try to read a function
+	// parameter list followed by `=`. Returns null (without consuming the `=`
+	// check's token) when the shape doesn't match - the caller restores.
+	#tryFunctionParams(): {
+		params: Token<"identifier">[];
+		operatorToken: Token<"=">;
+	} | null {
+		this.#consume(); // the "("
+		const params: Token<"identifier">[] = [];
+		while (this.#token.type === "identifier") {
+			params.push(this.#token);
+			this.#consume();
+			// Separating commas are optional, matching macro params.
+			if ((this.#token.type as TokenType) === ",") this.#consume();
+		}
+		if ((this.#token.type as TokenType) !== ")") return null;
+		this.#consume();
+		if (this.#token.type !== "=") return null;
+		const operatorToken = this.#token;
+		this.#consume();
+		return { params, operatorToken };
+	}
+
+	// The shared back half of a definition: RHS expression plus the attribute
+	// tail (`, key: value, ...` - unambiguous, the RHS never consumes a
+	// top-level comma).
+	#finishAssignment(
+		identifier: Token<"identifier">,
+		operatorToken: Token<"=" | ":=">,
+		params: Token<"identifier">[] | null,
+	): Assignment {
+		const expression = this.#expression(1);
+		const attributes: Attribute[] = [];
+		while (this.#token.type === ",") {
+			this.#consume();
+			const key = this.#expect("identifier");
+			const colonToken = this.#expect(":");
+			attributes.push({ key, colonToken, value: this.#expression(1) });
+		}
+		return {
+			type: "assignment",
+			identifier,
+			operatorToken,
+			expression,
+			attributes,
+			params,
+		};
 	}
 
 	// Call the lexer, skipping whitespace tokens
@@ -639,6 +887,10 @@ export interface Message {
 	start: number;
 	end: number;
 	message: string;
+	/** Module id the span refers into, for file:line:col attribution. */
+	file?: string;
+	/** Pre-rendered `file:line:col: type: message` + source line + caret. */
+	formatted?: string;
 }
 
 export class ParseError implements Message {
@@ -668,6 +920,8 @@ export class ParseError implements Message {
 	message: string;
 	start: number;
 	end: number;
+	file?: string;
+	formatted?: string;
 }
 
 export function getExpressionLocation(
@@ -680,7 +934,6 @@ export function getExpressionLocation(
 		case "string":
 		case "character":
 		case "*":
-		case "global":
 			return [expression.start, expression.end];
 		case "member-expression":
 			return [
@@ -690,6 +943,18 @@ export function getExpressionLocation(
 		case "grouped-expression":
 			return [
 				expression.openingBracketToken.start,
+				expression.closingBracketToken.end,
+			];
+		case "dict-literal":
+			return [
+				expression.openingBraceToken.start,
+				expression.closingBraceToken.end,
+			];
+		case "builtin-call":
+			return [expression.keyword.start, expression.closingBracketToken.end];
+		case "call-expression":
+			return [
+				getExpressionLocation(expression.callee)[0],
 				expression.closingBracketToken.end,
 			];
 		case "prefix-expression":
@@ -768,16 +1033,27 @@ export type StatementContent =
 	| Emplace
 	| Import
 	| Export
-	| Global
 	| Res
 	| SegmentShorthand
 	| Macro;
+
+/** One `key: value` in a definition's attribute tail (`X := $0300, size: 2`). */
+export interface Attribute {
+	key: Token<"identifier">;
+	colonToken: Token<":">;
+	value: Expression;
+}
 
 export interface Assignment {
 	type: "assignment";
 	identifier: Token<"identifier">;
 	operatorToken: Token<"=" | ":=">;
 	expression: Expression;
+	/** Placement attributes; only `:=` definitions may carry them. */
+	attributes: Attribute[];
+	/** Parameters of an expression macro (`DOUBLE(x) = 2 * x`); null for a
+	 * plain definition. */
+	params: Token<"identifier">[] | null;
 }
 
 export interface Label {
@@ -789,7 +1065,10 @@ export interface Label {
 export interface Instruction {
 	type: "instruction";
 	mnemonic: Token<"identifier">;
-	operand: null | Operand;
+	/** Path segments of a namespaced macro call (`ns::m args`); real
+	 * instructions never carry these. */
+	memberTokens?: Token<"identifier">[];
+	operands: Operand[];
 }
 
 export type Operand =
@@ -895,18 +1174,19 @@ export interface Import {
 	type: "import";
 	importToken: Token<"import">;
 	specToken: Token<"string">;
+	/** `name = .import "m"` binds the module's export dict; null = splat. */
+	binding: Token<"identifier"> | null;
 }
 
 export interface Export {
 	type: "export";
 	exportToken: Token<"export">;
-	content: StatementContent;
-}
-
-export interface Global {
-	type: "global";
-	globalToken: Token<"global">;
-	nameToken: Token<"identifier">;
+	/** The exported definition; null for the name forms below. */
+	content: StatementContent | null;
+	/** `.export name` (export an existing definition - repeatable) or
+	 * `.export name:` (define a label here and export it). */
+	nameToken?: Token<"identifier">;
+	definesLabel?: boolean;
 }
 
 export interface Res {
@@ -920,11 +1200,18 @@ export interface SegmentShorthand {
 	keyword: Token<"code" | "rodata" | "data" | "bss" | "zeropage">;
 }
 
+/** A macro parameter; `.out` marks the outward channel (the caller's plain
+ * identifier receives a definition made by the body). */
+export interface MacroParam {
+	outToken: Token<"out"> | null;
+	nameToken: Token<"identifier">;
+}
+
 export interface Macro {
 	type: "macro";
 	macroToken: Token<"macro">;
 	nameToken: Token<"identifier">;
-	params: Token<"identifier">[];
+	params: MacroParam[];
 	body: Statement[];
 }
 
@@ -933,14 +1220,56 @@ export type Expression =
 	| Token<"string">
 	| Token<"character">
 	| Token<"*">
-	| Token<"global">
 	| IntegerLiteral
 	| GroupedExpression
 	| PrefixExpression
 	| InfixExpression
-	| MemberExpression;
+	| MemberExpression
+	| DictLiteral
+	| BuiltinCall
+	| CallExpression;
 
-/** Scope resolution: `object::member`, e.g. `.global::start` or `mod::sym`. */
+/** Function application: `DOUBLE(2)`, `lib::DOUBLE(2)`. */
+export interface CallExpression {
+	type: "call-expression";
+	callee: Expression;
+	openingBracketToken: Token<"(">;
+	args: Expression[];
+	closingBracketToken: Token<")">;
+}
+
+/** `.attributes(X)` / `.sizeof(X)` - attribute-reading builtins. */
+export interface BuiltinCall {
+	type: "builtin-call";
+	keyword: Token<"attributes" | "sizeof">;
+	openingBracketToken: Token<"(">;
+	argument: Expression;
+	closingBracketToken: Token<")">;
+}
+
+export interface DictEntry {
+	// Keys are ordinary identifiers - register names stay reserved here too,
+	// because a future namespace-splat must be able to turn any key into a
+	// bare symbol. Keys and scope names share one name grammar.
+	key: Token<"identifier">;
+	colonToken: Token<":">;
+	value: Expression;
+	commaToken?: Token<",">;
+}
+
+/**
+ * `{ key: value, ... }` - a dictionary (namespace) literal. Only valid as the
+ * whole right-hand side of a `=` definition; entries lower to qualified
+ * symbols accessed with `::`.
+ */
+export interface DictLiteral {
+	type: "dict-literal";
+	openingBraceToken: Token<"{">;
+	entries: DictEntry[];
+	closingBraceToken: Token<"}">;
+}
+
+/** Dictionary access: `object::member`, e.g. `NOTES::C4` or nested paths. */
 export interface MemberExpression {
 	type: "member-expression";
 	object: Expression;
@@ -959,7 +1288,7 @@ export interface GroupedExpression {
 
 export interface PrefixExpression {
 	type: "prefix-expression";
-	operator: Token<"+" | "-" | "<" | ">" | "!">;
+	operator: Token<"+" | "-" | "<" | ">" | "!" | "~">;
 	expression: Expression;
 }
 
@@ -967,7 +1296,22 @@ export interface InfixExpression {
 	type: "infix-expression";
 	left: Expression;
 	operator: Token<
-		"*" | "/" | "%" | "+" | "-" | "=" | "!=" | "<" | ">" | "||" | "&&"
+		| "*"
+		| "/"
+		| "%"
+		| "^"
+		| "&"
+		| "<<"
+		| ">>"
+		| "+"
+		| "-"
+		| "|"
+		| "="
+		| "!="
+		| "<"
+		| ">"
+		| "||"
+		| "&&"
 	>;
 	right: Expression;
 }

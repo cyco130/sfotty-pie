@@ -144,6 +144,10 @@ function assembleModules(
 	);
 	const cap = Math.max(statementCount + 1, 8);
 	let converged = false;
+	// The final pass's segment/discard bookkeeping, for the discarded-label
+	// annotation below.
+	let finalSegments = new Map<string, Segment>();
+	let finalDiscards = new Map<string, SegmentSite>();
 
 	for (let pass = 0; pass < cap; pass++) {
 		const snapshot = scopes.snapshot();
@@ -171,6 +175,8 @@ function assembleModules(
 			resSizes,
 			sizes,
 		);
+		finalSegments = segments;
+		finalDiscards = discards;
 
 		// Segment sanitation: every defined segment must be consumed - placed
 		// with `.emit`/`.emplace` somewhere, or deliberately dropped with
@@ -269,6 +275,34 @@ function assembleModules(
 			end: 0,
 			message: `Assembly did not converge after ${cap} passes; some operands may be larger than necessary.`,
 		});
+	}
+
+	// A reference to a label in a discarded segment is an ordinary undefined
+	// symbol (the label is never rendered, deliberately) - but bare "undefined"
+	// is baffling when the definition is right there in the source, so explain
+	// with notes pointing at the definition and the discard.
+	for (const [segName, discardSite] of finalDiscards) {
+		const segment = finalSegments.get(segName);
+		if (!segment) continue;
+		for (const item of segment.items) {
+			if (item.kind !== "label") continue;
+			const expected = `Undefined symbol "${item.name}"`;
+			for (const diagnostic of diagnostics) {
+				if (
+					diagnostic.message === expected &&
+					diagnostic.file === item.moduleId
+				) {
+					(diagnostic.notes ??= []).push(
+						noteAt(
+							`Defined here, in discarded segment "${segName}"`,
+							item.span,
+							item.moduleId,
+						),
+						noteAt("Discarded here", discardSite.span, discardSite.moduleId),
+					);
+				}
+			}
+		}
 	}
 
 	// A bare `.export name` must name a definition made somewhere in its

@@ -225,6 +225,23 @@ describe("segments", () => {
 		expect(bytes).toEqual([9]); // A's content never reaches the file
 	});
 
+	test("a reference into a discarded segment errors, with an explanation", () => {
+		const r = assemble(
+			'.discard "A"\n.word entry\n.segment "A"\nentry: .byte 1\n',
+			"t",
+		);
+		const error = r.diagnostics.find(
+			(d) => d.message === 'Undefined symbol "entry"',
+		)!;
+		expect(error.notes?.map((n) => n.message)).toEqual([
+			'Defined here, in discarded segment "A"',
+			"Discarded here",
+		]);
+		expect(error.formatted).toContain(
+			'note: Defined here, in discarded segment "A"',
+		);
+	});
+
 	test("discarding an unknown segment is reported", () => {
 		expect(asm('.discard "NOPE"\n.byte 1\n').messages).toEqual([
 			'Unknown segment "NOPE"',

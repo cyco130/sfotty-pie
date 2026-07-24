@@ -30,10 +30,14 @@ async function main(): Promise<void> {
 
 	const result = await assemble(resolve(input), host);
 
-	for (const diagnostic of result.diagnostics) {
-		process.stderr.write(
-			`${diagnostic.formatted ?? `${diagnostic.type}: ${diagnostic.message}`}\n`,
-		);
+	// Colors only when a human is watching (and NO_COLOR isn't set).
+	const useColor = process.stderr.isTTY && !process.env.NO_COLOR;
+	const rendered = result.diagnostics.map(
+		(d) =>
+			(useColor ? d.formattedColor : d.formatted) ?? `${d.type}: ${d.message}`,
+	);
+	if (rendered.length) {
+		process.stderr.write(rendered.join("\n\n") + "\n");
 	}
 	if (result.diagnostics.some((d) => d.type === "error")) {
 		process.exit(1);

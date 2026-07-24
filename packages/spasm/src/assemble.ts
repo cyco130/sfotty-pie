@@ -228,28 +228,37 @@ function assembleModules(
 		}
 	}
 
-	// Render each diagnostic to `file:line:col: type: message` with the source
-	// line and a caret, when its module is known; notes follow as `note:`
-	// blocks in the same shape.
+	// Render each diagnostic to a tsc-style `file:line:col - type: message`
+	// block with a source excerpt, when its module is known; notes follow as
+	// `note:` blocks in the same shape. Both a plain and an ANSI-colored form
+	// are pre-rendered; consumers pick by whether they're writing to a tty.
 	const sourceFiles = new Map(loaded.map((m) => [m.id, m.sourceFile]));
 	const formatOne = (
 		span: { start: number; end: number; file?: string },
+		kind: string,
 		text: string,
+		color: boolean,
 	): string => {
 		const sourceFile =
 			span.file === undefined ? undefined : sourceFiles.get(span.file);
 		return sourceFile
-			? sourceFile.formatMessage(span.start, span.end, text, true)
-			: text;
+			? sourceFile.formatMessage(span.start, span.end, kind, text, {
+					showLine: true,
+					color,
+				})
+			: `${kind}: ${text}`;
 	};
 	const all = [...priorDiagnostics, ...diagnostics];
 	for (const message of all) {
-		message.formatted = [
-			formatOne(message, `${message.type}: ${message.message}`),
-			...(message.notes ?? []).map((note) =>
-				formatOne(note, `note: ${note.message}`),
-			),
-		].join("\n");
+		const render = (color: boolean) =>
+			[
+				formatOne(message, message.type, message.message, color),
+				...(message.notes ?? []).map((note) =>
+					formatOne(note, "note", note.message, color),
+				),
+			].join("\n\n");
+		message.formatted = render(false);
+		message.formattedColor = render(true);
 	}
 
 	return {

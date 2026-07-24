@@ -16,10 +16,13 @@ const host: Host = {
 export async function buildGame(): Promise<Uint8Array> {
 	const entry = resolve(import.meta.dirname, "src/main.s");
 	const result = await assemble(entry, host);
-	for (const diagnostic of result.diagnostics) {
-		process.stderr.write(
-			`${diagnostic.formatted ?? `${diagnostic.type}: ${diagnostic.message}`}\n`,
-		);
+	const useColor = process.stderr.isTTY && !process.env.NO_COLOR;
+	const rendered = result.diagnostics.map(
+		(d) =>
+			(useColor ? d.formattedColor : d.formatted) ?? `${d.type}: ${d.message}`,
+	);
+	if (rendered.length) {
+		process.stderr.write(rendered.join("\n\n") + "\n");
 	}
 	if (result.diagnostics.some((d) => d.type === "error")) {
 		throw new Error("Assembly failed");

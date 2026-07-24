@@ -906,10 +906,12 @@ export interface Message {
 	/** Related locations, rendered as `note:` lines after the message. */
 	notes?: MessageNote[];
 	/**
-	 * Pre-rendered `file:line:col: type: message` + source line + caret,
-	 * followed by one such block per note.
+	 * Pre-rendered `file:line:col - type: message` + source excerpt with a
+	 * squiggle marker, followed by one such block per note.
 	 */
 	formatted?: string;
+	/** Like `formatted`, with ANSI colors - print when stderr is a tty. */
+	formattedColor?: string;
 }
 
 export class ParseError implements Message {

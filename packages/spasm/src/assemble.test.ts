@@ -1020,10 +1020,15 @@ describe("diagnostics with locations", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics.find((d) => d.message.includes("NOPE"))!;
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:2:7: error: Undefined symbol "NOPE"/);
-		// The formatted message shows the source line and a caret under the span.
-		expect(error.formatted).toContain("\n.byte NOPE\n");
-		expect(error.formatted).toMatch(/\n {6}\^{4}$/);
+		expect(error.formatted).toMatch(
+			/^lib:2:7 - error: Undefined symbol "NOPE"/,
+		);
+		// The excerpt shows a line-number gutter and squiggles under the span.
+		expect(error.formatted).toContain("\n\n2 .byte NOPE\n");
+		expect(error.formatted).toMatch(/\n {8}~{4}$/);
+		// The colored twin carries ANSI codes.
+		expect(error.formattedColor).toContain("\x1b[36mlib\x1b[0m");
+		expect(error.formattedColor).toContain("\x1b[31merror\x1b[0m");
 	});
 
 	test("an error inside a macro body points into the macro's file", async () => {
@@ -1035,7 +1040,7 @@ describe("diagnostics with locations", () => {
 		const error = r.diagnostics.find((d) => d.message.includes("MISSING"))!;
 		// The span is a body token: hygiene's origin doubles as the file.
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:2:8: error: Undefined symbol/);
+		expect(error.formatted).toMatch(/^lib:2:8 - error: Undefined symbol/);
 	});
 
 	test("parse errors are attributed to their module", async () => {
@@ -1046,14 +1051,14 @@ describe("diagnostics with locations", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:1:10: error: /);
+		expect(error.formatted).toMatch(/^lib:1:10 - error: /);
 	});
 
 	test("single-source diagnostics use the given name", () => {
 		const { messages } = asm("lda undef\n");
 		expect(messages).toEqual(['Undefined symbol "undef"']);
 		const r = assemble("lda undef\n", "prog.s");
-		expect(r.diagnostics[0]!.formatted).toMatch(/^prog\.s:1:5: error: /);
+		expect(r.diagnostics[0]!.formatted).toMatch(/^prog\.s:1:5 - error: /);
 	});
 
 	test("a host shortName shortens the printed path, not the id", async () => {
@@ -1066,7 +1071,7 @@ describe("diagnostics with locations", () => {
 		const error = r.diagnostics[0]!;
 		// The module id stays canonical; only the formatted rendering shortens.
 		expect(error.file).toBe("/deep/path/main.s");
-		expect(error.formatted).toMatch(/^main\.s:1:5: error: /);
+		expect(error.formatted).toMatch(/^main\.s:1:5 - error: /);
 	});
 });
 
@@ -1079,9 +1084,9 @@ describe("diagnostic notes", () => {
 			{ message: "First defined here", start: 0, end: 3, file: "t" },
 		]);
 		// The note renders as its own file:line:col block after the error.
-		expect(error.formatted).toMatch(/^t:2:1: error: /);
-		expect(error.formatted).toContain("\nt:1:1: note: First defined here\n");
-		expect(error.formatted).toMatch(/\n\^{3}$/);
+		expect(error.formatted).toMatch(/^t:2:1 - error: /);
+		expect(error.formatted).toContain("\n\nt:1:1 - note: First defined here\n");
+		expect(error.formatted).toMatch(/\n {2}~{3}$/);
 	});
 
 	test("a duplicate label notes the first definition", () => {
@@ -1121,7 +1126,7 @@ describe("diagnostic notes", () => {
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe('Segment "A" is placed more than once');
 		expect(error.notes?.[0]?.message).toBe("First placed here");
-		expect(error.formatted).toMatch(/note: First placed here\n\.emit "A"/);
+		expect(error.formatted).toMatch(/note: First placed here\n\n2 \.emit "A"/);
 	});
 
 	test("a circular placement notes the chain of open placements", () => {
@@ -1153,8 +1158,8 @@ describe("diagnostic notes", () => {
 			{ message: 'While importing "a"', start: 8, end: 11, file: "main" },
 			{ message: 'While importing "b"', start: 8, end: 11, file: "a" },
 		]);
-		expect(error.formatted).toContain('main:1:9: note: While importing "a"');
-		expect(error.formatted).toContain('a:1:9: note: While importing "b"');
+		expect(error.formatted).toContain('main:1:9 - note: While importing "a"');
+		expect(error.formatted).toContain('a:1:9 - note: While importing "b"');
 	});
 });
 
@@ -1178,7 +1183,7 @@ describe("export name forms", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe('Symbol "FOO" is already exported');
-		expect(error.formatted).toMatch(/^lib:2:9: error: /);
+		expect(error.formatted).toMatch(/^lib:2:9 - error: /);
 	});
 
 	test("a bare re-export of a defining export is an error too", async () => {
@@ -1211,6 +1216,6 @@ describe("export name forms", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe('Exported symbol "NOPE" is never defined');
-		expect(error.formatted).toMatch(/^lib:1:9: error: /);
+		expect(error.formatted).toMatch(/^lib:1:9 - error: /);
 	});
 });

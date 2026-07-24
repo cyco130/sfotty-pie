@@ -1,6 +1,7 @@
 packages:
   - packages/*
   - apps/*
+  - a8apps/*
   - examples/*
 
 strictPeerDependencies: false

@@ -9,7 +9,7 @@ import {
 	type PrefixExpression,
 } from "./parser.ts";
 import { SEP } from "./symbols.ts";
-import { decodeStringLiteral, type Value } from "./value.ts";
+import { decodeStringLiteral, type DictValue, type Value } from "./value.ts";
 
 export interface EvalEnv {
 	/**
@@ -44,6 +44,7 @@ export interface EvalEnv {
 }
 
 const MAX_APPLICATION_DEPTH = 64;
+const MAX_DICT_DEPTH = 16;
 
 /**
  * Evaluate an expression. Returns `undefined` if any part is unresolved (a
@@ -110,30 +111,18 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 		case "infix-expression":
 			return infix(expr, env);
 		case "member-expression": {
-			// A dictionary path: `N::key` (chains for nested dicts). Entries live
-			// in the symbol table under qualified names, so this is an ordinary
-			// resolve with the joined key; the root's hygiene origin applies to
-			// the whole path.
+			// A path: `N::key`, chaining for nested dictionaries. The root's
+			// hygiene origin applies to the whole path.
 			const path = flattenPath(expr);
 			if (!path) {
 				env.report(
 					Codes.ScopeResolutionOnValue,
-					"`::` requires a namespace name on its left",
+					"`::` requires a dictionary or an imported module on its left",
 					getExpressionLocation(expr),
 				);
 				return undefined;
 			}
-			const value = env.resolve(path.qualified, path.root.origin);
-			if (value === undefined && env.strict) {
-				env.report(
-					Codes.UndefinedSymbol,
-					`Undefined symbol "${path.display}"`,
-					getExpressionLocation(expr),
-					path.root.origin,
-					{ symbol: path.qualified },
-				);
-			}
-			return value;
+			return resolvePath(path, getExpressionLocation(expr), env);
 		}
 		case "call-expression": {
 			const fn = evaluate(expr.callee, env);
@@ -182,23 +171,139 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			};
 			return evaluate(fn.body, inner);
 		}
-		case "dict-literal":
-			env.report(
-				Codes.DictionaryPosition,
-				"A dictionary literal can only be the right-hand side of a `=` definition",
-				getExpressionLocation(expr),
-			);
-			return undefined;
+		case "dict-literal": {
+			// Entries are held inline, so an entry that doesn't resolve this pass
+			// is `undefined` inside an otherwise perfectly good dictionary - the
+			// parent is a value even when a child isn't yet.
+			const entries = new Map<string, Value | undefined>();
+			for (const entry of expr.entries) {
+				const key = entry.key.text;
+				if (entries.has(key)) {
+					env.report(
+						Codes.DuplicateDictKey,
+						`Duplicate dictionary key "${key}"`,
+						[entry.key.start, entry.key.end],
+					);
+					continue; // the first entry wins
+				}
+				entries.set(key, evaluate(entry.value, env));
+			}
+			const dict: DictValue = { type: "dict", entries };
+			// A backstop for definitions that nest one level deeper every pass -
+			// mutual bare references (`N = { A: M }`, `M = { B: N }`), which the
+			// self-reference check can't see because neither literal names itself.
+			if (dictDepth(dict) > MAX_DICT_DEPTH) {
+				env.report(
+					Codes.DictionaryTooDeep,
+					"Dictionary nested too deeply - a cyclic definition?",
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			return dict;
+		}
 	}
 }
 
-// Flatten `A::B::C` to its root identifier and joined keys; undefined when the
+/**
+ * Resolve a path (`A::B::C`) in two steps: find the value its root names, then
+ * index the remaining keys into it.
+ *
+ * The root is either a symbol in scope - normally a dictionary - or a
+ * *namespace binding* (`lib = .import "m"`), which is not itself a value and
+ * so spends the first key reaching an export of the bound module. Everything
+ * after that is ordinary value indexing, which is what lets a dictionary
+ * exported by an imported module chain (`lib::N::V`).
+ */
+function resolvePath(
+	path: FlatPath,
+	span: readonly [number, number],
+	env: EvalEnv,
+): Value | undefined {
+	const origin = path.root.origin;
+	const reportUndefined = (display: string) => {
+		if (env.strict) {
+			env.report(
+				Codes.UndefinedSymbol,
+				`Undefined symbol "${display}"`,
+				span,
+				origin,
+				{
+					symbol: path.qualified,
+				},
+			);
+		}
+	};
+
+	let value = env.resolve(path.root.text, origin);
+	let keys: readonly string[] = path.keys;
+	let seen = path.root.text;
+	if (value === undefined) {
+		// Not a value in scope; try the namespace-binding reading. (A root that
+		// is defined but merely unresolved this pass also lands here, and gets
+		// the same "undefined" answer it would have got anyway.)
+		value = env.resolve(path.root.text + SEP + path.keys[0]!, origin);
+		keys = path.keys.slice(1);
+		seen = path.root.text + "::" + path.keys[0]!;
+		if (value === undefined) {
+			reportUndefined(seen);
+			return undefined;
+		}
+	}
+
+	for (const key of keys) {
+		if (typeof value !== "object" || value.type !== "dict") {
+			env.report(
+				Codes.NotADictionary,
+				`"${seen}" is not a dictionary`,
+				span,
+				origin,
+			);
+			return undefined;
+		}
+		// Keys are statically known, so a missing one is a hard error rather
+		// than something that might still resolve on a later pass.
+		if (!value.entries.has(key)) {
+			env.report(
+				Codes.NoSuchDictKey,
+				`Dictionary "${seen}" has no entry "${key}"`,
+				span,
+				origin,
+			);
+			return undefined;
+		}
+		value = value.entries.get(key);
+		seen += "::" + key;
+		if (value === undefined) {
+			reportUndefined(seen); // present, but not resolved (yet)
+			return undefined;
+		}
+	}
+	return value;
+}
+
+// Nesting depth of a dictionary value (1 for a flat one).
+function dictDepth(value: Value | undefined): number {
+	if (typeof value !== "object" || value.type !== "dict") return 0;
+	let deepest = 0;
+	for (const entry of value.entries.values()) {
+		const depth = dictDepth(entry);
+		if (depth > deepest) deepest = depth;
+	}
+	return deepest + 1;
+}
+
+interface FlatPath {
+	root: Token<"identifier">;
+	/** The keys after the root - always at least one. */
+	keys: readonly string[];
+	qualified: string;
+	display: string;
+}
+
+// Flatten `A::B::C` to its root identifier and its keys; undefined when the
 // path doesn't bottom out at an identifier.
-function flattenPath(
-	expr: MemberExpression,
-):
-	| { root: Token<"identifier">; qualified: string; display: string }
-	| undefined {
+function flattenPath(expr: MemberExpression): FlatPath | undefined {
 	const keys: string[] = [expr.member.text];
 	let object = expr.object;
 	while (object.type === "member-expression") {
@@ -206,11 +311,11 @@ function flattenPath(
 		object = object.object;
 	}
 	if (object.type !== "identifier") return undefined;
-	keys.unshift(object.text);
 	return {
 		root: object,
-		qualified: keys.join(SEP),
-		display: keys.join("::"),
+		keys,
+		qualified: [object.text, ...keys].join(SEP),
+		display: [object.text, ...keys].join("::"),
 	};
 }
 

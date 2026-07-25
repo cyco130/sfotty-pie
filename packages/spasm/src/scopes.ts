@@ -76,11 +76,11 @@ export class Scopes {
 		const prefix = moduleId + SEP;
 		const out = new Map<string, Value>();
 		for (const [key, value] of this.#table.resolved()) {
-			// Functions are static machinery, not result data.
-			if (typeof value === "object") continue;
-			if (key.startsWith(prefix)) {
-				out.set(key.slice(prefix.length).split(SEP).join("::"), value);
-			}
+			// Functions are static machinery, not result data. Dictionaries are
+			// data, and surface whole - flattening them into `::` paths is a
+			// consumer's job (a debug-info format's, when there is one).
+			if (typeof value === "object" && value.type === "function") continue;
+			if (key.startsWith(prefix)) out.set(key.slice(prefix.length), value);
 		}
 		return out;
 	}

@@ -492,16 +492,18 @@ JoystickBits = {
 	lda #JoystickBits::UP | JoystickBits::LEFT
 ```
 
-Entries are `key: value` pairs separated by commas or newlines (a trailing comma is fine). Values are arbitrary expressions, evaluated with the same forward-reference power as any constant - later entries may reference earlier ones, or other symbols entirely. Entries can themselves be dictionaries, accessed by chaining: `Config::Video::HEIGHT`.
+Entries are `key: value` pairs separated by commas or newlines (a trailing comma is fine). Values are arbitrary expressions with the same forward-reference power as any constant - an entry may reference another symbol defined later, or a sibling entry through the dictionary's own name (`N = { foo: 1, bar: N::foo + 1 }`, in either order). Entries can themselves be dictionaries, accessed by chaining: `Config::Video::HEIGHT`.
 
-Dictionaries are values, with restrictions that keep them static:
+A dictionary is an ordinary value. It can be aliased (`Alias = JoystickBits`), passed to a macro, returned from an expression macro, and held in another dictionary's entry - `::` walks whatever value it finds. The rules:
 
-- A dictionary literal may only appear as the entire right-hand side of a `=` definition (a dictionary is a value, not an address, so `:=` rejects it, and it cannot be nested inside a larger expression).
-- They are immutable and statically keyed: every entry exists from the definition, and an unknown key is an error at the access site.
-- Keys are ordinary identifiers, which means the reserved register names `a`, `x`, `y` cannot be keys (write `A4`, not `A`).
-- `.export Name = { ... }` exports the dictionary and with it every entry.
+- **Immutable and statically keyed.** Every entry exists from the definition, so a key that isn't there is an error at the access site (`Dictionary "N" has no entry "NOPE"`) rather than an undefined symbol that might have resolved later. A key that _is_ there but hasn't resolved yet is an ordinary undefined symbol.
+- **A duplicate key is an error**, and `::` on something that isn't a dictionary says so.
+- **Keys are ordinary identifiers**, which means the reserved register names `a`, `x`, `y` cannot be keys (write `A4`, not `A`).
+- **A dictionary is not an address** - `:=` rejects it - **and not data**: `.byte N` is an error, `.byte N::V` is what you meant.
+- **A dictionary cannot contain itself.** `N = { A1: N }` is rejected; a path like `N::foo` is exactly how you reach a sibling.
+- `.export Name = { ... }` exports the dictionary, entries included, and a path chains straight through a namespaced import: `lib::Config::HEIGHT`.
 
-Under the hood each entry is an ordinary constant under a qualified name, which is why forward references, define-once, and export all behave exactly as they do for plain symbols.
+Entries live inside the value rather than as separate symbols, so a dictionary with an unresolved entry is still a perfectly good dictionary - only that entry is missing. The multipass engine settles entries like anything else, which costs one pass per level of indirection.
 
 ## Symbol attributes
 

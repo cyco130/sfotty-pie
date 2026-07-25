@@ -1,4 +1,4 @@
-import type { Value } from "./value.ts";
+import { isEqual, type Value } from "./value.ts";
 
 /**
  * The qualified-name separator. A NUL can't appear in a module id or symbol
@@ -73,12 +73,17 @@ export class SymbolTable {
 		return snapshot;
 	}
 
-	/** Did any value (or the set of names) change since the snapshot? */
+	/**
+	 * Did any value (or the set of names) change since the snapshot? Compared
+	 * with `isEqual`, not `!==`: an aggregate is rebuilt every pass, so identity
+	 * would always differ, and skipping aggregates entirely would converge early
+	 * on a change still in flight inside one (see design.md).
+	 */
 	changedSince(snapshot: Map<string, Value | undefined>): boolean {
 		if (snapshot.size !== this.#entries.size) return true;
 		for (const [name, entry] of this.#entries) {
-			if (!snapshot.has(name) || snapshot.get(name) !== entry.value)
-				return true;
+			if (!snapshot.has(name)) return true;
+			if (!isEqual(snapshot.get(name), entry.value)) return true;
 		}
 		return false;
 	}

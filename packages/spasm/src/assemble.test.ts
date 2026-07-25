@@ -777,13 +777,20 @@ describe("macros", () => {
 });
 
 describe("namespaces (dict-valued symbols)", () => {
-	test("entries define and resolve via ::", () => {
+	test("entries resolve via ::", () => {
 		const { bytes, symbols, messages } = asm(
 			"N = { V: 1, B: 2 }\n.byte N::V, N::B\n",
 		);
 		expect(messages).toEqual([]);
 		expect(bytes).toEqual([1, 2]);
-		expect(symbols.get("N::V")).toBe(1n);
+		// The symbol map holds the dictionary whole, not flattened entries.
+		expect(symbols.get("N")).toEqual({
+			type: "dict",
+			entries: new Map([
+				["V", 1n],
+				["B", 2n],
+			]),
+		});
 	});
 
 	test("multiline literal: newline separators, comments, trailing comma", () => {
@@ -813,15 +820,28 @@ describe("namespaces (dict-valued symbols)", () => {
 		expect(bytes).toEqual([7]);
 	});
 
-	test("an unknown key is an undefined symbol with the full path", () => {
+	test("a missing key is a hard error, not an undefined symbol", () => {
+		// Keys are statically known, so this can never resolve on a later pass.
 		expect(asm("N = { V: 1 }\n.byte N::NOPE\n").messages).toContain(
-			'Undefined symbol "N::NOPE"',
+			'Dictionary "N" has no entry "NOPE"',
 		);
 	});
 
-	test("duplicate keys are duplicate definitions", () => {
+	test("a key that exists but hasn't resolved is still 'undefined'", () => {
+		expect(asm("N = { V: NEVER }\n.byte N::V\n").messages).toContain(
+			'Undefined symbol "N::V"',
+		);
+	});
+
+	test("indexing a non-dictionary reports what it is", () => {
+		expect(asm("K = 5\n.byte K::V\n").messages).toContain(
+			'"K" is not a dictionary',
+		);
+	});
+
+	test("duplicate keys error", () => {
 		expect(asm("N = { V: 1, V: 2 }\n").messages).toContain(
-			'Symbol "N::V" is already defined',
+			'Duplicate dictionary key "V"',
 		);
 	});
 
@@ -831,10 +851,61 @@ describe("namespaces (dict-valued symbols)", () => {
 		);
 	});
 
-	test("a dictionary is not a value in expression position", () => {
+	test("a dictionary is a value, but not data", () => {
 		expect(asm(".byte { V: 1 }\n").messages).toContain(
-			"A dictionary literal can only be the right-hand side of a `=` definition",
+			"A dictionary is not data - select an entry with `::`",
 		);
+		expect(asm("N = { V: 1 }\n.byte N\n").messages).toContain(
+			"A dictionary is not data - select an entry with `::`",
+		);
+	});
+
+	test("a dictionary can be aliased", () => {
+		const { bytes, messages } = asm(
+			"N = { V: 1, M: { W: 5 } }\nA1 = N\n.byte A1::V, A1::M::W\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 5]);
+	});
+
+	test("an entry may read a sibling through the root", () => {
+		// Legal, and the fixpoint settles it in either order.
+		expect(
+			asm("N = { foo: 1, bar: N::foo + 1 }\n.byte N::bar\n").bytes,
+		).toEqual([2]);
+		expect(
+			asm("N = { bar: N::foo + 1, foo: 1 }\n.byte N::bar\n").bytes,
+		).toEqual([2]);
+	});
+
+	test("a dictionary may not contain itself", () => {
+		// Bare `N` inside `N`'s own literal would nest a level deeper each pass.
+		expect(asm("N = { A1: N }\n").messages[0]).toContain(
+			"A dictionary cannot contain itself",
+		);
+		expect(asm("N = { A1: { B: N } }\n").messages[0]).toContain(
+			"A dictionary cannot contain itself",
+		);
+	});
+
+	test("an unresolved entry doesn't stop the parent from being a value", () => {
+		// `N` is a perfectly good dictionary; only `V` is missing.
+		const { messages } = asm("N = { V: NEVER }\nA1 = N\n.byte A1::V\n");
+		expect(messages).toEqual([
+			'Undefined symbol "NEVER"',
+			'Undefined symbol "A1::V"',
+		]);
+	});
+
+	test("a change in flight inside a dictionary still converges", () => {
+		// Each hop through a dictionary costs a pass, and in the intermediate
+		// pass the dictionary is the only thing that changed - bytes and scalars
+		// are both stable. Convergence has to notice it anyway.
+		const { bytes, messages } = asm(
+			".byte M\nM = N::A1\nN = { A1: LATER }\nLATER = 7\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
 	});
 
 	test(":= rejects a dictionary", () => {
@@ -851,6 +922,30 @@ describe("namespaces (dict-valued symbols)", () => {
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		expect([...r.output]).toEqual([9]);
+	});
+
+	test("a path chains through a namespaced import into a dictionary", async () => {
+		// The trickiest resolution path: `lib` is a namespace binding rather than
+		// a value, so it spends the first key reaching the export, and the rest
+		// is ordinary value indexing.
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte lib::Config::HEIGHT, lib::Config::W::X1\n',
+			lib: ".export Config = { HEIGHT: 24, W: { X1: 40 } }\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([24, 40]);
+	});
+
+	test("a missing key through an import names the right prefix", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte lib::Config::NOPE\n',
+			lib: ".export Config = { HEIGHT: 24 }\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Dictionary "lib::Config" has no entry "NOPE"',
+		);
 	});
 
 	test("namespace references in macro bodies are hygienic", async () => {

@@ -867,10 +867,11 @@ function defineAssignment(
 				definitionModule,
 			);
 		}
+		checkNoSelfReference(assignment.expression, text, report, definitionModule);
 		const prior = scopes.defineLocal(
 			definitionModule,
 			text,
-			undefined,
+			evaluate(assignment.expression, env),
 			"namespace",
 			span,
 		);
@@ -883,15 +884,6 @@ function defineAssignment(
 				{ notes: [noteAt("First defined here", prior, definitionModule)] },
 			);
 		}
-		defineDict(
-			assignment.expression,
-			definitionModule,
-			text,
-			text,
-			scopes,
-			env,
-			report,
-		);
 		return;
 	}
 
@@ -964,69 +956,58 @@ function checkAttributes(
 	}
 }
 
-// Lower a dictionary literal to qualified symbols: entry `key` of dict `N`
-// becomes the symbol `N<SEP>key`, resolved by `N::key`. Nested dicts recurse;
-// entry values are ordinary expressions evaluated in the enclosing module's
-// env (their identifiers carry their own hygiene origins).
-function defineDict(
+// `N = { A: N }` would nest one level deeper every pass, so a dictionary may
+// not mention its own name as a bare value. Using it as the base of a path is
+// fine, and genuinely useful: `N = { foo: 1, bar: N::foo + 1 }` reads a
+// sibling entry, which the fixpoint settles like any other forward reference.
+// Matching is by text alone, so a same-named symbol from another module can't
+// be reached from inside a literal being bound to that name - an acceptable
+// trade for a check that costs nothing.
+function checkNoSelfReference(
 	dict: DictLiteral,
-	definitionModule: string,
-	prefix: string,
-	display: string,
-	scopes: Scopes,
-	env: EvalEnv,
+	name: string,
 	report: Reporter,
+	file: string,
 ): void {
-	for (const entry of dict.entries) {
-		const name = prefix + SEP + entry.key.text;
-		const path = display + "::" + entry.key.text;
-		const span: readonly [number, number] = [entry.key.start, entry.key.end];
-		if (entry.value.type === "dict-literal") {
-			const prior = scopes.defineLocal(
-				definitionModule,
-				name,
-				undefined,
-				"namespace",
-				span,
-			);
-			if (prior) {
-				report(
-					Codes.AlreadyDefined,
-					`Symbol "${path}" is already defined`,
-					span,
-					definitionModule,
-					{ notes: [noteAt("First defined here", prior, definitionModule)] },
-				);
+	const walk = (expr: Expression): void => {
+		switch (expr.type) {
+			case "identifier":
+				if (expr.text === name) {
+					report(
+						Codes.SelfReferentialDict,
+						`A dictionary cannot contain itself - "${name}" names the dictionary being defined (a path like \`${name}::key\` is fine)`,
+						[expr.start, expr.end],
+						file,
+					);
+				}
+				return;
+			case "member-expression": {
+				// A path's root selects entries; it isn't a use of the whole value.
+				let object: Expression = expr.object;
+				while (object.type === "member-expression") object = object.object;
+				if (object.type !== "identifier") walk(object);
+				return;
 			}
-			defineDict(
-				entry.value,
-				definitionModule,
-				name,
-				path,
-				scopes,
-				env,
-				report,
-			);
-		} else {
-			const value = evaluate(entry.value, env);
-			const prior = scopes.defineLocal(
-				definitionModule,
-				name,
-				value,
-				"constant",
-				span,
-			);
-			if (prior) {
-				report(
-					Codes.AlreadyDefined,
-					`Symbol "${path}" is already defined`,
-					span,
-					definitionModule,
-					{ notes: [noteAt("First defined here", prior, definitionModule)] },
-				);
-			}
+			case "grouped-expression":
+			case "prefix-expression":
+				walk(expr.expression);
+				return;
+			case "infix-expression":
+				walk(expr.left);
+				walk(expr.right);
+				return;
+			case "call-expression":
+				walk(expr.callee);
+				for (const argument of expr.args) walk(argument);
+				return;
+			case "dict-literal":
+				for (const entry of expr.entries) walk(entry.value);
+				return;
+			default:
+				return; // literals and `*`
 		}
-	}
+	};
+	for (const entry of dict.entries) walk(entry.value);
 }
 
 /**
@@ -1136,11 +1117,17 @@ function emitData(
 	}
 
 	if (typeof value === "object") {
-		env.report(
-			Codes.FunctionAsData,
-			"A function is not data - apply it with `(...)`",
-			span,
-		);
+		const [code, message] =
+			value.type === "dict"
+				? ([
+						Codes.DictionaryAsData,
+						"A dictionary is not data - select an entry with `::`",
+					] as const)
+				: ([
+						Codes.FunctionAsData,
+						"A function is not data - apply it with `(...)`",
+					] as const);
+		env.report(code, message, span);
 		for (let i = 0; i < size; i++) output.push(0);
 		return;
 	}

@@ -36,11 +36,19 @@ export const Codes = {
 	// checks (SP2014, SP2015, SP2021) stay live.
 	UnknownAttributeKey: "SP2014",
 	OnlyLabelsHaveAttributes: "SP2015",
-	DictionaryPosition: "SP2017",
+	// SP2017 is burned: it rejected a dictionary literal outside the right-hand
+	// side of a `=`, a restriction that went away when dictionaries became
+	// ordinary values.
 	DictionaryIsAValue: "SP2018",
 	SizeAlreadySet: "SP2021",
 	FunctionAsData: "SP2022",
 	OnlyDefinitionExportable: "SP2023",
+	DuplicateDictKey: "SP2024",
+	NoSuchDictKey: "SP2025",
+	NotADictionary: "SP2026",
+	SelfReferentialDict: "SP2027",
+	DictionaryTooDeep: "SP2028",
+	DictionaryAsData: "SP2029",
 
 	// 3xxx - encoding, layout, and segments
 	UnknownMnemonic: "SP3001",

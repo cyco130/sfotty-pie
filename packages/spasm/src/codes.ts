@@ -30,14 +30,14 @@ export const Codes = {
 	NegativeShift: "SP2010",
 	CharacterNotSingleByte: "SP2011",
 	ScopeResolutionOnValue: "SP2012",
-	AttributesNeedsMember: "SP2013",
+	// SP2013, SP2016, SP2019, SP2020 are burned: they belonged to `.attributes`,
+	// `.sizeof`, and the `size:` value checks, removed until attribute semantics
+	// are settled. The attribute tail still parses, so the codes for its shape
+	// checks (SP2014, SP2015, SP2021) stay live.
 	UnknownAttributeKey: "SP2014",
 	OnlyLabelsHaveAttributes: "SP2015",
-	AttributesArgument: "SP2016",
 	DictionaryPosition: "SP2017",
 	DictionaryIsAValue: "SP2018",
-	SizeRequiresNumber: "SP2019",
-	SizeNegative: "SP2020",
 	SizeAlreadySet: "SP2021",
 	FunctionAsData: "SP2022",
 	OnlyDefinitionExportable: "SP2023",

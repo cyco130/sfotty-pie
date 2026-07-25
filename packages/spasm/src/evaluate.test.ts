@@ -20,7 +20,6 @@ function evalSrc(
 	const reports: string[] = [];
 	const env: EvalEnv = {
 		resolve: (name) => opts.symbols?.[name],
-		attributesOf: () => undefined,
 		locationCounter: opts.pc,
 		report: (_code, message) => reports.push(message),
 	};

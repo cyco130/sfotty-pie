@@ -20,7 +20,7 @@ import {
 	type StatementContent,
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
-import { SEP, type SymbolAttributes } from "./symbols.ts";
+import { SEP } from "./symbols.ts";
 import {
 	decodeStringLiteral,
 	type FunctionValue,
@@ -795,8 +795,6 @@ function moduleEnv(
 ): EvalEnv {
 	return {
 		resolve: (name, origin) => scopes.resolve(origin ?? moduleId, name),
-		attributesOf: (name, origin) =>
-			scopes.attributesOf(origin ?? moduleId, name),
 		locationCounter: location,
 		report: (code, message, span, file, options) =>
 			report(code, message, span, file ?? moduleId, options),
@@ -831,7 +829,7 @@ function defineAssignment(
 			};
 			functionValues.set(assignment, fn);
 		}
-		evaluateAttributes(assignment, env, report, definitionModule); // none allowed
+		checkAttributes(assignment, report, definitionModule); // none allowed
 		const prior = scopes.defineLocal(
 			definitionModule,
 			text,
@@ -899,20 +897,8 @@ function defineAssignment(
 
 	const value = evaluate(assignment.expression, env);
 	const kind = assignment.operatorToken.type === ":=" ? "label" : "constant";
-	const attributes = evaluateAttributes(
-		assignment,
-		env,
-		report,
-		definitionModule,
-	);
-	const prior = scopes.defineLocal(
-		definitionModule,
-		text,
-		value,
-		kind,
-		span,
-		attributes,
-	);
+	checkAttributes(assignment, report, definitionModule);
+	const prior = scopes.defineLocal(definitionModule, text, value, kind, span);
 	if (prior) {
 		report(
 			Codes.AlreadyDefined,
@@ -924,17 +910,19 @@ function defineAssignment(
 	}
 }
 
-// The placement-attribute tail of a definition. Only labels (`:=`) carry
-// attributes; an equate defaults to `size: 1` (one byte) unless declared.
-// `size` is the only key so far, and it must be a non-negative number.
-function evaluateAttributes(
+// The placement-attribute tail of a definition. Attribute *semantics* are
+// deferred until the address-vs-number value split lands, so the tail is
+// checked for shape and then discarded: the value expression is never
+// evaluated and nothing is stored. The shape rules are the ones that stay true
+// under any future semantics - only labels (`:=`) may carry a tail, `size` is
+// the only key, and a key may be given once - so source written today keeps
+// meaning what it means when attributes come back.
+function checkAttributes(
 	assignment: Assignment,
-	env: EvalEnv,
 	report: Reporter,
 	file: string,
-): SymbolAttributes | undefined {
-	const isLabel = assignment.operatorToken.type === ":=";
-	if (!isLabel) {
+): void {
+	if (assignment.operatorToken.type !== ":=") {
 		const first = assignment.attributes[0];
 		if (first) {
 			report(
@@ -944,10 +932,9 @@ function evaluateAttributes(
 				file,
 			);
 		}
-		return undefined;
+		return;
 	}
 
-	const attributes: SymbolAttributes = { size: 1n };
 	let sizeDeclaredAt: readonly [number, number] | undefined;
 	for (const attribute of assignment.attributes) {
 		const keySpan: readonly [number, number] = [
@@ -974,28 +961,7 @@ function evaluateAttributes(
 			continue;
 		}
 		sizeDeclaredAt = keySpan;
-		const value = evaluate(attribute.value, env);
-		if (value !== undefined && typeof value !== "bigint") {
-			report(
-				Codes.SizeRequiresNumber,
-				"`size:` requires a number",
-				getExpressionLocation(attribute.value),
-				file,
-			);
-			continue;
-		}
-		if (value !== undefined && value < 0n) {
-			report(
-				Codes.SizeNegative,
-				"`size:` must not be negative",
-				getExpressionLocation(attribute.value),
-				file,
-			);
-			continue;
-		}
-		attributes.size = value; // may be undefined this pass; resolves later
 	}
-	return attributes;
 }
 
 // Lower a dictionary literal to qualified symbols: entry `key` of dict `N`

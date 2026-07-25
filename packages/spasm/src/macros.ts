@@ -574,6 +574,9 @@ function substituteContent(
 				report,
 				shadowed,
 			);
+			// Attribute values are currently discarded unevaluated, but keep
+			// substituting into them so the tail stays a correctly-bound AST for
+			// when attribute semantics return.
 			content.attributes = content.attributes.map((attribute) => ({
 				...attribute,
 				value: substituteExpr(attribute.value, subst, origin, report),
@@ -723,17 +726,6 @@ function substituteExpr(
 					substituteExpr(arg, subst, origin, report, shadowed),
 				),
 			};
-		case "builtin-call":
-			return {
-				...expr,
-				argument: substituteExpr(
-					expr.argument,
-					subst,
-					origin,
-					report,
-					shadowed,
-				),
-			};
 		default:
 			return expr; // literals and `*`
 	}
@@ -804,9 +796,6 @@ function validateBody(
 			case "dict-literal":
 				for (const entry of expr.entries) check(entry.value);
 				break;
-			case "builtin-call":
-				check(expr.argument);
-				break;
 			case "call-expression":
 				check(expr.callee);
 				for (const arg of expr.args) check(arg);
@@ -838,7 +827,8 @@ function validateBody(
 					);
 					for (const p of added) bound.add(p.text);
 					check(content.expression);
-					for (const attribute of content.attributes) check(attribute.value);
+					// Attribute values are discarded without ever being evaluated,
+					// so an unresolvable name in one isn't an error.
 					for (const p of added) bound.delete(p.text);
 					break;
 				}

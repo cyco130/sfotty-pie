@@ -16,20 +16,10 @@ export const SEP = "\0";
  */
 export type SymbolKind = "label" | "constant" | "namespace" | "function";
 
-/**
- * Assembler-opaque placement attributes: tracked and surfaced, never
- * interpreted by the assembler itself. `size` so far; more (address space,
- * load address) will join with the same shape.
- */
-export interface SymbolAttributes {
-	size?: Value | undefined;
-}
-
 interface Entry {
 	value: Value | undefined;
 	kind: SymbolKind;
 	definedAt: readonly [number, number];
-	attributes: SymbolAttributes;
 }
 
 /**
@@ -55,12 +45,11 @@ export class SymbolTable {
 		value: Value | undefined,
 		kind: SymbolKind,
 		definedAt: readonly [number, number],
-		attributes: SymbolAttributes = {},
 	): readonly [number, number] | undefined {
 		const prior = this.#entries.get(name);
 		if (this.#definedThisPass.has(name)) return prior!.definedAt;
 		this.#definedThisPass.add(name);
-		this.#entries.set(name, { value, kind, definedAt, attributes });
+		this.#entries.set(name, { value, kind, definedAt });
 		return undefined;
 	}
 
@@ -101,10 +90,5 @@ export class SymbolTable {
 			if (entry.value !== undefined) out.set(name, entry.value);
 		}
 		return out;
-	}
-
-	/** A symbol's placement attributes; undefined when the symbol isn't known. */
-	attributesOf(name: string): SymbolAttributes | undefined {
-		return this.#entries.get(name)?.attributes;
 	}
 }

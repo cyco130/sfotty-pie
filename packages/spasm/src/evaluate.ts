@@ -2,14 +2,13 @@ import { Codes } from "./codes.ts";
 import type { Token } from "./lexer.ts";
 import {
 	getExpressionLocation,
-	type BuiltinCall,
 	type Expression,
 	type InfixExpression,
 	type MemberExpression,
 	type MessageNote,
 	type PrefixExpression,
 } from "./parser.ts";
-import { SEP, type SymbolAttributes, type SymbolKind } from "./symbols.ts";
+import { SEP } from "./symbols.ts";
 import { decodeStringLiteral, type Value } from "./value.ts";
 
 export interface EvalEnv {
@@ -19,15 +18,6 @@ export interface EvalEnv {
 	 * expansion); otherwise the name resolves in the containing module.
 	 */
 	resolve(name: string, origin?: string): Value | undefined;
-	/**
-	 * A symbol's kind and placement attributes, for `.attributes()`/
-	 * `.sizeof()`; `undefined` means the symbol isn't known (yet). Only
-	 * label-kind symbols carry attributes - the evaluator enforces that.
-	 */
-	attributesOf(
-		name: string,
-		origin?: string,
-	): { kind: SymbolKind; attributes: SymbolAttributes } | undefined;
 	/** Value of `*` (the location counter), or `undefined` outside a section. */
 	locationCounter: bigint | undefined;
 	/**
@@ -120,24 +110,6 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 		case "infix-expression":
 			return infix(expr, env);
 		case "member-expression": {
-			// `.attributes(X)::size` - member access on the attributes dict.
-			const base = memberBase(expr);
-			if (
-				base.object.type === "builtin-call" &&
-				base.object.keyword.type === "attributes"
-			) {
-				const bad = base.keys.find((k) => k.text !== "size");
-				if (bad || base.keys.length !== 1) {
-					const at = bad ?? base.keys[1]!;
-					env.report(
-						Codes.UnknownAttributeKey,
-						`Unknown attribute "${at.text}"`,
-						[at.start, at.end],
-					);
-					return undefined;
-				}
-				return attributeValue(base.object, env);
-			}
 			// A dictionary path: `N::key` (chains for nested dicts). Entries live
 			// in the symbol table under qualified names, so this is an ordinary
 			// resolve with the joined key; the root's hygiene origin applies to
@@ -203,8 +175,6 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 					origin === undefined && bindings.has(name)
 						? bindings.get(name)
 						: env.resolve(name, origin ?? fn.moduleId),
-				attributesOf: (name, origin) =>
-					env.attributesOf(name, origin ?? fn.moduleId),
 				locationCounter: env.locationCounter,
 				report: env.report,
 				strict: env.strict,
@@ -212,17 +182,6 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			};
 			return evaluate(fn.body, inner);
 		}
-		case "builtin-call":
-			if (expr.keyword.type === "sizeof") {
-				// `.sizeof(X)` is shorthand for `.attributes(X)::size`.
-				return attributeValue(expr, env);
-			}
-			env.report(
-				Codes.AttributesNeedsMember,
-				"`.attributes(...)` is a dictionary - access an attribute with `::`",
-				getExpressionLocation(expr),
-			);
-			return undefined;
 		case "dict-literal":
 			env.report(
 				Codes.DictionaryPosition,
@@ -231,83 +190,6 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			);
 			return undefined;
 	}
-}
-
-// The `size` attribute of the symbol named by an `.attributes`/`.sizeof`
-// argument. Undeclared size reads as 0 (labels are 0-sized for now; `:=`
-// equates bake a default of 1 at definition).
-function attributeValue(call: BuiltinCall, env: EvalEnv): Value | undefined {
-	const arg = call.argument;
-	let name: string;
-	let display: string;
-	let origin: string | undefined;
-	if (arg.type === "identifier") {
-		name = display = arg.text;
-		origin = arg.origin;
-	} else if (arg.type === "member-expression") {
-		const path = flattenPath(arg);
-		if (!path) {
-			env.report(
-				Codes.AttributesArgument,
-				"`.attributes()` takes a symbol name",
-				getExpressionLocation(arg),
-			);
-			return undefined;
-		}
-		name = path.qualified;
-		display = path.display;
-		origin = path.root.origin;
-	} else {
-		env.report(
-			Codes.AttributesArgument,
-			"`.attributes()` takes a symbol name",
-			getExpressionLocation(arg),
-		);
-		return undefined;
-	}
-
-	const info = env.attributesOf(name, origin);
-	if (info === undefined) {
-		if (env.strict) {
-			env.report(
-				Codes.UndefinedSymbol,
-				`Undefined symbol "${display}"`,
-				getExpressionLocation(arg),
-				origin,
-				{ symbol: name },
-			);
-		}
-		return undefined;
-	}
-	if (info.kind !== "label") {
-		env.report(
-			Codes.OnlyLabelsHaveAttributes,
-			`Only labels have attributes - "${display}" is a ${info.kind}`,
-			getExpressionLocation(arg),
-		);
-		return undefined;
-	}
-	return "size" in info.attributes ? info.attributes.size : 0n;
-}
-
-// Collect a member chain's keys down to its base expression.
-function memberBase(expr: MemberExpression): {
-	object: Expression;
-	keys: { text: string; start: number; end: number }[];
-} {
-	const keys = [
-		{ text: expr.member.text, start: expr.member.start, end: expr.member.end },
-	];
-	let object = expr.object;
-	while (object.type === "member-expression") {
-		keys.unshift({
-			text: object.member.text,
-			start: object.member.start,
-			end: object.member.end,
-		});
-		object = object.object;
-	}
-	return { object, keys };
 }
 
 // Flatten `A::B::C` to its root identifier and joined keys; undefined when the

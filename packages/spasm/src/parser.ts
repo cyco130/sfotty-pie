@@ -668,25 +668,6 @@ class Parser {
 				};
 			}
 
-			// Builtin calls: a dot-keyword hugging `(` is the call meaning of the
-			// parenthesis. `.attributes(X)` yields the symbol's attribute dict
-			// (member-accessed with `::`); `.sizeof(X)` is its `size` shorthand.
-			case "attributes":
-			case "sizeof": {
-				const keyword = token;
-				this.#consume();
-				const openingBracketToken = this.#expect("(");
-				const argument = this.#expression(1);
-				const closingBracketToken = this.#expect(")");
-				return this.#memberTail({
-					type: "builtin-call",
-					keyword,
-					openingBracketToken,
-					argument,
-					closingBracketToken,
-				});
-			}
-
 			// Dictionary literal. `{` opens a context where newlines separate
 			// entries like commas do (each nesting level handles its own), and
 			// `key: value` uses the call-site association mark - a keyword-arg
@@ -1061,8 +1042,6 @@ export function getExpressionLocation(
 				expression.openingBraceToken.start,
 				expression.closingBraceToken.end,
 			];
-		case "builtin-call":
-			return [expression.keyword.start, expression.closingBracketToken.end];
 		case "call-expression":
 			return [
 				getExpressionLocation(expression.callee)[0],
@@ -1183,7 +1162,12 @@ export interface ErrorDirective {
 	message: Expression;
 }
 
-/** One `key: value` in a definition's attribute tail (`X := $0300, size: 2`). */
+/**
+ * One `key: value` in a definition's attribute tail (`X := $0300, size: 2`).
+ * The tail is parsed and its keys are checked, but the value is currently
+ * discarded and never evaluated - attribute semantics wait on the
+ * address-vs-number value split (see design.md, "What's deferred").
+ */
 export interface Attribute {
 	key: Token<"identifier">;
 	colonToken: Token<":">;
@@ -1380,7 +1364,6 @@ export type Expression =
 	| InfixExpression
 	| MemberExpression
 	| DictLiteral
-	| BuiltinCall
 	| CallExpression;
 
 /** Function application: `DOUBLE(2)`, `lib::DOUBLE(2)`. */
@@ -1389,15 +1372,6 @@ export interface CallExpression {
 	callee: Expression;
 	openingBracketToken: Token<"(">;
 	args: Expression[];
-	closingBracketToken: Token<")">;
-}
-
-/** `.attributes(X)` / `.sizeof(X)` - attribute-reading builtins. */
-export interface BuiltinCall {
-	type: "builtin-call";
-	keyword: Token<"attributes" | "sizeof">;
-	openingBracketToken: Token<"(">;
-	argument: Expression;
 	closingBracketToken: Token<")">;
 }
 

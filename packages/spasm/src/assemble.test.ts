@@ -946,89 +946,53 @@ describe("namespaced imports", () => {
 	});
 });
 
-describe("placement attributes", () => {
-	test(".sizeof and .attributes()::size read a declared size", () => {
-		const { bytes, messages } = asm(
-			"BUF := $0600, size: 3\n.byte .sizeof(BUF), .attributes(BUF)::size\n",
+// Attribute semantics are deferred until the address-vs-number value split
+// lands, so the tail is checked for shape and discarded. These tests pin the
+// shape rules (which survive any future semantics) and the discarding itself.
+describe("placement attributes (parsed, then discarded)", () => {
+	test("a declared attribute is accepted and has no effect", () => {
+		const { bytes, messages, symbols } = asm(
+			"BUF := $0600, size: 3\n.byte <BUF\n",
 		);
 		expect(messages).toEqual([]);
-		expect(bytes).toEqual([3, 3]);
+		expect(bytes).toEqual([0x00]);
+		expect(symbols.get("BUF")).toBe(0x0600n);
 	});
 
-	test("an equate defaults to size 1; a label to 0", () => {
-		const { bytes, messages } = asm(
-			"PORTA := $D300\nstart:\n.byte .sizeof(PORTA), .sizeof(start)\n",
-		);
-		expect(messages).toEqual([]);
-		expect(bytes).toEqual([1, 0]);
+	test("the value is never evaluated", () => {
+		// Nonsense a live `size:` would have rejected: a string, a negative, and
+		// a name that is never defined anywhere.
+		expect(asm('B := 1, size: "x"\n').messages).toEqual([]);
+		expect(asm("B := 1, size: -1\n").messages).toEqual([]);
+		expect(asm("B := 1, size: NEVER_DEFINED\n").messages).toEqual([]);
 	});
 
-	test("a size may forward-reference", () => {
-		const { bytes, messages } = asm(
-			"BUF := $0600, size: LEN\nLEN = 2\n.byte .sizeof(BUF)\n",
-		);
-		expect(messages).toEqual([]);
-		expect(bytes).toEqual([2]);
-	});
-
-	test("constants have no attributes", () => {
-		expect(asm("K = 5\n.byte .sizeof(K)\n").messages).toContain(
-			'Only labels have attributes - "K" is a constant',
-		);
+	test("only `:=` definitions may carry a tail", () => {
 		expect(asm("K = 5, size: 2\n").messages).toContain(
 			"Only labels have attributes - use `:=` for an address",
 		);
 	});
 
-	test("unknown attribute keys error on both sides", () => {
+	test("unknown keys are rejected, so adding keys later stays additive", () => {
 		expect(asm("B := 1, foo: 2\n").messages).toContain(
 			'Unknown attribute "foo"',
 		);
-		expect(asm("B := 1\n.byte .attributes(B)::foo\n").messages).toContain(
-			'Unknown attribute "foo"',
-		);
 	});
 
-	test("a bare .attributes() is not a value", () => {
-		expect(asm("B := 1\n.byte .attributes(B)\n").messages).toContain(
-			"`.attributes(...)` is a dictionary - access an attribute with `::`",
-		);
-	});
-
-	test("size must be a non-negative number, set once", () => {
-		expect(asm('B := 1, size: "x"\n').messages).toContain(
-			"`size:` requires a number",
-		);
-		expect(asm("B := 1, size: -1\n").messages).toContain(
-			"`size:` must not be negative",
-		);
+	test("a key may be given only once", () => {
 		expect(asm("B := 1, size: 2, size: 3\n").messages).toContain(
 			'Attribute "size" is already set',
 		);
 	});
 
-	test("attributes travel through exports and namespaced imports", async () => {
+	test("a tail survives export and namespaced import", async () => {
 		const host = memHost({
-			main:
-				'lib = .import "lib"\n.import "lib"\n' +
-				".byte .sizeof(BUF), .sizeof(lib::BUF)\n",
+			main: 'lib = .import "lib"\n.import "lib"\n.byte <BUF, <lib::BUF\n',
 			lib: ".export BUF := $0600, size: 3\n",
 		});
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
-		expect([...r.output]).toEqual([3, 3]);
-	});
-
-	test(".sizeof in a macro body is hygienic", async () => {
-		const host = memHost({
-			main: '.import "lib"\nput\n',
-			lib:
-				"BUF := $0600, size: 7\n" +
-				".export .macro put\n\t.byte .sizeof(BUF)\n.endmacro\n",
-		});
-		const r = await assemble("main", host);
-		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
-		expect([...r.output]).toEqual([7]);
+		expect([...r.output]).toEqual([0x00, 0x00]);
 	});
 });
 

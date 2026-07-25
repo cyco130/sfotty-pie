@@ -505,27 +505,20 @@ Under the hood each entry is an ordinary constant under a qualified name, which 
 
 ## Symbol attributes
 
-Labels can carry placement metadata that the assembler tracks but never interprets - it is surfaced back to tooling (debuggers, emulators) and readable in source. The one attribute so far is `size`, the number of bytes the symbol covers.
-
-Attributes are written as a keyword tail on `:=` definitions:
+**Reserved syntax, no semantics yet.** Labels may carry a keyword tail meant for placement metadata, but what an attribute _means_ depends on the address-vs-number distinction the value system doesn't make yet. So the tail is parsed and checked for shape, and then discarded - nothing reads it, and there is currently no way to observe one. It is documented here so libraries can be written against the final syntax today.
 
 ```
 .export PIA_AREA := $D300, size: 256   ; a whole register area
 .export NMIVEC := $FFFA, size: 2       ; a vector
-.export PORTA := $D300                 ; defaults to size: 1
 ```
 
-The value is an ordinary expression (forward references allowed), must be a non-negative number, and may be given only once. Defaults: a `:=` definition covers 1 byte unless declared; a positional `label:` has size 0. Only labels have attributes - a constant is a pure number, so `FOO = 5, size: 2` is an error, and the positional `label:` form takes no tail (write the full `name := *, size: n` when you need one).
+The rules that are enforced are the ones that stay true under any future semantics, so source written now keeps its meaning when attributes come back:
 
-Attributes are read with builtins:
+- only `:=` definitions may carry a tail - `FOO = 5, size: 2` is an error, and the positional `label:` form takes no tail (write `name := *, size: n` when you need one);
+- `size` is the only recognized key, so adding keys later is additive;
+- a key may be given only once.
 
-```
-	ldx #.sizeof(NMIVEC)              ; 2
-	ldx #.attributes(NMIVEC)::size    ; the same, spelled out
-AREA_END = PIA_AREA + .sizeof(PIA_AREA)
-```
-
-`.attributes(SYM)` evaluates to the symbol's attribute dictionary and `.sizeof(SYM)` is shorthand for its `size` entry. Both require their argument to be a label (constants and functions have no attributes) and accept `::` paths (`.sizeof(lib::NMIVEC)`). Unknown attribute keys are errors on both the write and the read side. Attributes travel with the symbol through `.export` and namespaced imports.
+The value expression is _not_ evaluated, so nothing about it is checked - not its type, not its sign, not whether the names in it exist.
 
 ## The multipass model
 
@@ -560,7 +553,7 @@ If the pass cap is hit without convergence (rare - it requires pathological layo
 | `.export ...`                                    | [Modules](#modules)                                       |
 | `.macro name params` ... `.endmacro`             | [Macros](#macros)                                         |
 | `.out` (parameter marker)                        | [Macros](#macros)                                         |
-| `.attributes(SYM)` / `.sizeof(SYM)`              | [Symbol attributes](#symbol-attributes)                   |
+| `name := expr, size: n` (tail, inert)            | [Symbol attributes](#symbol-attributes)                   |
 
 ## Not yet implemented
 
@@ -571,6 +564,7 @@ Spasm's syntax is still evolving. Notable planned constructs that do **not** exi
 - `@local` labels (macro-body hygiene covers the common case today).
 - Operand size assertions (`lda .word addr` to force absolute).
 - Segment attributes on `.define_segment` (`kind:`, `executable:`) and relocation (`.reloc`, `.startof`, `.endof`).
+- Symbol attribute semantics: the `size:` tail parses but is discarded, and there are no attribute-reading builtins.
 - Keyword arguments and parameter defaults for macros, and operand introspection (`.mode()`, `.value()`).
 - Named/aliased import forms (`.import "m": a, b`) and inline `.namespace` blocks.
 - Target-specific string encodings (ATASCII, screen codes) - strings are UTF-8 passthrough for now.

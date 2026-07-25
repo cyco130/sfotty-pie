@@ -1,11 +1,6 @@
 import type { LoadedModule } from "./loader.ts";
 import type { Statement } from "./parser.ts";
-import {
-	SEP,
-	SymbolTable,
-	type SymbolAttributes,
-	type SymbolKind,
-} from "./symbols.ts";
+import { SEP, SymbolTable, type SymbolKind } from "./symbols.ts";
 import type { Value } from "./value.ts";
 
 type Span = readonly [number, number];
@@ -58,15 +53,8 @@ export class Scopes {
 		value: Value | undefined,
 		kind: SymbolKind,
 		span: Span,
-		attributes?: SymbolAttributes,
 	): Span | undefined {
-		return this.#table.define(
-			moduleId + SEP + name,
-			value,
-			kind,
-			span,
-			attributes,
-		);
+		return this.#table.define(moduleId + SEP + name, value, kind, span);
 	}
 
 	/** Whether `name` is defined in `moduleId`'s own scope (any value state). */
@@ -78,19 +66,6 @@ export class Scopes {
 	resolve(moduleId: string, name: string): Value | undefined {
 		const key = this.#scopeKey(moduleId, name);
 		return key === undefined ? undefined : this.#table.resolve(key);
-	}
-
-	/** The kind and placement attributes of `name` as seen from `moduleId`. */
-	attributesOf(
-		moduleId: string,
-		name: string,
-	): { kind: SymbolKind; attributes: SymbolAttributes } | undefined {
-		const key = this.#scopeKey(moduleId, name);
-		if (key === undefined) return undefined;
-		const kind = this.#table.kindOf(key);
-		const attributes = this.#table.attributesOf(key);
-		if (kind === undefined || attributes === undefined) return undefined;
-		return { kind, attributes };
 	}
 
 	/**

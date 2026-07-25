@@ -25,8 +25,6 @@ function expr(e: Expression): string {
 			return `{${e.entries
 				.map((entry) => `${entry.key.text}: ${expr(entry.value)}`)
 				.join(", ")}}`;
-		case "builtin-call":
-			return `.${e.keyword.text.replace(/^\./, "")}(${expr(e.argument)})`;
 		case "call-expression":
 			return `${expr(e.callee)}(${e.args.map(expr).join(", ")})`;
 		default:
@@ -296,12 +294,8 @@ describe("directives", () => {
 		expect(dump("lda #~p")).toEqual(["lda #~p"]);
 	});
 
-	test("attribute tails and attribute builtins", () => {
+	test("attribute tails still parse (the values are discarded later)", () => {
 		expect(dump("BUF := $0600, size: 3")).toEqual(["BUF := $0600, size: 3"]);
-		expect(dump(".byte .sizeof(BUF)")).toEqual([".byte .sizeof(BUF)"]);
-		expect(dump(".byte .attributes(BUF)::size")).toEqual([
-			".byte .attributes(BUF)::size",
-		]);
 	});
 
 	test("dictionary literals", () => {

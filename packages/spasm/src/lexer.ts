@@ -113,7 +113,11 @@ const REGEXES = [
 				keyword,
 			] as const,
 	),
-	[/[a-zA-Z_][a-zA-Z_0-9]*/, "identifier"],
+	// A leading `@` marks a local label (`@loop`), scoped to the enclosing
+	// non-local label. It's only ever leading: the qualified forms the local
+	// -label and macro-hygiene passes synthesize (`owner@name`, `name@3`) are
+	// deliberately unspellable.
+	[/@?[a-zA-Z_][a-zA-Z_0-9]*/, "identifier"],
 
 	// Numeric literals. `%` hugging a binary digit is a binary literal, so the
 	// modulo operator needs a space before a right operand starting with 0 or 1

@@ -49,6 +49,7 @@ export const Codes = {
 	SelfReferentialDict: "SP2027",
 	DictionaryTooDeep: "SP2028",
 	DictionaryAsData: "SP2029",
+	LocalLabelExported: "SP2030",
 
 	// 3xxx - encoding, layout, and segments
 	UnknownMnemonic: "SP3001",

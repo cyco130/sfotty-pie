@@ -870,6 +870,132 @@ function validateBody(
  * Arms are also emit-only: `.import`, `.export`, and `.macro` are rejected
  * inside them.
  */
+/** Does `name` name a local label? Only a leading `@` counts. */
+function isLocalName(name: string): boolean {
+	return name.startsWith("@");
+}
+
+/**
+ * Local labels (`@name`) - a static rewrite that runs *before* macro
+ * expansion.
+ *
+ * A local label belongs to the nearest preceding non-local label and stays in
+ * scope until the next one; locals written before any label belong to a
+ * module-initial scope. Qualifying `@name` to `owner@name` turns them into
+ * ordinary symbols, so define-once, forward references, and scoping all come
+ * from machinery that already exists. Both the qualified form and the
+ * module-initial owner (`@`) are unspellable, so a reference that escapes its
+ * scope resolves to nothing rather than silently reaching another scope's
+ * label - and it reports as the `@name` the author wrote, because an
+ * out-of-scope name is left unqualified.
+ *
+ * Two deliberate boundaries:
+ *
+ * - **`.if` arms neither open nor close a scope.** An arm belongs to the scope
+ *   in effect at the `.if`, so which arm wins can never change what a local
+ *   label means - the same pass-invariance `scopeIfArms` exists to protect.
+ *   (Arm-local visibility still applies afterwards: `scopeIfArms` renames the
+ *   qualified name like any other arm definition.)
+ * - **Macro bodies are left alone**, because `substituteStatement` doesn't
+ *   descend into them. A body's `@name` is renamed per expansion by macro
+ *   hygiene, which already makes it unique and unreachable from outside, and a
+ *   body's free `@name` is caught by the definition-site free-name check.
+ *   Running before expansion is what keeps the two mechanisms from colliding -
+ *   in particular, it means a macro call can't silently re-point the caller's
+ *   local scope, and an expanded body can't capture the caller's locals.
+ */
+export function scopeLocalLabels(
+	modules: readonly LoadedModule[],
+	report: Reporter,
+): void {
+	for (const module of modules) {
+		// `@` is the module-initial scope: no real label starts with one, so its
+		// locals (`@@name`) can't collide with any labelled scope's.
+		let owner = "@";
+		let run: Statement[] = [];
+		const flush = () => {
+			qualifyLocals(run, owner, module.id, report);
+			run = [];
+		};
+		for (const statement of module.statements) {
+			const opener = openingLabel(statement, module.id, report);
+			if (opener !== undefined) {
+				flush();
+				owner = opener;
+			}
+			run.push(statement);
+		}
+		flush();
+	}
+}
+
+// The non-local label that makes a statement start a new local scope, if any.
+// Several labels on one statement are aliases, so the last one wins.
+function openingLabel(
+	statement: Statement,
+	file: string,
+	report: Reporter,
+): string | undefined {
+	let opener: string | undefined;
+	for (const label of statement.labels) {
+		if (!isLocalName(label.identifier.text)) opener = label.identifier.text;
+	}
+	const content = statement.content;
+	if (content?.type === "export" && content.nameToken) {
+		if (isLocalName(content.nameToken.text)) {
+			report(
+				Codes.LocalLabelExported,
+				`Local label "${content.nameToken.text}" is private to its scope and cannot be exported`,
+				tokenSpan(content.nameToken),
+				file,
+			);
+		} else if (content.definesLabel) {
+			opener = content.nameToken.text;
+		}
+	}
+	return opener;
+}
+
+// Qualify every local name one scope defines, across the whole scope - so a
+// local may be referenced before it is defined, like any other symbol.
+function qualifyLocals(
+	statements: readonly Statement[],
+	owner: string,
+	file: string,
+	report: Reporter,
+): void {
+	const defined = new Set<string>();
+	collectLocalDefinitions(statements, defined);
+	if (!defined.size) return;
+	const subst = new Map<string, Substitution>();
+	for (const name of defined) {
+		subst.set(name, { kind: "rename", name: owner + name });
+	}
+	for (const statement of statements) {
+		substituteStatement(statement, subst, file, report);
+	}
+}
+
+// Local names a scope defines. Descends into `.if` arms (an arm belongs to the
+// enclosing scope) but not into macro bodies.
+function collectLocalDefinitions(
+	statements: readonly Statement[],
+	into: Set<string>,
+): void {
+	for (const statement of statements) {
+		for (const label of statement.labels) {
+			if (isLocalName(label.identifier.text)) into.add(label.identifier.text);
+		}
+		const content = statement.content;
+		if (content?.type === "assignment") {
+			if (isLocalName(content.identifier.text))
+				into.add(content.identifier.text);
+		} else if (content?.type === "if-block") {
+			for (const arm of content.arms) collectLocalDefinitions(arm.body, into);
+		}
+	}
+}
+
 export function scopeIfArms(
 	modules: readonly LoadedModule[],
 	report: Reporter,

@@ -635,6 +635,89 @@ end:
 	});
 });
 
+describe("local labels", () => {
+	test("two scopes may reuse a local name", () => {
+		const { bytes, symbols, messages } = asm(
+			".org $2000\n" +
+				"read_word:\n\tbcc @eof\n@eof:\n\trts\n" +
+				"fill_buffer:\n\tbeq @eof\n@eof:\n\trts\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("read_word@eof")).toBe(0x2002n);
+		expect(symbols.get("fill_buffer@eof")).toBe(0x2005n);
+		// Each branch reaches its own scope's `@eof`, one byte ahead.
+		expect(bytes).toEqual([0x90, 0x00, 0x60, 0xf0, 0x00, 0x60]);
+	});
+
+	test("a local resolves in either direction within its scope", () => {
+		const { symbols, messages } = asm(
+			".org $2000\nfoo:\n\tjmp @fwd\n@back:\n\tnop\n@fwd:\n\tjmp @back\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("foo@back")).toBe(0x2003n);
+		expect(symbols.get("foo@fwd")).toBe(0x2004n);
+	});
+
+	test("a reference outside its scope is undefined, and reads as written", () => {
+		// The qualified form is unspellable, so this can't silently reach
+		// another scope's label - and the message shows the source spelling.
+		expect(asm("foo:\n@loop:\n\trts\nbar:\n\tjmp @loop\n").messages).toContain(
+			'Undefined symbol "@loop"',
+		);
+	});
+
+	test("locals before any label get a module-initial scope", () => {
+		const { symbols, messages } = asm(
+			".org $2000\n@start:\n\tjmp @start\nfoo:\n@start:\n\trts\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("@@start")).toBe(0x2000n);
+		expect(symbols.get("foo@start")).toBe(0x2003n);
+	});
+
+	test("`.export name:` opens a scope", () => {
+		const { symbols, messages } = asm(
+			".org $2000\n.export entry:\n@loop:\n\tjmp @loop\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("entry@loop")).toBe(0x2000n);
+	});
+
+	test("a local cannot be exported", () => {
+		expect(asm("foo:\n.export @loop:\n\trts\n").messages).toContain(
+			'Local label "@loop" is private to its scope and cannot be exported',
+		);
+	});
+
+	test("an `.if` arm belongs to the scope in effect at the `.if`", () => {
+		// Arms neither open nor close a scope, so which arm wins can never
+		// change what a local label means.
+		const { bytes, messages } = asm(
+			".org $2000\nfoo:\n@target:\n.if 1\n\tjmp @target\n.else\n\tnop\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0x4c, 0x00, 0x20]);
+	});
+
+	test("a macro body's locals are per-expansion, not the caller's", () => {
+		// Macro hygiene already renames body-defined names per expansion, so
+		// the local-label pass leaves bodies alone.
+		const { bytes, messages } = asm(
+			".org $2000\n.macro hop\n@skip:\n\tjmp @skip\n.endmacro\nfoo:\nhop\nhop\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0x4c, 0x00, 0x20, 0x4c, 0x03, 0x20]);
+	});
+
+	test("a macro body cannot capture the caller's local", () => {
+		const { messages } = asm(
+			".macro hop\n\tjmp @skip\n.endmacro\nfoo:\n@skip:\n\thop\n",
+		);
+		expect(messages.join("\n")).toContain("@skip");
+		expect(messages).not.toEqual([]);
+	});
+});
+
 describe("macros", () => {
 	test("expands a call, substituting the parameter", () => {
 		const { bytes } = asm(

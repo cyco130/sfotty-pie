@@ -10,6 +10,7 @@ For the JavaScript API and the CLI, see the [readme](./readme.md); for the assem
 - [Source format](#source-format)
 - [Numbers, strings, and characters](#numbers-strings-and-characters)
 - [Symbols: constants and labels](#symbols-constants-and-labels)
+  - [Local labels](#local-labels)
 - [Expressions](#expressions)
 - [Instructions and addressing modes](#instructions-and-addressing-modes)
 - [Data and fill directives](#data-and-fill-directives)
@@ -80,7 +81,7 @@ A backslash at the end of a line continues the statement onto the next line. Tra
 
 **Case.** The fixed vocabulary - mnemonics, register names, and dotted directives - is case-insensitive (`LDA`, `lda`, and `Lda` are the same instruction). Everything the user names is case-sensitive: `Foo` and `foo` are two distinct symbols.
 
-**Names** start with an ASCII letter or underscore, followed by any number of letters, digits, or underscores. The register names `a`, `x`, and `y` (in any case) are reserved words and cannot be used to name anything - symbols, macro parameters, or dictionary keys - because `asl a` must parse as accumulator mode. This is a common trap when porting code; rename such symbols (e.g. `x` to `xpos`).
+**Names** start with an ASCII letter or underscore, followed by any number of letters, digits, or underscores. A single leading `@` marks a [local label](#local-labels). The register names `a`, `x`, and `y` (in any case) are reserved words and cannot be used to name anything - symbols, macro parameters, or dictionary keys - because `asl a` must parse as accumulator mode. This is a common trap when porting code; rename such symbols (e.g. `x` to `xpos`).
 
 **Directives** start with a dot (`.byte`, `.macro`, ...). The dot keeps them out of both user namespaces, and an unknown dotted word is an error rather than a symbol.
 
@@ -108,6 +109,36 @@ start:             ; a label: the current location
 **Forward references work everywhere.** A symbol may be used before it is defined - in operands, in `.byte`/`.word` data, in other definitions (`SYM1 = SYM2 + 3` with `SYM2` defined later). The multipass engine resolves them; see [The multipass model](#the-multipass-model). One current limitation: a genuinely cyclic definition (`A = B` and `B = A`) is not specifically detected - it converges to unresolved and is reported as an undefined symbol.
 
 Symbols are scoped to their [module](#modules) and private unless exported.
+
+### Local labels
+
+A label starting with `@` is **local**: it belongs to the nearest preceding ordinary label and stays in scope until the next one. Short throwaway names can then be reused instead of invented:
+
+```
+read_word:
+	jsr read_byte
+	bcc @eof
+	rts
+@eof:
+	sec
+	rts
+
+fill_buffer:
+	jsr next_sector
+	bcs @eof        ; a different @eof - this one
+	rts
+@eof:
+	jmp boot_error
+```
+
+Locals written before any ordinary label share a module-initial scope of their own.
+
+They are ordinary labels in every other respect - forward references work, define-once applies within the scope, and `.if`/`.res`/expressions treat them like any other name. What they are not is reachable: a reference from another scope is an error (`Undefined symbol "@eof"`) rather than a silent jump into someone else's code, and a local cannot be `.export`ed.
+
+Two boundaries are worth knowing:
+
+- **`.if` arms neither open nor close a scope.** An arm belongs to whatever scope was in effect at the `.if`, so which arm wins can never change what a local label means.
+- **Macro bodies have their own locals.** A `@name` inside a macro body is private to each expansion, so two calls in the same scope don't collide - and a body cannot reach the caller's locals, or the caller the body's. Macro parameters remain the only channel between them.
 
 ## Expressions
 
@@ -563,7 +594,6 @@ Spasm's syntax is still evolving. Notable planned constructs that do **not** exi
 
 - The static `#if` family: conditionals decided once, before layout, that may alter program structure (gate imports, exports, and macro definitions - everything the iterative `.if` deliberately cannot).
 - Backtick-quoted symbol names (for names that collide with `a`/`x`/`y` or aren't valid identifiers).
-- `@local` labels (macro-body hygiene covers the common case today).
 - Operand size assertions (`lda .word addr` to force absolute).
 - Segment attributes on `.define_segment` (`kind:`, `executable:`) and relocation (`.reloc`, `.startof`, `.endof`).
 - Symbol attribute semantics: the `size:` tail parses but is discarded, and there are no attribute-reading builtins.

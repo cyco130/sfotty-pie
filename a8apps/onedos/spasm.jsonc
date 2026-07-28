@@ -1,0 +1,4 @@
+{
+	// Entry modules, relative to this file.
+	"entries": ["src/loaders/atari-dos-no-dos.s"],
+}

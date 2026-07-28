@@ -1,0 +1,11 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "spasm-vscode: build",
+			"type": "shell",
+			"command": "pnpm --filter spasm-vscode build",
+			"problemMatcher": []
+		}
+	]
+}

@@ -1,0 +1,107 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "spasm",
+	"scopeName": "source.spasm",
+	"patterns": [
+		{ "include": "#line-continuation" },
+		{ "include": "#comments" },
+		{ "include": "#directives" },
+		{ "include": "#strings" },
+		{ "include": "#characters" },
+		{ "include": "#labels" },
+		{ "include": "#mnemonics" },
+		{ "include": "#registers" },
+		{ "include": "#numbers" },
+		{ "include": "#anonymous-labels" },
+		{ "include": "#operators" }
+	],
+	"repository": {
+		"line-continuation": {
+			"match": "\\\\[ \\t]*(?=;|$)",
+			"name": "constant.character.escape.line-continuation.spasm"
+		},
+		"comments": {
+			"match": ";[^\\n\\r]*",
+			"name": "comment.line.semicolon.spasm"
+		},
+		"directives": {
+			"patterns": [
+				{
+					"match": "(?i)\\.(byte|org|word|segment|define_segment|emit|emplace|discard|import|export|out|res|code|rodata|data|bss|zeropage|macro|endmacro|if|elseif|else|endif|error)(?![A-Za-z_0-9])",
+					"name": "keyword.control.directive.spasm"
+				},
+				{
+					"match": "\\.[A-Za-z_][A-Za-z_0-9]*",
+					"name": "invalid.illegal.directive.spasm"
+				}
+			]
+		},
+		"strings": {
+			"name": "string.quoted.double.spasm",
+			"begin": "\"",
+			"end": "\"|$",
+			"patterns": [
+				{ "match": "\\\\.", "name": "constant.character.escape.spasm" }
+			]
+		},
+		"characters": {
+			"name": "string.quoted.single.spasm",
+			"begin": "'",
+			"end": "'|$",
+			"patterns": [
+				{ "match": "\\\\.", "name": "constant.character.escape.spasm" }
+			]
+		},
+		"labels": {
+			"match": "(@?[A-Za-z_][A-Za-z_0-9]*)[ \\t]*(:)(?![:=+\\-])",
+			"captures": {
+				"1": { "name": "entity.name.function.label.spasm" },
+				"2": { "name": "punctuation.separator.label.spasm" }
+			}
+		},
+		"mnemonics": {
+			"match": "(?i)(?<![@.A-Za-z_0-9])(adc|and|asl|bcc|bcs|beq|bit|bmi|bne|bpl|brk|bvc|bvs|clc|cld|cli|clv|cmp|cpx|cpy|dec|dex|dey|eor|inc|inx|iny|jmp|jsr|lda|ldx|ldy|lsr|nop|ora|pha|php|pla|plp|rol|ror|rti|rts|sbc|sec|sed|sei|sta|stx|sty|tax|tay|tsx|txa|txs|tya)(?![A-Za-z_0-9])",
+			"name": "keyword.other.mnemonic.spasm"
+		},
+		"registers": {
+			"match": "(?i)(?<![@.A-Za-z_0-9])[axy](?![A-Za-z_0-9])",
+			"name": "variable.language.register.spasm"
+		},
+		"numbers": {
+			"patterns": [
+				{
+					"match": "\\$[0-9A-Fa-f_]+",
+					"name": "constant.numeric.hexadecimal.spasm"
+				},
+				{ "match": "%[01_]+", "name": "constant.numeric.binary.spasm" },
+				{
+					"match": "\\b[0-9][0-9_]*",
+					"name": "constant.numeric.decimal.spasm"
+				}
+			]
+		},
+		"anonymous-labels": {
+			"patterns": [
+				{
+					"match": "^[ \\t]*(:)(?=[ \\t]|$|;)",
+					"captures": {
+						"1": { "name": "variable.language.label.anonymous.spasm" }
+					}
+				},
+				{
+					"match": ":[+\\-]+",
+					"name": "variable.language.label.anonymous.spasm"
+				}
+			]
+		},
+		"operators": {
+			"patterns": [
+				{
+					"match": "\\|\\||&&|!=|<<|>>|:=|[=<>!~+\\-*/%^&|#]",
+					"name": "keyword.operator.spasm"
+				},
+				{ "match": "::", "name": "punctuation.accessor.spasm" }
+			]
+		}
+	}
+}

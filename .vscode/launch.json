@@ -1,0 +1,16 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Run spasm extension",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"${workspaceFolder}/a8apps",
+				"--extensionDevelopmentPath=${workspaceFolder}/apps/spasm-vscode"
+			],
+			"outFiles": ["${workspaceFolder}/apps/spasm-vscode/dist/**/*.cjs"],
+			"preLaunchTask": "spasm-vscode: build"
+		}
+	]
+}

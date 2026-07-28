@@ -1,0 +1,62 @@
+{
+  "name": "spasm-vscode",
+  "displayName": "spasm",
+  "description": "Language support for the spasm 6502 assembler: syntax highlighting and diagnostics.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "sfotty-pie",
+  "license": "MIT",
+  "repository": "github:cyco130/sfotty-pie",
+  "type": "module",
+  "main": "./dist/extension.cjs",
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "spasm",
+        "aliases": [
+          "spasm"
+        ],
+        "extensions": [
+          ".s"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "spasm",
+        "scopeName": "source.spasm",
+        "path": "./syntaxes/spasm.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts src/server.ts --bundle --format=cjs --platform=node --target=node20 --main-fields=module,main --external:vscode --outdir=dist --out-extension:.js=.cjs",
+    "dev": "pnpm build --watch",
+    "test": "pnpm run /^test:/",
+    "test:typecheck": "tsc -p tsconfig.json",
+    "test:lint": "eslint . --max-warnings 0"
+  },
+  "dependencies": {
+    "@sfotty-pie/spasm": "workspace:*",
+    "jsonc-parser": "^3.3.1",
+    "vscode-languageclient": "^10.1.0",
+    "vscode-languageserver": "^10.1.0",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "vscode-uri": "^3.0.8"
+  },
+  "devDependencies": {
+    "@cyco130/eslint-config": "^9.0.2",
+    "@types/node": "^22.20.0",
+    "@types/vscode": "~1.104.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.5.0",
+    "typescript": "^6.0.3"
+  }
+}

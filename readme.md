@@ -8,9 +8,10 @@ Currently, it consists of a web-based Atari 8-bit emulator and a set of NPM pack
 
 ## Apps
 
-| App                                        | Description                                                    |
-| ------------------------------------------ | -------------------------------------------------------------- |
-| [Sfotty Pie A8 Web](apps/a8-web/readme.md) | A browser-based Atari 8-bit emulator built on `@sfotty-pie/a8` |
+| App                                         | Description                                                    |
+| ------------------------------------------- | -------------------------------------------------------------- |
+| [Sfotty Pie A8 Web](apps/a8-web/readme.md)  | A browser-based Atari 8-bit emulator built on `@sfotty-pie/a8` |
+| [spasm-vscode](apps/spasm-vscode/readme.md) | VSCode language support for the `spasm` assembler              |
 
 ## NPM packages
 

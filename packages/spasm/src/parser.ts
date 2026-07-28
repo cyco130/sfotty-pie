@@ -1107,6 +1107,56 @@ export function getExpressionLocation(
 	}
 }
 
+/**
+ * The hygiene origin of an expression's leftmost token - the module whose
+ * source `getExpressionLocation(expression)[0]` indexes into (undefined means
+ * the containing module). Diagnostics spanning an expression attribute with
+ * this so span and file agree even in macro-expanded statements, where an
+ * operand's tokens may come from a different file than the statement around
+ * it.
+ */
+export function getExpressionOrigin(
+	expression: Expression,
+): string | undefined {
+	return getExpressionAnchorToken(expression)?.origin;
+}
+
+/**
+ * The expression's *anchor* token: the leftmost token that can carry hygiene
+ * metadata (`origin`, `substitutedAt`). Splicing writes there and diagnostics
+ * read there, so the two always meet on the same token.
+ */
+export function getExpressionAnchorToken(
+	expression: Expression,
+): Token | undefined {
+	switch (expression.type) {
+		case "decimal":
+		case "hexadecimal":
+		case "binary":
+		case "identifier":
+		case "string":
+		case "character":
+		case "*":
+			return expression;
+		case "member-expression":
+			return getExpressionAnchorToken(expression.object);
+		// Only identifiers (and a few keywords) get hygiene stamps, so for
+		// wrappers whose leftmost token is punctuation, the inner expression
+		// is the informative one - its tokens come from the same source text.
+		case "grouped-expression":
+		case "prefix-expression":
+			return getExpressionAnchorToken(expression.expression);
+		case "dict-literal":
+			return expression.openingBraceToken;
+		case "call-expression":
+			return getExpressionAnchorToken(expression.callee);
+		case "infix-expression":
+			return getExpressionAnchorToken(expression.left);
+		default:
+			impossible(expression);
+	}
+}
+
 export function getOperandLocation(
 	operand: Operand,
 ): [start: number, end: number] {
@@ -1154,6 +1204,21 @@ export interface Statement {
 	labels: Label[];
 	content: StatementContent | null;
 	newline: Token<"newline"> | null;
+	/**
+	 * For a statement cloned out of a macro body: the chain of call sites it
+	 * was expanded through, innermost first - `trail[0]` is the call that
+	 * produced this statement, `trail[at the end]` the original source-level
+	 * call. Diagnostics walk it to narrate the expansion path.
+	 */
+	expansionTrail?: readonly ExpansionSite[];
+}
+
+/** One hop of a macro-expansion trail: the call to `macro` at this span. */
+export interface ExpansionSite {
+	macro: string;
+	file: string;
+	start: number;
+	end: number;
 }
 
 export type StatementContent =

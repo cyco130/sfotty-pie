@@ -197,6 +197,20 @@ interface TypedToken<T extends TokenType = TokenType> {
 	 * its containing module.
 	 */
 	origin?: string;
+	/**
+	 * For a token spliced as a macro argument: where the value was written at
+	 * each substitution hop, outermost first - the param occurrence the
+	 * argument replaced, per expansion level. Carried on the expression's
+	 * anchor token; expansion-path diagnostics walk it.
+	 */
+	substitutedAt?: readonly SubstitutionSite[];
+}
+
+/** One argument-splice site: the param occurrence replaced, in `file`. */
+export interface SubstitutionSite {
+	file: string;
+	start: number;
+	end: number;
 }
 
 export type SkippedToken = Token<"whitespace" | "comment">;

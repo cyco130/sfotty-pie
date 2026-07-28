@@ -24,6 +24,8 @@ import {
 	type Operand,
 	type Statement,
 	type StatementContent,
+	type ExpansionSite,
+	getExpressionAnchorToken,
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
 import { SEP, type Definition } from "./symbols.ts";
@@ -779,6 +781,7 @@ function collect(
 							current,
 							resSizes,
 							report,
+							statement.expansionTrail,
 						),
 					);
 			}
@@ -1144,6 +1147,7 @@ function collectContent(
 	output: Segment,
 	resSizes: Map<string, bigint>,
 	report: Reporter,
+	trail?: readonly ExpansionSite[],
 ): bigint {
 	const env = moduleEnv(moduleId, scopes, location, report);
 
@@ -1199,9 +1203,56 @@ function collectContent(
 			// misused real instructions - encode reports the arity error below.
 			const expr = operandExpression(content.operands[0] ?? null);
 			const value = expr ? evaluate(expr, env) : undefined;
+			// In a macro-expanded instruction (stamped mnemonic), an encode
+			// error attributed elsewhere - typically to a spliced call-site
+			// argument - gets notes narrating the expansion path, outermost
+			// first. Each hop underlines the failing value *as written in
+			// that macro's body* (the anchor token's splice chain aligns with
+			// the innermost hops), falling back to the hop's call site when
+			// the value didn't pass through it; a hop that would just repeat
+			// the error's own span is dropped.
+			const expansion = content.mnemonic.origin;
+			const splices = expr
+				? (getExpressionAnchorToken(expr)?.substitutedAt ?? [])
+				: [];
 			const bytes = encodeInstruction(content, value, {
 				location,
-				report: env.report,
+				report: (code, message, span, file) => {
+					let notes: MessageNote[] | undefined;
+					if (
+						expansion !== undefined &&
+						(file ?? moduleId) !== expansion &&
+						trail?.length
+					) {
+						const hops = [...trail].reverse();
+						notes = [];
+						for (let i = 0; i < hops.length; i++) {
+							const splice = splices[i - (hops.length - splices.length)];
+							const at = splice ?? hops[i]!;
+							if (
+								at.file === (file ?? moduleId) &&
+								at.start === span[0] &&
+								at.end === span[1]
+							) {
+								continue;
+							}
+							notes.push(
+								noteAt(
+									`While expanding \`${hops[i]!.macro}\``,
+									[at.start, at.end],
+									at.file,
+								),
+							);
+						}
+					}
+					env.report(
+						code,
+						message,
+						span,
+						file,
+						notes?.length ? { notes } : undefined,
+					);
+				},
 			});
 			output.items.push({
 				kind: "bytes",

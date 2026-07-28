@@ -3,8 +3,10 @@ import type { Token } from "./lexer.ts";
 import type { LoadedModule } from "./loader.ts";
 import {
 	ANONYMOUS_LABEL,
+	getExpressionAnchorToken,
 	getOperandLocation,
 	type Expression,
+	type ExpansionSite,
 	type Label,
 	type Macro,
 	type MessageNote,
@@ -299,6 +301,9 @@ export function expandModules(
 					} else if (statement.labels.length) {
 						out.push({ ...statement, content: null });
 					}
+					attachTrail(body, statement, found.macro, content.mnemonic, scopeId, {
+						end: content.memberTokens[0]!.end,
+					});
 					out.push(...expand(body, found.definingId, depth + 1));
 				}
 				continue;
@@ -331,6 +336,13 @@ export function expandModules(
 						} else if (statement.labels.length) {
 							out.push({ ...statement, content: null });
 						}
+						attachTrail(
+							body,
+							statement,
+							found.macro,
+							content.mnemonic,
+							scopeId,
+						);
 						out.push(...expand(body, found.definingId, depth + 1));
 					}
 					continue;
@@ -518,6 +530,55 @@ function validateParams(
 	}
 }
 
+/**
+ * Append the splice site - the param occurrence at `origin` this argument
+ * replaces - to the cloned expression's anchor token, outermost-first: each
+ * expansion level appends, so the chain reads from the original call inward.
+ * Expansion-path diagnostics underline these (the value as written at each
+ * hop) rather than the calls around them.
+ */
+function recordSplice(
+	clone: Expression,
+	occurrence: { start: number; end: number },
+	origin: string,
+): void {
+	const anchor = getExpressionAnchorToken(clone);
+	if (!anchor) return;
+	anchor.substitutedAt = [
+		...(anchor.substitutedAt ?? []),
+		{ file: origin, start: occurrence.start, end: occurrence.end },
+	];
+}
+
+/**
+ * Chain the call site onto each expanded statement's trail (innermost
+ * first): a body statement expanded through nested calls remembers every hop
+ * back to the original source-level call, for diagnostic narration.
+ */
+function attachTrail(
+	body: Statement[],
+	call: Statement,
+	macro: Macro,
+	mnemonic: Token<"identifier">,
+	file: string,
+	span?: { end: number },
+): void {
+	const site: ExpansionSite = {
+		macro: macro.nameToken.text,
+		// A body call's mnemonic is origin-stamped; a source-level call's
+		// tokens live in the module being expanded.
+		file: mnemonic.origin ?? file,
+		start: mnemonic.start,
+		end: span?.end ?? mnemonic.end,
+	};
+	for (let i = 0; i < body.length; i++) {
+		body[i] = {
+			...body[i]!,
+			expansionTrail: [site, ...(call.expansionTrail ?? [])],
+		};
+	}
+}
+
 function expandCall(
 	macro: Macro,
 	definingId: string,
@@ -633,7 +694,9 @@ function substituteName(
 			s.operand.type === "simple-operand" &&
 			s.operand.expression.type === "identifier"
 		) {
-			return structuredClone(s.operand.expression);
+			const clone = structuredClone(s.operand.expression);
+			recordSplice(clone, identifier, origin);
+			return clone;
 		}
 		report(
 			Codes.ArgumentMustBeIdentifier,
@@ -699,6 +762,10 @@ function substituteContent(
 			break;
 		}
 		case "instruction":
+			// Stamp the mnemonic like the `.if`/`.error` keywords: it marks
+			// the statement as macro-expanded and carries the body's file, so
+			// encode-time diagnostics attribute (and note) the expansion site.
+			content.mnemonic.origin = content.mnemonic.origin ?? origin;
 			content.operands = content.operands.map((operand) =>
 				substituteOperand(operand, subst, origin, report),
 			);
@@ -747,7 +814,11 @@ function substituteOperand(
 		const s = subst.get(operand.expression.text);
 		if (s?.kind === "operand") {
 			s.onUse?.(operand.expression);
-			return structuredClone(s.operand);
+			const clone = structuredClone(s.operand);
+			if (clone.type !== "accumulator-operand") {
+				recordSplice(clone.expression, operand.expression, origin);
+			}
+			return clone;
 		}
 	}
 	return {
@@ -774,7 +845,9 @@ function substituteExpr(
 				// Operand is a super-type of simple values: only a simple operand
 				// (a plain expression) has a value usable inside an expression.
 				if (s.operand.type === "simple-operand") {
-					return structuredClone(s.operand.expression);
+					const clone = structuredClone(s.operand.expression);
+					recordSplice(clone, expr, origin);
+					return clone;
 				}
 				report(
 					Codes.ShapedArgumentInExpression,

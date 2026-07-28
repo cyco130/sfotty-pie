@@ -2131,3 +2131,94 @@ describe("module scopes", () => {
 		expect([...lib.macroExports]).toEqual(["nothing"]);
 	});
 });
+
+describe("macro-expansion diagnostics", () => {
+	const lib =
+		".export .macro emit_boot target\n\tjmp target\n\tlda #target\n.endmacro\n";
+
+	test("a spliced argument's range error spans the call-site arg, with a note", async () => {
+		const main = '.import "lib"\n\t.org $2000\ninit:\n\temit_boot init\n';
+		const host = memHost({ main, lib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3004");
+		expect(error.file).toBe("main");
+		// The second `init` - the macro argument, exactly.
+		const arg = main.indexOf("init", main.indexOf("emit_boot"));
+		expect([error.start, error.end]).toEqual([arg, arg + 4]);
+
+		// The note points into the macro body, at the failing value as
+		// written there - the param occurrence the argument replaced.
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `emit_boot`");
+		expect(note.file).toBe("lib");
+		expect([note.start, note.end]).toEqual([
+			lib.indexOf("#target") + 1,
+			lib.indexOf("#target") + 7,
+		]);
+	});
+
+	test("a body expression's range error attributes to the macro file, without a note", async () => {
+		const bigLib = ".export .macro emit\nBIG = $1234\n\tlda #BIG\n.endmacro\n";
+		const main = '.import "lib"\n\temit\n';
+		const host = memHost({ main, lib: bigLib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3004");
+		expect(error.file).toBe("lib");
+		const use = bigLib.indexOf("BIG", bigLib.indexOf("#"));
+		expect([error.start, error.end]).toEqual([use, use + 3]);
+		expect(error.notes).toBeUndefined();
+	});
+
+	test("a plain range error spans the expression, not the # marker", () => {
+		const src = "\tlda #$1234\n";
+		const result = assemble(src, "t");
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3004");
+		expect([error.start, error.end]).toEqual([
+			src.indexOf("$1234"),
+			src.indexOf("$1234") + 5,
+		]);
+	});
+});
+
+describe("macro-expansion trails", () => {
+	test("nested expansions narrate the whole path, outermost first", async () => {
+		const inner = ".export .macro emit_boot target\n\tlda #target\n.endmacro\n";
+		const main = [
+			'.import "inner"',
+			".macro wrapper t",
+			"\temit_boot t",
+			".endmacro",
+			"\t.org $2000",
+			"init:",
+			"\twrapper init",
+			"",
+		].join("\n");
+		const host = memHost({ main, inner });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3004");
+		// Main span: the argument of the outermost, source-level call.
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("init", main.indexOf("wrapper init"));
+		expect([error.start, error.end]).toEqual([arg, arg + 4]);
+
+		expect(error.notes!.map((n) => [n.message, n.file])).toEqual([
+			["While expanding `wrapper`", "main"],
+			["While expanding `emit_boot`", "inner"],
+		]);
+		// Each hop underlines the failing value as written in that macro's
+		// body: `t` in wrapper's call, `target` in emit_boot's operand.
+		expect(error.notes![0]!.start).toBe(main.indexOf("emit_boot t") + 10);
+		expect(error.notes![1]!.start).toBe(inner.indexOf("#target") + 1);
+	});
+});

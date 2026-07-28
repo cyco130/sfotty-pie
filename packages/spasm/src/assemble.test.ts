@@ -2222,3 +2222,17 @@ describe("macro-expansion trails", () => {
 		expect(error.notes![1]!.start).toBe(inner.indexOf("#target") + 1);
 	});
 });
+
+describe("export references", () => {
+	test("a bare .export records a reference to the symbol", async () => {
+		const lib = "FOO = 7\n.export FOO\n";
+		const host = memHost({ main: '.import "lib"\n\t.byte FOO\n', lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const exportRef = result.references
+			.get("lib")
+			?.find((r) => r.start === lib.indexOf("FOO", lib.indexOf(".export")));
+		expect(exportRef?.symbol).toBe("lib\0FOO");
+	});
+});

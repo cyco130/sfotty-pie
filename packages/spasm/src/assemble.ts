@@ -684,7 +684,9 @@ function collect(
 				case "export":
 					if (content.nameToken) {
 						// `.export name:` defines the label here; bare `.export name`
-						// only affects the export set (validated after convergence).
+						// only affects the export set (validated after convergence) -
+						// but it *references* the symbol, so record it: rename and
+						// find-references must cover the export statement too.
 						if (content.definesLabel) {
 							current.items.push({
 								kind: "label",
@@ -693,6 +695,12 @@ function collect(
 								symbolKind: "label",
 								span: [content.nameToken.start, content.nameToken.end],
 							});
+						} else {
+							scopes.recordReference(
+								content.nameToken.origin ?? moduleId,
+								content.nameToken.text,
+								[content.nameToken.start, content.nameToken.end],
+							);
 						}
 					} else if (content.content?.type === "assignment") {
 						defineAssignment(

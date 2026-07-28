@@ -21,13 +21,16 @@ import { parse as parseJsonc } from "jsonc-parser";
 import {
 	createConnection,
 	DiagnosticSeverity,
+	ErrorCodes,
 	ProposedFeatures,
+	ResponseError,
 	TextDocuments,
 	TextDocumentSyncKind,
 	type Diagnostic,
 	type Hover,
 	type Location,
 	type Range,
+	type TextEdit,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
@@ -56,6 +59,7 @@ connection.onInitialize((params) => {
 				},
 				full: true,
 			},
+			renameProvider: { prepareProvider: true },
 		},
 	};
 });
@@ -442,6 +446,96 @@ connection.onHover((params): Hover | null => {
 			end: doc.positionAt(hit.span[1]),
 		},
 	};
+});
+
+/** Whether `symbol` is renameable, and its current spelling in source. */
+function renameTarget(
+	path: string,
+	offset: number,
+): { symbol: string; span: [number, number]; spelling: string } | undefined {
+	const hit = symbolAt(path, offset);
+	if (!hit) return undefined;
+	const definition = analysis.definitions.get(hit.symbol);
+	if (!definition || definition.kind === "module") return undefined;
+	const name = hit.symbol.slice(hit.symbol.indexOf("\0") + 1);
+	if (name.startsWith(":")) return undefined; // anonymous label
+	const spelling =
+		analysis.texts.get(path)?.slice(hit.span[0], hit.span[1]) ?? "";
+	return { symbol: hit.symbol, span: hit.span, spelling };
+}
+
+connection.onPrepareRename((params) => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return null;
+	const path = URI.parse(doc.uri).fsPath;
+	const target = renameTarget(path, doc.offsetAt(params.position));
+	if (!target) return null;
+	return {
+		range: {
+			start: doc.positionAt(target.span[0]),
+			end: doc.positionAt(target.span[1]),
+		},
+		placeholder: doc.getText().slice(target.span[0], target.span[1]),
+	};
+});
+
+connection.onRenameRequest((params) => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return null;
+	const path = URI.parse(doc.uri).fsPath;
+	const target = renameTarget(path, doc.offsetAt(params.position));
+	if (!target) return null;
+
+	const local = target.spelling.startsWith("@");
+	const newName = params.newName;
+	if (local && !newName.startsWith("@")) {
+		throw new ResponseError(
+			ErrorCodes.InvalidParams,
+			"Local label names start with `@`",
+		);
+	}
+	if (!/^@?[A-Za-z_]\w*$/.test(newName) || local !== newName.startsWith("@")) {
+		throw new ResponseError(ErrorCodes.InvalidParams, "Not a valid name");
+	}
+	if (/^[axy]$/i.test(newName)) {
+		throw new ResponseError(
+			ErrorCodes.InvalidParams,
+			"Register names are reserved",
+		);
+	}
+
+	// Every recorded reference plus the definition token, deduped by span
+	// (multi-entry closures can record a file twice).
+	const editsByPath = new Map<string, Map<number, number>>();
+	const addEdit = (file: string, start: number, end: number): void => {
+		const spans = editsByPath.get(file) ?? new Map<number, number>();
+		if (!editsByPath.has(file)) editsByPath.set(file, spans);
+		if (!spans.has(start)) spans.set(start, end);
+	};
+
+	for (const [file, references] of analysis.references) {
+		for (const reference of references) {
+			if (reference.symbol === target.symbol) {
+				addEdit(file, reference.start, reference.end);
+			}
+		}
+	}
+	const definition = analysis.definitions.get(target.symbol)!;
+	addEdit(definition.file, definition.start, definition.end);
+
+	const changes: Record<string, TextEdit[]> = {};
+	for (const [file, spans] of editsByPath) {
+		const fileDoc = mappingDocFor(file);
+		if (!fileDoc) continue;
+		changes[fileDoc.uri] = [...spans].map(([start, end]) => ({
+			range: {
+				start: fileDoc.positionAt(start),
+				end: fileDoc.positionAt(end),
+			},
+			newText: newName,
+		}));
+	}
+	return { changes };
 });
 
 connection.languages.semanticTokens.on((params) => {

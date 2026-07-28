@@ -1,4 +1,5 @@
-import type { Expression } from "./parser.ts";
+import { Codes } from "./codes.ts";
+import type { Expression, MessageNote } from "./parser.ts";
 import type { SymbolKind } from "./symbols.ts";
 import type { Value } from "./value.ts";
 
@@ -10,7 +11,13 @@ import type { Value } from "./value.ts";
  * segment at the current location.
  */
 export type Item =
-	| { kind: "bytes"; bytes: number[] }
+	| {
+			kind: "bytes";
+			bytes: number[];
+			/** The originating statement, for "emplaced segment emits bytes". */
+			moduleId: string;
+			span: readonly [number, number];
+	  }
 	| { kind: "org"; addr: bigint }
 	| {
 			kind: "label";
@@ -61,9 +68,11 @@ export type EvaluateAt = (
 ) => Value | undefined;
 
 type Reporter = (
+	code: string,
 	message: string,
 	span: readonly [number, number],
 	file?: string,
+	options?: { notes?: MessageNote[]; symbol?: string },
 ) => void;
 
 export interface RenderResult {
@@ -77,6 +86,12 @@ export interface RenderResult {
 	 * sizes (one pass of lag, absorbed by the fixpoint).
 	 */
 	resSizes: Map<string, bigint>;
+	/**
+	 * Rendered byte length of each segment. Fed back like `resSizes`: collect
+	 * advances its running location by a placed segment's previous-pass size,
+	 * so `*` after an `.emit`/`.emplace` (a bounds check, say) is meaningful.
+	 */
+	sizes: Map<string, bigint>;
 }
 
 /**
@@ -96,11 +111,38 @@ export function render(
 ): RenderResult {
 	const bases = new Map<string, bigint>();
 	const resSizes = new Map<string, bigint>();
+	const sizes = new Map<string, bigint>();
 	const onStack = new Set<string>();
+	// The placement site (`.emit`/`.emplace` item) of each placed segment, for
+	// "first placed here" and cycle-chain notes; the root has no site.
+	const placements = new Map<
+		string,
+		{ span: readonly [number, number]; moduleId: string }
+	>();
+	const stackList: string[] = [];
 
-	function renderSegment(segment: Segment, baseLC: bigint): number[] {
+	const placementNote = (message: string, name: string): MessageNote[] => {
+		const site = placements.get(name);
+		return site
+			? [
+					{
+						message,
+						start: site.span[0],
+						end: site.span[1],
+						file: site.moduleId,
+					},
+				]
+			: [];
+	};
+
+	function renderSegment(
+		segment: Segment,
+		baseLC: bigint,
+		emplaced: boolean,
+	): number[] {
 		bases.set(segment.name, baseLC);
 		onStack.add(segment.name);
+		stackList.push(segment.name);
 
 		let lc = baseLC;
 		let resIndex = 0;
@@ -108,6 +150,16 @@ export function render(
 		for (const item of segment.items) {
 			switch (item.kind) {
 				case "bytes":
+					// An emplaced segment reserves address space but never reaches
+					// the file - real content there would be silently dropped.
+					if (emplaced && item.bytes.length > 0) {
+						report(
+							Codes.EmplacedContent,
+							`Emplaced segment "${segment.name}" contains byte-emitting content - only \`.res\` is allowed`,
+							item.span,
+							item.moduleId,
+						);
+					}
 					bytes.push(...item.bytes);
 					lc += BigInt(item.bytes.length);
 					break;
@@ -121,9 +173,15 @@ export function render(
 					const value = evaluateAt(item.expression, item.moduleId, lc);
 					let count = 0n; // unresolved this pass -> 0; later passes settle it
 					if (value !== undefined && typeof value !== "bigint") {
-						report("`.res` requires a numeric count", item.span, item.moduleId);
+						report(
+							Codes.ResRequiresNumber,
+							"`.res` requires a numeric count",
+							item.span,
+							item.moduleId,
+						);
 					} else if (value !== undefined && value < 0n) {
 						report(
+							Codes.ResOverflow,
 							"`.res` count is negative - content overflows the fill boundary",
 							item.span,
 							item.moduleId,
@@ -144,6 +202,7 @@ export function render(
 					const sub = segments.get(item.segment);
 					if (!sub) {
 						report(
+							Codes.UnknownSegment,
 							`Unknown segment "${item.segment}"`,
 							item.span,
 							item.moduleId,
@@ -151,14 +210,51 @@ export function render(
 						break;
 					}
 					if (onStack.has(sub.name)) {
+						// The chain of in-progress placements, outermost first, walks
+						// the cycle for the reader.
+						const cycle = stackList.slice(stackList.indexOf(sub.name));
 						report(
+							Codes.CircularPlacement,
 							`Circular .${item.kind} of segment "${sub.name}"`,
 							item.span,
 							item.moduleId,
+							{
+								notes: cycle.flatMap((name) =>
+									placementNote(`While placing "${name}"`, name),
+								),
+							},
 						);
 						break;
 					}
-					const subBytes = renderSegment(sub, lc);
+					// A second placement would assign the segment a second base -
+					// two contradictory addresses for every label in it.
+					if (bases.has(sub.name)) {
+						report(
+							Codes.PlacedMoreThanOnce,
+							`Segment "${sub.name}" is placed more than once`,
+							item.span,
+							item.moduleId,
+							{ notes: placementNote("First placed here", sub.name) },
+						);
+						break;
+					}
+					placements.set(sub.name, {
+						span: item.span,
+						moduleId: item.moduleId,
+					});
+					if (emplaced && item.kind === "emit") {
+						report(
+							Codes.EmitInsideEmplaced,
+							"Cannot `.emit` inside an emplaced segment - use `.emplace`",
+							item.span,
+							item.moduleId,
+						);
+					}
+					const subBytes = renderSegment(
+						sub,
+						lc,
+						emplaced || item.kind === "emplace",
+					);
 					if (item.kind === "emit") bytes.push(...subBytes);
 					lc += BigInt(subBytes.length); // emplace reserves without emitting
 					break;
@@ -167,10 +263,12 @@ export function render(
 		}
 
 		onStack.delete(segment.name);
+		stackList.pop();
+		sizes.set(segment.name, BigInt(bytes.length));
 		return bytes;
 	}
 
 	const root = segments.get(rootName);
-	const bytes = root ? renderSegment(root, 0n) : [];
-	return { bytes, bases, resSizes };
+	const bytes = root ? renderSegment(root, 0n, false) : [];
+	return { bytes, bases, resSizes, sizes };
 }

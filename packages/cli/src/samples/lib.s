@@ -26,9 +26,12 @@
 	    .word start  ; Reset
 	    .word 0      ; IRQ (unused)
 
-	  ; Zero page RAM ( `.if`/`.error` bounds checks deferred - step 2)
+	  ; Zero page RAM
 	  .org $0000
 	    .emplace "ZEROPAGE"
+	.if * > $0100
+	.error "Zero page overflow"
+	.endif
 
 	  ; Main RAM
 	  .org $0400
@@ -37,4 +40,7 @@
 	    .emit "DATA"
 
 	    .emplace "BSS"
+	.if * > $FFFA
+	.error "RAM overflow"
+	.endif
 .endmacro

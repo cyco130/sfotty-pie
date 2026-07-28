@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { assemble } from "./assemble.ts";
+import { Codes } from "./codes.ts";
 import type { Host } from "./loader.ts";
 
 /** An in-memory host: module ids are their own specifiers (identity resolve). */
@@ -97,12 +98,13 @@ describe("segments", () => {
 	});
 
 	test("emplace reserves address space without emitting bytes", () => {
-		const { bytes, symbols } = asm(
+		const { bytes, symbols, messages } = asm(
 			'.define_segment "BSS"\n.define_segment "CODE"\n' +
 				'.segment "OUTPUT"\n.org $0200\n.emplace "BSS"\n.org $0400\n.emit "CODE"\n' +
-				'.segment "BSS"\nbuf:\n\t.byte 0, 0, 0\n' +
+				'.segment "BSS"\nbuf:\n\t.res 3\n' +
 				'.segment "CODE"\n\tlda buf\n',
 		);
+		expect(messages).toEqual([]);
 		expect(symbols.get("buf")).toBe(0x0200n); // got an address...
 		expect(bytes).toEqual([0xad, 0x00, 0x02]); // ...but BSS emitted no file bytes
 	});
@@ -177,6 +179,179 @@ describe("segments", () => {
 				'.segment "B"\n.emit "A"\n',
 		);
 		expect(messages).toContain('Circular .emit of segment "A"');
+	});
+
+	test("placing a segment twice is reported", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0400\n.emit "A"\n.emit "A"\n' +
+				'.segment "A"\n.byte 1\n',
+		);
+		expect(messages).toContain('Segment "A" is placed more than once');
+	});
+
+	test("an .emit after an .emplace of the same segment is also a double placement", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0400\n.emplace "A"\n.emit "A"\n' +
+				'.segment "A"\n.byte 1\n',
+		);
+		expect(messages).toContain('Segment "A" is placed more than once');
+	});
+
+	test("a single placement stays clean", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0400\n.emit "A"\n.segment "A"\n.byte 1\n',
+		);
+		expect(messages).toEqual([]);
+	});
+
+	test("a defined but never-placed segment is reported", () => {
+		const { messages } = asm('.define_segment "CODW"\n.byte 1\n');
+		expect(messages).toEqual([
+			'Segment "CODW" is never placed - `.emit`, `.emplace`, or `.discard` it',
+		]);
+	});
+
+	test("a switched-to but never-placed segment is reported", () => {
+		const { messages } = asm('.segment "A"\n.byte 1\n');
+		expect(messages).toEqual([
+			'Segment "A" is never placed - `.emit`, `.emplace`, or `.discard` it',
+		]);
+	});
+
+	test(".discard satisfies the consumption check and drops the bytes", () => {
+		const { bytes, messages } = asm(
+			'.discard "A"\n.byte 9\n.segment "A"\n.byte 1\n',
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([9]); // A's content never reaches the file
+	});
+
+	test("a reference into a discarded segment errors, with an explanation", () => {
+		const r = assemble(
+			'.discard "A"\n.word entry\n.segment "A"\nentry: .byte 1\n',
+			"t",
+		);
+		const error = r.diagnostics.find(
+			(d) => d.message === 'Undefined symbol "entry"',
+		)!;
+		expect(error.notes?.map((n) => n.message)).toEqual([
+			'Defined here, in discarded segment "A"',
+			"Discarded here",
+		]);
+		expect(error.formatted).toContain(
+			'note: Defined here, in discarded segment "A"',
+		);
+	});
+
+	test("a cross-module reference into a discarded segment is explained too", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.discard "SOUND"\n\tjsr sfx_beep\n',
+			lib: '.export sfx_beep\n.segment "SOUND"\nsfx_beep:\n\trts\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find(
+			(d) => d.message === 'Undefined symbol "sfx_beep"',
+		)!;
+		expect(error.file).toBe("main");
+		expect(error.notes?.map((n) => [n.message, n.file])).toEqual([
+			['Defined here, in discarded segment "SOUND"', "lib"],
+			["Discarded here", "main"],
+		]);
+		// The bare `.export sfx_beep` in lib gets the same explanation.
+		const exportError = r.diagnostics.find(
+			(d) => d.code === Codes.ExportNeverDefined,
+		)!;
+		expect(exportError.notes?.map((n) => n.message)).toEqual([
+			'Defined here, in discarded segment "SOUND"',
+			"Discarded here",
+		]);
+	});
+
+	test("a namespaced reference into a discarded segment is explained", async () => {
+		const host = memHost({
+			main: 'snd = .import "lib"\n.discard "SOUND"\n\tjsr snd::sfx_beep\n',
+			lib: '.export sfx_beep\n.segment "SOUND"\nsfx_beep:\n\trts\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find(
+			(d) => d.message === 'Undefined symbol "snd::sfx_beep"',
+		)!;
+		expect(error.notes?.map((n) => n.message)).toContain(
+			'Defined here, in discarded segment "SOUND"',
+		);
+	});
+
+	test("an unrelated undefined symbol with the same name is not annotated", async () => {
+		const host = memHost({
+			// main does NOT import lib's exports, so its `sfx_beep` cannot
+			// resolve to the discarded label - no note.
+			main: '.import "layout"\n\tjsr sfx_beep\n',
+			layout: '.discard "SOUND"\n.segment "SOUND"\nsfx_beep_local:\n\trts\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find(
+			(d) => d.message === 'Undefined symbol "sfx_beep"',
+		)!;
+		expect(error.notes).toBeUndefined();
+	});
+
+	test("discarding an unknown segment is reported", () => {
+		expect(asm('.discard "NOPE"\n.byte 1\n').messages).toEqual([
+			'Unknown segment "NOPE"',
+		]);
+	});
+
+	test("discarding a placed segment is contradictory", () => {
+		const r = assemble(
+			'.segment "OUTPUT"\n.emit "A"\n.discard "A"\n.segment "A"\n.byte 1\n',
+			"t",
+		);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Segment "A" is discarded but also placed');
+		expect(error.notes?.[0]?.message).toBe("Placed here");
+	});
+
+	test("a duplicate discard is reported with the first site", () => {
+		const r = assemble(
+			'.discard "A"\n.discard "A"\n.segment "A"\n.byte 1\n',
+			"t",
+		);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Segment "A" is already discarded');
+		expect(error.notes?.[0]?.message).toBe("First discarded here");
+	});
+
+	test("byte-emitting content in an emplaced segment is reported", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0200\n.emplace "BSS"\n' +
+				'.segment "BSS"\nbuf: .res 3\n.byte 1\n\tnop\n',
+		);
+		expect(messages).toEqual([
+			'Emplaced segment "BSS" contains byte-emitting content - only `.res` is allowed',
+			'Emplaced segment "BSS" contains byte-emitting content - only `.res` is allowed',
+		]);
+	});
+
+	test("the emplaced-content rule applies transitively", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0200\n.emplace "A"\n' +
+				'.segment "A"\n.emplace "B"\n' +
+				'.segment "B"\n.byte 1\n',
+		);
+		expect(messages).toEqual([
+			'Emplaced segment "B" contains byte-emitting content - only `.res` is allowed',
+		]);
+	});
+
+	test(".emit inside an emplaced segment is reported", () => {
+		const { messages } = asm(
+			'.segment "OUTPUT"\n.org $0200\n.emplace "A"\n' +
+				'.segment "A"\n.emit "B"\n' +
+				'.segment "B"\n.res 2\n',
+		);
+		expect(messages).toEqual([
+			"Cannot `.emit` inside an emplaced segment - use `.emplace`",
+		]);
 	});
 
 	// The lib.s-inlined hello, exercising the whole engine: cross-segment refs
@@ -460,6 +635,154 @@ end:
 	});
 });
 
+describe("anonymous labels", () => {
+	test(":+ is the next one, :- the previous", () => {
+		const { bytes, messages } = asm(
+			".org $2000\n\tbne :+\n\tlda #0\n:\n\tsta $600\n\tjmp :-\n",
+		);
+		expect(messages).toEqual([]);
+		// The branch skips `lda #0` to the label; the jump goes back to it.
+		expect(bytes).toEqual([
+			0xd0, 0x02, 0xa9, 0x00, 0x8d, 0x00, 0x06, 0x4c, 0x04, 0x20,
+		]);
+	});
+
+	test("repeated signs count further out", () => {
+		const { bytes, messages } = asm(
+			".org $2000\n\tbne :++\n\tnop\n:\n\tnop\n:\n\tnop\n\tjmp :--\n\tjmp :-\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([
+			0xd0, 0x02, 0xea, 0xea, 0xea, 0x4c, 0x03, 0x20, 0x4c, 0x04, 0x20,
+		]);
+	});
+
+	test("a label on the same statement counts as previous", () => {
+		expect(asm(".org $2000\n: jmp :-\n").bytes).toEqual([0x4c, 0x00, 0x20]);
+	});
+
+	test("`bne :+` is an instruction, not a label named bne", () => {
+		// The colon binds rightwards when a sign hugs it; nothing else could
+		// follow a label's colon that way.
+		const { bytes, messages } = asm(".org $2000\n\tbne :+\n\tnop\n:\n\trts\n");
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xd0, 0x01, 0xea, 0x60]);
+	});
+
+	test("a keyed entry with a signed value is untouched", () => {
+		// `key: -1` must stay a key and a negative value: the entry rule eats
+		// the colon, so the reference syntax never sees it.
+		expect(asm("N = { A1: -1, B: +2 }\n.byte <N::A1, N::B\n").bytes).toEqual([
+			0xff, 0x02,
+		]);
+		expect(asm("L := $1234, size: -1\n.byte <L\n").messages).toEqual([]);
+	});
+
+	test("out-of-range references say so", () => {
+		expect(asm(".org $2000\n\tjmp :+\n").messages).toContain(
+			"There is no anonymous label after this point",
+		);
+		expect(asm(".org $2000\n:\n\tjmp :--\n").messages).toContain(
+			"There is no second anonymous label before this point",
+		);
+	});
+
+	test("a macro body is its own numbering context", () => {
+		// The body's `:+` finds the body's own label, per expansion, and the
+		// caller's `:-` skips past both expansions to the caller's own.
+		const { bytes, messages } = asm(
+			".org $2000\n.macro hop\n\tbne :+\n\tnop\n:\n.endmacro\n:\nhop\nhop\n\tjmp :-\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([
+			0xd0, 0x01, 0xea, 0xd0, 0x01, 0xea, 0x4c, 0x00, 0x20,
+		]);
+	});
+});
+
+describe("local labels", () => {
+	test("two scopes may reuse a local name", () => {
+		const { bytes, symbols, messages } = asm(
+			".org $2000\n" +
+				"read_word:\n\tbcc @eof\n@eof:\n\trts\n" +
+				"fill_buffer:\n\tbeq @eof\n@eof:\n\trts\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("read_word@eof")).toBe(0x2002n);
+		expect(symbols.get("fill_buffer@eof")).toBe(0x2005n);
+		// Each branch reaches its own scope's `@eof`, one byte ahead.
+		expect(bytes).toEqual([0x90, 0x00, 0x60, 0xf0, 0x00, 0x60]);
+	});
+
+	test("a local resolves in either direction within its scope", () => {
+		const { symbols, messages } = asm(
+			".org $2000\nfoo:\n\tjmp @fwd\n@back:\n\tnop\n@fwd:\n\tjmp @back\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("foo@back")).toBe(0x2003n);
+		expect(symbols.get("foo@fwd")).toBe(0x2004n);
+	});
+
+	test("a reference outside its scope is undefined, and reads as written", () => {
+		// The qualified form is unspellable, so this can't silently reach
+		// another scope's label - and the message shows the source spelling.
+		expect(asm("foo:\n@loop:\n\trts\nbar:\n\tjmp @loop\n").messages).toContain(
+			'Undefined symbol "@loop"',
+		);
+	});
+
+	test("locals before any label get a module-initial scope", () => {
+		const { symbols, messages } = asm(
+			".org $2000\n@start:\n\tjmp @start\nfoo:\n@start:\n\trts\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("@@start")).toBe(0x2000n);
+		expect(symbols.get("foo@start")).toBe(0x2003n);
+	});
+
+	test("`.export name:` opens a scope", () => {
+		const { symbols, messages } = asm(
+			".org $2000\n.export entry:\n@loop:\n\tjmp @loop\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("entry@loop")).toBe(0x2000n);
+	});
+
+	test("a local cannot be exported", () => {
+		expect(asm("foo:\n.export @loop:\n\trts\n").messages).toContain(
+			'Local label "@loop" is private to its scope and cannot be exported',
+		);
+	});
+
+	test("an `.if` arm belongs to the scope in effect at the `.if`", () => {
+		// Arms neither open nor close a scope, so which arm wins can never
+		// change what a local label means.
+		const { bytes, messages } = asm(
+			".org $2000\nfoo:\n@target:\n.if 1\n\tjmp @target\n.else\n\tnop\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0x4c, 0x00, 0x20]);
+	});
+
+	test("a macro body's locals are per-expansion, not the caller's", () => {
+		// Macro hygiene already renames body-defined names per expansion, so
+		// the local-label pass leaves bodies alone.
+		const { bytes, messages } = asm(
+			".org $2000\n.macro hop\n@skip:\n\tjmp @skip\n.endmacro\nfoo:\nhop\nhop\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0x4c, 0x00, 0x20, 0x4c, 0x03, 0x20]);
+	});
+
+	test("a macro body cannot capture the caller's local", () => {
+		const { messages } = asm(
+			".macro hop\n\tjmp @skip\n.endmacro\nfoo:\n@skip:\n\thop\n",
+		);
+		expect(messages.join("\n")).toContain("@skip");
+		expect(messages).not.toEqual([]);
+	});
+});
+
 describe("macros", () => {
 	test("expands a call, substituting the parameter", () => {
 		const { bytes } = asm(
@@ -602,13 +925,20 @@ describe("macros", () => {
 });
 
 describe("namespaces (dict-valued symbols)", () => {
-	test("entries define and resolve via ::", () => {
+	test("entries resolve via ::", () => {
 		const { bytes, symbols, messages } = asm(
 			"N = { V: 1, B: 2 }\n.byte N::V, N::B\n",
 		);
 		expect(messages).toEqual([]);
 		expect(bytes).toEqual([1, 2]);
-		expect(symbols.get("N::V")).toBe(1n);
+		// The symbol map holds the dictionary whole, not flattened entries.
+		expect(symbols.get("N")).toEqual({
+			type: "dict",
+			entries: new Map([
+				["V", 1n],
+				["B", 2n],
+			]),
+		});
 	});
 
 	test("multiline literal: newline separators, comments, trailing comma", () => {
@@ -638,15 +968,28 @@ describe("namespaces (dict-valued symbols)", () => {
 		expect(bytes).toEqual([7]);
 	});
 
-	test("an unknown key is an undefined symbol with the full path", () => {
+	test("a missing key is a hard error, not an undefined symbol", () => {
+		// Keys are statically known, so this can never resolve on a later pass.
 		expect(asm("N = { V: 1 }\n.byte N::NOPE\n").messages).toContain(
-			'Undefined symbol "N::NOPE"',
+			'Dictionary "N" has no entry "NOPE"',
 		);
 	});
 
-	test("duplicate keys are duplicate definitions", () => {
+	test("a key that exists but hasn't resolved is still 'undefined'", () => {
+		expect(asm("N = { V: NEVER }\n.byte N::V\n").messages).toContain(
+			'Undefined symbol "N::V"',
+		);
+	});
+
+	test("indexing a non-dictionary reports what it is", () => {
+		expect(asm("K = 5\n.byte K::V\n").messages).toContain(
+			'"K" is not a dictionary',
+		);
+	});
+
+	test("duplicate keys error", () => {
 		expect(asm("N = { V: 1, V: 2 }\n").messages).toContain(
-			'Symbol "N::V" is already defined',
+			'Duplicate dictionary key "V"',
 		);
 	});
 
@@ -656,10 +999,61 @@ describe("namespaces (dict-valued symbols)", () => {
 		);
 	});
 
-	test("a dictionary is not a value in expression position", () => {
+	test("a dictionary is a value, but not data", () => {
 		expect(asm(".byte { V: 1 }\n").messages).toContain(
-			"A dictionary literal can only be the right-hand side of a `=` definition",
+			"A dictionary is not data - select an entry with `::`",
 		);
+		expect(asm("N = { V: 1 }\n.byte N\n").messages).toContain(
+			"A dictionary is not data - select an entry with `::`",
+		);
+	});
+
+	test("a dictionary can be aliased", () => {
+		const { bytes, messages } = asm(
+			"N = { V: 1, M: { W: 5 } }\nA1 = N\n.byte A1::V, A1::M::W\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 5]);
+	});
+
+	test("an entry may read a sibling through the root", () => {
+		// Legal, and the fixpoint settles it in either order.
+		expect(
+			asm("N = { foo: 1, bar: N::foo + 1 }\n.byte N::bar\n").bytes,
+		).toEqual([2]);
+		expect(
+			asm("N = { bar: N::foo + 1, foo: 1 }\n.byte N::bar\n").bytes,
+		).toEqual([2]);
+	});
+
+	test("a dictionary may not contain itself", () => {
+		// Bare `N` inside `N`'s own literal would nest a level deeper each pass.
+		expect(asm("N = { A1: N }\n").messages[0]).toContain(
+			"A dictionary cannot contain itself",
+		);
+		expect(asm("N = { A1: { B: N } }\n").messages[0]).toContain(
+			"A dictionary cannot contain itself",
+		);
+	});
+
+	test("an unresolved entry doesn't stop the parent from being a value", () => {
+		// `N` is a perfectly good dictionary; only `V` is missing.
+		const { messages } = asm("N = { V: NEVER }\nA1 = N\n.byte A1::V\n");
+		expect(messages).toEqual([
+			'Undefined symbol "NEVER"',
+			'Undefined symbol "A1::V"',
+		]);
+	});
+
+	test("a change in flight inside a dictionary still converges", () => {
+		// Each hop through a dictionary costs a pass, and in the intermediate
+		// pass the dictionary is the only thing that changed - bytes and scalars
+		// are both stable. Convergence has to notice it anyway.
+		const { bytes, messages } = asm(
+			".byte M\nM = N::A1\nN = { A1: LATER }\nLATER = 7\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
 	});
 
 	test(":= rejects a dictionary", () => {
@@ -676,6 +1070,30 @@ describe("namespaces (dict-valued symbols)", () => {
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		expect([...r.output]).toEqual([9]);
+	});
+
+	test("a path chains through a namespaced import into a dictionary", async () => {
+		// The trickiest resolution path: `lib` is a namespace binding rather than
+		// a value, so it spends the first key reaching the export, and the rest
+		// is ordinary value indexing.
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte lib::Config::HEIGHT, lib::Config::W::X1\n',
+			lib: ".export Config = { HEIGHT: 24, W: { X1: 40 } }\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([24, 40]);
+	});
+
+	test("a missing key through an import names the right prefix", async () => {
+		const host = memHost({
+			main: 'lib = .import "lib"\n.byte lib::Config::NOPE\n',
+			lib: ".export Config = { HEIGHT: 24 }\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toContain(
+			'Dictionary "lib::Config" has no entry "NOPE"',
+		);
 	});
 
 	test("namespace references in macro bodies are hygienic", async () => {
@@ -771,89 +1189,53 @@ describe("namespaced imports", () => {
 	});
 });
 
-describe("placement attributes", () => {
-	test(".sizeof and .attributes()::size read a declared size", () => {
-		const { bytes, messages } = asm(
-			"BUF := $0600, size: 3\n.byte .sizeof(BUF), .attributes(BUF)::size\n",
+// Attribute semantics are deferred until the address-vs-number value split
+// lands, so the tail is checked for shape and discarded. These tests pin the
+// shape rules (which survive any future semantics) and the discarding itself.
+describe("placement attributes (parsed, then discarded)", () => {
+	test("a declared attribute is accepted and has no effect", () => {
+		const { bytes, messages, symbols } = asm(
+			"BUF := $0600, size: 3\n.byte <BUF\n",
 		);
 		expect(messages).toEqual([]);
-		expect(bytes).toEqual([3, 3]);
+		expect(bytes).toEqual([0x00]);
+		expect(symbols.get("BUF")).toBe(0x0600n);
 	});
 
-	test("an equate defaults to size 1; a label to 0", () => {
-		const { bytes, messages } = asm(
-			"PORTA := $D300\nstart:\n.byte .sizeof(PORTA), .sizeof(start)\n",
-		);
-		expect(messages).toEqual([]);
-		expect(bytes).toEqual([1, 0]);
+	test("the value is never evaluated", () => {
+		// Nonsense a live `size:` would have rejected: a string, a negative, and
+		// a name that is never defined anywhere.
+		expect(asm('B := 1, size: "x"\n').messages).toEqual([]);
+		expect(asm("B := 1, size: -1\n").messages).toEqual([]);
+		expect(asm("B := 1, size: NEVER_DEFINED\n").messages).toEqual([]);
 	});
 
-	test("a size may forward-reference", () => {
-		const { bytes, messages } = asm(
-			"BUF := $0600, size: LEN\nLEN = 2\n.byte .sizeof(BUF)\n",
-		);
-		expect(messages).toEqual([]);
-		expect(bytes).toEqual([2]);
-	});
-
-	test("constants have no attributes", () => {
-		expect(asm("K = 5\n.byte .sizeof(K)\n").messages).toContain(
-			'Only labels have attributes - "K" is a constant',
-		);
+	test("only `:=` definitions may carry a tail", () => {
 		expect(asm("K = 5, size: 2\n").messages).toContain(
 			"Only labels have attributes - use `:=` for an address",
 		);
 	});
 
-	test("unknown attribute keys error on both sides", () => {
+	test("unknown keys are rejected, so adding keys later stays additive", () => {
 		expect(asm("B := 1, foo: 2\n").messages).toContain(
 			'Unknown attribute "foo"',
 		);
-		expect(asm("B := 1\n.byte .attributes(B)::foo\n").messages).toContain(
-			'Unknown attribute "foo"',
-		);
 	});
 
-	test("a bare .attributes() is not a value", () => {
-		expect(asm("B := 1\n.byte .attributes(B)\n").messages).toContain(
-			"`.attributes(...)` is a dictionary - access an attribute with `::`",
-		);
-	});
-
-	test("size must be a non-negative number, set once", () => {
-		expect(asm('B := 1, size: "x"\n').messages).toContain(
-			"`size:` requires a number",
-		);
-		expect(asm("B := 1, size: -1\n").messages).toContain(
-			"`size:` must not be negative",
-		);
+	test("a key may be given only once", () => {
 		expect(asm("B := 1, size: 2, size: 3\n").messages).toContain(
 			'Attribute "size" is already set',
 		);
 	});
 
-	test("attributes travel through exports and namespaced imports", async () => {
+	test("a tail survives export and namespaced import", async () => {
 		const host = memHost({
-			main:
-				'lib = .import "lib"\n.import "lib"\n' +
-				".byte .sizeof(BUF), .sizeof(lib::BUF)\n",
+			main: 'lib = .import "lib"\n.import "lib"\n.byte <BUF, <lib::BUF\n',
 			lib: ".export BUF := $0600, size: 3\n",
 		});
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
-		expect([...r.output]).toEqual([3, 3]);
-	});
-
-	test(".sizeof in a macro body is hygienic", async () => {
-		const host = memHost({
-			main: '.import "lib"\nput\n',
-			lib:
-				"BUF := $0600, size: 7\n" +
-				".export .macro put\n\t.byte .sizeof(BUF)\n.endmacro\n",
-		});
-		const r = await assemble("main", host);
-		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
-		expect([...r.output]).toEqual([7]);
+		expect([...r.output]).toEqual([0x00, 0x00]);
 	});
 });
 
@@ -997,10 +1379,15 @@ describe("diagnostics with locations", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics.find((d) => d.message.includes("NOPE"))!;
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:2:7: error: Undefined symbol "NOPE"/);
-		// The formatted message shows the source line and a caret under the span.
-		expect(error.formatted).toContain("\n.byte NOPE\n");
-		expect(error.formatted).toMatch(/\n {6}\^{4}$/);
+		expect(error.formatted).toMatch(
+			/^lib:2:7 - error SP2001: Undefined symbol "NOPE"/,
+		);
+		// The excerpt shows a line-number gutter and squiggles under the span.
+		expect(error.formatted).toContain("\n\n2 .byte NOPE\n");
+		expect(error.formatted).toMatch(/\n {8}~{4}$/);
+		// The colored twin carries ANSI codes.
+		expect(error.formattedColor).toContain("\x1b[36mlib\x1b[0m");
+		expect(error.formattedColor).toContain("\x1b[31merror SP2001\x1b[0m");
 	});
 
 	test("an error inside a macro body points into the macro's file", async () => {
@@ -1012,7 +1399,9 @@ describe("diagnostics with locations", () => {
 		const error = r.diagnostics.find((d) => d.message.includes("MISSING"))!;
 		// The span is a body token: hygiene's origin doubles as the file.
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:2:8: error: Undefined symbol/);
+		expect(error.formatted).toMatch(
+			/^lib:2:8 - error SP2001: Undefined symbol/,
+		);
 	});
 
 	test("parse errors are attributed to their module", async () => {
@@ -1023,27 +1412,350 @@ describe("diagnostics with locations", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:1:10: error: /);
+		expect(error.formatted).toMatch(/^lib:1:10 - error SP1001: /);
 	});
 
 	test("single-source diagnostics use the given name", () => {
 		const { messages } = asm("lda undef\n");
 		expect(messages).toEqual(['Undefined symbol "undef"']);
 		const r = assemble("lda undef\n", "prog.s");
-		expect(r.diagnostics[0]!.formatted).toMatch(/^prog\.s:1:5: error: /);
+		expect(r.diagnostics[0]!.formatted).toMatch(
+			/^prog\.s:1:5 - error SP2001: /,
+		);
+	});
+
+	test("a host shortName shortens the printed path, not the id", async () => {
+		const host: Host = {
+			resolve: (specifier) => specifier,
+			read: () => "lda undef\n",
+			shortName: (id) => id.split("/").pop()!,
+		};
+		const r = await assemble("/deep/path/main.s", host);
+		const error = r.diagnostics[0]!;
+		// The module id stays canonical; only the formatted rendering shortens.
+		expect(error.file).toBe("/deep/path/main.s");
+		expect(error.formatted).toMatch(/^main\.s:1:5 - error SP2001: /);
+	});
+});
+
+describe("diagnostic codes", () => {
+	test("every diagnostic carries a stable code", () => {
+		const r = assemble("lda undef\nFOO = 1\nFOO = 2\n", "t");
+		expect(r.diagnostics.map((d) => d.code)).toEqual([
+			Codes.UndefinedSymbol,
+			Codes.AlreadyDefined,
+		]);
+	});
+
+	test("undefined-symbol diagnostics carry the symbol name", () => {
+		const r = assemble("lda undef\n", "t");
+		expect(r.diagnostics[0]!.symbol).toBe("undef");
+	});
+
+	test("the code registry has no duplicate codes", () => {
+		const values = Object.values(Codes);
+		expect(new Set(values).size).toBe(values.length);
+	});
+});
+
+describe("diagnostic notes", () => {
+	test("a duplicate symbol notes the first definition", () => {
+		const r = assemble("FOO = 1\nFOO = 2\n", "t");
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Symbol "FOO" is already defined');
+		expect(error.notes).toEqual([
+			{ message: "First defined here", start: 0, end: 3, file: "t" },
+		]);
+		// The note renders as its own file:line:col block after the error.
+		expect(error.formatted).toMatch(/^t:2:1 - error SP2002: /);
+		expect(error.formatted).toContain("\n\nt:1:1 - note: First defined here\n");
+		expect(error.formatted).toMatch(/\n {2}~{3}$/);
+	});
+
+	test("a duplicate label notes the first definition", () => {
+		const r = assemble("here:\nhere:\n", "t");
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Symbol "here" is already defined');
+		expect(error.notes).toEqual([
+			{ message: "First defined here", start: 0, end: 4, file: "t" },
+		]);
+	});
+
+	test("a duplicate export notes the first export", () => {
+		const r = assemble(".export FOO = 1\n.export FOO\n", "t");
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Symbol "FOO" is already exported');
+		expect(error.notes).toEqual([
+			{ message: "First exported here", start: 8, end: 11, file: "t" },
+		]);
+	});
+
+	test("a duplicate macro notes the first definition", () => {
+		const r = assemble(
+			".macro m\n\tnop\n.endmacro\n.macro m\n\tnop\n.endmacro\n",
+			"t",
+		);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Macro "m" is already defined');
+		expect(error.notes?.[0]?.message).toBe("First defined here");
+		expect(error.formatted).toContain("note: First defined here");
+	});
+
+	test("a double placement notes the first placement", () => {
+		const r = assemble(
+			'.segment "OUTPUT"\n.emit "A"\n.emit "A"\n.segment "A"\n.byte 1\n',
+			"t",
+		);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Segment "A" is placed more than once');
+		expect(error.notes?.[0]?.message).toBe("First placed here");
+		expect(error.formatted).toMatch(/note: First placed here\n\n2 \.emit "A"/);
+	});
+
+	test("a circular placement notes the chain of open placements", () => {
+		const r = assemble(
+			'.segment "OUTPUT"\n.emit "A"\n' +
+				'.segment "A"\n.emit "B"\n' +
+				'.segment "B"\n.emit "A"\n',
+			"t",
+		);
+		const error = r.diagnostics.find((d) => d.message.includes("Circular"))!;
+		expect(error.notes?.map((n) => n.message)).toEqual([
+			'While placing "A"',
+			'While placing "B"',
+		]);
+	});
+
+	test("an import cycle notes the chain of open imports", async () => {
+		const host = memHost({
+			main: '.import "a"\nnop\n',
+			a: '.import "b"\n',
+			b: '.import "a"\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics.find((d) =>
+			d.message.includes("Import cycle"),
+		)!;
+		expect(error.file).toBe("b");
+		expect(error.notes).toEqual([
+			{ message: 'While importing "a"', start: 8, end: 11, file: "main" },
+			{ message: 'While importing "b"', start: 8, end: 11, file: "a" },
+		]);
+		expect(error.formatted).toContain('main:1:9 - note: While importing "a"');
+		expect(error.formatted).toContain('a:1:9 - note: While importing "b"');
+	});
+});
+
+describe("conditional assembly (.if/.elseif/.else/.endif)", () => {
+	test("a true condition takes its arm", () => {
+		expect(asm(".if 1\n.byte 1\n.else\n.byte 2\n.endif\n").bytes).toEqual([1]);
+	});
+
+	test("a false condition falls through to .else", () => {
+		expect(asm(".if 0\n.byte 1\n.else\n.byte 2\n.endif\n").bytes).toEqual([2]);
+	});
+
+	test(".elseif chains take the first true arm", () => {
+		const src = (v: number) =>
+			`V = ${v}\n.if V = 1\n.byte 1\n.elseif V = 2\n.byte 2\n.else\n.byte 3\n.endif\n`;
+		expect(asm(src(1)).bytes).toEqual([1]);
+		expect(asm(src(2)).bytes).toEqual([2]);
+		expect(asm(src(9)).bytes).toEqual([3]);
+	});
+
+	test("no matching arm and no .else collects nothing", () => {
+		expect(asm(".if 0\n.byte 1\n.endif\n.byte 9\n").bytes).toEqual([9]);
+	});
+
+	test("an unresolved condition falls to .else and errors at convergence", () => {
+		const { bytes, messages } = asm(
+			".if nope\n.byte 1\n.else\n.byte 2\n.endif\n",
+		);
+		expect(bytes).toEqual([2]);
+		expect(messages).toEqual(['Undefined symbol "nope"']);
+	});
+
+	test("a non-numeric condition is a type error", () => {
+		expect(asm('.if "x"\n.byte 1\n.endif\n').messages).toContain(
+			"`.if` requires a numeric condition",
+		);
+	});
+
+	test("a span-dependent condition converges (backward, near)", () => {
+		const { bytes, messages } = asm(
+			".org $0400\nstart:\n\tnop\n.if start - * < 130 && * - start < 127\n\tbne start\n.else\n\tbeq skip\n\tjmp start\nskip:\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xea, 0xd0, 0xfd]); // nop; bne start
+	});
+
+	test("a span-dependent condition converges (backward, far)", () => {
+		const { bytes, messages } = asm(
+			".org $0400\nstart:\n\tnop\n.res 200\n.if start - * < 130 && * - start < 127\n\tbne start\n.else\n\tbeq skip\n\tjmp start\nskip:\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		// nop, 200 fill bytes, then the long form: beq +3; jmp start.
+		expect(bytes).toHaveLength(206);
+		expect(bytes.slice(-5)).toEqual([0xf0, 0x03, 0x4c, 0x00, 0x04]);
+	});
+
+	test("a forward target starts long (pessimistic) and shrinks to short", () => {
+		const { bytes, messages } = asm(
+			".org $0400\n.if fwd - * < 130 && * - fwd < 127\n\tbne fwd\n.else\n\tbeq skip\n\tjmp fwd\nskip:\n.endif\n\tnop\nfwd:\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xd0, 0x01, 0xea]); // bne fwd; nop
+	});
+
+	test("arm-local names are invisible outside the arm", () => {
+		const { bytes, messages } = asm(".if 1\ntmp: .byte 5\n.endif\n\tlda tmp\n");
+		expect(messages).toEqual(['Undefined symbol "tmp"']);
+		expect(bytes).toEqual([5, 0xad, 0, 0]);
+	});
+
+	test("both arms may define the same name without colliding", () => {
+		const { bytes, messages } = asm(
+			".if 1\nv = 1\n.byte v\n.else\nv = 2\n.byte v\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1]);
+	});
+
+	test("a label on the .if statement names the winning arm's address", () => {
+		const { bytes, symbols, messages } = asm(
+			".org $0400\nentry: .if 1\n\tnop\n.endif\n.word entry\n",
+		);
+		expect(messages).toEqual([]);
+		expect(symbols.get("entry")).toBe(0x0400n);
+		expect(bytes).toEqual([0xea, 0x00, 0x04]);
+	});
+
+	test("nested arms shadow the outer arm's locals", () => {
+		const { bytes, messages } = asm(
+			".if 1\nn = 1\n.if 1\nn = 2\n.byte n\n.endif\n.byte n\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([2, 1]);
+	});
+
+	test("module-level directives are rejected inside arms", () => {
+		expect(asm(".if 1\n.export foo = 1\n.endif\n").messages).toContain(
+			"`.export` is not allowed inside an `.if` arm",
+		);
+	});
+
+	test("a macro parameter can gate an .if in the body", () => {
+		const { bytes, messages } = asm(
+			".macro maybe_byte flag, v\n.if flag\n.byte v\n.endif\n.endmacro\n" +
+				"maybe_byte 1, 7\nmaybe_byte 0, 8\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
+	});
+
+	test("a jne-style macro picks short or long per call site", () => {
+		const { bytes, messages } = asm(
+			".macro jne target\n" +
+				".if target - * < 130 && * - target < 127\n\tbne target\n" +
+				".else\n\tbeq skip\n\tjmp target\nskip:\n.endif\n" +
+				".endmacro\n" +
+				".org $0400\nstart:\n\tnop\n\tjne start\n.res 200\n\tjne start\n",
+		);
+		expect(messages).toEqual([]);
+		// Near call: bne; far call: beq skip; jmp start (skip is per-expansion).
+		expect(bytes.slice(0, 3)).toEqual([0xea, 0xd0, 0xfd]);
+		expect(bytes.slice(-5)).toEqual([0xf0, 0x03, 0x4c, 0x00, 0x04]);
+	});
+
+	test("a parameter defined inside an arm is rejected at the definition site", () => {
+		expect(
+			asm(".macro m .out name\n.if 1\nname: .byte 1\n.endif\n.endmacro\n")
+				.messages,
+		).toContain(
+			'Parameter "name" is defined inside an `.if` arm - arm definitions are arm-local',
+		);
+	});
+});
+
+describe(".error", () => {
+	test("fires when its arm is taken", () => {
+		expect(asm('.if 1\n.error "boom"\n.endif\n').messages).toEqual(["boom"]);
+	});
+
+	test("does not fire in an untaken arm", () => {
+		expect(asm('.if 0\n.error "boom"\n.endif\n').messages).toEqual([]);
+	});
+
+	test("an address-dependent bounds check fires only on overflow", () => {
+		const src = (n: number) =>
+			`.org 0\n.res ${n}\n.if * > 2\n.error "overflow"\n.endif\n`;
+		expect(asm(src(2)).messages).toEqual([]);
+		expect(asm(src(3)).messages).toEqual(["overflow"]);
+	});
+
+	test("a bounds check after a placement sees the placed segment's size", () => {
+		// `*` after an `.emit`/`.emplace` advances by the previous render's
+		// segment size (fed back like `.res` sizes), so the format-macro idiom
+		// "emplace, then check the boundary" works.
+		const src = (n: number) =>
+			'.segment "OUTPUT"\n.org $80\n.emplace "ZP"\n' +
+			'.if * > $100\n.error "zp overflow"\n.endif\n' +
+			`.segment "ZP"\n.res ${n}\n`;
+		expect(asm(src(128)).messages).toEqual([]);
+		expect(asm(src(200)).messages).toEqual(["zp overflow"]);
+	});
+
+	test("a macro-body .error attributes to the macro's file", async () => {
+		const host = memHost({
+			main: '.import "lib"\ncheck\n',
+			lib: '.export .macro check\n.if 1\n.error "boom"\n.endif\n.endmacro\n',
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe("boom");
+		expect(error.file).toBe("lib");
+		expect(error.formatted).toMatch(/^lib:3:1 - error SP3022: boom/);
+	});
+
+	test("the message must be a string", () => {
+		expect(asm(".error 42\n").messages).toEqual([
+			"`.error` requires a string message",
+		]);
 	});
 });
 
 describe("export name forms", () => {
-	test(".export name exports an elsewhere-defined symbol, repeatably", async () => {
+	test(".export name exports an elsewhere-defined symbol", async () => {
 		const host = memHost({
 			main: '.import "lib"\n.byte FOO\nlda entry\n',
-			lib: ".export FOO\n.export FOO\nFOO = 7\n.export entry\nentry:\n\tnop\n",
+			lib: ".export FOO\nFOO = 7\n.export entry\nentry:\n\tnop\n",
 		});
 		const r = await assemble("main", host);
 		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
 		// lib collects first: entry/nop at 0; then main's byte and a zp lda.
 		expect([...r.output]).toEqual([0xea, 7, 0xa5, 0x00]);
+	});
+
+	test("exporting the same symbol twice is an error", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte FOO\n',
+			lib: ".export FOO\n.export FOO\nFOO = 7\n",
+		});
+		const r = await assemble("main", host);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe('Symbol "FOO" is already exported');
+		expect(error.formatted).toMatch(/^lib:2:9 - error SP2003: /);
+	});
+
+	test("a bare re-export of a defining export is an error too", async () => {
+		const host = memHost({
+			main: '.import "lib"\n.byte FOO\n',
+			lib: ".export FOO = 7\n.export FOO\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([
+			'Symbol "FOO" is already exported',
+		]);
 	});
 
 	test(".export label: defines and exports in place", async () => {
@@ -1065,6 +1777,462 @@ describe("export name forms", () => {
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe('Exported symbol "NOPE" is never defined');
-		expect(error.formatted).toMatch(/^lib:1:9: error: /);
+		expect(error.formatted).toMatch(/^lib:1:9 - error SP2004: /);
+	});
+});
+
+describe("definition spans", () => {
+	const SEP = "\0";
+
+	function span(src: string, text: string): [number, number] {
+		const start = src.indexOf(text);
+		expect(start).toBeGreaterThanOrEqual(0);
+		return [start, start + text.length];
+	}
+
+	test("labels and constants record their defining token", () => {
+		const src = "\t.org $0600\nSIZE = 3\nstart:\n\tlda #SIZE\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		const size = result.definitions.get("t" + SEP + "SIZE")!;
+		expect([size.start, size.end]).toEqual(span(src, "SIZE"));
+		expect(size.kind).toBe("constant");
+		expect(size.file).toBe("t");
+
+		const start = result.definitions.get("t" + SEP + "start")!;
+		expect([start.start, start.end]).toEqual(span(src, "start"));
+		expect(start.kind).toBe("label");
+	});
+
+	test("a dictionary defines entries under NUL-joined names, at key tokens", () => {
+		const src = "N = { OPEN: 0, CLOSE: 2 }\n\t.byte N::CLOSE\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		const n = result.definitions.get("t" + SEP + "N")!;
+		expect(n.kind).toBe("namespace");
+		expect([n.start, n.end]).toEqual(span(src, "N"));
+
+		const close = result.definitions.get("t" + SEP + "N" + SEP + "CLOSE")!;
+		expect([close.start, close.end]).toEqual(span(src, "CLOSE"));
+		expect(close.kind).toBe("constant");
+		expect(close.value).toBe(2n);
+
+		// Entries surface through the dict, not as flattened symbols.
+		expect([...result.symbols.keys()]).toEqual(["N"]);
+	});
+
+	test("expression macros appear in definitions but not in symbols", () => {
+		const src = "DOUBLE(v) = 2 * v\n\t.byte DOUBLE(3)\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		expect(result.symbols.has("DOUBLE")).toBe(false);
+		const double = result.definitions.get("t" + SEP + "DOUBLE")!;
+		expect([double.start, double.end]).toEqual(span(src, "DOUBLE"));
+		expect(double.kind).toBe("function");
+	});
+
+	test("an imported symbol's definition points into the defining module", async () => {
+		const lib = ".export SIZE = 7\n";
+		const host = memHost({
+			main: '.import "lib"\n\t.byte SIZE\n',
+			lib,
+		});
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const size = result.definitions.get("lib" + SEP + "SIZE")!;
+		expect(size.file).toBe("lib");
+		expect([size.start, size.end]).toEqual(span(lib, "SIZE"));
+	});
+
+	test("a macro-stamped definition attributes to the macro's module", async () => {
+		const lib = ".export .macro setup\nMAGIC = 42\n.endmacro\n";
+		const host = memHost({
+			main: '.import "lib"\nsetup\n\tnop\n',
+			lib,
+		});
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const entry = [...result.definitions].find(([key]) =>
+			key.slice(key.indexOf(SEP) + 1).startsWith("MAGIC"),
+		);
+		expect(entry).toBeDefined();
+		const [, magic] = entry!;
+		expect(magic.file).toBe("lib");
+		expect([magic.start, magic.end]).toEqual(span(lib, "MAGIC"));
+	});
+
+	test("a duplicate definition keeps the first span", () => {
+		const src = "foo = 1\nfoo = 2\n\t.byte foo\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics.map((d) => d.code)).toEqual(["SP2002"]);
+
+		const foo = result.definitions.get("t" + SEP + "foo")!;
+		expect(foo.start).toBe(src.indexOf("foo"));
+	});
+});
+
+describe("reference recording", () => {
+	const SEP = "\0";
+
+	function refAt(
+		result: {
+			references: Map<string, { start: number; end: number; symbol: string }[]>;
+		},
+		file: string,
+		src: string,
+		text: string,
+		from = 0,
+	): string | undefined {
+		const start = src.indexOf(text, from);
+		expect(start).toBeGreaterThanOrEqual(0);
+		return result.references
+			.get(file)
+			?.find((r) => r.start === start && r.end === start + text.length)?.symbol;
+	}
+
+	test("operand and forward-label references record their spans", () => {
+		const src = "SIZE = 3\nstart:\n\tlda #SIZE\n\tbne done\ndone:\n\trts\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "t", src, "SIZE", src.indexOf("#"))).toBe(
+			"t" + SEP + "SIZE",
+		);
+		expect(refAt(result, "t", src, "done")).toBe("t" + SEP + "done");
+	});
+
+	test("local labels record under their qualified names", () => {
+		const src = "start:\n@loop:\n\tbne @loop\n\trts\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "t", src, "@loop", src.indexOf("bne"))).toBe(
+			"t" + SEP + "start@loop",
+		);
+	});
+
+	test("a splat-imported reference records the defining module's key", async () => {
+		const main = '.import "lib"\n\t.byte SIZE\n';
+		const host = memHost({ main, lib: ".export SIZE = 7\n" });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "main", main, "SIZE")).toBe("lib" + SEP + "SIZE");
+	});
+
+	test("a namespaced path records per-segment spans", async () => {
+		const main = 'lib = .import "lib"\n\t.byte lib::FOO\n';
+		const host = memHost({ main, lib: ".export FOO = 7\n" });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		// Cursor over `FOO` finds the export; over `lib`, the binding.
+		expect(refAt(result, "main", main, "FOO")).toBe("lib" + SEP + "FOO");
+		expect(refAt(result, "main", main, "lib", main.indexOf("::") - 3)).toBe(
+			"main" + SEP + "lib",
+		);
+	});
+
+	test("an undefined name records no reference", () => {
+		const src = "\t.byte nope\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics.map((d) => d.code)).toEqual(["SP2001"]);
+		expect(result.references.get("t") ?? []).toEqual([]);
+	});
+
+	test("references pair with definitions for round trips", () => {
+		const src = "SIZE = 3\n\tlda #SIZE\n";
+		const result = assemble(src, "t");
+		const symbol = refAt(result, "t", src, "SIZE", src.indexOf("#"))!;
+		const definition = result.definitions.get(symbol)!;
+		expect(definition.file).toBe("t");
+		expect(definition.start).toBe(src.indexOf("SIZE"));
+		expect(definition.value).toBe(3n);
+	});
+});
+
+describe("dict-entry and import navigation", () => {
+	const SEP = "\0";
+
+	function refAt(
+		result: {
+			references: Map<string, { start: number; end: number; symbol: string }[]>;
+		},
+		file: string,
+		src: string,
+		text: string,
+		from = 0,
+	): string | undefined {
+		const start = src.indexOf(text, from);
+		expect(start).toBeGreaterThanOrEqual(0);
+		return result.references
+			.get(file)
+			?.find((r) => r.start === start && r.end === start + text.length)?.symbol;
+	}
+
+	test("nested dict keys reference their entry definitions", () => {
+		const src =
+			"N = { Command: { OPEN: 3, CLOSE: 12 } }\n\t.byte N::Command::OPEN\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		const use = src.indexOf(".byte");
+		expect(refAt(result, "t", src, "Command", use)).toBe(
+			"t" + SEP + "N" + SEP + "Command",
+		);
+		expect(refAt(result, "t", src, "OPEN", use)).toBe(
+			"t" + SEP + "N" + SEP + "Command" + SEP + "OPEN",
+		);
+
+		const command = result.definitions.get("t" + SEP + "N" + SEP + "Command")!;
+		expect(command.kind).toBe("namespace");
+		const open = result.definitions.get(
+			"t" + SEP + "N" + SEP + "Command" + SEP + "OPEN",
+		)!;
+		expect([open.start, open.end]).toEqual([
+			src.indexOf("OPEN"),
+			src.indexOf("OPEN") + 4,
+		]);
+		expect(open.value).toBe(3n);
+	});
+
+	test("dict keys navigate through a namespaced import", async () => {
+		const lib = ".export Command = { OPEN: 3, CLOSE: 12 }\n";
+		const main = 'cio = .import "lib"\n\t.byte cio::Command::OPEN\n';
+		const host = memHost({ main, lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "main", main, "OPEN")).toBe(
+			"lib" + SEP + "Command" + SEP + "OPEN",
+		);
+		const open = result.definitions.get(
+			"lib" + SEP + "Command" + SEP + "OPEN",
+		)!;
+		expect(open.file).toBe("lib");
+		expect([open.start, open.end]).toEqual([
+			lib.indexOf("OPEN"),
+			lib.indexOf("OPEN") + 4,
+		]);
+	});
+
+	test("an import specifier references the imported module", async () => {
+		const main =
+			'.import "lib"\nlib2 = .import "lib2"\n\t.byte FOO, lib2::BAR\n';
+		const host = memHost({
+			main,
+			lib: ".export FOO = 1\n",
+			lib2: ".export BAR = 2\n",
+		});
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "main", main, '"lib"')).toBe("lib");
+		expect(refAt(result, "main", main, '"lib2"')).toBe("lib2");
+		const module = result.definitions.get("lib")!;
+		expect(module.kind).toBe("module");
+		expect(module.file).toBe("lib");
+		expect([module.start, module.end]).toEqual([0, 0]);
+	});
+});
+
+describe("macro navigation", () => {
+	const SEP = "\0";
+
+	function refAt(
+		result: {
+			references: Map<string, { start: number; end: number; symbol: string }[]>;
+		},
+		file: string,
+		src: string,
+		text: string,
+		from = 0,
+	): string | undefined {
+		const start = src.indexOf(text, from);
+		expect(start).toBeGreaterThanOrEqual(0);
+		return result.references
+			.get(file)
+			?.find((r) => r.start === start && r.end === start + text.length)?.symbol;
+	}
+
+	const lib = ".export .macro mva src, dst\n\tlda src\n\tsta dst\n.endmacro\n";
+
+	test("a call references the macro; body occurrences reference params", async () => {
+		const main = '.import "lib"\nfoo = $80\nbar = $81\n\tmva foo, bar\n\trts\n';
+		const host = memHost({ main, lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const macroSym = "lib" + SEP + SEP + "mva";
+		expect(refAt(result, "main", main, "mva")).toBe(macroSym);
+
+		const macro = result.definitions.get(macroSym)!;
+		expect(macro.kind).toBe("macro");
+		expect([macro.start, macro.end]).toEqual([
+			lib.indexOf("mva"),
+			lib.indexOf("mva") + 3,
+		]);
+
+		// Spliced call-site arguments reference the caller's symbols.
+		const call = main.indexOf("mva");
+		expect(refAt(result, "main", main, "foo", call)).toBe("main" + SEP + "foo");
+
+		// Param occurrences in the body reference the param definitions.
+		expect(refAt(result, "lib", lib, "src", lib.indexOf("lda"))).toBe(
+			macroSym + SEP + "src",
+		);
+		expect(refAt(result, "lib", lib, "dst", lib.indexOf("sta"))).toBe(
+			macroSym + SEP + "dst",
+		);
+		const param = result.definitions.get(macroSym + SEP + "src")!;
+		expect(param.kind).toBe("parameter");
+		expect([param.start, param.end]).toEqual([
+			lib.indexOf("src"),
+			lib.indexOf("src") + 3,
+		]);
+	});
+
+	test("a namespaced call references the binding and the macro", async () => {
+		const main =
+			'l = .import "lib"\nfoo = $80\nbar = $81\n\tl::mva foo, bar\n\trts\n';
+		const host = memHost({ main, lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const call = main.indexOf("l::");
+		expect(refAt(result, "main", main, "l", call)).toBe("main" + SEP + "l");
+		expect(refAt(result, "main", main, "mva", call)).toBe(
+			"lib" + SEP + SEP + "mva",
+		);
+	});
+});
+
+describe("module scopes", () => {
+	test("the result carries per-module visibility", async () => {
+		const host = memHost({
+			main: '.import "lib"\nns = .import "lib2"\n\t.byte FOO, ns::BAR\n',
+			lib: ".export FOO = 1\n.export .macro nothing\n.endmacro\n.macro private\n.endmacro\n",
+			lib2: ".export BAR = 2\n",
+		});
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const main = result.moduleScopes.get("main")!;
+		expect(main.splats).toEqual(["lib"]);
+		expect([...main.bindings]).toEqual([["ns", "lib2"]]);
+
+		const lib = result.moduleScopes.get("lib")!;
+		expect([...lib.exports]).toEqual(["FOO"]);
+		expect([...lib.macroExports]).toEqual(["nothing"]);
+	});
+});
+
+describe("macro-expansion diagnostics", () => {
+	const lib =
+		".export .macro emit_boot target\n\tjmp target\n\tlda #target\n.endmacro\n";
+
+	test("a spliced argument's range error spans the call-site arg, with a note", async () => {
+		const main = '.import "lib"\n\t.org $2000\ninit:\n\temit_boot init\n';
+		const host = memHost({ main, lib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3004");
+		expect(error.file).toBe("main");
+		// The second `init` - the macro argument, exactly.
+		const arg = main.indexOf("init", main.indexOf("emit_boot"));
+		expect([error.start, error.end]).toEqual([arg, arg + 4]);
+
+		// The note points into the macro body, at the failing value as
+		// written there - the param occurrence the argument replaced.
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `emit_boot`");
+		expect(note.file).toBe("lib");
+		expect([note.start, note.end]).toEqual([
+			lib.indexOf("#target") + 1,
+			lib.indexOf("#target") + 7,
+		]);
+	});
+
+	test("a body expression's range error attributes to the macro file, without a note", async () => {
+		const bigLib = ".export .macro emit\nBIG = $1234\n\tlda #BIG\n.endmacro\n";
+		const main = '.import "lib"\n\temit\n';
+		const host = memHost({ main, lib: bigLib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3004");
+		expect(error.file).toBe("lib");
+		const use = bigLib.indexOf("BIG", bigLib.indexOf("#"));
+		expect([error.start, error.end]).toEqual([use, use + 3]);
+		expect(error.notes).toBeUndefined();
+	});
+
+	test("a plain range error spans the expression, not the # marker", () => {
+		const src = "\tlda #$1234\n";
+		const result = assemble(src, "t");
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3004");
+		expect([error.start, error.end]).toEqual([
+			src.indexOf("$1234"),
+			src.indexOf("$1234") + 5,
+		]);
+	});
+});
+
+describe("macro-expansion trails", () => {
+	test("nested expansions narrate the whole path, outermost first", async () => {
+		const inner = ".export .macro emit_boot target\n\tlda #target\n.endmacro\n";
+		const main = [
+			'.import "inner"',
+			".macro wrapper t",
+			"\temit_boot t",
+			".endmacro",
+			"\t.org $2000",
+			"init:",
+			"\twrapper init",
+			"",
+		].join("\n");
+		const host = memHost({ main, inner });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3004");
+		// Main span: the argument of the outermost, source-level call.
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("init", main.indexOf("wrapper init"));
+		expect([error.start, error.end]).toEqual([arg, arg + 4]);
+
+		expect(error.notes!.map((n) => [n.message, n.file])).toEqual([
+			["While expanding `wrapper`", "main"],
+			["While expanding `emit_boot`", "inner"],
+		]);
+		// Each hop underlines the failing value as written in that macro's
+		// body: `t` in wrapper's call, `target` in emit_boot's operand.
+		expect(error.notes![0]!.start).toBe(main.indexOf("emit_boot t") + 10);
+		expect(error.notes![1]!.start).toBe(inner.indexOf("#target") + 1);
+	});
+});
+
+describe("export references", () => {
+	test("a bare .export records a reference to the symbol", async () => {
+		const lib = "FOO = 7\n.export FOO\n";
+		const host = memHost({ main: '.import "lib"\n\t.byte FOO\n', lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const exportRef = result.references
+			.get("lib")
+			?.find((r) => r.start === lib.indexOf("FOO", lib.indexOf(".export")));
+		expect(exportRef?.symbol).toBe("lib\0FOO");
 	});
 });

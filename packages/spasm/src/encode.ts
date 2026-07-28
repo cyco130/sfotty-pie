@@ -1,6 +1,10 @@
+import { Codes } from "./codes.ts";
 import { OPCODES, type Mode } from "./opcodes.ts";
 import {
+	getExpressionLocation,
+	getExpressionOrigin,
 	getOperandLocation,
+	type Expression,
 	type Instruction,
 	type Operand,
 } from "./parser.ts";
@@ -9,7 +13,12 @@ import type { Value } from "./value.ts";
 export interface EncodeContext {
 	/** Address of this instruction's first byte, for relative branch offsets. */
 	location: bigint | undefined;
-	report(message: string, span: readonly [number, number], file?: string): void;
+	report(
+		code: string,
+		message: string,
+		span: readonly [number, number],
+		file?: string,
+	): void;
 }
 
 const OPERAND_BYTES: Record<Mode, number> = {
@@ -64,15 +73,23 @@ export function encodeInstruction(
 	const nameSpan: readonly [number, number] = [mnemonic.start, mnemonic.end];
 
 	if (!modes) {
-		context.report(`Unknown mnemonic "${mnemonic.text}"`, nameSpan);
+		context.report(
+			Codes.UnknownMnemonic,
+			`Unknown mnemonic "${mnemonic.text}"`,
+			nameSpan,
+			mnemonic.origin,
+		);
 		return [];
 	}
 
 	// Operand lists exist for macro calls; a real instruction takes at most one.
 	if (operands.length > 1) {
+		const second = expressionOf(operands[1]!);
 		context.report(
+			Codes.TooManyOperands,
 			`Too many operands for ${name}`,
 			getOperandLocation(operands[1]!),
+			second ? getExpressionOrigin(second) : mnemonic.origin,
 		);
 		return [];
 	}
@@ -82,14 +99,32 @@ export function encodeInstruction(
 	const opcode = modes[mode];
 	if (opcode === undefined) {
 		context.report(
+			Codes.NoSuchAddressingMode,
 			`${name} has no ${MODE_NAMES[mode]} addressing mode`,
 			nameSpan,
+			mnemonic.origin,
 		);
 		return [];
 	}
 
-	const span = operand ? getOperandLocation(operand) : nameSpan;
-	return [opcode, ...encodeOperand(mode, operandValue, span, context)];
+	// Value errors span the operand's *expression* and attribute to the file
+	// its tokens come from: in a macro-expanded instruction the expression may
+	// be a spliced call-site argument (caller's file) or a body expression
+	// (macro's file) - either way, span and file must come from the same
+	// tokens, and the surrounding operand punctuation (`#`, `(`) may not.
+	const expression = expressionOf(operand);
+	const span = expression
+		? getExpressionLocation(expression)
+		: operand
+			? getOperandLocation(operand)
+			: nameSpan;
+	const file = expression ? getExpressionOrigin(expression) : mnemonic.origin;
+	return [opcode, ...encodeOperand(mode, operandValue, span, file, context)];
+}
+
+function expressionOf(operand: Operand | null): Expression | null {
+	if (operand === null || operand.type === "accumulator-operand") return null;
+	return operand.expression;
 }
 
 function resolveMode(
@@ -147,6 +182,7 @@ function encodeOperand(
 	mode: Mode,
 	value: Value | undefined,
 	span: readonly [number, number],
+	file: string | undefined,
 	context: EncodeContext,
 ): number[] {
 	const size = OPERAND_BYTES[mode];
@@ -155,27 +191,35 @@ function encodeOperand(
 	if (value === undefined) return new Array<number>(size).fill(0); // unresolved
 	if (typeof value !== "bigint") {
 		context.report(
+			Codes.OperandType,
 			typeof value === "string"
 				? "Operand must be a number, not a string"
 				: "Operand must be a number, not a function",
 			span,
+			file,
 		);
 		return new Array<number>(size).fill(0);
 	}
 
-	if (mode === "rel") return [branchByte(value, span, context)];
-	if (size === 1) return [byte(value, span, context)];
-	const w = word(value, span, context);
+	if (mode === "rel") return [branchByte(value, span, file, context)];
+	if (size === 1) return [byte(value, span, file, context)];
+	const w = word(value, span, file, context);
 	return [w & 0xff, (w >> 8) & 0xff];
 }
 
 function byte(
 	value: bigint,
 	span: readonly [number, number],
+	file: string | undefined,
 	context: EncodeContext,
 ): number {
 	if (value < -128n || value > 255n) {
-		context.report(`Byte value out of range: ${value}`, span);
+		context.report(
+			Codes.ByteOutOfRange,
+			`Byte value out of range: ${value}`,
+			span,
+			file,
+		);
 	}
 	return Number(value & 0xffn);
 }
@@ -183,10 +227,16 @@ function byte(
 function word(
 	value: bigint,
 	span: readonly [number, number],
+	file: string | undefined,
 	context: EncodeContext,
 ): number {
 	if (value < -32768n || value > 65535n) {
-		context.report(`Word value out of range: ${value}`, span);
+		context.report(
+			Codes.WordOutOfRange,
+			`Word value out of range: ${value}`,
+			span,
+			file,
+		);
 	}
 	return Number(value & 0xffffn);
 }
@@ -194,12 +244,18 @@ function word(
 function branchByte(
 	target: bigint,
 	span: readonly [number, number],
+	file: string | undefined,
 	context: EncodeContext,
 ): number {
 	if (context.location === undefined) return 0; // offset not computable yet
 	const offset = target - (context.location + 2n);
 	if (offset < -128n || offset > 127n) {
-		context.report(`Branch target out of range (${offset} bytes)`, span);
+		context.report(
+			Codes.BranchOutOfRange,
+			`Branch target out of range (${offset} bytes)`,
+			span,
+			file,
+		);
 		return 0;
 	}
 	return Number(offset & 0xffn);

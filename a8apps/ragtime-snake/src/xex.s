@@ -23,6 +23,9 @@
 	; Zero page workspace
 	.org $80
 		.emplace "ZEROPAGE"
+	.if * > $100
+	.error "Zero page overflow"
+	.endif
 
 	; The load chunk
 	.org load
@@ -31,6 +34,9 @@
 		.emit "DATA"
 chunk_end:
 		.emplace "BSS"
+	.if * > $C000
+	.error "Memory overflow (image extends past $C000)"
+	.endif
 
 		; RUNAD chunk: run the program at `start`
 		.word $02E0, $02E1

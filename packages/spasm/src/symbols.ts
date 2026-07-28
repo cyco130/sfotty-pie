@@ -1,4 +1,4 @@
-import type { Value } from "./value.ts";
+import { isEqual, type Value } from "./value.ts";
 
 /**
  * The qualified-name separator. A NUL can't appear in a module id or symbol
@@ -16,20 +16,31 @@ export const SEP = "\0";
  */
 export type SymbolKind = "label" | "constant" | "namespace" | "function";
 
-/**
- * Assembler-opaque placement attributes: tracked and surfaced, never
- * interpreted by the assembler itself. `size` so far; more (address space,
- * load address) will join with the same shape.
- */
-export interface SymbolAttributes {
-	size?: Value | undefined;
-}
-
 interface Entry {
 	value: Value | undefined;
 	kind: SymbolKind;
 	definedAt: readonly [number, number];
-	attributes: SymbolAttributes;
+}
+
+/**
+ * Where a symbol was defined: the module whose source `start`/`end` index
+ * into, and the symbol's kind. Hygiene keeps file and scope aligned: a
+ * macro-stamped definition defines in the macro's module, and its tokens come
+ * from that module's source. Kind `"module"` marks the synthetic definition
+ * every module gets (keyed by its bare id - unambiguous, since qualified
+ * names always contain `SEP`), the target of `.import` specifier references.
+ * Kinds `"macro"` and `"parameter"` mark code-macro definitions, which live
+ * in their own namespace: keyed `module SEP SEP name` (and
+ * `module SEP SEP name SEP param`) - the double `SEP` cannot occur in a
+ * symbol key, whose components are never empty.
+ */
+export interface Definition {
+	file: string;
+	start: number;
+	end: number;
+	kind: SymbolKind | "module" | "macro" | "parameter";
+	/** The converged value; `undefined` when it never resolved. */
+	value: Value | undefined;
 }
 
 /**
@@ -55,12 +66,11 @@ export class SymbolTable {
 		value: Value | undefined,
 		kind: SymbolKind,
 		definedAt: readonly [number, number],
-		attributes: SymbolAttributes = {},
 	): readonly [number, number] | undefined {
 		const prior = this.#entries.get(name);
 		if (this.#definedThisPass.has(name)) return prior!.definedAt;
 		this.#definedThisPass.add(name);
-		this.#entries.set(name, { value, kind, definedAt, attributes });
+		this.#entries.set(name, { value, kind, definedAt });
 		return undefined;
 	}
 
@@ -77,6 +87,19 @@ export class SymbolTable {
 		return this.#entries.get(name)?.kind;
 	}
 
+	definedAt(name: string): readonly [number, number] | undefined {
+		return this.#entries.get(name)?.definedAt;
+	}
+
+	/** Every defined symbol's kind and definition span, by qualified key. */
+	*definitions(): IterableIterator<
+		[string, SymbolKind, readonly [number, number]]
+	> {
+		for (const [name, entry] of this.#entries) {
+			yield [name, entry.kind, entry.definedAt];
+		}
+	}
+
 	/** Snapshot of values, for fixpoint detection. */
 	snapshot(): Map<string, Value | undefined> {
 		const snapshot = new Map<string, Value | undefined>();
@@ -84,12 +107,17 @@ export class SymbolTable {
 		return snapshot;
 	}
 
-	/** Did any value (or the set of names) change since the snapshot? */
+	/**
+	 * Did any value (or the set of names) change since the snapshot? Compared
+	 * with `isEqual`, not `!==`: an aggregate is rebuilt every pass, so identity
+	 * would always differ, and skipping aggregates entirely would converge early
+	 * on a change still in flight inside one (see design.md).
+	 */
 	changedSince(snapshot: Map<string, Value | undefined>): boolean {
 		if (snapshot.size !== this.#entries.size) return true;
 		for (const [name, entry] of this.#entries) {
-			if (!snapshot.has(name) || snapshot.get(name) !== entry.value)
-				return true;
+			if (!snapshot.has(name)) return true;
+			if (!isEqual(snapshot.get(name), entry.value)) return true;
 		}
 		return false;
 	}
@@ -101,10 +129,5 @@ export class SymbolTable {
 			if (entry.value !== undefined) out.set(name, entry.value);
 		}
 		return out;
-	}
-
-	/** A symbol's placement attributes; undefined when the symbol isn't known. */
-	attributesOf(name: string): SymbolAttributes | undefined {
-		return this.#entries.get(name)?.attributes;
 	}
 }

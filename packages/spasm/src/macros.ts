@@ -1,25 +1,57 @@
+import { Codes } from "./codes.ts";
 import type { Token } from "./lexer.ts";
 import type { LoadedModule } from "./loader.ts";
 import {
+	ANONYMOUS_LABEL,
+	getExpressionAnchorToken,
 	getOperandLocation,
 	type Expression,
+	type ExpansionSite,
+	type Label,
 	type Macro,
+	type MessageNote,
 	type Operand,
 	type Statement,
 	type StatementContent,
 } from "./parser.ts";
-import { exportedNames } from "./scopes.ts";
+import { exportedNames, type Reference } from "./scopes.ts";
+import { SEP, type Definition } from "./symbols.ts";
 
 type Reporter = (
+	code: string,
 	message: string,
 	span: readonly [number, number],
 	file?: string,
+	options?: { notes?: MessageNote[]; symbol?: string },
 ) => void;
 
 // A param substitutes to an argument operand; a body-local label renames.
+// `onUse` reports each substituted occurrence (macro-nav records the body
+// spans of param uses through it).
 type Substitution =
-	| { kind: "operand"; operand: Operand }
+	| {
+			kind: "operand";
+			operand: Operand;
+			onUse?: (token: { start: number; end: number }) => void;
+	  }
 	| { kind: "rename"; name: string };
+
+/**
+ * Navigation data for the macro namespace, collected during expansion (the
+ * only step that sees macros - they never reach the symbol table). Keys use
+ * the double-`SEP` macro spelling (see `Definition`); merged into the
+ * assemble result's `definitions`/`references`.
+ */
+export interface MacroNav {
+	definitions: Map<string, Definition>;
+	references: Map<string, Reference[]>;
+	/** Exported macro names per module (for scope-aware tooling). */
+	exports: Map<string, ReadonlySet<string>>;
+}
+
+export function macroKey(moduleId: string, name: string): string {
+	return moduleId + SEP + SEP + name;
+}
 
 const MAX_DEPTH = 64;
 
@@ -44,7 +76,25 @@ interface ModuleMacros {
 export function expandModules(
 	modules: readonly LoadedModule[],
 	report: Reporter,
+	nav?: MacroNav,
 ): LoadedModule[] {
+	// Reference recording, deduped by span: a macro expanded N times visits
+	// the same body tokens N times.
+	const seenSpans = new Set<string>();
+	const recordRef = (
+		file: string,
+		token: { start: number; end: number },
+		symbol: string,
+	): void => {
+		if (!nav) return;
+		const spanKey = file + SEP + token.start + SEP + token.end;
+		if (seenSpans.has(spanKey)) return;
+		seenSpans.add(spanKey);
+		const list = nav.references.get(file);
+		const reference = { start: token.start, end: token.end, symbol };
+		if (list) list.push(reference);
+		else nav.references.set(file, [reference]);
+	};
 	// Collect each module's macro definitions, removing them from its stream.
 	const macros = new Map<string, ModuleMacros>();
 	const splats = new Map<string, readonly string[]>();
@@ -84,20 +134,52 @@ export function expandModules(
 				continue;
 			}
 			const name = macro.nameToken.text;
-			if (own.has(name)) {
+			const prior = own.get(name);
+			if (prior) {
 				report(
+					Codes.MacroAlreadyDefined,
 					`Macro "${name}" is already defined`,
 					tokenSpan(macro.nameToken),
 					module.id,
+					{
+						notes: [
+							{
+								message: "First defined here",
+								start: prior.nameToken.start,
+								end: prior.nameToken.end,
+								file: module.id,
+							},
+						],
+					},
 				);
 			} else {
 				own.set(name, macro);
 				if (isExported) exported.add(name);
 				checkBody(macro, report, module.id);
+				if (nav) {
+					const key = macroKey(module.id, name);
+					nav.definitions.set(key, {
+						file: module.id,
+						start: macro.nameToken.start,
+						end: macro.nameToken.end,
+						kind: "macro",
+						value: undefined,
+					});
+					for (const param of macro.params) {
+						nav.definitions.set(key + SEP + param.nameToken.text, {
+							file: module.id,
+							start: param.nameToken.start,
+							end: param.nameToken.end,
+							kind: "parameter",
+							value: undefined,
+						});
+					}
+				}
 			}
 		}
 		macros.set(module.id, { own, exported });
 		stripped.set(module.id, rest);
+		nav?.exports.set(module.id, exported);
 	}
 
 	// Lexical lookup: own macros, then the splat imports' exported ones (first
@@ -163,6 +245,7 @@ export function expandModules(
 			const first = statements[0];
 			if (first) {
 				report(
+					Codes.ExpansionTooDeep,
 					"Macro expansion too deep (recursion?)",
 					statementSpan(first),
 					scopeId,
@@ -179,6 +262,7 @@ export function expandModules(
 				const found = lookupPath(scopeId, content);
 				if (!found) {
 					report(
+						Codes.UnknownMacro,
 						`Unknown macro "${[content.mnemonic, ...content.memberTokens]
 							.map((t) => t.text)
 							.join("::")}"`,
@@ -188,6 +272,17 @@ export function expandModules(
 					continue;
 				}
 				expanded.add(found.macro);
+				// The root is the namespace binding, the segment the macro.
+				recordRef(
+					scopeId,
+					content.mnemonic,
+					scopeId + SEP + content.mnemonic.text,
+				);
+				recordRef(
+					scopeId,
+					content.memberTokens[0]!,
+					macroKey(found.definingId, found.macro.nameToken.text),
+				);
 				const args = callArgs(content, found.macro, report, scopeId);
 				if (args) {
 					const body = expandCall(
@@ -196,6 +291,7 @@ export function expandModules(
 						args,
 						() => ++counter,
 						report,
+						recordRef,
 					);
 					if (statement.labels.length && body.length) {
 						body[0] = {
@@ -205,6 +301,9 @@ export function expandModules(
 					} else if (statement.labels.length) {
 						out.push({ ...statement, content: null });
 					}
+					attachTrail(body, statement, found.macro, content.mnemonic, scopeId, {
+						end: content.memberTokens[0]!.end,
+					});
 					out.push(...expand(body, found.definingId, depth + 1));
 				}
 				continue;
@@ -213,6 +312,11 @@ export function expandModules(
 				const found = lookup(scopeId, content.mnemonic.text);
 				if (found) {
 					expanded.add(found.macro);
+					recordRef(
+						scopeId,
+						content.mnemonic,
+						macroKey(found.definingId, content.mnemonic.text),
+					);
 					const args = callArgs(content, found.macro, report, scopeId);
 					if (args) {
 						const body = expandCall(
@@ -221,6 +325,7 @@ export function expandModules(
 							args,
 							() => ++counter,
 							report,
+							recordRef,
 						);
 						// Carry the call's own labels onto the first expanded statement.
 						if (statement.labels.length && body.length) {
@@ -231,6 +336,13 @@ export function expandModules(
 						} else if (statement.labels.length) {
 							out.push({ ...statement, content: null });
 						}
+						attachTrail(
+							body,
+							statement,
+							found.macro,
+							content.mnemonic,
+							scopeId,
+						);
 						out.push(...expand(body, found.definingId, depth + 1));
 					}
 					continue;
@@ -279,28 +391,35 @@ export function expandModules(
 	return result;
 }
 
-// Module-level directives can't appear in a macro body: the loader resolves
-// imports from top-level statements only, and an export or a nested macro
-// definition would escape the expansion.
+// Module-level directives can't appear in a macro body (`.if` arms
+// included): the loader resolves imports from top-level statements only, and
+// an export or a nested macro definition would escape the expansion.
 function checkBody(macro: Macro, report: Reporter, file: string): void {
-	for (const statement of macro.body) {
-		const content = statement.content;
-		const keyword =
-			content?.type === "import"
-				? content.importToken
-				: content?.type === "export"
-					? content.exportToken
-					: content?.type === "macro"
-						? content.macroToken
-						: undefined;
-		if (content && keyword) {
-			report(
-				`\`.${content.type}\` is not allowed inside a macro body`,
-				tokenSpan(keyword),
-				file,
-			);
+	const walk = (statements: readonly Statement[]): void => {
+		for (const statement of statements) {
+			const content = statement.content;
+			const keyword =
+				content?.type === "import"
+					? content.importToken
+					: content?.type === "export"
+						? content.exportToken
+						: content?.type === "macro"
+							? content.macroToken
+							: undefined;
+			if (content && keyword) {
+				report(
+					Codes.DirectiveInMacroBody,
+					`\`.${content.type}\` is not allowed inside a macro body`,
+					tokenSpan(keyword),
+					file,
+				);
+			}
+			if (content?.type === "if-block") {
+				for (const arm of content.arms) walk(arm.body);
+			}
 		}
-	}
+	};
+	walk(macro.body);
 }
 
 // A macro argument is a whole *operand*, shape included - `mva (src),y, (dst),y`
@@ -316,6 +435,7 @@ function callArgs(
 	const args = call.operands;
 	if (args.length !== macro.params.length) {
 		report(
+			Codes.MacroArity,
 			`Macro "${macro.nameToken.text}" expects ${macro.params.length} argument(s), got ${args.length}`,
 			tokenSpan(call.mnemonic),
 			file,
@@ -330,6 +450,7 @@ function callArgs(
 			(arg.type !== "simple-operand" || arg.expression.type !== "identifier")
 		) {
 			report(
+				Codes.OutArgumentShape,
 				`Argument for \`.out\` parameter "${param.nameToken.text}" must be a plain identifier`,
 				getOperandLocation(arg),
 				file,
@@ -343,6 +464,9 @@ function callArgs(
 // The `.out` contract: an `.out` param must be defined by the body (a label,
 // an assignment, or forwarding to a nested call's `.out` position) - reads
 // are additionally allowed; a plain param must not be defined or forwarded.
+// Definitions inside `.if` arms don't count for either side: arm definitions
+// are arm-local, so they could never reach the caller - defining a param
+// there is its own error.
 function validateParams(
 	macro: Macro,
 	getMacro: (name: string) => Macro | undefined,
@@ -350,40 +474,108 @@ function validateParams(
 	file: string,
 ): void {
 	if (!macro.params.length) return;
-	const defined = localNames(macro.body);
-	const forwarded = new Set<string>();
-	for (const statement of macro.body) {
-		const content = statement.content;
-		if (content?.type !== "instruction") continue;
-		const callee = getMacro(content.mnemonic.text);
-		if (!callee) continue;
-		content.operands.forEach((operand, i) => {
-			if (
-				callee.params[i]?.outToken &&
-				operand.type === "simple-operand" &&
-				operand.expression.type === "identifier"
-			) {
-				forwarded.add(operand.expression.text);
+	const direct = new Set<string>();
+	const inArm = new Set<string>();
+	const walk = (statements: readonly Statement[], insideArm: boolean): void => {
+		const defs = insideArm ? inArm : direct;
+		for (const statement of statements) {
+			for (const label of statement.labels) defs.add(label.identifier.text);
+			const content = statement.content;
+			if (content?.type === "assignment") defs.add(content.identifier.text);
+			if (content?.type === "if-block") {
+				for (const arm of content.arms) walk(arm.body, true);
 			}
-		});
-	}
+			if (content?.type === "instruction") {
+				const callee = getMacro(content.mnemonic.text);
+				if (!callee) continue;
+				content.operands.forEach((operand, i) => {
+					if (
+						callee.params[i]?.outToken &&
+						operand.type === "simple-operand" &&
+						operand.expression.type === "identifier"
+					) {
+						defs.add(operand.expression.text);
+					}
+				});
+			}
+		}
+	};
+	walk(macro.body, false);
 	for (const param of macro.params) {
 		const name = param.nameToken.text;
-		if (param.outToken) {
-			if (!defined.has(name) && !forwarded.has(name)) {
+		if (inArm.has(name)) {
+			report(
+				Codes.ParamDefinedInArm,
+				`Parameter "${name}" is defined inside an \`.if\` arm - arm definitions are arm-local`,
+				tokenSpan(param.nameToken),
+				file,
+			);
+		} else if (param.outToken) {
+			if (!direct.has(name)) {
 				report(
+					Codes.OutNeverDefined,
 					`\`.out\` parameter "${name}" is never defined in the macro body`,
 					tokenSpan(param.nameToken),
 					file,
 				);
 			}
-		} else if (defined.has(name) || forwarded.has(name)) {
+		} else if (direct.has(name)) {
 			report(
+				Codes.ParamNeedsOut,
 				`Parameter "${name}" is defined in the macro body - declare it \`.out\``,
 				tokenSpan(param.nameToken),
 				file,
 			);
 		}
+	}
+}
+
+/**
+ * Append the splice site - the param occurrence at `origin` this argument
+ * replaces - to the cloned expression's anchor token, outermost-first: each
+ * expansion level appends, so the chain reads from the original call inward.
+ * Expansion-path diagnostics underline these (the value as written at each
+ * hop) rather than the calls around them.
+ */
+function recordSplice(
+	clone: Expression,
+	occurrence: { start: number; end: number },
+	origin: string,
+): void {
+	const anchor = getExpressionAnchorToken(clone);
+	if (!anchor) return;
+	anchor.substitutedAt = [
+		...(anchor.substitutedAt ?? []),
+		{ file: origin, start: occurrence.start, end: occurrence.end },
+	];
+}
+
+/**
+ * Chain the call site onto each expanded statement's trail (innermost
+ * first): a body statement expanded through nested calls remembers every hop
+ * back to the original source-level call, for diagnostic narration.
+ */
+function attachTrail(
+	body: Statement[],
+	call: Statement,
+	macro: Macro,
+	mnemonic: Token<"identifier">,
+	file: string,
+	span?: { end: number },
+): void {
+	const site: ExpansionSite = {
+		macro: macro.nameToken.text,
+		// A body call's mnemonic is origin-stamped; a source-level call's
+		// tokens live in the module being expanded.
+		file: mnemonic.origin ?? file,
+		start: mnemonic.start,
+		end: span?.end ?? mnemonic.end,
+	};
+	for (let i = 0; i < body.length; i++) {
+		body[i] = {
+			...body[i]!,
+			expansionTrail: [site, ...(call.expansionTrail ?? [])],
+		};
 	}
 }
 
@@ -393,10 +585,27 @@ function expandCall(
 	args: Operand[],
 	gensym: () => number,
 	report: Reporter,
+	recordRef?: (
+		file: string,
+		token: { start: number; end: number },
+		symbol: string,
+	) => void,
 ): Statement[] {
 	const subst = new Map<string, Substitution>();
 	macro.params.forEach((param, i) => {
-		subst.set(param.nameToken.text, { kind: "operand", operand: args[i]! });
+		const name = param.nameToken.text;
+		subst.set(name, {
+			kind: "operand",
+			operand: args[i]!,
+			// A substituted occurrence is a param use at a body span - record
+			// it against the param's definition.
+			onUse: (token) =>
+				recordRef?.(
+					definingId,
+					token,
+					macroKey(definingId, macro.nameToken.text) + SEP + name,
+				),
+		});
 	});
 	const suffix = `@${gensym()}`;
 	for (const name of localNames(macro.body)) {
@@ -413,11 +622,30 @@ function expandCall(
 	return body;
 }
 
-// Names defined inside the body (labels and assignments) are local to each
-// expansion; references to anything else bind in the defining module.
+// Names defined inside the body (labels and assignments, `.if` arms
+// included) are local to each expansion; references to anything else bind in
+// the defining module.
 function localNames(body: Statement[]): Set<string> {
 	const names = new Set<string>();
-	for (const statement of body) {
+	const walk = (statements: readonly Statement[]): void => {
+		for (const statement of statements) {
+			for (const label of statement.labels) names.add(label.identifier.text);
+			const content = statement.content;
+			if (content?.type === "assignment") names.add(content.identifier.text);
+			if (content?.type === "if-block") {
+				for (const arm of content.arms) walk(arm.body);
+			}
+		}
+	};
+	walk(body);
+	return names;
+}
+
+// Names defined directly by these statements - labels and assignments, but
+// NOT inside nested `.if` blocks (those belong to the nested arms).
+function directNames(statements: readonly Statement[]): Set<string> {
+	const names = new Set<string>();
+	for (const statement of statements) {
 		for (const label of statement.labels) names.add(label.identifier.text);
 		if (statement.content?.type === "assignment") {
 			names.add(statement.content.identifier.text);
@@ -450,15 +678,28 @@ function substituteName(
 	report: Reporter,
 ): Token<"identifier"> {
 	const s = subst.get(identifier.text);
-	if (s?.kind === "rename") return { ...identifier, text: s.name };
+	// A renamed local is stamped like a free name: its token spans the macro's
+	// source, so its definition must live in the macro's module for spans and
+	// scope to agree (definition-site queries rely on this).
+	if (s?.kind === "rename") {
+		return {
+			...identifier,
+			text: s.name,
+			origin: identifier.origin ?? origin,
+		};
+	}
 	if (s?.kind === "operand") {
+		s.onUse?.(identifier);
 		if (
 			s.operand.type === "simple-operand" &&
 			s.operand.expression.type === "identifier"
 		) {
-			return structuredClone(s.operand.expression);
+			const clone = structuredClone(s.operand.expression);
+			recordSplice(clone, identifier, origin);
+			return clone;
 		}
 		report(
+			Codes.ArgumentMustBeIdentifier,
 			`Macro argument for "${identifier.text}" defines a name and must be a plain identifier`,
 			tokenSpan(identifier),
 			origin,
@@ -505,6 +746,9 @@ function substituteContent(
 				report,
 				shadowed,
 			);
+			// Attribute values are currently discarded unevaluated, but keep
+			// substituting into them so the tail stays a correctly-bound AST for
+			// when attribute semantics return.
 			content.attributes = content.attributes.map((attribute) => ({
 				...attribute,
 				value: substituteExpr(attribute.value, subst, origin, report),
@@ -518,9 +762,32 @@ function substituteContent(
 			break;
 		}
 		case "instruction":
+			// Stamp the mnemonic like the `.if`/`.error` keywords: it marks
+			// the statement as macro-expanded and carries the body's file, so
+			// encode-time diagnostics attribute (and note) the expansion site.
+			content.mnemonic.origin = content.mnemonic.origin ?? origin;
 			content.operands = content.operands.map((operand) =>
 				substituteOperand(operand, subst, origin, report),
 			);
+			break;
+		case "if-block":
+			// One map for the whole block is right here: macro params substitute
+			// everywhere, and arm-local visibility is the later arm-scoping
+			// pass's job. The keywords get origin-stamped so diagnostics whose
+			// span is the keyword itself attribute to the macro's file.
+			for (const arm of content.arms) {
+				arm.keyword.origin = arm.keyword.origin ?? origin;
+				if (arm.condition) {
+					arm.condition = substituteExpr(arm.condition, subst, origin, report);
+				}
+				for (const statement of arm.body) {
+					substituteStatement(statement, subst, origin, report);
+				}
+			}
+			break;
+		case "error-directive":
+			content.errorToken.origin = content.errorToken.origin ?? origin;
+			content.message = substituteExpr(content.message, subst, origin, report);
 			break;
 		// Segment directives carry no substitutable expressions; import/export/
 		// macro are rejected from bodies at collection.
@@ -545,7 +812,14 @@ function substituteOperand(
 		operand.expression.type === "identifier"
 	) {
 		const s = subst.get(operand.expression.text);
-		if (s?.kind === "operand") return structuredClone(s.operand);
+		if (s?.kind === "operand") {
+			s.onUse?.(operand.expression);
+			const clone = structuredClone(s.operand);
+			if (clone.type !== "accumulator-operand") {
+				recordSplice(clone.expression, operand.expression, origin);
+			}
+			return clone;
+		}
 	}
 	return {
 		...operand,
@@ -567,19 +841,27 @@ function substituteExpr(
 			if (shadowed?.has(expr.text)) return expr;
 			const s = subst.get(expr.text);
 			if (s?.kind === "operand") {
+				s.onUse?.(expr);
 				// Operand is a super-type of simple values: only a simple operand
 				// (a plain expression) has a value usable inside an expression.
 				if (s.operand.type === "simple-operand") {
-					return structuredClone(s.operand.expression);
+					const clone = structuredClone(s.operand.expression);
+					recordSplice(clone, expr, origin);
+					return clone;
 				}
 				report(
+					Codes.ShapedArgumentInExpression,
 					`Macro argument "${expr.text}" has an operand value and can only be used as a whole operand`,
 					tokenSpan(expr),
 					origin,
 				);
 				return expr;
 			}
-			if (s?.kind === "rename") return { ...expr, text: s.name };
+			// Stamped like the defining occurrence in `substituteName`, so
+			// renamed references resolve where the renamed definition lands.
+			if (s?.kind === "rename") {
+				return { ...expr, text: s.name, origin: expr.origin ?? origin };
+			}
 			// A free name binds where the macro was defined (hygiene). An already
 			// stamped identifier (from an outer expansion's argument) keeps its
 			// binding.
@@ -634,17 +916,6 @@ function substituteExpr(
 					substituteExpr(arg, subst, origin, report, shadowed),
 				),
 			};
-		case "builtin-call":
-			return {
-				...expr,
-				argument: substituteExpr(
-					expr.argument,
-					subst,
-					origin,
-					report,
-					shadowed,
-				),
-			};
 		default:
 			return expr; // literals and `*`
 	}
@@ -694,6 +965,7 @@ function validateBody(
 			case "identifier":
 				if (!bound.has(expr.text) && !visible.has(expr.text)) {
 					report(
+						Codes.UndefinedInMacroBody,
 						`Undefined symbol "${expr.text}" in macro "${macro.nameToken.text}"`,
 						tokenSpan(expr),
 						file,
@@ -714,9 +986,6 @@ function validateBody(
 			case "dict-literal":
 				for (const entry of expr.entries) check(entry.value);
 				break;
-			case "builtin-call":
-				check(expr.argument);
-				break;
 			case "call-expression":
 				check(expr.callee);
 				for (const arg of expr.args) check(arg);
@@ -726,39 +995,482 @@ function validateBody(
 		}
 	};
 
-	for (const statement of macro.body) {
-		const content = statement.content;
-		if (!content) continue;
-		switch (content.type) {
-			case "byte":
-			case "word":
-				for (const [e] of content.list) check(e);
-				break;
-			case "org":
-				check(content.expression);
-				break;
-			case "res":
-				check(content.count);
-				break;
-			case "assignment": {
-				// An expression macro's params are bound within its own body.
-				const added = (content.params ?? []).filter((p) => !bound.has(p.text));
-				for (const p of added) bound.add(p.text);
-				check(content.expression);
-				for (const attribute of content.attributes) check(attribute.value);
-				for (const p of added) bound.delete(p.text);
-				break;
-			}
-			case "instruction":
-				if (isMacro(content.mnemonic.text)) break;
-				for (const operand of content.operands) {
-					if (operand.type !== "accumulator-operand") {
-						check(operand.expression);
-					}
+	const walk = (statements: readonly Statement[]): void => {
+		for (const statement of statements) {
+			const content = statement.content;
+			if (!content) continue;
+			switch (content.type) {
+				case "byte":
+				case "word":
+					for (const [e] of content.list) check(e);
+					break;
+				case "org":
+					check(content.expression);
+					break;
+				case "res":
+					check(content.count);
+					break;
+				case "assignment": {
+					// An expression macro's params are bound within its own body.
+					const added = (content.params ?? []).filter(
+						(p) => !bound.has(p.text),
+					);
+					for (const p of added) bound.add(p.text);
+					check(content.expression);
+					// Attribute values are discarded without ever being evaluated,
+					// so an unresolvable name in one isn't an error.
+					for (const p of added) bound.delete(p.text);
+					break;
 				}
-				break;
-			default:
-				break;
+				case "instruction":
+					if (isMacro(content.mnemonic.text)) break;
+					for (const operand of content.operands) {
+						if (operand.type !== "accumulator-operand") {
+							check(operand.expression);
+						}
+					}
+					break;
+				case "if-block":
+					for (const arm of content.arms) {
+						if (arm.condition) check(arm.condition);
+						walk(arm.body);
+					}
+					break;
+				case "error-directive":
+					check(content.message);
+					break;
+				default:
+					break;
+			}
+		}
+	};
+	walk(macro.body);
+}
+
+/**
+ * Scope `.if` arms - a static pass over the (macro-expanded) statement
+ * stream. A name defined inside an arm (a label or an assignment) is local
+ * to that arm: it's renamed with a per-arm suffix, so it can't be referenced
+ * (or collide) outside. This keeps the set of outside-visible definitions
+ * pass-invariant while arm selection is re-decided every pass - a label that
+ * flips in and out of existence with an address-dependent condition is
+ * unrepresentable rather than a hazard. The idiom for "the address of
+ * whichever arm wins" is a label on the `.if` statement itself.
+ *
+ * Arms are also emit-only: `.import`, `.export`, and `.macro` are rejected
+ * inside them.
+ */
+/**
+ * Anonymous labels - a static rewrite that runs before everything else.
+ *
+ * A lone `:` defines one; `:+` refers to the next one lexically, `:++` to the
+ * one after that, `:-` to the previous one, and so on. They're numbered per
+ * *context* - a module's top level, or one macro body - and rewritten to
+ * `:0`, `:1`, ... which no identifier can spell, so they behave like ordinary
+ * private labels from there on.
+ *
+ * A macro body is its own context, so a body's anonymous labels can't be
+ * reached from the call site and vice versa; macro hygiene then renames them
+ * per expansion, so two calls in one scope don't collide. `.if` arms are *not*
+ * their own context - numbering is lexical, so it can't depend on which arm
+ * wins - but arm-local visibility still applies afterwards, which means a
+ * reference reaching into an arm from outside resolves to nothing, like any
+ * other arm-local name.
+ */
+export function resolveAnonymousLabels(
+	modules: readonly LoadedModule[],
+	report: Reporter,
+): void {
+	for (const module of modules) {
+		for (const statement of module.statements) {
+			const content = statement.content;
+			const macro =
+				content?.type === "macro"
+					? content
+					: content?.type === "export" && content.content?.type === "macro"
+						? content.content
+						: undefined;
+			if (macro) resolveAnonymousContext(macro.body, module.id, report);
+		}
+		resolveAnonymousContext(module.statements, module.id, report);
+	}
+}
+
+/** A numbered anonymous label (`:0`), as the first walk leaves them. */
+function isAnonymousLabel(text: string): boolean {
+	return (
+		text.length > 1 && text[0] === ":" && text[1]! >= "0" && text[1]! <= "9"
+	);
+}
+
+/** `:++` -> two forward, `:--` -> two back; undefined for anything else. */
+function anonymousReference(
+	text: string,
+): { forward: boolean; count: number } | undefined {
+	if (text.length < 2 || text[0] !== ":") return undefined;
+	const sign = text[1]!;
+	if (sign !== "+" && sign !== "-") return undefined;
+	for (let i = 2; i < text.length; i++) {
+		if (text[i] !== sign) return undefined;
+	}
+	return { forward: sign === "+", count: text.length - 1 };
+}
+
+function resolveAnonymousContext(
+	statements: readonly Statement[],
+	file: string,
+	report: Reporter,
+): void {
+	// Walk 1: number every definition, so forward references have something
+	// to point at.
+	const names: string[] = [];
+	walkAnonymous(statements, {
+		label: (label) => {
+			if (label.identifier.text !== ANONYMOUS_LABEL) return;
+			const name = ANONYMOUS_LABEL + names.length;
+			label.identifier = { ...label.identifier, text: name };
+			names.push(name);
+		},
+		expression: () => {},
+	});
+	// Walk 2 runs even when nothing was defined, so a stray `:+` gets the
+	// diagnostic it deserves instead of an undefined-symbol error.
+	//
+	// Resolve references against how many definitions have gone by.
+	// Labels are counted before the statement's own content, so `: jmp :-`
+	// refers to the label on its own line.
+	let seen = 0;
+	walkAnonymous(statements, {
+		label: (label) => {
+			if (isAnonymousLabel(label.identifier.text)) seen++;
+		},
+		expression: (expr) => {
+			if (expr.type !== "identifier") return;
+			const reference = anonymousReference(expr.text);
+			if (!reference) return;
+			const index = reference.forward
+				? seen + reference.count - 1
+				: seen - reference.count;
+			const target = names[index];
+			if (target === undefined) {
+				const which = reference.forward ? "after" : "before";
+				const nth = reference.count === 1 ? "" : `${ordinal(reference.count)} `;
+				report(
+					Codes.NoSuchAnonymousLabel,
+					`There is no ${nth}anonymous label ${which} this point`,
+					tokenSpan(expr),
+					file,
+				);
+				return;
+			}
+			expr.text = target;
+		},
+	});
+}
+
+function ordinal(n: number): string {
+	return n === 2 ? "second" : n === 3 ? "third" : n === 4 ? "fourth" : `${n}th`;
+}
+
+/**
+ * Walk statements in lexical order, reporting label definitions and every
+ * expression. Descends into `.if` arms (interleaving each arm's condition with
+ * its body, as written) but not into macro bodies, which are numbered as their
+ * own contexts.
+ */
+function walkAnonymous(
+	statements: readonly Statement[],
+	visit: {
+		label: (label: Label) => void;
+		expression: (expr: Expression) => void;
+	},
+): void {
+	for (const statement of statements) {
+		for (const label of statement.labels) visit.label(label);
+		const content = statement.content;
+		if (!content || content.type === "macro") continue;
+		if (content.type === "if-block") {
+			for (const arm of content.arms) {
+				if (arm.condition) visitExpression(arm.condition, visit.expression);
+				walkAnonymous(arm.body, visit);
+			}
+			continue;
+		}
+		visitContentExpressions(content, visit.expression);
+	}
+}
+
+/** Every expression directly in `content` (an `if-block`'s arms excepted). */
+function visitContentExpressions(
+	content: StatementContent,
+	visit: (expr: Expression) => void,
+): void {
+	switch (content.type) {
+		case "byte":
+		case "word":
+			for (const [expression] of content.list)
+				visitExpression(expression, visit);
+			break;
+		case "org":
+			visitExpression(content.expression, visit);
+			break;
+		case "res":
+			visitExpression(content.count, visit);
+			break;
+		case "assignment":
+			visitExpression(content.expression, visit);
+			for (const attribute of content.attributes) {
+				visitExpression(attribute.value, visit);
+			}
+			break;
+		case "instruction":
+			for (const operand of content.operands) {
+				if (operand.type !== "accumulator-operand") {
+					visitExpression(operand.expression, visit);
+				}
+			}
+			break;
+		case "error-directive":
+			visitExpression(content.message, visit);
+			break;
+		case "export":
+			if (content.content) visitContentExpressions(content.content, visit);
+			break;
+		default:
+			break; // import, segment directives, macro
+	}
+}
+
+function visitExpression(
+	expr: Expression,
+	visit: (expr: Expression) => void,
+): void {
+	visit(expr);
+	switch (expr.type) {
+		case "grouped-expression":
+		case "prefix-expression":
+			visitExpression(expr.expression, visit);
+			break;
+		case "infix-expression":
+			visitExpression(expr.left, visit);
+			visitExpression(expr.right, visit);
+			break;
+		case "member-expression":
+			visitExpression(expr.object, visit);
+			break;
+		case "call-expression":
+			visitExpression(expr.callee, visit);
+			for (const argument of expr.args) visitExpression(argument, visit);
+			break;
+		case "dict-literal":
+			for (const entry of expr.entries) visitExpression(entry.value, visit);
+			break;
+		default:
+			break; // literals and `*`
+	}
+}
+
+/** Does `name` name a local label? Only a leading `@` counts. */
+function isLocalName(name: string): boolean {
+	return name.startsWith("@");
+}
+
+/**
+ * Local labels (`@name`) - a static rewrite that runs *before* macro
+ * expansion.
+ *
+ * A local label belongs to the nearest preceding non-local label and stays in
+ * scope until the next one; locals written before any label belong to a
+ * module-initial scope. Qualifying `@name` to `owner@name` turns them into
+ * ordinary symbols, so define-once, forward references, and scoping all come
+ * from machinery that already exists. Both the qualified form and the
+ * module-initial owner (`@`) are unspellable, so a reference that escapes its
+ * scope resolves to nothing rather than silently reaching another scope's
+ * label - and it reports as the `@name` the author wrote, because an
+ * out-of-scope name is left unqualified.
+ *
+ * Two deliberate boundaries:
+ *
+ * - **`.if` arms neither open nor close a scope.** An arm belongs to the scope
+ *   in effect at the `.if`, so which arm wins can never change what a local
+ *   label means - the same pass-invariance `scopeIfArms` exists to protect.
+ *   (Arm-local visibility still applies afterwards: `scopeIfArms` renames the
+ *   qualified name like any other arm definition.)
+ * - **Macro bodies are left alone**, because `substituteStatement` doesn't
+ *   descend into them. A body's `@name` is renamed per expansion by macro
+ *   hygiene, which already makes it unique and unreachable from outside, and a
+ *   body's free `@name` is caught by the definition-site free-name check.
+ *   Running before expansion is what keeps the two mechanisms from colliding -
+ *   in particular, it means a macro call can't silently re-point the caller's
+ *   local scope, and an expanded body can't capture the caller's locals.
+ */
+export function scopeLocalLabels(
+	modules: readonly LoadedModule[],
+	report: Reporter,
+): void {
+	for (const module of modules) {
+		// `@` is the module-initial scope: no real label starts with one, so its
+		// locals (`@@name`) can't collide with any labelled scope's.
+		let owner = "@";
+		let run: Statement[] = [];
+		const flush = () => {
+			qualifyLocals(run, owner, module.id, report);
+			run = [];
+		};
+		for (const statement of module.statements) {
+			const opener = openingLabel(statement, module.id, report);
+			if (opener !== undefined) {
+				flush();
+				owner = opener;
+			}
+			run.push(statement);
+		}
+		flush();
+	}
+}
+
+// The non-local label that makes a statement start a new local scope, if any.
+// Several labels on one statement are aliases, so the last one wins.
+function openingLabel(
+	statement: Statement,
+	file: string,
+	report: Reporter,
+): string | undefined {
+	let opener: string | undefined;
+	for (const label of statement.labels) {
+		if (!isLocalName(label.identifier.text)) opener = label.identifier.text;
+	}
+	const content = statement.content;
+	if (content?.type === "export" && content.nameToken) {
+		if (isLocalName(content.nameToken.text)) {
+			report(
+				Codes.LocalLabelExported,
+				`Local label "${content.nameToken.text}" is private to its scope and cannot be exported`,
+				tokenSpan(content.nameToken),
+				file,
+			);
+		} else if (content.definesLabel) {
+			opener = content.nameToken.text;
+		}
+	}
+	return opener;
+}
+
+// Qualify every local name one scope defines, across the whole scope - so a
+// local may be referenced before it is defined, like any other symbol.
+function qualifyLocals(
+	statements: readonly Statement[],
+	owner: string,
+	file: string,
+	report: Reporter,
+): void {
+	const defined = new Set<string>();
+	collectLocalDefinitions(statements, defined);
+	if (!defined.size) return;
+	const subst = new Map<string, Substitution>();
+	for (const name of defined) {
+		subst.set(name, { kind: "rename", name: owner + name });
+	}
+	for (const statement of statements) {
+		substituteStatement(statement, subst, file, report);
+	}
+}
+
+// Local names a scope defines. Descends into `.if` arms (an arm belongs to the
+// enclosing scope) but not into macro bodies.
+function collectLocalDefinitions(
+	statements: readonly Statement[],
+	into: Set<string>,
+): void {
+	for (const statement of statements) {
+		for (const label of statement.labels) {
+			if (isLocalName(label.identifier.text)) into.add(label.identifier.text);
+		}
+		const content = statement.content;
+		if (content?.type === "assignment") {
+			if (isLocalName(content.identifier.text))
+				into.add(content.identifier.text);
+		} else if (content?.type === "if-block") {
+			for (const arm of content.arms) collectLocalDefinitions(arm.body, into);
+		}
+	}
+}
+
+export function scopeIfArms(
+	modules: readonly LoadedModule[],
+	report: Reporter,
+): void {
+	let counter = 0;
+	for (const module of modules) {
+		scopeStatements(
+			module.statements,
+			new Map(),
+			module.id,
+			() => ++counter,
+			report,
+		);
+	}
+}
+
+// Walk `statements` looking for `.if` blocks; `outer` holds the enclosing
+// arms' renames (empty at top level). Nested arms shadow outer renames.
+function scopeStatements(
+	statements: readonly Statement[],
+	outer: Map<string, Substitution>,
+	file: string,
+	gensym: () => number,
+	report: Reporter,
+): void {
+	for (const statement of statements) {
+		const content = statement.content;
+		if (content?.type !== "if-block") continue;
+		for (const arm of content.arms) {
+			// The condition evaluates in the enclosing scope.
+			if (arm.condition && outer.size) {
+				arm.condition = substituteExpr(arm.condition, outer, file, report);
+			}
+			const merged = new Map(outer);
+			const suffix = `@if${gensym()}`;
+			for (const name of directNames(arm.body)) {
+				merged.set(name, { kind: "rename", name: name + suffix });
+			}
+			for (const armStatement of arm.body) {
+				const inner = armStatement.content;
+				const keyword =
+					inner?.type === "import"
+						? inner.importToken
+						: inner?.type === "export"
+							? inner.exportToken
+							: inner?.type === "macro"
+								? inner.macroToken
+								: undefined;
+				if (inner && keyword) {
+					report(
+						Codes.DirectiveInIfArm,
+						`\`.${inner.type}\` is not allowed inside an \`.if\` arm`,
+						tokenSpan(keyword),
+						file,
+					);
+					continue;
+				}
+				if (inner?.type === "if-block") {
+					// The nested `.if` statement's own labels belong to this arm;
+					// its arms recurse with this arm's renames as the outer scope.
+					if (merged.size) {
+						for (const label of armStatement.labels) {
+							label.identifier = substituteName(
+								label.identifier,
+								merged,
+								file,
+								report,
+							);
+						}
+					}
+					scopeStatements([armStatement], merged, file, gensym, report);
+				} else if (merged.size) {
+					substituteStatement(armStatement, merged, file, report);
+				}
+			}
 		}
 	}
 }

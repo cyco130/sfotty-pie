@@ -3,12 +3,37 @@ import type { Statement } from "./parser.ts";
 import {
 	SEP,
 	SymbolTable,
-	type SymbolAttributes,
+	type Definition,
 	type SymbolKind,
 } from "./symbols.ts";
 import type { Value } from "./value.ts";
 
 type Span = readonly [number, number];
+
+/** A resolved reference: where in `file` (the map key), and to which symbol
+ * (a qualified name in the `Message.symbol` spelling - a `definitions` key).
+ */
+export interface Reference {
+	start: number;
+	end: number;
+	symbol: string;
+}
+
+/**
+ * What a module can see and offer: its imports (splats and namespace
+ * bindings) and its export sets. The assemble result carries one per module,
+ * for tooling that needs scope-aware candidate sets (completion).
+ */
+export interface ModuleScope {
+	/** Splat-imported module ids, in import order. */
+	splats: readonly string[];
+	/** Namespace binding name -> bound module id. */
+	bindings: ReadonlyMap<string, string>;
+	/** Symbol names this module exports. */
+	exports: ReadonlySet<string>;
+	/** Macro names this module exports (filled from expansion data). */
+	macroExports: ReadonlySet<string>;
+}
 
 /**
  * Per-module symbol scopes layered over one `SymbolTable` via qualified keys.
@@ -23,6 +48,8 @@ export class Scopes {
 	#exports = new Map<string, ReadonlySet<string>>();
 	#splats = new Map<string, readonly string[]>();
 	#bindings = new Map<string, ReadonlyMap<string, string>>();
+	#references = new Map<string, Reference[]>();
+	#referenceSpans = new Set<string>();
 
 	constructor(modules: readonly LoadedModule[]) {
 		for (const module of modules) {
@@ -44,6 +71,10 @@ export class Scopes {
 
 	beginPass(): void {
 		this.#table.beginPass();
+		// References re-record each pass so only the converged pass's survive
+		// (same discipline as diagnostics - earlier passes see stale values).
+		this.#references.clear();
+		this.#referenceSpans.clear();
 	}
 	snapshot(): Map<string, Value | undefined> {
 		return this.#table.snapshot();
@@ -58,15 +89,8 @@ export class Scopes {
 		value: Value | undefined,
 		kind: SymbolKind,
 		span: Span,
-		attributes?: SymbolAttributes,
 	): Span | undefined {
-		return this.#table.define(
-			moduleId + SEP + name,
-			value,
-			kind,
-			span,
-			attributes,
-		);
+		return this.#table.define(moduleId + SEP + name, value, kind, span);
 	}
 
 	/** Whether `name` is defined in `moduleId`'s own scope (any value state). */
@@ -80,19 +104,6 @@ export class Scopes {
 		return key === undefined ? undefined : this.#table.resolve(key);
 	}
 
-	/** The kind and placement attributes of `name` as seen from `moduleId`. */
-	attributesOf(
-		moduleId: string,
-		name: string,
-	): { kind: SymbolKind; attributes: SymbolAttributes } | undefined {
-		const key = this.#scopeKey(moduleId, name);
-		if (key === undefined) return undefined;
-		const kind = this.#table.kindOf(key);
-		const attributes = this.#table.attributesOf(key);
-		if (kind === undefined || attributes === undefined) return undefined;
-		return { kind, attributes };
-	}
-
 	/**
 	 * A module's resolved symbols, unqualified (for the assemble result).
 	 * Dictionary entries surface under their user-facing `::` paths.
@@ -101,13 +112,109 @@ export class Scopes {
 		const prefix = moduleId + SEP;
 		const out = new Map<string, Value>();
 		for (const [key, value] of this.#table.resolved()) {
-			// Functions are static machinery, not result data.
-			if (typeof value === "object") continue;
-			if (key.startsWith(prefix)) {
-				out.set(key.slice(prefix.length).split(SEP).join("::"), value);
-			}
+			// Functions are static machinery, not result data. Dictionaries are
+			// data, and surface whole - flattening them into `::` paths is a
+			// consumer's job (a debug-info format's, when there is one).
+			if (typeof value === "object" && value.type === "function") continue;
+			if (!key.startsWith(prefix)) continue;
+			const name = key.slice(prefix.length);
+			// Dictionary entries have their own qualified symbols (for
+			// definition sites), but surface through the whole dict here.
+			if (name.includes(SEP)) continue;
+			out.set(name, value);
 		}
 		return out;
+	}
+
+	/**
+	 * Record that `name` was referenced at `span` in `moduleId`'s source (the
+	 * caller passes the hygiene-adjusted module, so span and file agree). A
+	 * name that resolves to nothing records nothing; a span records once (an
+	 * expression can re-evaluate within a pass - collect and render both walk
+	 * `.res` counts, for instance).
+	 */
+	recordReference(moduleId: string, name: string, span: Span): void {
+		const key = this.#scopeKey(moduleId, name);
+		if (key === undefined) return;
+		const spanKey = moduleId + SEP + span[0] + SEP + span[1];
+		if (this.#referenceSpans.has(spanKey)) return;
+		this.#referenceSpans.add(spanKey);
+		const list = this.#references.get(moduleId);
+		const reference = { start: span[0], end: span[1], symbol: key };
+		if (list) list.push(reference);
+		else this.#references.set(moduleId, [reference]);
+	}
+
+	/** The recorded references of the last (converged) pass, per file. */
+	references(): Map<string, Reference[]> {
+		return this.#references;
+	}
+
+	/** Per-module visibility, for the assemble result (`macroExports` is the
+	 * expansion step's knowledge - the caller fills it in). */
+	moduleScopes(
+		macroExports: ReadonlyMap<string, ReadonlySet<string>>,
+	): Map<string, ModuleScope> {
+		const out = new Map<string, ModuleScope>();
+		for (const [id, exports] of this.#exports) {
+			out.set(id, {
+				splats: this.#splats.get(id) ?? [],
+				bindings: this.#bindings.get(id) ?? new Map(),
+				exports,
+				macroExports: macroExports.get(id) ?? new Set(),
+			});
+		}
+		return out;
+	}
+
+	/**
+	 * The definition `name` resolves to as seen from `moduleId` (own scope,
+	 * splat imports, or a namespaced path), if any.
+	 */
+	definitionOf(moduleId: string, name: string): Definition | undefined {
+		const key = this.#scopeKey(moduleId, name);
+		return key === undefined ? undefined : this.#definitionFor(key);
+	}
+
+	/**
+	 * Every symbol definition, keyed by qualified name (module NUL name,
+	 * dictionary paths NUL-joined further - the same spelling as
+	 * `Message.symbol`). Includes unresolved and function-valued symbols;
+	 * kinds distinguish them.
+	 */
+	definitions(): Map<string, Definition> {
+		const out = new Map<string, Definition>();
+		for (const [key] of this.#table.definitions()) {
+			out.set(key, this.#definitionFor(key)!);
+		}
+		return out;
+	}
+
+	// The file is the qualified key's module: a definition's span always
+	// indexes into the module it defines under (hygiene stamps both the scope
+	// and the token source to the macro's module - see `Definition`).
+	#definitionFor(key: string): Definition | undefined {
+		const definedAt = this.#table.definedAt(key);
+		if (definedAt === undefined) return undefined;
+		return {
+			file: key.slice(0, key.indexOf(SEP)),
+			start: definedAt[0],
+			end: definedAt[1],
+			kind: this.#table.kindOf(key)!,
+			value: this.#table.resolve(key),
+		};
+	}
+
+	/**
+	 * The qualified key `name` would resolve to from `moduleId`, or undefined.
+	 * Public for diagnostics (e.g. matching an undefined reference to a label
+	 * in a discarded segment): the import branches test structural export
+	 * *sets*, so they answer correctly even for names that were never defined.
+	 * The own-scope branch requires a table entry, so callers interested in
+	 * never-defined own-module names must check the direct key themselves.
+	 */
+	resolutionTarget(moduleId: string, name: string): string | undefined {
+		return this.#scopeKey(moduleId, name);
 	}
 
 	// The qualified key `name` resolves to from `moduleId`, or undefined.

@@ -25,8 +25,6 @@ function expr(e: Expression): string {
 			return `{${e.entries
 				.map((entry) => `${entry.key.text}: ${expr(entry.value)}`)
 				.join(", ")}}`;
-		case "builtin-call":
-			return `.${e.keyword.text.replace(/^\./, "")}(${expr(e.argument)})`;
 		case "call-expression":
 			return `${expr(e.callee)}(${e.args.map(expr).join(", ")})`;
 		default:
@@ -87,6 +85,8 @@ function content(c: StatementContent): string {
 			return `.emit ${c.nameToken.text}`;
 		case "emplace":
 			return `.emplace ${c.nameToken.text}`;
+		case "discard":
+			return `.discard ${c.nameToken.text}`;
 		case "import":
 			return `${c.binding ? `${c.binding.text} = ` : ""}.import ${c.specToken.text}`;
 		case "export":
@@ -101,6 +101,19 @@ function content(c: StatementContent): string {
 			return `.macro ${c.nameToken.text}${c.params
 				.map((p) => ` ${p.outToken ? ".out " : ""}${p.nameToken.text}`)
 				.join("")}`;
+		case "if-block":
+			return (
+				c.arms
+					.map(
+						(arm) =>
+							`.${arm.keyword.type}${arm.condition ? ` ${expr(arm.condition)}` : ""} [${arm.body
+								.map(stmt)
+								.join("; ")}]`,
+					)
+					.join(" ") + " .endif"
+			);
+		case "error-directive":
+			return `.error ${expr(c.message)}`;
 	}
 }
 
@@ -281,12 +294,8 @@ describe("directives", () => {
 		expect(dump("lda #~p")).toEqual(["lda #~p"]);
 	});
 
-	test("attribute tails and attribute builtins", () => {
+	test("attribute tails still parse (the values are discarded later)", () => {
 		expect(dump("BUF := $0600, size: 3")).toEqual(["BUF := $0600, size: 3"]);
-		expect(dump(".byte .sizeof(BUF)")).toEqual([".byte .sizeof(BUF)"]);
-		expect(dump(".byte .attributes(BUF)::size")).toEqual([
-			".byte .attributes(BUF)::size",
-		]);
 	});
 
 	test("dictionary literals", () => {
@@ -354,6 +363,47 @@ describe("directives", () => {
 			expect(c.list[0]![1]).toBeDefined(); // the trailing comma token
 		}
 		expect(dump(".byte 1,")).toEqual([".byte 1,"]);
+	});
+});
+
+describe(".if blocks and .error", () => {
+	test("arms with .elseif and .else", () => {
+		expect(
+			dump(".if c\nnop\n.elseif d\n.byte 1\n.else\n.byte 2\n.endif"),
+		).toEqual([".if c [nop] .elseif d [.byte 1] .else [.byte 2] .endif"]);
+	});
+
+	test("nested blocks consume their own .endif", () => {
+		expect(dump(".if c\n.if d\nnop\n.endif\n.endif")).toEqual([
+			".if c [.if d [nop] .endif] .endif",
+		]);
+	});
+
+	test("a label may sit on the .if statement", () => {
+		expect(dump("entry: .if c\nnop\n.endif")).toEqual([
+			"entry: .if c [nop] .endif",
+		]);
+	});
+
+	test(".error takes an expression", () => {
+		expect(dump('.error "boom"')).toEqual(['.error "boom"']);
+	});
+
+	test("a stray .endif is reported", () => {
+		const { errors } = parse(new SourceFile("t", ".endif\n"));
+		expect(errors[0]!.message).toBe("`.endif` without a matching `.if`");
+	});
+
+	test(".elseif after .else is rejected", () => {
+		const { errors } = parse(
+			new SourceFile("t", ".if c\n.else\n.elseif d\n.endif\n"),
+		);
+		expect(errors[0]!.message).toBe('".endif" (".else" is final) expected');
+	});
+
+	test("an unterminated .if is reported at EOF", () => {
+		const { errors } = parse(new SourceFile("t", ".if c\nnop\n"));
+		expect(errors[0]!.message).toBe('".endif" expected');
 	});
 });
 

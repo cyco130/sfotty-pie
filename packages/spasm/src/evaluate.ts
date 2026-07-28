@@ -1,39 +1,45 @@
+import { Codes } from "./codes.ts";
 import type { Token } from "./lexer.ts";
 import {
 	getExpressionLocation,
-	type BuiltinCall,
 	type Expression,
 	type InfixExpression,
 	type MemberExpression,
+	type MessageNote,
 	type PrefixExpression,
 } from "./parser.ts";
-import { SEP, type SymbolAttributes, type SymbolKind } from "./symbols.ts";
-import { decodeStringLiteral, type Value } from "./value.ts";
+import { SEP } from "./symbols.ts";
+import { decodeStringLiteral, type DictValue, type Value } from "./value.ts";
 
 export interface EvalEnv {
 	/**
 	 * Look up a symbol; `undefined` means "not resolved (yet)". `origin`, when
 	 * present, is the module the identifier lexically binds to (stamped by macro
-	 * expansion); otherwise the name resolves in the containing module.
+	 * expansion); otherwise the name resolves in the containing module. `span`
+	 * is the referencing token's span (a `::` path resolves per segment, each
+	 * with its own token's span) - the assemble env records it for reference
+	 * tracking; plain evaluation ignores it.
 	 */
-	resolve(name: string, origin?: string): Value | undefined;
-	/**
-	 * A symbol's kind and placement attributes, for `.attributes()`/
-	 * `.sizeof()`; `undefined` means the symbol isn't known (yet). Only
-	 * label-kind symbols carry attributes - the evaluator enforces that.
-	 */
-	attributesOf(
+	resolve(
 		name: string,
 		origin?: string,
-	): { kind: SymbolKind; attributes: SymbolAttributes } | undefined;
+		span?: readonly [number, number],
+	): Value | undefined;
 	/** Value of `*` (the location counter), or `undefined` outside a section. */
 	locationCounter: bigint | undefined;
 	/**
 	 * Report a hard error (type mismatch, divide-by-zero, bad escape). `file`
 	 * overrides the module the span refers into - hygiene-stamped tokens point
-	 * into their defining module's source.
+	 * into their defining module's source. `options.symbol` carries the
+	 * qualified symbol name on symbol-related diagnostics.
 	 */
-	report(message: string, span: readonly [number, number], file?: string): void;
+	report(
+		code: string,
+		message: string,
+		span: readonly [number, number],
+		file?: string,
+		options?: { notes?: MessageNote[]; symbol?: string },
+	): void;
 	/**
 	 * When set, an unresolved symbol is reported as undefined. The assemble loop
 	 * turns this on so the final (converged) pass flags genuinely-missing names,
@@ -45,6 +51,7 @@ export interface EvalEnv {
 }
 
 const MAX_APPLICATION_DEPTH = 64;
+const MAX_DICT_DEPTH = 16;
 
 /**
  * Evaluate an expression. Returns `undefined` if any part is unresolved (a
@@ -58,9 +65,12 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return BigInt(expr.text.replace(/_/g, ""));
 		case "hexadecimal":
 			return BigInt("0x" + expr.text.slice(1).replace(/_/g, ""));
+		case "binary":
+			return BigInt("0b" + expr.text.slice(1).replace(/_/g, ""));
 		case "string":
 			return decodeStringLiteral(expr.text, (escape) =>
 				env.report(
+					Codes.UnknownEscape,
 					`Unknown escape sequence "\\${escape}"`,
 					getExpressionLocation(expr),
 				),
@@ -68,6 +78,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 		case "character": {
 			const decoded = decodeStringLiteral(expr.text, (escape) =>
 				env.report(
+					Codes.UnknownEscape,
 					`Unknown escape sequence "\\${escape}"`,
 					getExpressionLocation(expr),
 				),
@@ -77,6 +88,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			const bytes = new TextEncoder().encode(decoded);
 			if (bytes.length !== 1) {
 				env.report(
+					Codes.CharacterNotSingleByte,
 					"A character literal must be a single byte",
 					getExpressionLocation(expr),
 				);
@@ -85,12 +97,14 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return BigInt(bytes[0]!);
 		}
 		case "identifier": {
-			const value = env.resolve(expr.text, expr.origin);
+			const value = env.resolve(expr.text, expr.origin, [expr.start, expr.end]);
 			if (value === undefined && env.strict) {
 				env.report(
+					Codes.UndefinedSymbol,
 					`Undefined symbol "${expr.text}"`,
 					getExpressionLocation(expr),
 					expr.origin,
+					{ symbol: expr.text },
 				);
 			}
 			return value;
@@ -104,47 +118,25 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 		case "infix-expression":
 			return infix(expr, env);
 		case "member-expression": {
-			// `.attributes(X)::size` - member access on the attributes dict.
-			const base = memberBase(expr);
-			if (
-				base.object.type === "builtin-call" &&
-				base.object.keyword.type === "attributes"
-			) {
-				const bad = base.keys.find((k) => k.text !== "size");
-				if (bad || base.keys.length !== 1) {
-					const at = bad ?? base.keys[1]!;
-					env.report(`Unknown attribute "${at.text}"`, [at.start, at.end]);
-					return undefined;
-				}
-				return attributeValue(base.object, env);
-			}
-			// A dictionary path: `N::key` (chains for nested dicts). Entries live
-			// in the symbol table under qualified names, so this is an ordinary
-			// resolve with the joined key; the root's hygiene origin applies to
-			// the whole path.
+			// A path: `N::key`, chaining for nested dictionaries. The root's
+			// hygiene origin applies to the whole path.
 			const path = flattenPath(expr);
 			if (!path) {
 				env.report(
-					"`::` requires a namespace name on its left",
+					Codes.ScopeResolutionOnValue,
+					"`::` requires a dictionary or an imported module on its left",
 					getExpressionLocation(expr),
 				);
 				return undefined;
 			}
-			const value = env.resolve(path.qualified, path.root.origin);
-			if (value === undefined && env.strict) {
-				env.report(
-					`Undefined symbol "${path.display}"`,
-					getExpressionLocation(expr),
-					path.root.origin,
-				);
-			}
-			return value;
+			return resolvePath(path, getExpressionLocation(expr), env);
 		}
 		case "call-expression": {
 			const fn = evaluate(expr.callee, env);
 			if (fn === undefined) return undefined; // unresolved; strict reported
 			if (typeof fn !== "object" || fn.type !== "function") {
 				env.report(
+					Codes.NotAFunction,
 					`${calleeName(expr.callee)} is not a function`,
 					getExpressionLocation(expr.callee),
 				);
@@ -152,6 +144,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			}
 			if (expr.args.length !== fn.params.length) {
 				env.report(
+					Codes.FunctionArity,
 					`${calleeName(expr.callee)} expects ${fn.params.length} argument(s), got ${expr.args.length}`,
 					getExpressionLocation(expr),
 				);
@@ -160,6 +153,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			const depth = (env.depth ?? 0) + 1;
 			if (depth > MAX_APPLICATION_DEPTH) {
 				env.report(
+					Codes.ApplicationTooDeep,
 					"Expression macro application too deep (recursion?)",
 					getExpressionLocation(expr),
 				);
@@ -173,12 +167,10 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				bindings.set(param, evaluate(expr.args[i]!, env));
 			});
 			const inner: EvalEnv = {
-				resolve: (name, origin) =>
+				resolve: (name, origin, span) =>
 					origin === undefined && bindings.has(name)
 						? bindings.get(name)
-						: env.resolve(name, origin ?? fn.moduleId),
-				attributesOf: (name, origin) =>
-					env.attributesOf(name, origin ?? fn.moduleId),
+						: env.resolve(name, origin ?? fn.moduleId, span),
 				locationCounter: env.locationCounter,
 				report: env.report,
 				strict: env.strict,
@@ -186,116 +178,177 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			};
 			return evaluate(fn.body, inner);
 		}
-		case "builtin-call":
-			if (expr.keyword.type === "sizeof") {
-				// `.sizeof(X)` is shorthand for `.attributes(X)::size`.
-				return attributeValue(expr, env);
+		case "dict-literal": {
+			// Entries are held inline, so an entry that doesn't resolve this pass
+			// is `undefined` inside an otherwise perfectly good dictionary - the
+			// parent is a value even when a child isn't yet.
+			const entries = new Map<string, Value | undefined>();
+			for (const entry of expr.entries) {
+				const key = entry.key.text;
+				if (entries.has(key)) {
+					env.report(
+						Codes.DuplicateDictKey,
+						`Duplicate dictionary key "${key}"`,
+						[entry.key.start, entry.key.end],
+					);
+					continue; // the first entry wins
+				}
+				entries.set(key, evaluate(entry.value, env));
 			}
-			env.report(
-				"`.attributes(...)` is a dictionary - access an attribute with `::`",
-				getExpressionLocation(expr),
-			);
-			return undefined;
-		case "dict-literal":
-			env.report(
-				"A dictionary literal can only be the right-hand side of a `=` definition",
-				getExpressionLocation(expr),
-			);
-			return undefined;
+			const dict: DictValue = { type: "dict", entries };
+			// A backstop for definitions that nest one level deeper every pass -
+			// mutual bare references (`N = { A: M }`, `M = { B: N }`), which the
+			// self-reference check can't see because neither literal names itself.
+			if (dictDepth(dict) > MAX_DICT_DEPTH) {
+				env.report(
+					Codes.DictionaryTooDeep,
+					"Dictionary nested too deeply - a cyclic definition?",
+					getExpressionLocation(expr),
+				);
+				return undefined;
+			}
+			return dict;
+		}
 	}
 }
 
-// The `size` attribute of the symbol named by an `.attributes`/`.sizeof`
-// argument. Undeclared size reads as 0 (labels are 0-sized for now; `:=`
-// equates bake a default of 1 at definition).
-function attributeValue(call: BuiltinCall, env: EvalEnv): Value | undefined {
-	const arg = call.argument;
-	let name: string;
-	let display: string;
-	let origin: string | undefined;
-	if (arg.type === "identifier") {
-		name = display = arg.text;
-		origin = arg.origin;
-	} else if (arg.type === "member-expression") {
-		const path = flattenPath(arg);
-		if (!path) {
-			env.report(
-				"`.attributes()` takes a symbol name",
-				getExpressionLocation(arg),
-			);
-			return undefined;
-		}
-		name = path.qualified;
-		display = path.display;
-		origin = path.root.origin;
-	} else {
-		env.report(
-			"`.attributes()` takes a symbol name",
-			getExpressionLocation(arg),
-		);
-		return undefined;
-	}
-
-	const info = env.attributesOf(name, origin);
-	if (info === undefined) {
+/**
+ * Resolve a path (`A::B::C`) in two steps: find the value its root names, then
+ * index the remaining keys into it.
+ *
+ * The root is either a symbol in scope - normally a dictionary - or a
+ * *namespace binding* (`lib = .import "m"`), which is not itself a value and
+ * so spends the first key reaching an export of the bound module. Everything
+ * after that is ordinary value indexing, which is what lets a dictionary
+ * exported by an imported module chain (`lib::N::V`).
+ */
+function resolvePath(
+	path: FlatPath,
+	span: readonly [number, number],
+	env: EvalEnv,
+): Value | undefined {
+	const origin = path.root.origin;
+	const reportUndefined = (display: string) => {
 		if (env.strict) {
 			env.report(
+				Codes.UndefinedSymbol,
 				`Undefined symbol "${display}"`,
-				getExpressionLocation(arg),
+				span,
 				origin,
+				{
+					symbol: path.qualified,
+				},
 			);
 		}
-		return undefined;
+	};
+
+	// Each resolve passes its own token's span (root alone, then one key at a
+	// time), so reference records stay per-segment: on `lib::N::KEY` the
+	// cursor over `lib` finds the binding, over `N` the export, over `KEY`
+	// the dictionary entry.
+	let value = env.resolve(path.root.text, origin, [
+		path.root.start,
+		path.root.end,
+	]);
+	let index = 0;
+	let written = path.root.text;
+	let seen = path.root.text;
+	if (value === undefined) {
+		// Not a value in scope; try the namespace-binding reading. (A root that
+		// is defined but merely unresolved this pass also lands here, and gets
+		// the same "undefined" answer it would have got anyway.)
+		const key0 = path.keyTokens[0]!;
+		value = env.resolve(path.root.text + SEP + path.keys[0]!, origin, [
+			key0.start,
+			key0.end,
+		]);
+		index = 1;
+		written += SEP + path.keys[0]!;
+		seen = path.root.text + "::" + path.keys[0]!;
+		if (value === undefined) {
+			reportUndefined(seen);
+			return undefined;
+		}
 	}
-	if (info.kind !== "label") {
-		env.report(
-			`Only labels have attributes - "${display}" is a ${info.kind}`,
-			getExpressionLocation(arg),
-		);
-		return undefined;
+
+	for (; index < path.keys.length; index++) {
+		const key = path.keys[index]!;
+		const token = path.keyTokens[index]!;
+		if (typeof value !== "object" || value.type !== "dict") {
+			env.report(
+				Codes.NotADictionary,
+				`"${seen}" is not a dictionary`,
+				span,
+				origin,
+			);
+			return undefined;
+		}
+		// Keys are statically known, so a missing one is a hard error rather
+		// than something that might still resolve on a later pass.
+		if (!value.entries.has(key)) {
+			env.report(
+				Codes.NoSuchDictKey,
+				`Dictionary "${seen}" has no entry "${key}"`,
+				span,
+				origin,
+			);
+			return undefined;
+		}
+		written += SEP + key;
+		// Purely for reference recording: dict literals define their entries
+		// as table symbols under qualified names, so when this path is backed
+		// by one, the key's span records against it. The traversal value stays
+		// the inline entry (dicts reached through non-symbol routes have no
+		// table backing, and record nothing).
+		env.resolve(written, origin, [token.start, token.end]);
+		value = value.entries.get(key);
+		seen += "::" + key;
+		if (value === undefined) {
+			reportUndefined(seen); // present, but not resolved (yet)
+			return undefined;
+		}
 	}
-	return "size" in info.attributes ? info.attributes.size : 0n;
+	return value;
 }
 
-// Collect a member chain's keys down to its base expression.
-function memberBase(expr: MemberExpression): {
-	object: Expression;
-	keys: { text: string; start: number; end: number }[];
-} {
-	const keys = [
-		{ text: expr.member.text, start: expr.member.start, end: expr.member.end },
-	];
-	let object = expr.object;
-	while (object.type === "member-expression") {
-		keys.unshift({
-			text: object.member.text,
-			start: object.member.start,
-			end: object.member.end,
-		});
-		object = object.object;
+// Nesting depth of a dictionary value (1 for a flat one).
+function dictDepth(value: Value | undefined): number {
+	if (typeof value !== "object" || value.type !== "dict") return 0;
+	let deepest = 0;
+	for (const entry of value.entries.values()) {
+		const depth = dictDepth(entry);
+		if (depth > deepest) deepest = depth;
 	}
-	return { object, keys };
+	return deepest + 1;
 }
 
-// Flatten `A::B::C` to its root identifier and joined keys; undefined when the
+interface FlatPath {
+	root: Token<"identifier">;
+	/** The keys after the root - always at least one. */
+	keys: readonly string[];
+	/** The keys' tokens, parallel to `keys` (for per-segment spans). */
+	keyTokens: readonly Token<"identifier">[];
+	qualified: string;
+	display: string;
+}
+
+// Flatten `A::B::C` to its root identifier and its keys; undefined when the
 // path doesn't bottom out at an identifier.
-function flattenPath(
-	expr: MemberExpression,
-):
-	| { root: Token<"identifier">; qualified: string; display: string }
-	| undefined {
-	const keys: string[] = [expr.member.text];
+function flattenPath(expr: MemberExpression): FlatPath | undefined {
+	const keyTokens: Token<"identifier">[] = [expr.member];
 	let object = expr.object;
 	while (object.type === "member-expression") {
-		keys.unshift(object.member.text);
+		keyTokens.unshift(object.member);
 		object = object.object;
 	}
 	if (object.type !== "identifier") return undefined;
-	keys.unshift(object.text);
+	const keys = keyTokens.map((token) => token.text);
 	return {
 		root: object,
-		qualified: keys.join(SEP),
-		display: keys.join("::"),
+		keys,
+		keyTokens,
+		qualified: [object.text, ...keys].join(SEP),
+		display: [object.text, ...keys].join("::"),
 	};
 }
 
@@ -316,11 +369,16 @@ function asNumber(
 	env: EvalEnv,
 ): bigint | undefined {
 	if (typeof value === "string") {
-		env.report("Expected a number, got a string", getExpressionLocation(expr));
+		env.report(
+			Codes.ExpectedNumber,
+			"Expected a number, got a string",
+			getExpressionLocation(expr),
+		);
 		return undefined;
 	}
 	if (typeof value === "object") {
 		env.report(
+			Codes.ExpectedNumber,
 			"Expected a number, got a function - apply it with `(...)`",
 			getExpressionLocation(expr),
 		);
@@ -382,6 +440,7 @@ function infix(expr: InfixExpression, env: EvalEnv): Value | undefined {
 		case ">>":
 			if (r < 0n) {
 				env.report(
+					Codes.NegativeShift,
 					"Shift count must not be negative",
 					getExpressionLocation(expr.right),
 				);
@@ -392,6 +451,7 @@ function infix(expr: InfixExpression, env: EvalEnv): Value | undefined {
 		case "%":
 			if (r === 0n) {
 				env.report(
+					Codes.DivisionByZero,
 					op === "/" ? "Division by zero" : "Modulo by zero",
 					getExpressionLocation(expr.right),
 				);

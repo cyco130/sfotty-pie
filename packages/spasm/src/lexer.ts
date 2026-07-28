@@ -14,7 +14,7 @@ export class Lexer {
 			this.position++;
 
 			return {
-				type: "error",
+				type: "invalid",
 				text: this.#source.slice(start, this.position),
 				start,
 				end: this.position,
@@ -50,6 +50,7 @@ export const DOT_KEYWORDS = [
 	"define_segment",
 	"emit",
 	"emplace",
+	"discard",
 	"import",
 	"export",
 	"out",
@@ -61,8 +62,11 @@ export const DOT_KEYWORDS = [
 	"zeropage",
 	"macro",
 	"endmacro",
-	"attributes",
-	"sizeof",
+	"if",
+	"elseif",
+	"else",
+	"endif",
+	"error",
 ] as const;
 
 const REGISTER_NAMES = ["a", "x", "y"] as const;
@@ -85,10 +89,10 @@ const REGEXES = [
 	[/\n|\r\n?/, "newline"],
 
 	// Whitespaces. A backslash before the line break is a line continuation:
-	// the whole sequence (trailing blanks allowed, comments not) is trivia, so
-	// the newline never reaches the parser.
+	// the whole sequence (trailing blanks and a trailing comment allowed) is
+	// trivia, so the newline never reaches the parser.
 	[/[ \t]+/, "whitespace"],
-	[/\\[ \t]*(?:\n|\r\n?)/, "whitespace"],
+	[/\\[ \t]*(?:;[^\n\r]*)?(?:\n|\r\n?)/, "whitespace"],
 	[/;[^\n\r]*/, "comment"],
 
 	// Keywords
@@ -100,7 +104,7 @@ const REGEXES = [
 			] as const,
 	),
 
-	[/\.[a-zA-Z_][a-zA-Z_0-9]*/, "error:keyword"],
+	[/\.[a-zA-Z_][a-zA-Z_0-9]*/, "invalid:keyword"],
 
 	...REGISTER_NAMES.map(
 		(keyword) =>
@@ -109,19 +113,26 @@ const REGEXES = [
 				keyword,
 			] as const,
 	),
-	[/[a-zA-Z_][a-zA-Z_0-9]*/, "identifier"],
+	// A leading `@` marks a local label (`@loop`), scoped to the enclosing
+	// non-local label. It's only ever leading: the qualified forms the local
+	// -label and macro-hygiene passes synthesize (`owner@name`, `name@3`) are
+	// deliberately unspellable.
+	[/@?[a-zA-Z_][a-zA-Z_0-9]*/, "identifier"],
 
-	// Numeric literals
+	// Numeric literals. `%` hugging a binary digit is a binary literal, so the
+	// modulo operator needs a space before a right operand starting with 0 or 1
+	// (`a % 1`, not `a%1`) - the ca65 tension, resolved the same way.
 	[/[0-9_]+/, "decimal"],
 	[/\$[0-9_A-Fa-f]+/, "hexadecimal"],
+	[/%[01_]+/, "binary"],
 
 	// String literals (single-line: a raw line break ends recovery here)
 	[/"(?:[^"\r\n\\]|\\.)*"/, "string"],
-	[/"(?:[^"\r\n\\]|\\.)*/, "error:string"],
+	[/"(?:[^"\r\n\\]|\\.)*/, "invalid:string"],
 
 	// Character literals (single-line)
 	[/'(?:[^'\r\n\\]|\\.)*'/, "character"],
-	[/'(?:[^'\r\n\\]|\\.)*/, "error:character"],
+	[/'(?:[^'\r\n\\]|\\.)*/, "invalid:character"],
 
 	// Multi character punctuation (must precede its single-character prefixes).
 	// Note `<<` vs `< <`: the shift lexes greedily, so comparing against a
@@ -166,7 +177,7 @@ const BIG_REGEX = new RegExp(
 	}).join("|"),
 );
 
-export type TokenType = (typeof REGEXES)[number][1] | "error";
+export type TokenType = (typeof REGEXES)[number][1] | "invalid";
 
 export type Token<T extends TokenType = TokenType> = Distribute<T>;
 
@@ -180,10 +191,26 @@ interface TypedToken<T extends TokenType = TokenType> {
 	/**
 	 * The module id an identifier lexically binds to. Macro expansion stamps
 	 * this on the free identifiers of an expanded body (hygiene: they resolve
-	 * where the macro was defined, not where it was called). Absent everywhere
-	 * else - an unstamped identifier binds to its containing module.
+	 * where the macro was defined, not where it was called), and on `.if`/
+	 * `.error` keywords (so keyword-spanned diagnostics attribute to the
+	 * macro's file). Absent everywhere else - an unstamped identifier binds to
+	 * its containing module.
 	 */
 	origin?: string;
+	/**
+	 * For a token spliced as a macro argument: where the value was written at
+	 * each substitution hop, outermost first - the param occurrence the
+	 * argument replaced, per expansion level. Carried on the expression's
+	 * anchor token; expansion-path diagnostics walk it.
+	 */
+	substitutedAt?: readonly SubstitutionSite[];
+}
+
+/** One argument-splice site: the param occurrence replaced, in `file`. */
+export interface SubstitutionSite {
+	file: string;
+	start: number;
+	end: number;
 }
 
 export type SkippedToken = Token<"whitespace" | "comment">;

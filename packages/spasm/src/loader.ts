@@ -1,4 +1,10 @@
-import { parse, type Message, type Statement } from "./parser.ts";
+import { Codes } from "./codes.ts";
+import {
+	parse,
+	type Message,
+	type MessageNote,
+	type Statement,
+} from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
 import { decodeStringLiteral } from "./value.ts";
 
@@ -6,10 +12,13 @@ import { decodeStringLiteral } from "./value.ts";
  * How the assembler reaches modules. `resolve` turns an `.import` specifier
  * into a canonical id (relative to the importing module); `read` returns a
  * module's source. Both may throw - the loader turns that into a diagnostic.
+ * `shortName`, when provided, gives a module's display name for formatted
+ * diagnostics (e.g. a cwd-relative path); ids stay canonical everywhere else.
  */
 export interface Host {
 	resolve(specifier: string, fromId: string): string | Promise<string>;
 	read(id: string): string | Promise<string>;
+	shortName?(id: string): string;
 }
 
 /** One resolved `.import`: `binding` is the namespace name, or null for a
@@ -17,6 +26,8 @@ export interface Host {
 export interface ImportRecord {
 	id: string;
 	binding: string | null;
+	/** The specifier string token's span, in the importing module's source. */
+	span: readonly [number, number];
 }
 
 export interface LoadedModule {
@@ -39,6 +50,13 @@ export async function loadModules(
 ): Promise<LoadedModule[]> {
 	const loaded = new Map<string, LoadedModule>();
 	const onStack = new Set<string>();
+	// The in-progress import chain, for cycle notes: where each module on the
+	// stack was imported from (the entry module has no import site).
+	const stack: Array<{
+		id: string;
+		span?: readonly [number, number];
+		importerId?: string;
+	}> = [];
 	const order: LoadedModule[] = [];
 
 	const load = async (
@@ -48,25 +66,46 @@ export async function loadModules(
 	): Promise<void> => {
 		if (loaded.has(id)) return; // already loaded (dedup)
 		if (onStack.has(id)) {
+			const cycle = stack.slice(stack.findIndex((entry) => entry.id === id));
+			const notes: MessageNote[] = [];
+			for (const entry of cycle) {
+				if (entry.span && entry.importerId !== undefined) {
+					notes.push({
+						message: `While importing "${entry.id}"`,
+						start: entry.span[0],
+						end: entry.span[1],
+						file: entry.importerId,
+					});
+				}
+			}
 			report(
 				diagnostics,
+				Codes.ImportCycle,
 				importedAt,
 				`Import cycle through "${id}"`,
 				importerId,
+				notes,
 			);
 			return;
 		}
 		onStack.add(id);
+		stack.push({ id, span: importedAt, importerId });
 
 		let source: string | undefined;
 		try {
 			source = await host.read(id);
 		} catch {
-			report(diagnostics, importedAt, `Cannot read module "${id}"`, importerId);
+			report(
+				diagnostics,
+				Codes.ModuleReadFailed,
+				importedAt,
+				`Cannot read module "${id}"`,
+				importerId,
+			);
 		}
 
 		if (source !== undefined) {
-			const sourceFile = new SourceFile(id, source);
+			const sourceFile = new SourceFile(id, source, host.shortName?.(id) ?? id);
 			const { module, errors } = parse(sourceFile);
 			for (const error of errors) error.file = id;
 			diagnostics.push(...errors);
@@ -86,13 +125,14 @@ export async function loadModules(
 					} catch {
 						report(
 							diagnostics,
+							Codes.ModuleResolveFailed,
 							span,
 							`Cannot resolve module "${specifier}"`,
 							id,
 						);
 					}
 					if (depId !== undefined) {
-						imports.push({ id: depId, binding: binding?.text ?? null });
+						imports.push({ id: depId, binding: binding?.text ?? null, span });
 						await load(depId, span, id);
 					}
 				}
@@ -108,6 +148,7 @@ export async function loadModules(
 		}
 
 		onStack.delete(id);
+		stack.pop();
 	};
 
 	await load(entryId);
@@ -116,10 +157,12 @@ export async function loadModules(
 
 function report(
 	diagnostics: Message[],
+	code: string,
 	span: readonly [number, number] | undefined,
 	message: string,
 	file?: string,
+	notes?: MessageNote[],
 ): void {
 	const [start, end] = span ?? [0, 0];
-	diagnostics.push({ type: "error", start, end, message, file });
+	diagnostics.push({ type: "error", code, start, end, message, file, notes });
 }

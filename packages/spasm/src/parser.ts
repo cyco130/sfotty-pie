@@ -1,3 +1,4 @@
+import { Codes } from "./codes.ts";
 import {
 	DOT_KEYWORDS,
 	Lexer,
@@ -72,15 +73,41 @@ class Parser {
 	#statement(): Statement {
 		const labels: Label[] = [];
 
-		while (this.#token.type === "identifier" && this.#lookahead.type === ":") {
-			labels.push({
-				type: "label",
-				identifier: this.#token,
-				colonToken: this.#lookahead,
-			});
+		for (;;) {
+			const token = this.#token;
+			// A lone `:` is an anonymous label, referred to by `:+` / `:-`. It
+			// carries the placeholder name `ANONYMOUS_LABEL` until the resolver
+			// numbers it, so it needs no separate AST shape.
+			if (token.type === ":") {
+				labels.push({
+					type: "label",
+					identifier: { ...token, type: "identifier", text: ANONYMOUS_LABEL },
+					colonToken: token,
+				});
+				this.#consume();
+				continue;
+			}
 
+			const colonToken = this.#lookahead;
+			if (token.type !== "identifier" || colonToken.type !== ":") break;
+
+			// `bne :+` is an instruction with an anonymous-label operand, not a
+			// label named `bne`. A sign hugging the colon binds rightwards, and
+			// nothing else can follow a label's colon that way - no statement
+			// starts with `+` or `-`.
+			const saved = this.#save();
 			this.#consume();
 			this.#consume();
+			const sign = this.#token;
+			if (
+				(sign.type === "+" || sign.type === "-") &&
+				sign.start === colonToken.end
+			) {
+				this.#restore(saved);
+				break;
+			}
+
+			labels.push({ type: "label", identifier: token, colonToken });
 		}
 
 		const content = this.#statementContent();
@@ -222,6 +249,15 @@ class Parser {
 				};
 			}
 
+			case "discard": {
+				this.#consume();
+				return {
+					type: "discard",
+					discardToken: token,
+					nameToken: this.#expect("string"),
+				};
+			}
+
 			case "import": {
 				this.#consume();
 				return {
@@ -236,9 +272,10 @@ class Parser {
 				this.#consume();
 				if (this.#token.type === "identifier") {
 					// `.export name:` defines a label here AND exports it;
-					// `.export name` exports a definition made elsewhere (repeat
-					// exports are fine). `.export name = ...` / `name := ...` /
-					// `name(...) = ...` still parse as exported definitions below.
+					// `.export name` exports a definition made elsewhere (a name
+					// may be exported only once - checked at assemble). `.export
+					// name = ...` / `name := ...` / `name(...) = ...` still parse
+					// as exported definitions below.
 					if (this.#lookahead.type === ":") {
 						const nameToken = this.#token;
 						this.#consume();
@@ -287,6 +324,30 @@ class Parser {
 				return { type: "segment-shorthand", keyword: token };
 			}
 
+			case "if":
+				return this.#ifBlock(token);
+
+			case "error": {
+				this.#consume();
+				return {
+					type: "error-directive",
+					errorToken: token,
+					message: this.#expression(1),
+				};
+			}
+
+			// An arm/end keyword only appears inside `#ifBlock`'s body loop; in
+			// statement position it's stray (or carries a label, which arms and
+			// `.endif` can't).
+			case "elseif":
+			case "else":
+			case "endif": {
+				const error = new ParseError(token, ["a statement"]);
+				error.code = Codes.StrayConditionalKeyword;
+				error.message = `\`.${token.type}\` without a matching \`.if\``;
+				throw error;
+			}
+
 			case "macro": {
 				this.#consume();
 				const nameToken = this.#expect("identifier");
@@ -318,6 +379,55 @@ class Parser {
 		}
 
 		return null;
+	}
+
+	// `.if cond ... [.elseif cond ...]* [.else ...] .endif` - a conditional
+	// block. Arms hold ordinary statements; nested `.if`s consume their own
+	// `.endif` recursively via `#statement`.
+	#ifBlock(ifToken: Token<"if">): IfBlock {
+		this.#consume();
+		const arms: IfArm[] = [];
+		let arm: IfArm = {
+			keyword: ifToken,
+			condition: this.#expression(1),
+			body: [],
+		};
+		this.#expect("newline");
+
+		for (;;) {
+			const token = this.#token;
+			switch (token.type) {
+				case "elseif": {
+					if (arm.condition === null) {
+						throw new ParseError(token, ['".endif" (".else" is final)']);
+					}
+					arms.push(arm);
+					this.#consume();
+					arm = { keyword: token, condition: this.#expression(1), body: [] };
+					this.#expect("newline");
+					break;
+				}
+				case "else": {
+					if (arm.condition === null) {
+						throw new ParseError(token, ['".endif" (".else" is final)']);
+					}
+					arms.push(arm);
+					this.#consume();
+					arm = { keyword: token, condition: null, body: [] };
+					this.#expect("newline");
+					break;
+				}
+				case "endif": {
+					arms.push(arm);
+					this.#consume();
+					return { type: "if-block", arms, endifToken: token };
+				}
+				case "eof":
+					throw new ParseError(token, ['".endif"']);
+				default:
+					arm.body.push(this.#statement());
+			}
+		}
 	}
 
 	// Operands are comma-separated. A comma followed by a register name binds
@@ -556,8 +666,28 @@ class Parser {
 				this.#consume();
 				return this.#callTail(this.#memberTail(token));
 			}
+			// `:+` / `:++` / `:-` ... - the next or previous anonymous label.
+			// Adjacency is required, and that is what keeps `key: +1` in a
+			// dictionary or an attribute tail a keyed entry with a signed value:
+			// there the `:` is consumed by the entry rule, never reaching here.
+			case ":": {
+				this.#consume();
+				const sign = this.#token.type;
+				if ((sign !== "+" && sign !== "-") || this.#token.start !== token.end) {
+					throw new ParseError(this.#token, ['"+"', '"-"']);
+				}
+				let text: string = ":";
+				let end = token.end;
+				while (this.#token.type === sign && this.#token.start === end) {
+					text += sign;
+					end = this.#token.end;
+					this.#consume();
+				}
+				return { ...token, type: "identifier", text, end };
+			}
 			case "decimal":
 			case "hexadecimal":
+			case "binary":
 			case "string":
 			case "character":
 			case "*": {
@@ -581,25 +711,6 @@ class Parser {
 					operator,
 					expression,
 				};
-			}
-
-			// Builtin calls: a dot-keyword hugging `(` is the call meaning of the
-			// parenthesis. `.attributes(X)` yields the symbol's attribute dict
-			// (member-accessed with `::`); `.sizeof(X)` is its `size` shorthand.
-			case "attributes":
-			case "sizeof": {
-				const keyword = token;
-				this.#consume();
-				const openingBracketToken = this.#expect("(");
-				const argument = this.#expression(1);
-				const closingBracketToken = this.#expect(")");
-				return this.#memberTail({
-					type: "builtin-call",
-					keyword,
-					openingBracketToken,
-					argument,
-					closingBracketToken,
-				});
 			}
 
 			// Dictionary literal. `{` opens a context where newlines separate
@@ -882,15 +993,39 @@ export interface ParsedModule {
 	errors: ParseError[];
 }
 
-export interface Message {
-	type: "error" | "warning" | "info";
+/**
+ * A secondary span attached to a `Message` - "previously defined here",
+ * "imported here", and the like. Notes carry no notes of their own.
+ */
+export interface MessageNote {
 	start: number;
 	end: number;
 	message: string;
 	/** Module id the span refers into, for file:line:col attribution. */
 	file?: string;
-	/** Pre-rendered `file:line:col: type: message` + source line + caret. */
+}
+
+export interface Message {
+	type: "error" | "warning" | "info";
+	/** The diagnostic's stable code ("SP2001", ...) - see src/codes.ts. */
+	code: string;
+	start: number;
+	end: number;
+	message: string;
+	/** Module id the span refers into, for file:line:col attribution. */
+	file?: string;
+	/** For symbol-related diagnostics (undefined symbol, ...): the qualified
+	 * symbol name, machine-readable (dictionary paths NUL-joined). */
+	symbol?: string;
+	/** Related locations, rendered as `note:` lines after the message. */
+	notes?: MessageNote[];
+	/**
+	 * Pre-rendered `file:line:col - type: message` + source excerpt with a
+	 * squiggle marker, followed by one such block per note.
+	 */
 	formatted?: string;
+	/** Like `formatted`, with ANSI colors - print when stderr is a tty. */
+	formattedColor?: string;
 }
 
 export class ParseError implements Message {
@@ -917,6 +1052,7 @@ export class ParseError implements Message {
 	}
 
 	type = "error" as const;
+	code: string = Codes.Expected;
 	message: string;
 	start: number;
 	end: number;
@@ -930,6 +1066,7 @@ export function getExpressionLocation(
 	switch (expression.type) {
 		case "decimal":
 		case "hexadecimal":
+		case "binary":
 		case "identifier":
 		case "string":
 		case "character":
@@ -950,8 +1087,6 @@ export function getExpressionLocation(
 				expression.openingBraceToken.start,
 				expression.closingBraceToken.end,
 			];
-		case "builtin-call":
-			return [expression.keyword.start, expression.closingBracketToken.end];
 		case "call-expression":
 			return [
 				getExpressionLocation(expression.callee)[0],
@@ -967,6 +1102,56 @@ export function getExpressionLocation(
 				getExpressionLocation(expression.left)[0],
 				getExpressionLocation(expression.right)[1],
 			];
+		default:
+			impossible(expression);
+	}
+}
+
+/**
+ * The hygiene origin of an expression's leftmost token - the module whose
+ * source `getExpressionLocation(expression)[0]` indexes into (undefined means
+ * the containing module). Diagnostics spanning an expression attribute with
+ * this so span and file agree even in macro-expanded statements, where an
+ * operand's tokens may come from a different file than the statement around
+ * it.
+ */
+export function getExpressionOrigin(
+	expression: Expression,
+): string | undefined {
+	return getExpressionAnchorToken(expression)?.origin;
+}
+
+/**
+ * The expression's *anchor* token: the leftmost token that can carry hygiene
+ * metadata (`origin`, `substitutedAt`). Splicing writes there and diagnostics
+ * read there, so the two always meet on the same token.
+ */
+export function getExpressionAnchorToken(
+	expression: Expression,
+): Token | undefined {
+	switch (expression.type) {
+		case "decimal":
+		case "hexadecimal":
+		case "binary":
+		case "identifier":
+		case "string":
+		case "character":
+		case "*":
+			return expression;
+		case "member-expression":
+			return getExpressionAnchorToken(expression.object);
+		// Only identifiers (and a few keywords) get hygiene stamps, so for
+		// wrappers whose leftmost token is punctuation, the inner expression
+		// is the informative one - its tokens come from the same source text.
+		case "grouped-expression":
+		case "prefix-expression":
+			return getExpressionAnchorToken(expression.expression);
+		case "dict-literal":
+			return expression.openingBraceToken;
+		case "call-expression":
+			return getExpressionAnchorToken(expression.callee);
+		case "infix-expression":
+			return getExpressionAnchorToken(expression.left);
 		default:
 			impossible(expression);
 	}
@@ -1019,6 +1204,21 @@ export interface Statement {
 	labels: Label[];
 	content: StatementContent | null;
 	newline: Token<"newline"> | null;
+	/**
+	 * For a statement cloned out of a macro body: the chain of call sites it
+	 * was expanded through, innermost first - `trail[0]` is the call that
+	 * produced this statement, `trail[at the end]` the original source-level
+	 * call. Diagnostics walk it to narrate the expansion path.
+	 */
+	expansionTrail?: readonly ExpansionSite[];
+}
+
+/** One hop of a macro-expansion trail: the call to `macro` at this span. */
+export interface ExpansionSite {
+	macro: string;
+	file: string;
+	start: number;
+	end: number;
 }
 
 export type StatementContent =
@@ -1031,13 +1231,53 @@ export type StatementContent =
 	| Segment
 	| Emit
 	| Emplace
+	| Discard
 	| Import
 	| Export
 	| Res
 	| SegmentShorthand
-	| Macro;
+	| Macro
+	| IfBlock
+	| ErrorDirective;
 
-/** One `key: value` in a definition's attribute tail (`X := $0300, size: 2`). */
+/**
+ * One arm of an `.if` block: the opening keyword, its condition (null for
+ * `.else`), and the arm's statements. Names defined inside an arm are local
+ * to it (see the arm-scoping pass in macros.ts).
+ */
+export interface IfArm {
+	keyword: Token<"if" | "elseif" | "else">;
+	condition: Expression | null;
+	body: Statement[];
+}
+
+/**
+ * `.if cond ... [.elseif cond ...]* [.else ...] .endif`. Arm selection is
+ * re-decided every pass: the first arm whose condition is resolved and
+ * nonzero wins; an unresolved condition is skipped, so everything falls to
+ * `.else` until the conditions settle - write the `.else` arm as the
+ * pessimistic (always-correct) form.
+ */
+export interface IfBlock {
+	type: "if-block";
+	arms: IfArm[];
+	endifToken: Token<"endif">;
+}
+
+/** `.error expr` - report the (string) message when collected, on the
+ * converged pass only. */
+export interface ErrorDirective {
+	type: "error-directive";
+	errorToken: Token<"error">;
+	message: Expression;
+}
+
+/**
+ * One `key: value` in a definition's attribute tail (`X := $0300, size: 2`).
+ * The tail is parsed and its keys are checked, but the value is currently
+ * discarded and never evaluated - attribute semantics wait on the
+ * address-vs-number value split (see design.md, "What's deferred").
+ */
 export interface Attribute {
 	key: Token<"identifier">;
 	colonToken: Token<":">;
@@ -1055,6 +1295,14 @@ export interface Assignment {
 	 * plain definition. */
 	params: Token<"identifier">[] | null;
 }
+
+/**
+ * The placeholder name the parser gives a lone `:`. It can't be spelled as an
+ * identifier, so it never collides; `resolveAnonymousLabels` replaces it with
+ * a numbered name (`:0`, `:1`, ...) and rewrites the `:+` / `:-` references
+ * that point at it.
+ */
+export const ANONYMOUS_LABEL = ":";
 
 export interface Label {
 	type: "label";
@@ -1170,6 +1418,14 @@ export interface Emplace {
 	nameToken: Token<"string">;
 }
 
+/** `.discard "X"` - deliberately drop a segment (satisfies the every-segment-
+ * is-consumed check without placing it). */
+export interface Discard {
+	type: "discard";
+	discardToken: Token<"discard">;
+	nameToken: Token<"string">;
+}
+
 export interface Import {
 	type: "import";
 	importToken: Token<"import">;
@@ -1183,8 +1439,8 @@ export interface Export {
 	exportToken: Token<"export">;
 	/** The exported definition; null for the name forms below. */
 	content: StatementContent | null;
-	/** `.export name` (export an existing definition - repeatable) or
-	 * `.export name:` (define a label here and export it). */
+	/** `.export name` (export an existing definition) or `.export name:`
+	 * (define a label here and export it). */
 	nameToken?: Token<"identifier">;
 	definesLabel?: boolean;
 }
@@ -1226,7 +1482,6 @@ export type Expression =
 	| InfixExpression
 	| MemberExpression
 	| DictLiteral
-	| BuiltinCall
 	| CallExpression;
 
 /** Function application: `DOUBLE(2)`, `lib::DOUBLE(2)`. */
@@ -1235,15 +1490,6 @@ export interface CallExpression {
 	callee: Expression;
 	openingBracketToken: Token<"(">;
 	args: Expression[];
-	closingBracketToken: Token<")">;
-}
-
-/** `.attributes(X)` / `.sizeof(X)` - attribute-reading builtins. */
-export interface BuiltinCall {
-	type: "builtin-call";
-	keyword: Token<"attributes" | "sizeof">;
-	openingBracketToken: Token<"(">;
-	argument: Expression;
 	closingBracketToken: Token<")">;
 }
 
@@ -1277,7 +1523,10 @@ export interface MemberExpression {
 	member: Token<"identifier">;
 }
 
-export type IntegerLiteral = Token<"decimal"> | Token<"hexadecimal">;
+export type IntegerLiteral =
+	| Token<"decimal">
+	| Token<"hexadecimal">
+	| Token<"binary">;
 
 export interface GroupedExpression {
 	type: "grouped-expression";

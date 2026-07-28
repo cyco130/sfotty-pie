@@ -20,9 +20,8 @@ function evalSrc(
 	const reports: string[] = [];
 	const env: EvalEnv = {
 		resolve: (name) => opts.symbols?.[name],
-		attributesOf: () => undefined,
 		locationCounter: opts.pc,
-		report: (message) => reports.push(message),
+		report: (_code, message) => reports.push(message),
 	};
 	return { value: evaluate(content.expression, env), reports };
 }
@@ -35,12 +34,21 @@ function val(src: string, opts?: Opts): Value | undefined {
 }
 
 describe("literals", () => {
-	test("integers (decimal, hex, underscores)", () => {
+	test("integers (decimal, hex, binary, underscores)", () => {
 		expect(val("42")).toBe(42n);
 		expect(val("1_000")).toBe(1000n);
 		expect(val("$ff")).toBe(255n);
 		expect(val("$0a")).toBe(10n);
 		expect(val("$DE_AD")).toBe(0xdeadn);
+		expect(val("%1010")).toBe(10n);
+		expect(val("%1010_0101")).toBe(0xa5n);
+	});
+
+	test("modulo needs a space before a binary-looking operand", () => {
+		expect(val("7 % 10")).toBe(7n);
+		expect(val("7 % (10)")).toBe(7n);
+		// Without the space, `%10` lexes as a binary literal (value 2).
+		expect(val("7 - %10")).toBe(5n);
 	});
 
 	test("strings and escapes", () => {

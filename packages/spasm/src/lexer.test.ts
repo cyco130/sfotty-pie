@@ -45,6 +45,26 @@ describe("single tokens", () => {
 		expect(one("1_000")).toBe("decimal");
 		expect(one("$ff")).toBe("hexadecimal");
 		expect(one("$0A_F0")).toBe("hexadecimal");
+		expect(one("%1010")).toBe("binary");
+		expect(one("%10_10")).toBe("binary");
+	});
+
+	test("% is modulo unless it hugs a binary digit", () => {
+		expect(code("a4 % 2")).toEqual([
+			["identifier", "a4"],
+			["%", "%"],
+			["decimal", "2"],
+		]);
+		expect(code("a4 % 10")).toEqual([
+			["identifier", "a4"],
+			["%", "%"],
+			["decimal", "10"],
+		]);
+		// The greedy lex: `%10` is a binary literal, so modulo needs the space.
+		expect(code("a4 %10")).toEqual([
+			["identifier", "a4"],
+			["binary", "%10"],
+		]);
 	});
 
 	test("string and character literals", () => {
@@ -139,37 +159,37 @@ describe("dotted keywords", () => {
 		expect(one(".Org")).toBe("org");
 	});
 
-	test("an unknown dotted word is error:keyword, not a silent split", () => {
-		expect(one(".bytes")).toBe("error:keyword");
-		expect(one(".foo")).toBe("error:keyword");
+	test("an unknown dotted word is invalid:keyword, not a silent split", () => {
+		expect(one(".bytes")).toBe("invalid:keyword");
+		expect(one(".foo")).toBe("invalid:keyword");
 	});
 
 	test("a lone dot is an error", () => {
-		expect(one(".")).toBe("error");
+		expect(one(".")).toBe("invalid");
 	});
 });
 
 describe("error recovery", () => {
 	test("unterminated string and character", () => {
-		expect(one('"abc')).toBe("error:string");
-		expect(one("'a")).toBe("error:character");
+		expect(one('"abc')).toBe("invalid:string");
+		expect(one("'a")).toBe("invalid:character");
 	});
 
 	test("unknown bytes become single-char error tokens", () => {
 		expect(code("@@")).toEqual([
-			["error", "@"],
-			["error", "@"],
+			["invalid", "@"],
+			["invalid", "@"],
 		]);
 	});
 
 	test("string/char literals are single-line; recovery stops at the break", () => {
 		// The unterminated literal must not swallow the following line.
 		expect(code('"abc\nfoo')).toEqual([
-			["error:string", '"abc'],
+			["invalid:string", '"abc'],
 			["identifier", "foo"],
 		]);
 		expect(code("'a\nfoo")).toEqual([
-			["error:character", "'a"],
+			["invalid:character", "'a"],
 			["identifier", "foo"],
 		]);
 	});
@@ -179,7 +199,7 @@ describe("error recovery", () => {
 	test("unmatched byte before CRLF stays an error at the right span", () => {
 		const ts = tokens("@\r\nfoo");
 		expect(ts.map((t) => [t.type, t.text, t.start])).toEqual([
-			["error", "@", 0],
+			["invalid", "@", 0],
 			["newline", "\r\n", 1],
 			["identifier", "foo", 3],
 			["eof", "", 6],
@@ -218,7 +238,7 @@ end:
 
 	test("lexes with no error tokens", () => {
 		const bad = tokens(HELLO).filter(
-			(t) => t.type === "error" || t.type.startsWith("error:"),
+			(t) => t.type === "invalid" || t.type.startsWith("invalid:"),
 		);
 		expect(bad).toEqual([]);
 	});
@@ -295,12 +315,22 @@ describe("line continuation", () => {
 		]);
 	});
 
+	test("a comment may follow the backslash", () => {
+		expect(one("\\ ; note\n")).toBe("whitespace");
+		expect(code(".byte 1, \\ ; note\n 2")).toEqual([
+			["byte", ".byte"],
+			["decimal", "1"],
+			[",", ","],
+			["decimal", "2"],
+		]);
+	});
+
 	test("a comment swallows a trailing backslash (no continuation)", () => {
 		const ts = tokens("; c \\\nnop");
 		expect(ts.some((t) => t.type === "newline")).toBe(true);
 	});
 
 	test("a bare backslash is still an error", () => {
-		expect(code("\\5").some(([type]) => type === "error")).toBe(true);
+		expect(code("\\5").some(([type]) => type === "invalid")).toBe(true);
 	});
 });

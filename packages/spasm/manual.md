@@ -10,6 +10,7 @@ For the JavaScript API and the CLI, see the [readme](./readme.md); for the assem
 - [Source format](#source-format)
 - [Numbers, strings, and characters](#numbers-strings-and-characters)
 - [Symbols: constants and labels](#symbols-constants-and-labels)
+  - [Anonymous labels](#anonymous-labels)
   - [Local labels](#local-labels)
 - [Expressions](#expressions)
 - [Instructions and addressing modes](#instructions-and-addressing-modes)
@@ -109,6 +110,25 @@ start:             ; a label: the current location
 **Forward references work everywhere.** A symbol may be used before it is defined - in operands, in `.byte`/`.word` data, in other definitions (`SYM1 = SYM2 + 3` with `SYM2` defined later). The multipass engine resolves them; see [The multipass model](#the-multipass-model). One current limitation: a genuinely cyclic definition (`A = B` and `B = A`) is not specifically detected - it converges to unresolved and is reported as an undefined symbol.
 
 Symbols are scoped to their [module](#modules) and private unless exported.
+
+### Anonymous labels
+
+A lone `:` defines a label with no name at all. `:+` refers to the next one, `:++` to the one after that, `:-` to the previous one, `:--` to the one before that, and so on - as many signs as labels to count:
+
+```
+	ldx #8
+:
+	lsr shifted
+	bcc :+
+	inc count
+:
+	dex
+	bne :--     ; back past both, to the loop top
+```
+
+They're numbered per file (and each macro body counts on its own), so the ones in an imported module or another macro are never in reach. Use them for the jump-two-lines-down case that doesn't deserve a name; anything a reader has to count more than two signs for probably does.
+
+One parsing rule worth knowing: a sign has to hug the colon, and the colon binds rightwards when it does. That is what keeps `bne :+` an instruction rather than a label named `bne`, and what keeps `size: -1` or a dictionary's `KEY: -1` an ordinary keyed entry with a negative value.
 
 ### Local labels
 

@@ -635,6 +635,71 @@ end:
 	});
 });
 
+describe("anonymous labels", () => {
+	test(":+ is the next one, :- the previous", () => {
+		const { bytes, messages } = asm(
+			".org $2000\n\tbne :+\n\tlda #0\n:\n\tsta $600\n\tjmp :-\n",
+		);
+		expect(messages).toEqual([]);
+		// The branch skips `lda #0` to the label; the jump goes back to it.
+		expect(bytes).toEqual([
+			0xd0, 0x02, 0xa9, 0x00, 0x8d, 0x00, 0x06, 0x4c, 0x04, 0x20,
+		]);
+	});
+
+	test("repeated signs count further out", () => {
+		const { bytes, messages } = asm(
+			".org $2000\n\tbne :++\n\tnop\n:\n\tnop\n:\n\tnop\n\tjmp :--\n\tjmp :-\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([
+			0xd0, 0x02, 0xea, 0xea, 0xea, 0x4c, 0x03, 0x20, 0x4c, 0x04, 0x20,
+		]);
+	});
+
+	test("a label on the same statement counts as previous", () => {
+		expect(asm(".org $2000\n: jmp :-\n").bytes).toEqual([0x4c, 0x00, 0x20]);
+	});
+
+	test("`bne :+` is an instruction, not a label named bne", () => {
+		// The colon binds rightwards when a sign hugs it; nothing else could
+		// follow a label's colon that way.
+		const { bytes, messages } = asm(".org $2000\n\tbne :+\n\tnop\n:\n\trts\n");
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xd0, 0x01, 0xea, 0x60]);
+	});
+
+	test("a keyed entry with a signed value is untouched", () => {
+		// `key: -1` must stay a key and a negative value: the entry rule eats
+		// the colon, so the reference syntax never sees it.
+		expect(asm("N = { A1: -1, B: +2 }\n.byte <N::A1, N::B\n").bytes).toEqual([
+			0xff, 0x02,
+		]);
+		expect(asm("L := $1234, size: -1\n.byte <L\n").messages).toEqual([]);
+	});
+
+	test("out-of-range references say so", () => {
+		expect(asm(".org $2000\n\tjmp :+\n").messages).toContain(
+			"There is no anonymous label after this point",
+		);
+		expect(asm(".org $2000\n:\n\tjmp :--\n").messages).toContain(
+			"There is no second anonymous label before this point",
+		);
+	});
+
+	test("a macro body is its own numbering context", () => {
+		// The body's `:+` finds the body's own label, per expansion, and the
+		// caller's `:-` skips past both expansions to the caller's own.
+		const { bytes, messages } = asm(
+			".org $2000\n.macro hop\n\tbne :+\n\tnop\n:\n.endmacro\n:\nhop\nhop\n\tjmp :-\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([
+			0xd0, 0x01, 0xea, 0xd0, 0x01, 0xea, 0x4c, 0x00, 0x20,
+		]);
+	});
+});
+
 describe("local labels", () => {
 	test("two scopes may reuse a local name", () => {
 		const { bytes, symbols, messages } = asm(

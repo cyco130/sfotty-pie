@@ -3,7 +3,12 @@ import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
 import { render, Segment } from "./layout.ts";
 import { loadModules, type Host, type LoadedModule } from "./loader.ts";
-import { expandModules, scopeIfArms, scopeLocalLabels } from "./macros.ts";
+import {
+	expandModules,
+	resolveAnonymousLabels,
+	scopeIfArms,
+	scopeLocalLabels,
+} from "./macros.ts";
 import { Scopes } from "./scopes.ts";
 import {
 	getExpressionLocation,
@@ -116,7 +121,10 @@ function assembleModules(
 			symbol: options?.symbol,
 		});
 	};
-	// Local labels resolve first, while the stream still reflects what was
+	// Anonymous labels are numbered first: they're positional, so they have to
+	// be resolved while the statement stream is still exactly what was written.
+	resolveAnonymousLabels(loaded, expandReport);
+	// Local labels resolve next, while the stream still reflects what was
 	// written: qualifying `@name` before expansion keeps macro hygiene and
 	// local scoping from reaching into each other.
 	scopeLocalLabels(loaded, expandReport);

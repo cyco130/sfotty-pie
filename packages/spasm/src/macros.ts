@@ -2,8 +2,10 @@ import { Codes } from "./codes.ts";
 import type { Token } from "./lexer.ts";
 import type { LoadedModule } from "./loader.ts";
 import {
+	ANONYMOUS_LABEL,
 	getOperandLocation,
 	type Expression,
+	type Label,
 	type Macro,
 	type MessageNote,
 	type Operand,
@@ -870,6 +872,216 @@ function validateBody(
  * Arms are also emit-only: `.import`, `.export`, and `.macro` are rejected
  * inside them.
  */
+/**
+ * Anonymous labels - a static rewrite that runs before everything else.
+ *
+ * A lone `:` defines one; `:+` refers to the next one lexically, `:++` to the
+ * one after that, `:-` to the previous one, and so on. They're numbered per
+ * *context* - a module's top level, or one macro body - and rewritten to
+ * `:0`, `:1`, ... which no identifier can spell, so they behave like ordinary
+ * private labels from there on.
+ *
+ * A macro body is its own context, so a body's anonymous labels can't be
+ * reached from the call site and vice versa; macro hygiene then renames them
+ * per expansion, so two calls in one scope don't collide. `.if` arms are *not*
+ * their own context - numbering is lexical, so it can't depend on which arm
+ * wins - but arm-local visibility still applies afterwards, which means a
+ * reference reaching into an arm from outside resolves to nothing, like any
+ * other arm-local name.
+ */
+export function resolveAnonymousLabels(
+	modules: readonly LoadedModule[],
+	report: Reporter,
+): void {
+	for (const module of modules) {
+		for (const statement of module.statements) {
+			const content = statement.content;
+			const macro =
+				content?.type === "macro"
+					? content
+					: content?.type === "export" && content.content?.type === "macro"
+						? content.content
+						: undefined;
+			if (macro) resolveAnonymousContext(macro.body, module.id, report);
+		}
+		resolveAnonymousContext(module.statements, module.id, report);
+	}
+}
+
+/** A numbered anonymous label (`:0`), as the first walk leaves them. */
+function isAnonymousLabel(text: string): boolean {
+	return (
+		text.length > 1 && text[0] === ":" && text[1]! >= "0" && text[1]! <= "9"
+	);
+}
+
+/** `:++` -> two forward, `:--` -> two back; undefined for anything else. */
+function anonymousReference(
+	text: string,
+): { forward: boolean; count: number } | undefined {
+	if (text.length < 2 || text[0] !== ":") return undefined;
+	const sign = text[1]!;
+	if (sign !== "+" && sign !== "-") return undefined;
+	for (let i = 2; i < text.length; i++) {
+		if (text[i] !== sign) return undefined;
+	}
+	return { forward: sign === "+", count: text.length - 1 };
+}
+
+function resolveAnonymousContext(
+	statements: readonly Statement[],
+	file: string,
+	report: Reporter,
+): void {
+	// Walk 1: number every definition, so forward references have something
+	// to point at.
+	const names: string[] = [];
+	walkAnonymous(statements, {
+		label: (label) => {
+			if (label.identifier.text !== ANONYMOUS_LABEL) return;
+			const name = ANONYMOUS_LABEL + names.length;
+			label.identifier = { ...label.identifier, text: name };
+			names.push(name);
+		},
+		expression: () => {},
+	});
+	// Walk 2 runs even when nothing was defined, so a stray `:+` gets the
+	// diagnostic it deserves instead of an undefined-symbol error.
+	//
+	// Resolve references against how many definitions have gone by.
+	// Labels are counted before the statement's own content, so `: jmp :-`
+	// refers to the label on its own line.
+	let seen = 0;
+	walkAnonymous(statements, {
+		label: (label) => {
+			if (isAnonymousLabel(label.identifier.text)) seen++;
+		},
+		expression: (expr) => {
+			if (expr.type !== "identifier") return;
+			const reference = anonymousReference(expr.text);
+			if (!reference) return;
+			const index = reference.forward
+				? seen + reference.count - 1
+				: seen - reference.count;
+			const target = names[index];
+			if (target === undefined) {
+				const which = reference.forward ? "after" : "before";
+				const nth = reference.count === 1 ? "" : `${ordinal(reference.count)} `;
+				report(
+					Codes.NoSuchAnonymousLabel,
+					`There is no ${nth}anonymous label ${which} this point`,
+					tokenSpan(expr),
+					file,
+				);
+				return;
+			}
+			expr.text = target;
+		},
+	});
+}
+
+function ordinal(n: number): string {
+	return n === 2 ? "second" : n === 3 ? "third" : n === 4 ? "fourth" : `${n}th`;
+}
+
+/**
+ * Walk statements in lexical order, reporting label definitions and every
+ * expression. Descends into `.if` arms (interleaving each arm's condition with
+ * its body, as written) but not into macro bodies, which are numbered as their
+ * own contexts.
+ */
+function walkAnonymous(
+	statements: readonly Statement[],
+	visit: {
+		label: (label: Label) => void;
+		expression: (expr: Expression) => void;
+	},
+): void {
+	for (const statement of statements) {
+		for (const label of statement.labels) visit.label(label);
+		const content = statement.content;
+		if (!content || content.type === "macro") continue;
+		if (content.type === "if-block") {
+			for (const arm of content.arms) {
+				if (arm.condition) visitExpression(arm.condition, visit.expression);
+				walkAnonymous(arm.body, visit);
+			}
+			continue;
+		}
+		visitContentExpressions(content, visit.expression);
+	}
+}
+
+/** Every expression directly in `content` (an `if-block`'s arms excepted). */
+function visitContentExpressions(
+	content: StatementContent,
+	visit: (expr: Expression) => void,
+): void {
+	switch (content.type) {
+		case "byte":
+		case "word":
+			for (const [expression] of content.list)
+				visitExpression(expression, visit);
+			break;
+		case "org":
+			visitExpression(content.expression, visit);
+			break;
+		case "res":
+			visitExpression(content.count, visit);
+			break;
+		case "assignment":
+			visitExpression(content.expression, visit);
+			for (const attribute of content.attributes) {
+				visitExpression(attribute.value, visit);
+			}
+			break;
+		case "instruction":
+			for (const operand of content.operands) {
+				if (operand.type !== "accumulator-operand") {
+					visitExpression(operand.expression, visit);
+				}
+			}
+			break;
+		case "error-directive":
+			visitExpression(content.message, visit);
+			break;
+		case "export":
+			if (content.content) visitContentExpressions(content.content, visit);
+			break;
+		default:
+			break; // import, segment directives, macro
+	}
+}
+
+function visitExpression(
+	expr: Expression,
+	visit: (expr: Expression) => void,
+): void {
+	visit(expr);
+	switch (expr.type) {
+		case "grouped-expression":
+		case "prefix-expression":
+			visitExpression(expr.expression, visit);
+			break;
+		case "infix-expression":
+			visitExpression(expr.left, visit);
+			visitExpression(expr.right, visit);
+			break;
+		case "member-expression":
+			visitExpression(expr.object, visit);
+			break;
+		case "call-expression":
+			visitExpression(expr.callee, visit);
+			for (const argument of expr.args) visitExpression(argument, visit);
+			break;
+		case "dict-literal":
+			for (const entry of expr.entries) visitExpression(entry.value, visit);
+			break;
+		default:
+			break; // literals and `*`
+	}
+}
+
 /** Does `name` name a local label? Only a leading `@` counts. */
 function isLocalName(name: string): boolean {
 	return name.startsWith("@");

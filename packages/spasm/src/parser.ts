@@ -73,15 +73,41 @@ class Parser {
 	#statement(): Statement {
 		const labels: Label[] = [];
 
-		while (this.#token.type === "identifier" && this.#lookahead.type === ":") {
-			labels.push({
-				type: "label",
-				identifier: this.#token,
-				colonToken: this.#lookahead,
-			});
+		for (;;) {
+			const token = this.#token;
+			// A lone `:` is an anonymous label, referred to by `:+` / `:-`. It
+			// carries the placeholder name `ANONYMOUS_LABEL` until the resolver
+			// numbers it, so it needs no separate AST shape.
+			if (token.type === ":") {
+				labels.push({
+					type: "label",
+					identifier: { ...token, type: "identifier", text: ANONYMOUS_LABEL },
+					colonToken: token,
+				});
+				this.#consume();
+				continue;
+			}
 
+			const colonToken = this.#lookahead;
+			if (token.type !== "identifier" || colonToken.type !== ":") break;
+
+			// `bne :+` is an instruction with an anonymous-label operand, not a
+			// label named `bne`. A sign hugging the colon binds rightwards, and
+			// nothing else can follow a label's colon that way - no statement
+			// starts with `+` or `-`.
+			const saved = this.#save();
 			this.#consume();
 			this.#consume();
+			const sign = this.#token;
+			if (
+				(sign.type === "+" || sign.type === "-") &&
+				sign.start === colonToken.end
+			) {
+				this.#restore(saved);
+				break;
+			}
+
+			labels.push({ type: "label", identifier: token, colonToken });
 		}
 
 		const content = this.#statementContent();
@@ -640,6 +666,25 @@ class Parser {
 				this.#consume();
 				return this.#callTail(this.#memberTail(token));
 			}
+			// `:+` / `:++` / `:-` ... - the next or previous anonymous label.
+			// Adjacency is required, and that is what keeps `key: +1` in a
+			// dictionary or an attribute tail a keyed entry with a signed value:
+			// there the `:` is consumed by the entry rule, never reaching here.
+			case ":": {
+				this.#consume();
+				const sign = this.#token.type;
+				if ((sign !== "+" && sign !== "-") || this.#token.start !== token.end) {
+					throw new ParseError(this.#token, ['"+"', '"-"']);
+				}
+				let text: string = ":";
+				let end = token.end;
+				while (this.#token.type === sign && this.#token.start === end) {
+					text += sign;
+					end = this.#token.end;
+					this.#consume();
+				}
+				return { ...token, type: "identifier", text, end };
+			}
 			case "decimal":
 			case "hexadecimal":
 			case "binary":
@@ -1185,6 +1230,14 @@ export interface Assignment {
 	 * plain definition. */
 	params: Token<"identifier">[] | null;
 }
+
+/**
+ * The placeholder name the parser gives a lone `:`. It can't be spelled as an
+ * identifier, so it never collides; `resolveAnonymousLabels` replaces it with
+ * a numbered name (`:0`, `:1`, ...) and rewrites the `:+` / `:-` references
+ * that point at it.
+ */
+export const ANONYMOUS_LABEL = ":";
 
 export interface Label {
 	type: "label";

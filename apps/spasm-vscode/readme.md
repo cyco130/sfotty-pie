@@ -1,6 +1,6 @@
 # spasm-vscode
 
-VSCode language support for the [spasm](../../packages/spasm) 6502 assembler: syntax highlighting (TextMate grammar), live diagnostics from the real assembler over LSP, go to definition, and hover (the definition line with its preceding comments, plus the converged value - a label shows its address). Planned next: document outline, completion, semantic tokens.
+VSCode language support for the [spasm](../../packages/spasm) 6502 assembler: syntax highlighting (TextMate grammar), live diagnostics from the real assembler over LSP, go to definition, hover (the definition line with its preceding comments, plus the converged value - a label shows its address), and a document outline (labels with their `@` locals nested and their addresses shown, dictionaries with entries, macros with params; code labels span to the next label so breadcrumbs and sticky scroll track the enclosing routine). Planned next: completion, semantic tokens.
 
 Definition and hover answers come from the assembler itself: the converged pass records every reference the evaluator resolves (`AssembleResult.references`/`definitions`), so locals, `.if`-arm renames, splat and namespaced imports all behave exactly like assembly - there is no separate, driftable resolver in the extension.
 

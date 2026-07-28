@@ -7,8 +7,9 @@ import {
 	type Host,
 	type Message,
 	type Reference,
-	type Value,
 } from "@sfotty-pie/spasm";
+
+import { buildOutline, formatValue } from "./outline.ts";
 import { parse as parseJsonc } from "jsonc-parser";
 import {
 	createConnection,
@@ -39,6 +40,7 @@ connection.onInitialize((params) => {
 			textDocumentSync: TextDocumentSyncKind.Incremental,
 			definitionProvider: true,
 			hoverProvider: true,
+			documentSymbolProvider: true,
 		},
 	};
 });
@@ -339,6 +341,14 @@ connection.onHover((params): Hover | null => {
 	};
 });
 
+connection.onDocumentSymbol((params) => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return null;
+	const path = URI.parse(doc.uri).fsPath;
+	const text = analysis.texts.get(path) ?? doc.getText();
+	return buildOutline(path, analysis.definitions, text, doc);
+});
+
 /**
  * The line containing `offset` plus the contiguous run of whole-line comments
  * directly above it (capped, for pathological comment walls).
@@ -363,22 +373,6 @@ function definitionExcerpt(text: string, offset: number): string[] {
 	}
 
 	return [...comments, definitionLine];
-}
-
-function formatValue(value: Value | undefined): string | undefined {
-	if (value === undefined) return undefined;
-	if (typeof value === "bigint") {
-		const negative = value < 0n;
-		const magnitude = negative ? -value : value;
-		const hex = magnitude.toString(16).toUpperCase();
-		const padded = hex.padStart(hex.length <= 2 ? 2 : 4, "0");
-		return `${negative ? "-" : ""}$${padded} (${value.toString(10)})`;
-	}
-	if (typeof value === "string") return JSON.stringify(value);
-	if (value.type === "dict") {
-		return `{ ${[...value.entries.keys()].join(", ")} }`;
-	}
-	return `(${value.params.join(", ")}) - expression macro`;
 }
 
 /**

@@ -2111,3 +2111,23 @@ describe("macro navigation", () => {
 		);
 	});
 });
+
+describe("module scopes", () => {
+	test("the result carries per-module visibility", async () => {
+		const host = memHost({
+			main: '.import "lib"\nns = .import "lib2"\n\t.byte FOO, ns::BAR\n',
+			lib: ".export FOO = 1\n.export .macro nothing\n.endmacro\n.macro private\n.endmacro\n",
+			lib2: ".export BAR = 2\n",
+		});
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const main = result.moduleScopes.get("main")!;
+		expect(main.splats).toEqual(["lib"]);
+		expect([...main.bindings]).toEqual([["ns", "lib2"]]);
+
+		const lib = result.moduleScopes.get("lib")!;
+		expect([...lib.exports]).toEqual(["FOO"]);
+		expect([...lib.macroExports]).toEqual(["nothing"]);
+	});
+});

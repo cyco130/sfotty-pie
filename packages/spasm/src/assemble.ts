@@ -10,7 +10,7 @@ import {
 	scopeLocalLabels,
 	type MacroNav,
 } from "./macros.ts";
-import { Scopes, type Reference } from "./scopes.ts";
+import { Scopes, type ModuleScope, type Reference } from "./scopes.ts";
 import {
 	getExpressionLocation,
 	parse,
@@ -49,6 +49,9 @@ export interface AssembleResult {
 	 * position-to-definition queries and find-references.
 	 */
 	references: Map<string, Reference[]>;
+	/** Per-module visibility (imports and export sets), for scope-aware
+	 * tooling like completion. */
+	moduleScopes: Map<string, ModuleScope>;
 	diagnostics: Message[];
 }
 
@@ -142,7 +145,11 @@ function assembleModules(
 	// written: qualifying `@name` before expansion keeps macro hygiene and
 	// local scoping from reaching into each other.
 	scopeLocalLabels(loaded, expandReport);
-	const macroNav: MacroNav = { definitions: new Map(), references: new Map() };
+	const macroNav: MacroNav = {
+		definitions: new Map(),
+		references: new Map(),
+		exports: new Map(),
+	};
 	const modules = expandModules(loaded, expandReport, macroNav);
 	// Arm-scope `.if` blocks (also a static, run-once step): names defined
 	// inside arms become arm-local so the outside-visible definition set stays
@@ -498,6 +505,7 @@ function assembleModules(
 		symbols: scopes.resolvedFor(entryId),
 		definitions,
 		references,
+		moduleScopes: scopes.moduleScopes(macroNav.exports),
 		diagnostics: all,
 	};
 }

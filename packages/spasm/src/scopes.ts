@@ -20,6 +20,22 @@ export interface Reference {
 }
 
 /**
+ * What a module can see and offer: its imports (splats and namespace
+ * bindings) and its export sets. The assemble result carries one per module,
+ * for tooling that needs scope-aware candidate sets (completion).
+ */
+export interface ModuleScope {
+	/** Splat-imported module ids, in import order. */
+	splats: readonly string[];
+	/** Namespace binding name -> bound module id. */
+	bindings: ReadonlyMap<string, string>;
+	/** Symbol names this module exports. */
+	exports: ReadonlySet<string>;
+	/** Macro names this module exports (filled from expansion data). */
+	macroExports: ReadonlySet<string>;
+}
+
+/**
  * Per-module symbol scopes layered over one `SymbolTable` via qualified keys.
  * A name resolves to a module's own symbol, to an exported symbol of a module
  * it splat-imports, or - when its root is a namespace binding
@@ -132,6 +148,23 @@ export class Scopes {
 	/** The recorded references of the last (converged) pass, per file. */
 	references(): Map<string, Reference[]> {
 		return this.#references;
+	}
+
+	/** Per-module visibility, for the assemble result (`macroExports` is the
+	 * expansion step's knowledge - the caller fills it in). */
+	moduleScopes(
+		macroExports: ReadonlyMap<string, ReadonlySet<string>>,
+	): Map<string, ModuleScope> {
+		const out = new Map<string, ModuleScope>();
+		for (const [id, exports] of this.#exports) {
+			out.set(id, {
+				splats: this.#splats.get(id) ?? [],
+				bindings: this.#bindings.get(id) ?? new Map(),
+				exports,
+				macroExports: macroExports.get(id) ?? new Set(),
+			});
+		}
+		return out;
 	}
 
 	/**

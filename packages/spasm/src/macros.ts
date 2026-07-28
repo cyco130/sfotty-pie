@@ -43,6 +43,8 @@ type Substitution =
 export interface MacroNav {
 	definitions: Map<string, Definition>;
 	references: Map<string, Reference[]>;
+	/** Exported macro names per module (for scope-aware tooling). */
+	exports: Map<string, ReadonlySet<string>>;
 }
 
 export function macroKey(moduleId: string, name: string): string {
@@ -175,6 +177,7 @@ export function expandModules(
 		}
 		macros.set(module.id, { own, exported });
 		stripped.set(module.id, rest);
+		nav?.exports.set(module.id, exported);
 	}
 
 	// Lexical lookup: own macros, then the splat imports' exported ones (first

@@ -1,4 +1,4 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 import {
@@ -6,9 +6,11 @@ import {
 	type Definition,
 	type Host,
 	type Message,
+	type ModuleScope,
 	type Reference,
 } from "@sfotty-pie/spasm";
 
+import { buildCompletions } from "./completion.ts";
 import { buildOutline, formatValue } from "./outline.ts";
 import { parse as parseJsonc } from "jsonc-parser";
 import {
@@ -41,6 +43,7 @@ connection.onInitialize((params) => {
 			definitionProvider: true,
 			hoverProvider: true,
 			documentSymbolProvider: true,
+			completionProvider: { triggerCharacters: [":", "."] },
 		},
 	};
 });
@@ -76,6 +79,7 @@ let lastPublished = new Set<string>();
 let analysis = {
 	definitions: new Map<string, Definition>(),
 	references: new Map<string, Reference[]>(),
+	moduleScopes: new Map<string, ModuleScope>(),
 	texts: new Map<string, string>(),
 };
 
@@ -190,6 +194,7 @@ async function validateAll(): Promise<void> {
 
 	const definitions = new Map<string, Definition>();
 	const references = new Map<string, Reference[]>();
+	const moduleScopes = new Map<string, ModuleScope>();
 
 	async function runEntry(entryPath: string): Promise<void> {
 		const result = await assemble(entryPath, host);
@@ -201,6 +206,9 @@ async function validateAll(): Promise<void> {
 			const merged = references.get(file);
 			if (merged) merged.push(...list);
 			else references.set(file, [...list]);
+		}
+		for (const [id, scope] of result.moduleScopes) {
+			moduleScopes.set(id, scope);
 		}
 	}
 
@@ -245,7 +253,87 @@ async function validateAll(): Promise<void> {
 	}
 
 	lastPublished = published;
-	analysis = { definitions, references, texts };
+	analysis = { definitions, references, moduleScopes, texts };
+}
+
+connection.onCompletion(async (params) => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return null;
+	const path = URI.parse(doc.uri).fsPath;
+	const offset = doc.offsetAt(params.position);
+	const lineStart = doc.offsetAt({ line: params.position.line, character: 0 });
+	const text = doc.getText();
+	const linePrefix = text.slice(lineStart, offset);
+
+	// Inside an `.import` string, complete filesystem paths.
+	const importString = /\.import[ \t]+"([^"]*)$/i.exec(linePrefix);
+	if (importString) {
+		return importPathItems(doc, offset, dirname(path), importString[1]!);
+	}
+
+	const candidates = buildCompletions({
+		path,
+		offset,
+		linePrefix,
+		text,
+		definitions: analysis.definitions,
+		moduleScopes: analysis.moduleScopes,
+	});
+
+	// Explicit replace range covering the word plus a leading `.`, which the
+	// word pattern excludes - without this, accepting `.import` over `.im`
+	// would produce `..import`.
+	let wordStart = offset;
+	while (wordStart > lineStart && /[\w@]/.test(text[wordStart - 1]!)) {
+		wordStart--;
+	}
+	if (wordStart > lineStart && text[wordStart - 1] === ".") wordStart--;
+	const range = {
+		start: doc.positionAt(wordStart),
+		end: doc.positionAt(offset),
+	};
+	return candidates.map((candidate) => ({
+		...candidate,
+		textEdit: { range, newText: candidate.label },
+	}));
+});
+
+/** Directory listing completions for a partial `.import` specifier. */
+async function importPathItems(
+	doc: TextDocument,
+	offset: number,
+	fromDir: string,
+	partial: string,
+) {
+	const lastSlash = partial.lastIndexOf("/");
+	const base = resolve(
+		fromDir,
+		lastSlash === -1 ? "." : partial.slice(0, lastSlash),
+	);
+	const range = {
+		start: doc.positionAt(offset - (partial.length - (lastSlash + 1))),
+		end: doc.positionAt(offset),
+	};
+	try {
+		const entries = await readdir(base, { withFileTypes: true });
+		return entries
+			.filter(
+				(entry) =>
+					!entry.name.startsWith(".") &&
+					(entry.isDirectory() || entry.name.endsWith(".s")),
+			)
+			.map((entry) => ({
+				label: entry.isDirectory() ? entry.name + "/" : entry.name,
+				// LSP CompletionItemKind: 19 = Folder, 17 = File.
+				kind: entry.isDirectory() ? (19 as const) : (17 as const),
+				textEdit: {
+					range,
+					newText: entry.isDirectory() ? entry.name + "/" : entry.name,
+				},
+			}));
+	} catch {
+		return [];
+	}
 }
 
 /** The qualified symbol under `offset` in `path` - a reference, or the

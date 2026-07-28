@@ -25,7 +25,7 @@ import {
 	type StatementContent,
 } from "./parser.ts";
 import { SourceFile } from "./source-file.ts";
-import { SEP } from "./symbols.ts";
+import { SEP, type Definition } from "./symbols.ts";
 import {
 	decodeStringLiteral,
 	type FunctionValue,
@@ -35,6 +35,13 @@ import {
 export interface AssembleResult {
 	output: Uint8Array;
 	symbols: Map<string, Value>;
+	/**
+	 * Every symbol's definition site, keyed by qualified name (module NUL
+	 * name, dictionary paths NUL-joined further - the `Message.symbol`
+	 * spelling). Unlike `symbols`, includes unresolved and function-valued
+	 * symbols, and covers all modules, not just the entry.
+	 */
+	definitions: Map<string, Definition>;
 	diagnostics: Message[];
 }
 
@@ -448,6 +455,7 @@ function assembleModules(
 	return {
 		output: new Uint8Array(output),
 		symbols: scopes.resolvedFor(entryId),
+		definitions: scopes.definitions(),
 		diagnostics: all,
 	};
 }

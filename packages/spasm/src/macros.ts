@@ -520,7 +520,16 @@ function substituteName(
 	report: Reporter,
 ): Token<"identifier"> {
 	const s = subst.get(identifier.text);
-	if (s?.kind === "rename") return { ...identifier, text: s.name };
+	// A renamed local is stamped like a free name: its token spans the macro's
+	// source, so its definition must live in the macro's module for spans and
+	// scope to agree (definition-site queries rely on this).
+	if (s?.kind === "rename") {
+		return {
+			...identifier,
+			text: s.name,
+			origin: identifier.origin ?? origin,
+		};
+	}
 	if (s?.kind === "operand") {
 		if (
 			s.operand.type === "simple-operand" &&
@@ -673,7 +682,11 @@ function substituteExpr(
 				);
 				return expr;
 			}
-			if (s?.kind === "rename") return { ...expr, text: s.name };
+			// Stamped like the defining occurrence in `substituteName`, so
+			// renamed references resolve where the renamed definition lands.
+			if (s?.kind === "rename") {
+				return { ...expr, text: s.name, origin: expr.origin ?? origin };
+			}
 			// A free name binds where the macro was defined (hygiene). An already
 			// stamped identifier (from an outer expansion's argument) keeps its
 			// binding.

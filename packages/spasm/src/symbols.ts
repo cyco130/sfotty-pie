@@ -23,6 +23,19 @@ interface Entry {
 }
 
 /**
+ * Where a symbol was defined: the module whose source `start`/`end` index
+ * into, and the symbol's kind. Hygiene keeps file and scope aligned: a
+ * macro-stamped definition defines in the macro's module, and its tokens come
+ * from that module's source.
+ */
+export interface Definition {
+	file: string;
+	start: number;
+	end: number;
+	kind: SymbolKind;
+}
+
+/**
  * The (single, flat) symbol table. Values persist across passes so forward
  * references resolve via the previous pass; `define-once` is enforced per pass.
  */
@@ -64,6 +77,19 @@ export class SymbolTable {
 
 	kindOf(name: string): SymbolKind | undefined {
 		return this.#entries.get(name)?.kind;
+	}
+
+	definedAt(name: string): readonly [number, number] | undefined {
+		return this.#entries.get(name)?.definedAt;
+	}
+
+	/** Every defined symbol's kind and definition span, by qualified key. */
+	*definitions(): IterableIterator<
+		[string, SymbolKind, readonly [number, number]]
+	> {
+		for (const [name, entry] of this.#entries) {
+			yield [name, entry.kind, entry.definedAt];
+		}
 	}
 
 	/** Snapshot of values, for fixpoint detection. */

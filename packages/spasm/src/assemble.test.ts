@@ -1780,3 +1780,93 @@ describe("export name forms", () => {
 		expect(error.formatted).toMatch(/^lib:1:9 - error SP2004: /);
 	});
 });
+
+describe("definition spans", () => {
+	const SEP = "\0";
+
+	function span(src: string, text: string): [number, number] {
+		const start = src.indexOf(text);
+		expect(start).toBeGreaterThanOrEqual(0);
+		return [start, start + text.length];
+	}
+
+	test("labels and constants record their defining token", () => {
+		const src = "\t.org $0600\nSIZE = 3\nstart:\n\tlda #SIZE\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		const size = result.definitions.get("t" + SEP + "SIZE")!;
+		expect([size.start, size.end]).toEqual(span(src, "SIZE"));
+		expect(size.kind).toBe("constant");
+		expect(size.file).toBe("t");
+
+		const start = result.definitions.get("t" + SEP + "start")!;
+		expect([start.start, start.end]).toEqual(span(src, "start"));
+		expect(start.kind).toBe("label");
+	});
+
+	test("a dictionary defines one namespace symbol at its identifier", () => {
+		// Entries live inline in the DictValue, not as table entries -
+		// per-entry definition spans would need key spans in the value.
+		const src = "N = { OPEN: 0, CLOSE: 2 }\n\t.byte N::CLOSE\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		const n = result.definitions.get("t" + SEP + "N")!;
+		expect(n.kind).toBe("namespace");
+		expect([n.start, n.end]).toEqual(span(src, "N"));
+		expect(result.definitions.has("t" + SEP + "N" + SEP + "CLOSE")).toBe(false);
+	});
+
+	test("expression macros appear in definitions but not in symbols", () => {
+		const src = "DOUBLE(v) = 2 * v\n\t.byte DOUBLE(3)\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		expect(result.symbols.has("DOUBLE")).toBe(false);
+		const double = result.definitions.get("t" + SEP + "DOUBLE")!;
+		expect([double.start, double.end]).toEqual(span(src, "DOUBLE"));
+		expect(double.kind).toBe("function");
+	});
+
+	test("an imported symbol's definition points into the defining module", async () => {
+		const lib = ".export SIZE = 7\n";
+		const host = memHost({
+			main: '.import "lib"\n\t.byte SIZE\n',
+			lib,
+		});
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const size = result.definitions.get("lib" + SEP + "SIZE")!;
+		expect(size.file).toBe("lib");
+		expect([size.start, size.end]).toEqual(span(lib, "SIZE"));
+	});
+
+	test("a macro-stamped definition attributes to the macro's module", async () => {
+		const lib = ".export .macro setup\nMAGIC = 42\n.endmacro\n";
+		const host = memHost({
+			main: '.import "lib"\nsetup\n\tnop\n',
+			lib,
+		});
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const entry = [...result.definitions].find(([key]) =>
+			key.slice(key.indexOf(SEP) + 1).startsWith("MAGIC"),
+		);
+		expect(entry).toBeDefined();
+		const [, magic] = entry!;
+		expect(magic.file).toBe("lib");
+		expect([magic.start, magic.end]).toEqual(span(lib, "MAGIC"));
+	});
+
+	test("a duplicate definition keeps the first span", () => {
+		const src = "foo = 1\nfoo = 2\n\t.byte foo\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics.map((d) => d.code)).toEqual(["SP2002"]);
+
+		const foo = result.definitions.get("t" + SEP + "foo")!;
+		expect(foo.start).toBe(src.indexOf("foo"));
+	});
+});

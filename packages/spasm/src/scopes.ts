@@ -1,6 +1,11 @@
 import type { LoadedModule } from "./loader.ts";
 import type { Statement } from "./parser.ts";
-import { SEP, SymbolTable, type SymbolKind } from "./symbols.ts";
+import {
+	SEP,
+	SymbolTable,
+	type Definition,
+	type SymbolKind,
+} from "./symbols.ts";
 import type { Value } from "./value.ts";
 
 type Span = readonly [number, number];
@@ -83,6 +88,43 @@ export class Scopes {
 			if (key.startsWith(prefix)) out.set(key.slice(prefix.length), value);
 		}
 		return out;
+	}
+
+	/**
+	 * The definition `name` resolves to as seen from `moduleId` (own scope,
+	 * splat imports, or a namespaced path), if any.
+	 */
+	definitionOf(moduleId: string, name: string): Definition | undefined {
+		const key = this.#scopeKey(moduleId, name);
+		return key === undefined ? undefined : this.#definitionFor(key);
+	}
+
+	/**
+	 * Every symbol definition, keyed by qualified name (module NUL name,
+	 * dictionary paths NUL-joined further - the same spelling as
+	 * `Message.symbol`). Includes unresolved and function-valued symbols;
+	 * kinds distinguish them.
+	 */
+	definitions(): Map<string, Definition> {
+		const out = new Map<string, Definition>();
+		for (const [key] of this.#table.definitions()) {
+			out.set(key, this.#definitionFor(key)!);
+		}
+		return out;
+	}
+
+	// The file is the qualified key's module: a definition's span always
+	// indexes into the module it defines under (hygiene stamps both the scope
+	// and the token source to the macro's module - see `Definition`).
+	#definitionFor(key: string): Definition | undefined {
+		const definedAt = this.#table.definedAt(key);
+		if (definedAt === undefined) return undefined;
+		return {
+			file: key.slice(0, key.indexOf(SEP)),
+			start: definedAt[0],
+			end: definedAt[1],
+			kind: this.#table.kindOf(key)!,
+		};
 	}
 
 	/**

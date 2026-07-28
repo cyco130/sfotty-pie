@@ -99,7 +99,22 @@ let analysis = {
 	references: new Map<string, Reference[]>(),
 	moduleScopes: new Map<string, ModuleScope>(),
 	texts: new Map<string, string>(),
+	valueVariants: new Map<
+		string,
+		{ entry: string; value: Definition["value"] }[]
+	>(),
 };
+
+/** Values equal as far as display cares: numbers and strings compare; dicts
+ * and functions (rebuilt per assemble) and unresolved values never conflict. */
+function displayValuesEqual(
+	a: Definition["value"],
+	b: Definition["value"],
+): boolean {
+	if (a === undefined || b === undefined) return true;
+	if (typeof a === "bigint" || typeof a === "string") return a === b;
+	return true;
+}
 
 /**
  * Validate everything reachable from the open spasm documents: group them
@@ -213,12 +228,38 @@ async function validateAll(): Promise<void> {
 	const definitions = new Map<string, Definition>();
 	const references = new Map<string, Reference[]>();
 	const moduleScopes = new Map<string, ModuleScope>();
+	/** Which entry's assemble set a definition first, and, for symbols whose
+	 * converged values differ between entries (layout is per-program), the
+	 * per-entry values in entry order. Structure is entry-invariant; values
+	 * are not. */
+	const firstEntry = new Map<string, string>();
+	const valueVariants = new Map<
+		string,
+		{ entry: string; value: Definition["value"] }[]
+	>();
 
-	async function runEntry(entryPath: string): Promise<void> {
-		const result = await assemble(entryPath, host);
-		for (const message of result.diagnostics) addMessage(message, entryPath);
+	async function runEntry(entry: EntrySpec): Promise<void> {
+		const result = await assemble(entry.module, host);
+		for (const message of result.diagnostics) {
+			addMessage(message, entry.module);
+		}
 		for (const [key, definition] of result.definitions) {
-			definitions.set(key, definition);
+			const existing = definitions.get(key);
+			if (!existing) {
+				definitions.set(key, definition);
+				firstEntry.set(key, entry.name);
+				continue;
+			}
+			if (!displayValuesEqual(existing.value, definition.value)) {
+				let variants = valueVariants.get(key);
+				if (!variants) {
+					variants = [{ entry: firstEntry.get(key)!, value: existing.value }];
+					valueVariants.set(key, variants);
+				}
+				if (!variants.some((v) => v.entry === entry.name)) {
+					variants.push({ entry: entry.name, value: definition.value });
+				}
+			}
 		}
 		for (const [file, list] of result.references) {
 			const merged = references.get(file);
@@ -231,7 +272,7 @@ async function validateAll(): Promise<void> {
 	}
 
 	// Group open documents into projects by their nearest spasm.jsonc.
-	const projects = new Map<string, string[]>();
+	const projects = new Map<string, EntrySpec[]>();
 	for (const path of openByPath.keys()) {
 		const configPath = await findConfig(dirname(path));
 		if (configPath !== undefined && !projects.has(configPath)) {
@@ -247,7 +288,9 @@ async function validateAll(): Promise<void> {
 	// library module not yet wired into an entry - listing it in spasm.jsonc
 	// is the fix.
 	for (const path of openByPath.keys()) {
-		if (!texts.has(path)) await runEntry(path);
+		if (!texts.has(path)) {
+			await runEntry({ module: path, name: defaultEntryName(path) });
+		}
 	}
 
 	// Unreferenced definitions dim (hint severity + the Unnecessary tag).
@@ -306,7 +349,11 @@ async function validateAll(): Promise<void> {
 	// Publish for everything touched this run (empty array clears old
 	// squiggles), then explicitly clear files published before but untouched
 	// now (closed documents, removed imports).
-	const touched = new Set([...texts.keys(), ...entries, ...openByPath.keys()]);
+	const touched = new Set([
+		...texts.keys(),
+		...entries.map((entry) => entry.module),
+		...openByPath.keys(),
+	]);
 	const published = new Set<string>();
 	for (const path of touched) {
 		const uri = uriFor(path);
@@ -324,7 +371,7 @@ async function validateAll(): Promise<void> {
 	}
 
 	lastPublished = published;
-	analysis = { definitions, references, moduleScopes, texts };
+	analysis = { definitions, references, moduleScopes, texts, valueVariants };
 	// Analysis changed under the client's highlighted tokens - have it
 	// re-request them.
 	void connection.languages.semanticTokens.refresh().catch(() => {});
@@ -488,7 +535,14 @@ connection.onHover((params): Hover | null => {
 	}
 
 	const parts = ["```spasm", ...lines, "```"];
-	const value = formatValue(definition.value);
+	// Layout is per-program: when entries converge this symbol to different
+	// values, show each with its entry's name.
+	const variants = analysis.valueVariants.get(hit.symbol);
+	const value = variants
+		? variants
+				.map((v) => `${formatValue(v.value) ?? "?"} (${v.entry})`)
+				.join(" | ")
+		: formatValue(definition.value);
 	if (value !== undefined) parts.push("", `= ${value}`);
 	if (definition.file !== path) {
 		parts.push("", `*${basename(definition.file)}*`);
@@ -726,20 +780,47 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /** Read a spasm.jsonc's `entries`, resolved relative to the config file. */
-async function readEntries(configPath: string): Promise<string[]> {
+/**
+ * An entry from spasm.jsonc: a plain module path, or an object
+ * (`{ "module": "src/dos.s", "name": "dos" }`) whose future members will
+ * grow build context (injected defines, target, CPU type). The name labels
+ * the entry in multi-entry displays; it defaults to the module's basename.
+ */
+interface EntrySpec {
+	module: string;
+	name: string;
+}
+
+async function readEntries(configPath: string): Promise<EntrySpec[]> {
 	try {
 		const parsed: unknown = parseJsonc(await readFile(configPath, "utf8"));
 		const entries = (parsed as { entries?: unknown } | null | undefined)
 			?.entries;
 		if (!Array.isArray(entries)) return [];
 
-		return entries
-			.filter((entry): entry is string => typeof entry === "string")
-			.map((entry) => resolve(dirname(configPath), entry));
+		const out: EntrySpec[] = [];
+		for (const entry of entries) {
+			const spec =
+				typeof entry === "string"
+					? { module: entry, name: undefined }
+					: (entry as { module?: unknown; name?: unknown } | null);
+			if (typeof spec?.module !== "string") continue;
+			const module = resolve(dirname(configPath), spec.module);
+			out.push({
+				module,
+				name:
+					typeof spec.name === "string" ? spec.name : defaultEntryName(module),
+			});
+		}
+		return out;
 	} catch (error) {
 		connection.console.warn(`Failed to read ${configPath}: ${String(error)}`);
 		return [];
 	}
+}
+
+function defaultEntryName(module: string): string {
+	return basename(module).replace(/\.s$/, "");
 }
 
 documents.listen(connection);

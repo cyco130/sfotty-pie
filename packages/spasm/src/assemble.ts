@@ -8,8 +8,9 @@ import {
 	resolveAnonymousLabels,
 	scopeIfArms,
 	scopeLocalLabels,
+	type MacroNav,
 } from "./macros.ts";
-import { Scopes } from "./scopes.ts";
+import { Scopes, type Reference } from "./scopes.ts";
 import {
 	getExpressionLocation,
 	parse,
@@ -42,6 +43,12 @@ export interface AssembleResult {
 	 * symbols, and covers all modules, not just the entry.
 	 */
 	definitions: Map<string, Definition>;
+	/**
+	 * Every resolved symbol reference of the converged pass, per file:
+	 * referencing span -> qualified name (a `definitions` key). Powers
+	 * position-to-definition queries and find-references.
+	 */
+	references: Map<string, Reference[]>;
 	diagnostics: Message[];
 }
 
@@ -135,7 +142,8 @@ function assembleModules(
 	// written: qualifying `@name` before expansion keeps macro hygiene and
 	// local scoping from reaching into each other.
 	scopeLocalLabels(loaded, expandReport);
-	const modules = expandModules(loaded, expandReport);
+	const macroNav: MacroNav = { definitions: new Map(), references: new Map() };
+	const modules = expandModules(loaded, expandReport, macroNav);
 	// Arm-scope `.if` blocks (also a static, run-once step): names defined
 	// inside arms become arm-local so the outside-visible definition set stays
 	// pass-invariant while arm selection iterates.
@@ -452,10 +460,44 @@ function assembleModules(
 		message.formattedColor = render(true);
 	}
 
+	// Modules get synthetic definitions (file top), so `.import` specifiers
+	// navigate like symbol references. Macro navigation (collected once, at
+	// expansion) merges in under its own key namespace.
+	const definitions = scopes.definitions();
+	const references = scopes.references();
+	for (const [key, definition] of macroNav.definitions) {
+		definitions.set(key, definition);
+	}
+	for (const [file, list] of macroNav.references) {
+		const merged = references.get(file);
+		if (merged) merged.push(...list);
+		else references.set(file, list);
+	}
+	for (const module of modules) {
+		definitions.set(module.id, {
+			file: module.id,
+			start: 0,
+			end: 0,
+			kind: "module",
+			value: undefined,
+		});
+		if (!module.imports.length) continue;
+		const list = references.get(module.id) ?? [];
+		if (!references.has(module.id)) references.set(module.id, list);
+		for (const record of module.imports) {
+			list.push({
+				start: record.span[0],
+				end: record.span[1],
+				symbol: record.id,
+			});
+		}
+	}
+
 	return {
 		output: new Uint8Array(output),
 		symbols: scopes.resolvedFor(entryId),
-		definitions: scopes.definitions(),
+		definitions,
+		references,
 		diagnostics: all,
 	};
 }
@@ -814,12 +856,60 @@ function moduleEnv(
 	report: Reporter,
 ): EvalEnv {
 	return {
-		resolve: (name, origin) => scopes.resolve(origin ?? moduleId, name),
+		resolve: (name, origin, span) => {
+			if (span) scopes.recordReference(origin ?? moduleId, name, span);
+			return scopes.resolve(origin ?? moduleId, name);
+		},
 		locationCounter: location,
 		report: (code, message, span, file, options) =>
 			report(code, message, span, file ?? moduleId, options),
 		strict: true,
 	};
+}
+
+/**
+ * Define a dictionary literal's entries as table symbols under qualified
+ * names (`N SEP key`, nesting for nested literals), spanned by their key
+ * tokens. This is what makes `N::key` (and `lib::N::key`) a definition-site
+ * target: the path evaluator records key segments against these. Only the
+ * literal site defines entries - an alias (`M = N`) or a computed dict
+ * carries the value but not the names, so its keys aren't navigable.
+ */
+function defineDictEntries(
+	base: string,
+	literal: DictLiteral,
+	value: Value | undefined,
+	definitionModule: string,
+	scopes: Scopes,
+): void {
+	if (typeof value !== "object" || value.type !== "dict") return;
+	const seen = new Set<string>();
+	for (const entry of literal.entries) {
+		const key = entry.key.text;
+		if (seen.has(key)) continue; // duplicate key - first wins, like evaluate
+		seen.add(key);
+		const qualified = base + SEP + key;
+		const entryValue = value.entries.get(key);
+		const nested = entry.value.type === "dict-literal";
+		// Duplicates are impossible here (the parent was define-once checked),
+		// so the prior-definition return needs no handling.
+		scopes.defineLocal(
+			definitionModule,
+			qualified,
+			entryValue,
+			nested ? "namespace" : "constant",
+			[entry.key.start, entry.key.end],
+		);
+		if (entry.value.type === "dict-literal") {
+			defineDictEntries(
+				qualified,
+				entry.value,
+				entryValue,
+				definitionModule,
+				scopes,
+			);
+		}
+	}
 }
 
 function defineAssignment(
@@ -870,6 +960,7 @@ function defineAssignment(
 	}
 
 	if (assignment.expression.type === "dict-literal") {
+		const literal = assignment.expression;
 		if (assignment.operatorToken.type === ":=") {
 			report(
 				Codes.DictionaryIsAValue,
@@ -888,10 +979,11 @@ function defineAssignment(
 			);
 		}
 		checkNoSelfReference(assignment.expression, text, report, definitionModule);
+		const value = evaluate(assignment.expression, env);
 		const prior = scopes.defineLocal(
 			definitionModule,
 			text,
-			evaluate(assignment.expression, env),
+			value,
 			"namespace",
 			span,
 		);
@@ -903,6 +995,8 @@ function defineAssignment(
 				definitionModule,
 				{ notes: [noteAt("First defined here", prior, definitionModule)] },
 			);
+		} else {
+			defineDictEntries(text, literal, value, definitionModule, scopes);
 		}
 		return;
 	}

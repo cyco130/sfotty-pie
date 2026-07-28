@@ -12,7 +12,8 @@ import {
 	type Statement,
 	type StatementContent,
 } from "./parser.ts";
-import { exportedNames } from "./scopes.ts";
+import { exportedNames, type Reference } from "./scopes.ts";
+import { SEP, type Definition } from "./symbols.ts";
 
 type Reporter = (
 	code: string,
@@ -23,9 +24,30 @@ type Reporter = (
 ) => void;
 
 // A param substitutes to an argument operand; a body-local label renames.
+// `onUse` reports each substituted occurrence (macro-nav records the body
+// spans of param uses through it).
 type Substitution =
-	| { kind: "operand"; operand: Operand }
+	| {
+			kind: "operand";
+			operand: Operand;
+			onUse?: (token: { start: number; end: number }) => void;
+	  }
 	| { kind: "rename"; name: string };
+
+/**
+ * Navigation data for the macro namespace, collected during expansion (the
+ * only step that sees macros - they never reach the symbol table). Keys use
+ * the double-`SEP` macro spelling (see `Definition`); merged into the
+ * assemble result's `definitions`/`references`.
+ */
+export interface MacroNav {
+	definitions: Map<string, Definition>;
+	references: Map<string, Reference[]>;
+}
+
+export function macroKey(moduleId: string, name: string): string {
+	return moduleId + SEP + SEP + name;
+}
 
 const MAX_DEPTH = 64;
 
@@ -50,7 +72,25 @@ interface ModuleMacros {
 export function expandModules(
 	modules: readonly LoadedModule[],
 	report: Reporter,
+	nav?: MacroNav,
 ): LoadedModule[] {
+	// Reference recording, deduped by span: a macro expanded N times visits
+	// the same body tokens N times.
+	const seenSpans = new Set<string>();
+	const recordRef = (
+		file: string,
+		token: { start: number; end: number },
+		symbol: string,
+	): void => {
+		if (!nav) return;
+		const spanKey = file + SEP + token.start + SEP + token.end;
+		if (seenSpans.has(spanKey)) return;
+		seenSpans.add(spanKey);
+		const list = nav.references.get(file);
+		const reference = { start: token.start, end: token.end, symbol };
+		if (list) list.push(reference);
+		else nav.references.set(file, [reference]);
+	};
 	// Collect each module's macro definitions, removing them from its stream.
 	const macros = new Map<string, ModuleMacros>();
 	const splats = new Map<string, readonly string[]>();
@@ -112,6 +152,25 @@ export function expandModules(
 				own.set(name, macro);
 				if (isExported) exported.add(name);
 				checkBody(macro, report, module.id);
+				if (nav) {
+					const key = macroKey(module.id, name);
+					nav.definitions.set(key, {
+						file: module.id,
+						start: macro.nameToken.start,
+						end: macro.nameToken.end,
+						kind: "macro",
+						value: undefined,
+					});
+					for (const param of macro.params) {
+						nav.definitions.set(key + SEP + param.nameToken.text, {
+							file: module.id,
+							start: param.nameToken.start,
+							end: param.nameToken.end,
+							kind: "parameter",
+							value: undefined,
+						});
+					}
+				}
 			}
 		}
 		macros.set(module.id, { own, exported });
@@ -208,6 +267,17 @@ export function expandModules(
 					continue;
 				}
 				expanded.add(found.macro);
+				// The root is the namespace binding, the segment the macro.
+				recordRef(
+					scopeId,
+					content.mnemonic,
+					scopeId + SEP + content.mnemonic.text,
+				);
+				recordRef(
+					scopeId,
+					content.memberTokens[0]!,
+					macroKey(found.definingId, found.macro.nameToken.text),
+				);
 				const args = callArgs(content, found.macro, report, scopeId);
 				if (args) {
 					const body = expandCall(
@@ -216,6 +286,7 @@ export function expandModules(
 						args,
 						() => ++counter,
 						report,
+						recordRef,
 					);
 					if (statement.labels.length && body.length) {
 						body[0] = {
@@ -233,6 +304,11 @@ export function expandModules(
 				const found = lookup(scopeId, content.mnemonic.text);
 				if (found) {
 					expanded.add(found.macro);
+					recordRef(
+						scopeId,
+						content.mnemonic,
+						macroKey(found.definingId, content.mnemonic.text),
+					);
 					const args = callArgs(content, found.macro, report, scopeId);
 					if (args) {
 						const body = expandCall(
@@ -241,6 +317,7 @@ export function expandModules(
 							args,
 							() => ++counter,
 							report,
+							recordRef,
 						);
 						// Carry the call's own labels onto the first expanded statement.
 						if (statement.labels.length && body.length) {
@@ -444,10 +521,27 @@ function expandCall(
 	args: Operand[],
 	gensym: () => number,
 	report: Reporter,
+	recordRef?: (
+		file: string,
+		token: { start: number; end: number },
+		symbol: string,
+	) => void,
 ): Statement[] {
 	const subst = new Map<string, Substitution>();
 	macro.params.forEach((param, i) => {
-		subst.set(param.nameToken.text, { kind: "operand", operand: args[i]! });
+		const name = param.nameToken.text;
+		subst.set(name, {
+			kind: "operand",
+			operand: args[i]!,
+			// A substituted occurrence is a param use at a body span - record
+			// it against the param's definition.
+			onUse: (token) =>
+				recordRef?.(
+					definingId,
+					token,
+					macroKey(definingId, macro.nameToken.text) + SEP + name,
+				),
+		});
 	});
 	const suffix = `@${gensym()}`;
 	for (const name of localNames(macro.body)) {
@@ -531,6 +625,7 @@ function substituteName(
 		};
 	}
 	if (s?.kind === "operand") {
+		s.onUse?.(identifier);
 		if (
 			s.operand.type === "simple-operand" &&
 			s.operand.expression.type === "identifier"
@@ -647,7 +742,10 @@ function substituteOperand(
 		operand.expression.type === "identifier"
 	) {
 		const s = subst.get(operand.expression.text);
-		if (s?.kind === "operand") return structuredClone(s.operand);
+		if (s?.kind === "operand") {
+			s.onUse?.(operand.expression);
+			return structuredClone(s.operand);
+		}
 	}
 	return {
 		...operand,
@@ -669,6 +767,7 @@ function substituteExpr(
 			if (shadowed?.has(expr.text)) return expr;
 			const s = subst.get(expr.text);
 			if (s?.kind === "operand") {
+				s.onUse?.(expr);
 				// Operand is a super-type of simple values: only a simple operand
 				// (a plain expression) has a value usable inside an expression.
 				if (s.operand.type === "simple-operand") {

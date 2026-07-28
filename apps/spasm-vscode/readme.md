@@ -1,6 +1,8 @@
 # spasm-vscode
 
-VSCode language support for the [spasm](../../packages/spasm) 6502 assembler. Phase 1: syntax highlighting (TextMate grammar) and live diagnostics from the real assembler over LSP. Planned next: go to definition, hover values, completion.
+VSCode language support for the [spasm](../../packages/spasm) 6502 assembler: syntax highlighting (TextMate grammar), live diagnostics from the real assembler over LSP, go to definition, and hover (the definition line with its preceding comments, plus the converged value - a label shows its address). Planned next: document outline, completion, semantic tokens.
+
+Definition and hover answers come from the assembler itself: the converged pass records every reference the evaluator resolves (`AssembleResult.references`/`definitions`), so locals, `.if`-arm renames, splat and namespaced imports all behave exactly like assembly - there is no separate, driftable resolver in the extension.
 
 The extension is a thin client plus a language server bundled from [src/server.ts](src/server.ts). The server imports `@sfotty-pie/spasm` directly and assembles on every change (debounced), reading open editor buffers through the assembler's `Host` so unsaved edits diagnose correctly. Diagnostics keep spasm's stable `SPxxxx` codes, and secondary spans ("previously defined here") map to related-information links.
 

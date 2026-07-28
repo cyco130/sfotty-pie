@@ -1805,9 +1805,7 @@ describe("definition spans", () => {
 		expect(start.kind).toBe("label");
 	});
 
-	test("a dictionary defines one namespace symbol at its identifier", () => {
-		// Entries live inline in the DictValue, not as table entries -
-		// per-entry definition spans would need key spans in the value.
+	test("a dictionary defines entries under NUL-joined names, at key tokens", () => {
 		const src = "N = { OPEN: 0, CLOSE: 2 }\n\t.byte N::CLOSE\n";
 		const result = assemble(src, "t");
 		expect(result.diagnostics).toEqual([]);
@@ -1815,7 +1813,14 @@ describe("definition spans", () => {
 		const n = result.definitions.get("t" + SEP + "N")!;
 		expect(n.kind).toBe("namespace");
 		expect([n.start, n.end]).toEqual(span(src, "N"));
-		expect(result.definitions.has("t" + SEP + "N" + SEP + "CLOSE")).toBe(false);
+
+		const close = result.definitions.get("t" + SEP + "N" + SEP + "CLOSE")!;
+		expect([close.start, close.end]).toEqual(span(src, "CLOSE"));
+		expect(close.kind).toBe("constant");
+		expect(close.value).toBe(2n);
+
+		// Entries surface through the dict, not as flattened symbols.
+		expect([...result.symbols.keys()]).toEqual(["N"]);
 	});
 
 	test("expression macros appear in definitions but not in symbols", () => {
@@ -1868,5 +1873,241 @@ describe("definition spans", () => {
 
 		const foo = result.definitions.get("t" + SEP + "foo")!;
 		expect(foo.start).toBe(src.indexOf("foo"));
+	});
+});
+
+describe("reference recording", () => {
+	const SEP = "\0";
+
+	function refAt(
+		result: {
+			references: Map<string, { start: number; end: number; symbol: string }[]>;
+		},
+		file: string,
+		src: string,
+		text: string,
+		from = 0,
+	): string | undefined {
+		const start = src.indexOf(text, from);
+		expect(start).toBeGreaterThanOrEqual(0);
+		return result.references
+			.get(file)
+			?.find((r) => r.start === start && r.end === start + text.length)?.symbol;
+	}
+
+	test("operand and forward-label references record their spans", () => {
+		const src = "SIZE = 3\nstart:\n\tlda #SIZE\n\tbne done\ndone:\n\trts\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "t", src, "SIZE", src.indexOf("#"))).toBe(
+			"t" + SEP + "SIZE",
+		);
+		expect(refAt(result, "t", src, "done")).toBe("t" + SEP + "done");
+	});
+
+	test("local labels record under their qualified names", () => {
+		const src = "start:\n@loop:\n\tbne @loop\n\trts\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "t", src, "@loop", src.indexOf("bne"))).toBe(
+			"t" + SEP + "start@loop",
+		);
+	});
+
+	test("a splat-imported reference records the defining module's key", async () => {
+		const main = '.import "lib"\n\t.byte SIZE\n';
+		const host = memHost({ main, lib: ".export SIZE = 7\n" });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "main", main, "SIZE")).toBe("lib" + SEP + "SIZE");
+	});
+
+	test("a namespaced path records per-segment spans", async () => {
+		const main = 'lib = .import "lib"\n\t.byte lib::FOO\n';
+		const host = memHost({ main, lib: ".export FOO = 7\n" });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		// Cursor over `FOO` finds the export; over `lib`, the binding.
+		expect(refAt(result, "main", main, "FOO")).toBe("lib" + SEP + "FOO");
+		expect(refAt(result, "main", main, "lib", main.indexOf("::") - 3)).toBe(
+			"main" + SEP + "lib",
+		);
+	});
+
+	test("an undefined name records no reference", () => {
+		const src = "\t.byte nope\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics.map((d) => d.code)).toEqual(["SP2001"]);
+		expect(result.references.get("t") ?? []).toEqual([]);
+	});
+
+	test("references pair with definitions for round trips", () => {
+		const src = "SIZE = 3\n\tlda #SIZE\n";
+		const result = assemble(src, "t");
+		const symbol = refAt(result, "t", src, "SIZE", src.indexOf("#"))!;
+		const definition = result.definitions.get(symbol)!;
+		expect(definition.file).toBe("t");
+		expect(definition.start).toBe(src.indexOf("SIZE"));
+		expect(definition.value).toBe(3n);
+	});
+});
+
+describe("dict-entry and import navigation", () => {
+	const SEP = "\0";
+
+	function refAt(
+		result: {
+			references: Map<string, { start: number; end: number; symbol: string }[]>;
+		},
+		file: string,
+		src: string,
+		text: string,
+		from = 0,
+	): string | undefined {
+		const start = src.indexOf(text, from);
+		expect(start).toBeGreaterThanOrEqual(0);
+		return result.references
+			.get(file)
+			?.find((r) => r.start === start && r.end === start + text.length)?.symbol;
+	}
+
+	test("nested dict keys reference their entry definitions", () => {
+		const src =
+			"N = { Command: { OPEN: 3, CLOSE: 12 } }\n\t.byte N::Command::OPEN\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		const use = src.indexOf(".byte");
+		expect(refAt(result, "t", src, "Command", use)).toBe(
+			"t" + SEP + "N" + SEP + "Command",
+		);
+		expect(refAt(result, "t", src, "OPEN", use)).toBe(
+			"t" + SEP + "N" + SEP + "Command" + SEP + "OPEN",
+		);
+
+		const command = result.definitions.get("t" + SEP + "N" + SEP + "Command")!;
+		expect(command.kind).toBe("namespace");
+		const open = result.definitions.get(
+			"t" + SEP + "N" + SEP + "Command" + SEP + "OPEN",
+		)!;
+		expect([open.start, open.end]).toEqual([
+			src.indexOf("OPEN"),
+			src.indexOf("OPEN") + 4,
+		]);
+		expect(open.value).toBe(3n);
+	});
+
+	test("dict keys navigate through a namespaced import", async () => {
+		const lib = ".export Command = { OPEN: 3, CLOSE: 12 }\n";
+		const main = 'cio = .import "lib"\n\t.byte cio::Command::OPEN\n';
+		const host = memHost({ main, lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "main", main, "OPEN")).toBe(
+			"lib" + SEP + "Command" + SEP + "OPEN",
+		);
+		const open = result.definitions.get(
+			"lib" + SEP + "Command" + SEP + "OPEN",
+		)!;
+		expect(open.file).toBe("lib");
+		expect([open.start, open.end]).toEqual([
+			lib.indexOf("OPEN"),
+			lib.indexOf("OPEN") + 4,
+		]);
+	});
+
+	test("an import specifier references the imported module", async () => {
+		const main =
+			'.import "lib"\nlib2 = .import "lib2"\n\t.byte FOO, lib2::BAR\n';
+		const host = memHost({
+			main,
+			lib: ".export FOO = 1\n",
+			lib2: ".export BAR = 2\n",
+		});
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		expect(refAt(result, "main", main, '"lib"')).toBe("lib");
+		expect(refAt(result, "main", main, '"lib2"')).toBe("lib2");
+		const module = result.definitions.get("lib")!;
+		expect(module.kind).toBe("module");
+		expect(module.file).toBe("lib");
+		expect([module.start, module.end]).toEqual([0, 0]);
+	});
+});
+
+describe("macro navigation", () => {
+	const SEP = "\0";
+
+	function refAt(
+		result: {
+			references: Map<string, { start: number; end: number; symbol: string }[]>;
+		},
+		file: string,
+		src: string,
+		text: string,
+		from = 0,
+	): string | undefined {
+		const start = src.indexOf(text, from);
+		expect(start).toBeGreaterThanOrEqual(0);
+		return result.references
+			.get(file)
+			?.find((r) => r.start === start && r.end === start + text.length)?.symbol;
+	}
+
+	const lib = ".export .macro mva src, dst\n\tlda src\n\tsta dst\n.endmacro\n";
+
+	test("a call references the macro; body occurrences reference params", async () => {
+		const main = '.import "lib"\nfoo = $80\nbar = $81\n\tmva foo, bar\n\trts\n';
+		const host = memHost({ main, lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const macroSym = "lib" + SEP + SEP + "mva";
+		expect(refAt(result, "main", main, "mva")).toBe(macroSym);
+
+		const macro = result.definitions.get(macroSym)!;
+		expect(macro.kind).toBe("macro");
+		expect([macro.start, macro.end]).toEqual([
+			lib.indexOf("mva"),
+			lib.indexOf("mva") + 3,
+		]);
+
+		// Spliced call-site arguments reference the caller's symbols.
+		const call = main.indexOf("mva");
+		expect(refAt(result, "main", main, "foo", call)).toBe("main" + SEP + "foo");
+
+		// Param occurrences in the body reference the param definitions.
+		expect(refAt(result, "lib", lib, "src", lib.indexOf("lda"))).toBe(
+			macroSym + SEP + "src",
+		);
+		expect(refAt(result, "lib", lib, "dst", lib.indexOf("sta"))).toBe(
+			macroSym + SEP + "dst",
+		);
+		const param = result.definitions.get(macroSym + SEP + "src")!;
+		expect(param.kind).toBe("parameter");
+		expect([param.start, param.end]).toEqual([
+			lib.indexOf("src"),
+			lib.indexOf("src") + 3,
+		]);
+	});
+
+	test("a namespaced call references the binding and the macro", async () => {
+		const main =
+			'l = .import "lib"\nfoo = $80\nbar = $81\n\tl::mva foo, bar\n\trts\n';
+		const host = memHost({ main, lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const call = main.indexOf("l::");
+		expect(refAt(result, "main", main, "l", call)).toBe("main" + SEP + "l");
+		expect(refAt(result, "main", main, "mva", call)).toBe(
+			"lib" + SEP + SEP + "mva",
+		);
 	});
 });

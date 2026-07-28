@@ -15,9 +15,16 @@ export interface EvalEnv {
 	/**
 	 * Look up a symbol; `undefined` means "not resolved (yet)". `origin`, when
 	 * present, is the module the identifier lexically binds to (stamped by macro
-	 * expansion); otherwise the name resolves in the containing module.
+	 * expansion); otherwise the name resolves in the containing module. `span`
+	 * is the referencing token's span (a `::` path resolves per segment, each
+	 * with its own token's span) - the assemble env records it for reference
+	 * tracking; plain evaluation ignores it.
 	 */
-	resolve(name: string, origin?: string): Value | undefined;
+	resolve(
+		name: string,
+		origin?: string,
+		span?: readonly [number, number],
+	): Value | undefined;
 	/** Value of `*` (the location counter), or `undefined` outside a section. */
 	locationCounter: bigint | undefined;
 	/**
@@ -90,7 +97,7 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			return BigInt(bytes[0]!);
 		}
 		case "identifier": {
-			const value = env.resolve(expr.text, expr.origin);
+			const value = env.resolve(expr.text, expr.origin, [expr.start, expr.end]);
 			if (value === undefined && env.strict) {
 				env.report(
 					Codes.UndefinedSymbol,
@@ -160,10 +167,10 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				bindings.set(param, evaluate(expr.args[i]!, env));
 			});
 			const inner: EvalEnv = {
-				resolve: (name, origin) =>
+				resolve: (name, origin, span) =>
 					origin === undefined && bindings.has(name)
 						? bindings.get(name)
-						: env.resolve(name, origin ?? fn.moduleId),
+						: env.resolve(name, origin ?? fn.moduleId, span),
 				locationCounter: env.locationCounter,
 				report: env.report,
 				strict: env.strict,
@@ -235,15 +242,28 @@ function resolvePath(
 		}
 	};
 
-	let value = env.resolve(path.root.text, origin);
-	let keys: readonly string[] = path.keys;
+	// Each resolve passes its own token's span (root alone, then one key at a
+	// time), so reference records stay per-segment: on `lib::N::KEY` the
+	// cursor over `lib` finds the binding, over `N` the export, over `KEY`
+	// the dictionary entry.
+	let value = env.resolve(path.root.text, origin, [
+		path.root.start,
+		path.root.end,
+	]);
+	let index = 0;
+	let written = path.root.text;
 	let seen = path.root.text;
 	if (value === undefined) {
 		// Not a value in scope; try the namespace-binding reading. (A root that
 		// is defined but merely unresolved this pass also lands here, and gets
 		// the same "undefined" answer it would have got anyway.)
-		value = env.resolve(path.root.text + SEP + path.keys[0]!, origin);
-		keys = path.keys.slice(1);
+		const key0 = path.keyTokens[0]!;
+		value = env.resolve(path.root.text + SEP + path.keys[0]!, origin, [
+			key0.start,
+			key0.end,
+		]);
+		index = 1;
+		written += SEP + path.keys[0]!;
 		seen = path.root.text + "::" + path.keys[0]!;
 		if (value === undefined) {
 			reportUndefined(seen);
@@ -251,7 +271,9 @@ function resolvePath(
 		}
 	}
 
-	for (const key of keys) {
+	for (; index < path.keys.length; index++) {
+		const key = path.keys[index]!;
+		const token = path.keyTokens[index]!;
 		if (typeof value !== "object" || value.type !== "dict") {
 			env.report(
 				Codes.NotADictionary,
@@ -272,6 +294,13 @@ function resolvePath(
 			);
 			return undefined;
 		}
+		written += SEP + key;
+		// Purely for reference recording: dict literals define their entries
+		// as table symbols under qualified names, so when this path is backed
+		// by one, the key's span records against it. The traversal value stays
+		// the inline entry (dicts reached through non-symbol routes have no
+		// table backing, and record nothing).
+		env.resolve(written, origin, [token.start, token.end]);
 		value = value.entries.get(key);
 		seen += "::" + key;
 		if (value === undefined) {
@@ -297,6 +326,8 @@ interface FlatPath {
 	root: Token<"identifier">;
 	/** The keys after the root - always at least one. */
 	keys: readonly string[];
+	/** The keys' tokens, parallel to `keys` (for per-segment spans). */
+	keyTokens: readonly Token<"identifier">[];
 	qualified: string;
 	display: string;
 }
@@ -304,16 +335,18 @@ interface FlatPath {
 // Flatten `A::B::C` to its root identifier and its keys; undefined when the
 // path doesn't bottom out at an identifier.
 function flattenPath(expr: MemberExpression): FlatPath | undefined {
-	const keys: string[] = [expr.member.text];
+	const keyTokens: Token<"identifier">[] = [expr.member];
 	let object = expr.object;
 	while (object.type === "member-expression") {
-		keys.unshift(object.member.text);
+		keyTokens.unshift(object.member);
 		object = object.object;
 	}
 	if (object.type !== "identifier") return undefined;
+	const keys = keyTokens.map((token) => token.text);
 	return {
 		root: object,
 		keys,
+		keyTokens,
 		qualified: [object.text, ...keys].join(SEP),
 		display: [object.text, ...keys].join("::"),
 	};

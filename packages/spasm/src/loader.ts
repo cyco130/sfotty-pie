@@ -26,6 +26,8 @@ export interface Host {
 export interface ImportRecord {
 	id: string;
 	binding: string | null;
+	/** The specifier string token's span, in the importing module's source. */
+	span: readonly [number, number];
 }
 
 export interface LoadedModule {
@@ -130,7 +132,7 @@ export async function loadModules(
 						);
 					}
 					if (depId !== undefined) {
-						imports.push({ id: depId, binding: binding?.text ?? null });
+						imports.push({ id: depId, binding: binding?.text ?? null, span });
 						await load(depId, span, id);
 					}
 				}

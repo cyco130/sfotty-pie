@@ -1,7 +1,14 @@
 import { access, readFile } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
-import { assemble, type Host, type Message } from "@sfotty-pie/spasm";
+import {
+	assemble,
+	type Definition,
+	type Host,
+	type Message,
+	type Reference,
+	type Value,
+} from "@sfotty-pie/spasm";
 import { parse as parseJsonc } from "jsonc-parser";
 import {
 	createConnection,
@@ -10,6 +17,8 @@ import {
 	TextDocuments,
 	TextDocumentSyncKind,
 	type Diagnostic,
+	type Hover,
+	type Location,
 	type Range,
 } from "vscode-languageserver/node";
 import { TextDocument } from "vscode-languageserver-textdocument";
@@ -26,7 +35,11 @@ connection.onInitialize((params) => {
 		[];
 
 	return {
-		capabilities: { textDocumentSync: TextDocumentSyncKind.Incremental },
+		capabilities: {
+			textDocumentSync: TextDocumentSyncKind.Incremental,
+			definitionProvider: true,
+			hoverProvider: true,
+		},
 	};
 });
 
@@ -53,6 +66,16 @@ function scheduleValidation(): void {
 
 /** URIs we published diagnostics for last run, so stale ones get cleared. */
 let lastPublished = new Set<string>();
+
+/**
+ * The last validation's merged analysis, for the definition and hover
+ * providers. Module ids are absolute paths; spans are offsets into `texts`.
+ */
+let analysis = {
+	definitions: new Map<string, Definition>(),
+	references: new Map<string, Reference[]>(),
+	texts: new Map<string, string>(),
+};
 
 /**
  * Validate everything reachable from the open spasm documents: group them
@@ -163,9 +186,20 @@ async function validateAll(): Promise<void> {
 		}
 	}
 
+	const definitions = new Map<string, Definition>();
+	const references = new Map<string, Reference[]>();
+
 	async function runEntry(entryPath: string): Promise<void> {
 		const result = await assemble(entryPath, host);
 		for (const message of result.diagnostics) addMessage(message, entryPath);
+		for (const [key, definition] of result.definitions) {
+			definitions.set(key, definition);
+		}
+		for (const [file, list] of result.references) {
+			const merged = references.get(file);
+			if (merged) merged.push(...list);
+			else references.set(file, [...list]);
+		}
 	}
 
 	// Group open documents into projects by their nearest spasm.jsonc.
@@ -209,6 +243,142 @@ async function validateAll(): Promise<void> {
 	}
 
 	lastPublished = published;
+	analysis = { definitions, references, texts };
+}
+
+/** The qualified symbol under `offset` in `path` - a reference, or the
+ * definition itself when the cursor sits on a defining occurrence. */
+function symbolAt(
+	path: string,
+	offset: number,
+): { symbol: string; span: [number, number] } | undefined {
+	const reference = analysis.references
+		.get(path)
+		?.find((r) => r.start <= offset && offset <= r.end);
+	if (reference) {
+		return {
+			symbol: reference.symbol,
+			span: [reference.start, reference.end],
+		};
+	}
+
+	for (const [symbol, definition] of analysis.definitions) {
+		if (
+			definition.file === path &&
+			definition.start <= offset &&
+			offset <= definition.end
+		) {
+			return { symbol, span: [definition.start, definition.end] };
+		}
+	}
+
+	return undefined;
+}
+
+/** A document for offset/position mapping: the live buffer, or one built
+ * from the text the last validation read. */
+function mappingDocFor(path: string): TextDocument | undefined {
+	for (const doc of documents.all()) {
+		if (URI.parse(doc.uri).fsPath === path) return doc;
+	}
+	const text = analysis.texts.get(path);
+	if (text === undefined) return undefined;
+	return TextDocument.create(URI.file(path).toString(), "spasm", 0, text);
+}
+
+function definitionLocation(definition: Definition): Location | undefined {
+	const doc = mappingDocFor(definition.file);
+	if (!doc) return undefined;
+	return {
+		uri: doc.uri,
+		range: {
+			start: doc.positionAt(definition.start),
+			end: doc.positionAt(definition.end),
+		},
+	};
+}
+
+connection.onDefinition((params) => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return null;
+	const path = URI.parse(doc.uri).fsPath;
+	const hit = symbolAt(path, doc.offsetAt(params.position));
+	if (!hit) return null;
+	const definition = analysis.definitions.get(hit.symbol);
+	return definition ? (definitionLocation(definition) ?? null) : null;
+});
+
+connection.onHover((params): Hover | null => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return null;
+	const path = URI.parse(doc.uri).fsPath;
+	const hit = symbolAt(path, doc.offsetAt(params.position));
+	if (!hit) return null;
+	const definition = analysis.definitions.get(hit.symbol);
+	if (!definition) return null;
+
+	const text = analysis.texts.get(definition.file);
+	const lines: string[] = [];
+	if (text !== undefined) {
+		lines.push(...definitionExcerpt(text, definition.start));
+	}
+
+	const parts = ["```spasm", ...lines, "```"];
+	const value = formatValue(definition.value);
+	if (value !== undefined) parts.push("", `= ${value}`);
+	if (definition.file !== path) {
+		parts.push("", `*${basename(definition.file)}*`);
+	}
+
+	return {
+		contents: { kind: "markdown", value: parts.join("\n") },
+		range: {
+			start: doc.positionAt(hit.span[0]),
+			end: doc.positionAt(hit.span[1]),
+		},
+	};
+});
+
+/**
+ * The line containing `offset` plus the contiguous run of whole-line comments
+ * directly above it (capped, for pathological comment walls).
+ */
+function definitionExcerpt(text: string, offset: number): string[] {
+	const lineStart = (from: number): number =>
+		text.lastIndexOf("\n", from - 1) + 1;
+
+	let start = lineStart(offset);
+	const endIndex = text.indexOf("\n", offset);
+	const definitionLine = text
+		.slice(start, endIndex === -1 ? text.length : endIndex)
+		.trimEnd();
+
+	const comments: string[] = [];
+	while (start > 0 && comments.length < 16) {
+		const previousStart = lineStart(start - 1);
+		const line = text.slice(previousStart, start - 1).trim();
+		if (!line.startsWith(";")) break;
+		comments.unshift(line);
+		start = previousStart;
+	}
+
+	return [...comments, definitionLine];
+}
+
+function formatValue(value: Value | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value === "bigint") {
+		const negative = value < 0n;
+		const magnitude = negative ? -value : value;
+		const hex = magnitude.toString(16).toUpperCase();
+		const padded = hex.padStart(hex.length <= 2 ? 2 : 4, "0");
+		return `${negative ? "-" : ""}$${padded} (${value.toString(10)})`;
+	}
+	if (typeof value === "string") return JSON.stringify(value);
+	if (value.type === "dict") {
+		return `{ ${[...value.entries.keys()].join(", ")} }`;
+	}
+	return `(${value.params.join(", ")}) - expression macro`;
 }
 
 /**

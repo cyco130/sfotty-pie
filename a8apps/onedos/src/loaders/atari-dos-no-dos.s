@@ -136,3 +136,4 @@ COLDSV = $E477
 		.byte "Insert DOS disk or cartridge", $9B
 		.byte "Then press any key to reboot", $9B
 	no_cart_message_end:
+

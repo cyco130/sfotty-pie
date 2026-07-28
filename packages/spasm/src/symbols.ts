@@ -26,13 +26,21 @@ interface Entry {
  * Where a symbol was defined: the module whose source `start`/`end` index
  * into, and the symbol's kind. Hygiene keeps file and scope aligned: a
  * macro-stamped definition defines in the macro's module, and its tokens come
- * from that module's source.
+ * from that module's source. Kind `"module"` marks the synthetic definition
+ * every module gets (keyed by its bare id - unambiguous, since qualified
+ * names always contain `SEP`), the target of `.import` specifier references.
+ * Kinds `"macro"` and `"parameter"` mark code-macro definitions, which live
+ * in their own namespace: keyed `module SEP SEP name` (and
+ * `module SEP SEP name SEP param`) - the double `SEP` cannot occur in a
+ * symbol key, whose components are never empty.
  */
 export interface Definition {
 	file: string;
 	start: number;
 	end: number;
-	kind: SymbolKind;
+	kind: SymbolKind | "module" | "macro" | "parameter";
+	/** The converged value; `undefined` when it never resolved. */
+	value: Value | undefined;
 }
 
 /**

@@ -10,6 +10,15 @@ import type { Value } from "./value.ts";
 
 type Span = readonly [number, number];
 
+/** A resolved reference: where in `file` (the map key), and to which symbol
+ * (a qualified name in the `Message.symbol` spelling - a `definitions` key).
+ */
+export interface Reference {
+	start: number;
+	end: number;
+	symbol: string;
+}
+
 /**
  * Per-module symbol scopes layered over one `SymbolTable` via qualified keys.
  * A name resolves to a module's own symbol, to an exported symbol of a module
@@ -23,6 +32,8 @@ export class Scopes {
 	#exports = new Map<string, ReadonlySet<string>>();
 	#splats = new Map<string, readonly string[]>();
 	#bindings = new Map<string, ReadonlyMap<string, string>>();
+	#references = new Map<string, Reference[]>();
+	#referenceSpans = new Set<string>();
 
 	constructor(modules: readonly LoadedModule[]) {
 		for (const module of modules) {
@@ -44,6 +55,10 @@ export class Scopes {
 
 	beginPass(): void {
 		this.#table.beginPass();
+		// References re-record each pass so only the converged pass's survive
+		// (same discipline as diagnostics - earlier passes see stale values).
+		this.#references.clear();
+		this.#referenceSpans.clear();
 	}
 	snapshot(): Map<string, Value | undefined> {
 		return this.#table.snapshot();
@@ -85,9 +100,38 @@ export class Scopes {
 			// data, and surface whole - flattening them into `::` paths is a
 			// consumer's job (a debug-info format's, when there is one).
 			if (typeof value === "object" && value.type === "function") continue;
-			if (key.startsWith(prefix)) out.set(key.slice(prefix.length), value);
+			if (!key.startsWith(prefix)) continue;
+			const name = key.slice(prefix.length);
+			// Dictionary entries have their own qualified symbols (for
+			// definition sites), but surface through the whole dict here.
+			if (name.includes(SEP)) continue;
+			out.set(name, value);
 		}
 		return out;
+	}
+
+	/**
+	 * Record that `name` was referenced at `span` in `moduleId`'s source (the
+	 * caller passes the hygiene-adjusted module, so span and file agree). A
+	 * name that resolves to nothing records nothing; a span records once (an
+	 * expression can re-evaluate within a pass - collect and render both walk
+	 * `.res` counts, for instance).
+	 */
+	recordReference(moduleId: string, name: string, span: Span): void {
+		const key = this.#scopeKey(moduleId, name);
+		if (key === undefined) return;
+		const spanKey = moduleId + SEP + span[0] + SEP + span[1];
+		if (this.#referenceSpans.has(spanKey)) return;
+		this.#referenceSpans.add(spanKey);
+		const list = this.#references.get(moduleId);
+		const reference = { start: span[0], end: span[1], symbol: key };
+		if (list) list.push(reference);
+		else this.#references.set(moduleId, [reference]);
+	}
+
+	/** The recorded references of the last (converged) pass, per file. */
+	references(): Map<string, Reference[]> {
+		return this.#references;
 	}
 
 	/**
@@ -124,6 +168,7 @@ export class Scopes {
 			start: definedAt[0],
 			end: definedAt[1],
 			kind: this.#table.kindOf(key)!,
+			value: this.#table.resolve(key),
 		};
 	}
 

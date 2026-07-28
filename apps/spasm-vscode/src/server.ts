@@ -489,7 +489,28 @@ function definitionExcerpt(text: string, offset: number): string[] {
 		start = previousStart;
 	}
 
-	return [...comments, definitionLine];
+	const lines = [...comments, definitionLine];
+
+	// A label alone on its line says nothing - show what it labels: the next
+	// non-empty line (the routine's first instruction, a `.res`, ...).
+	const labelOnly = /^\s*(?:@?[A-Za-z_]\w*\s*:\s*)+(?:;.*)?$/;
+	if (labelOnly.test(definitionLine) && endIndex !== -1) {
+		let from = endIndex + 1;
+		while (from < text.length) {
+			const nextEnd = text.indexOf("\n", from);
+			const line = text
+				.slice(from, nextEnd === -1 ? text.length : nextEnd)
+				.trimEnd();
+			if (line.trim() !== "") {
+				lines.push(line);
+				break;
+			}
+			if (nextEnd === -1) break;
+			from = nextEnd + 1;
+		}
+	}
+
+	return lines;
 }
 
 /**

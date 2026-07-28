@@ -1157,6 +1157,43 @@ export function getExpressionAnchorToken(
 	}
 }
 
+/** Visit every identifier token in expression position (path keys are not
+ * identifiers in this sense - only a path's root resolves as a name). */
+export function forEachIdentifier(
+	expression: Expression,
+	visit: (token: Token<"identifier">) => void,
+): void {
+	switch (expression.type) {
+		case "identifier":
+			visit(expression);
+			return;
+		case "member-expression":
+			forEachIdentifier(expression.object, visit);
+			return;
+		case "grouped-expression":
+		case "prefix-expression":
+			forEachIdentifier(expression.expression, visit);
+			return;
+		case "infix-expression":
+			forEachIdentifier(expression.left, visit);
+			forEachIdentifier(expression.right, visit);
+			return;
+		case "call-expression":
+			forEachIdentifier(expression.callee, visit);
+			for (const argument of expression.args) {
+				forEachIdentifier(argument, visit);
+			}
+			return;
+		case "dict-literal":
+			for (const entry of expression.entries) {
+				forEachIdentifier(entry.value, visit);
+			}
+			return;
+		default:
+			return; // literals and `*`
+	}
+}
+
 export function getOperandLocation(
 	operand: Operand,
 ): [start: number, end: number] {

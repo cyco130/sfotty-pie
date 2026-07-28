@@ -3,6 +3,7 @@ import type { Token } from "./lexer.ts";
 import type { LoadedModule } from "./loader.ts";
 import {
 	ANONYMOUS_LABEL,
+	forEachIdentifier,
 	getExpressionAnchorToken,
 	getOperandLocation,
 	type Expression,
@@ -26,14 +27,8 @@ type Reporter = (
 ) => void;
 
 // A param substitutes to an argument operand; a body-local label renames.
-// `onUse` reports each substituted occurrence (macro-nav records the body
-// spans of param uses through it).
 type Substitution =
-	| {
-			kind: "operand";
-			operand: Operand;
-			onUse?: (token: { start: number; end: number }) => void;
-	  }
+	| { kind: "operand"; operand: Operand }
 	| { kind: "rename"; name: string };
 
 /**
@@ -174,6 +169,12 @@ export function expandModules(
 							value: undefined,
 						});
 					}
+					// Param uses record statically from the body, so tooling
+					// (rename, unused detection) works for uncalled macros too
+					// - expansion doesn't need to happen for uses to be known.
+					recordParamUses(macro, (token) =>
+						recordRef(module.id, token, key + SEP + token.text),
+					);
 				}
 			}
 		}
@@ -291,7 +292,6 @@ export function expandModules(
 						args,
 						() => ++counter,
 						report,
-						recordRef,
 					);
 					if (statement.labels.length && body.length) {
 						body[0] = {
@@ -325,7 +325,6 @@ export function expandModules(
 							args,
 							() => ++counter,
 							report,
-							recordRef,
 						);
 						// Carry the call's own labels onto the first expanded statement.
 						if (statement.labels.length && body.length) {
@@ -531,6 +530,79 @@ function validateParams(
 }
 
 /**
+ * Visit every occurrence of a macro param in the body - the same positions
+ * substitution touches: labels and assignment names (`.out` definitions and
+ * forwarding), operand and directive expressions, `.if` conditions and arm
+ * bodies. An expression-macro definition's own params shadow the code
+ * macro's inside its body expression.
+ */
+function recordParamUses(
+	macro: Macro,
+	visit: (token: Token<"identifier">) => void,
+): void {
+	const params = new Set(macro.params.map((p) => p.nameToken.text));
+	const visitIf = (token: Token<"identifier">): void => {
+		if (params.has(token.text)) visit(token);
+	};
+	const walkExpr = (
+		expression: Expression,
+		shadowed?: ReadonlySet<string>,
+	): void => {
+		forEachIdentifier(expression, (token) => {
+			if (!shadowed?.has(token.text)) visitIf(token);
+		});
+	};
+	const walk = (statements: readonly Statement[]): void => {
+		for (const statement of statements) {
+			for (const label of statement.labels) visitIf(label.identifier);
+			const content = statement.content;
+			switch (content?.type) {
+				case "byte":
+				case "word":
+					for (const [expression] of content.list) walkExpr(expression);
+					break;
+				case "org":
+					walkExpr(content.expression);
+					break;
+				case "res":
+					walkExpr(content.count);
+					break;
+				case "assignment": {
+					visitIf(content.identifier);
+					const shadowed = content.params
+						? new Set(content.params.map((p) => p.text))
+						: undefined;
+					walkExpr(content.expression, shadowed);
+					for (const attribute of content.attributes) {
+						walkExpr(attribute.value);
+					}
+					break;
+				}
+				case "instruction":
+					for (const operand of content.operands) {
+						if (operand.type !== "accumulator-operand") {
+							walkExpr(operand.expression);
+						}
+					}
+					break;
+				case "if-block":
+					for (const arm of content.arms) {
+						if (arm.condition) walkExpr(arm.condition);
+						walk(arm.body);
+					}
+					break;
+				case "error-directive":
+					walkExpr(content.message);
+					break;
+				default:
+					break;
+			}
+		}
+	};
+	walk(macro.body);
+}
+
+/**
  * Append the splice site - the param occurrence at `origin` this argument
  * replaces - to the cloned expression's anchor token, outermost-first: each
  * expansion level appends, so the chain reads from the original call inward.
@@ -585,27 +657,10 @@ function expandCall(
 	args: Operand[],
 	gensym: () => number,
 	report: Reporter,
-	recordRef?: (
-		file: string,
-		token: { start: number; end: number },
-		symbol: string,
-	) => void,
 ): Statement[] {
 	const subst = new Map<string, Substitution>();
 	macro.params.forEach((param, i) => {
-		const name = param.nameToken.text;
-		subst.set(name, {
-			kind: "operand",
-			operand: args[i]!,
-			// A substituted occurrence is a param use at a body span - record
-			// it against the param's definition.
-			onUse: (token) =>
-				recordRef?.(
-					definingId,
-					token,
-					macroKey(definingId, macro.nameToken.text) + SEP + name,
-				),
-		});
+		subst.set(param.nameToken.text, { kind: "operand", operand: args[i]! });
 	});
 	const suffix = `@${gensym()}`;
 	for (const name of localNames(macro.body)) {
@@ -689,7 +744,6 @@ function substituteName(
 		};
 	}
 	if (s?.kind === "operand") {
-		s.onUse?.(identifier);
 		if (
 			s.operand.type === "simple-operand" &&
 			s.operand.expression.type === "identifier"
@@ -813,7 +867,6 @@ function substituteOperand(
 	) {
 		const s = subst.get(operand.expression.text);
 		if (s?.kind === "operand") {
-			s.onUse?.(operand.expression);
 			const clone = structuredClone(s.operand);
 			if (clone.type !== "accumulator-operand") {
 				recordSplice(clone.expression, operand.expression, origin);
@@ -841,7 +894,6 @@ function substituteExpr(
 			if (shadowed?.has(expr.text)) return expr;
 			const s = subst.get(expr.text);
 			if (s?.kind === "operand") {
-				s.onUse?.(expr);
 				// Operand is a super-type of simple values: only a simple operand
 				// (a plain expression) has a value usable inside an expression.
 				if (s.operand.type === "simple-operand") {

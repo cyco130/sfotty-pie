@@ -12,6 +12,7 @@ import {
 } from "./macros.ts";
 import { Scopes, type ModuleScope, type Reference } from "./scopes.ts";
 import {
+	forEachIdentifier,
 	getExpressionLocation,
 	parse,
 	type Assignment,
@@ -959,6 +960,28 @@ function defineAssignment(
 			functionValues.set(assignment, fn);
 		}
 		checkAttributes(assignment, report, definitionModule); // none allowed
+		// Params become table symbols under the function's name (like dict
+		// entries), and body occurrences record as references - so rename,
+		// find-references, and unused detection see them. Values stay
+		// undefined: application binds eagerly through its own overlay.
+		const paramNames = new Set(fn.params);
+		for (const param of assignment.params) {
+			scopes.defineLocal(
+				definitionModule,
+				text + SEP + param.text,
+				undefined,
+				"parameter",
+				[param.start, param.end],
+			);
+		}
+		forEachIdentifier(assignment.expression, (token) => {
+			if (paramNames.has(token.text) && token.origin === undefined) {
+				scopes.recordReference(definitionModule, text + SEP + token.text, [
+					token.start,
+					token.end,
+				]);
+			}
+		});
 		const prior = scopes.defineLocal(
 			definitionModule,
 			text,

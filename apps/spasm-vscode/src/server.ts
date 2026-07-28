@@ -21,6 +21,7 @@ import { parse as parseJsonc } from "jsonc-parser";
 import {
 	createConnection,
 	DiagnosticSeverity,
+	DiagnosticTag,
 	ErrorCodes,
 	ProposedFeatures,
 	ResponseError,
@@ -247,6 +248,59 @@ async function validateAll(): Promise<void> {
 	// is the fix.
 	for (const path of openByPath.keys()) {
 		if (!texts.has(path)) await runEntry(path);
+	}
+
+	// Unreferenced definitions dim (hint severity + the Unnecessary tag).
+	// Exported symbols are API and stay lit even when this closure doesn't
+	// use them; hygiene gensyms share one source span across expansions, so
+	// a span is "used" if any symbol defined at it is referenced.
+	{
+		const used = new Set<string>();
+		for (const list of references.values()) {
+			for (const reference of list) used.add(reference.symbol);
+		}
+		const usedSpans = new Set<string>();
+		const spanKey = (d: Definition): string => d.file + "\0" + d.start;
+		for (const [symbol, definition] of definitions) {
+			if (used.has(symbol)) usedSpans.add(spanKey(definition));
+		}
+
+		for (const [symbol, definition] of definitions) {
+			if (definition.kind === "module") continue;
+			if (usedSpans.has(spanKey(definition))) continue;
+
+			const sep = symbol.indexOf("\0");
+			const module = symbol.slice(0, sep);
+			const rest = symbol.slice(sep + 1);
+			const scope = moduleScopes.get(module);
+			if (definition.kind === "parameter") {
+				// Param uses (both macro kinds) are recorded statically from
+				// the body, so unused is meaningful whether or not the macro
+				// is called or exported: unused is unused.
+			} else if (rest.startsWith("\0")) {
+				// Macro namespace: exported macros are API.
+				const name = rest.slice(1).split("\0")[0]!;
+				if (scope?.macroExports.has(name)) continue;
+			} else if (scope?.exports.has(rest.split("\0")[0]!)) {
+				// Symbols (and dict entries) reachable through an export.
+				continue;
+			}
+
+			const name = rest.startsWith("\0")
+				? rest.slice(1).replaceAll("\0", " ")
+				: rest.replaceAll("\0", "::");
+			const list = fileDiags.get(definition.file) ?? [];
+			if (!fileDiags.has(definition.file)) {
+				fileDiags.set(definition.file, list);
+			}
+			list.push({
+				range: rangeIn(definition.file, definition.start, definition.end),
+				severity: DiagnosticSeverity.Hint,
+				tags: [DiagnosticTag.Unnecessary],
+				source: "spasm",
+				message: `"${name}" is never referenced`,
+			});
+		}
 	}
 
 	// Publish for everything touched this run (empty array clears old

@@ -2236,3 +2236,56 @@ describe("export references", () => {
 		expect(exportRef?.symbol).toBe("lib\0FOO");
 	});
 });
+
+describe("expression-macro params", () => {
+	const SEP = "\0";
+
+	test("params are parameter symbols; body uses record references", () => {
+		const src = "SCALE(v, unused) = 2 * v\n\t.byte SCALE(3, 0)\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		const v = result.definitions.get("t" + SEP + "SCALE" + SEP + "v")!;
+		expect(v.kind).toBe("parameter");
+		expect([v.start, v.end]).toEqual([
+			src.indexOf("v,"),
+			src.indexOf("v,") + 1,
+		]);
+
+		const use = src.indexOf("v", src.indexOf("2 *"));
+		const ref = result.references
+			.get("t")
+			?.find((r) => r.start === use && r.end === use + 1);
+		expect(ref?.symbol).toBe("t" + SEP + "SCALE" + SEP + "v");
+
+		// The unused param has a definition and no references.
+		const unusedKey = "t" + SEP + "SCALE" + SEP + "unused";
+		expect(result.definitions.get(unusedKey)?.kind).toBe("parameter");
+		const refs = [...result.references.values()].flat();
+		expect(refs.some((r) => r.symbol === unusedKey)).toBe(false);
+
+		// Params stay out of the public symbols map.
+		expect([...result.symbols.keys()]).toEqual([]);
+	});
+});
+
+describe("uncalled-macro params", () => {
+	test("param uses are recorded without any call", async () => {
+		const lib =
+			".export .macro emit_boot target, unused\n\tjmp target\n.endmacro\n";
+		const host = memHost({ main: '.import "lib"\n\tnop\n', lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const use = lib.indexOf("target", lib.indexOf("jmp"));
+		const ref = result.references
+			.get("lib")
+			?.find((r) => r.start === use && r.end === use + 6);
+		expect(ref?.symbol).toBe("lib\0\0emit_boot\0target");
+
+		const refs = [...result.references.values()].flat();
+		expect(refs.some((r) => r.symbol === "lib\0\0emit_boot\0unused")).toBe(
+			false,
+		);
+	});
+});

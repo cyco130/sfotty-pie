@@ -49,7 +49,7 @@ function address(symbols: Map<string, Value>, name: string): number {
  * loader reads it back to learn the sector size.
  */
 export async function buildNoDosLoader(): Promise<Uint8Array> {
-	const { output, symbols } = await build("src/loaders/atari-dos-no-dos.s");
+	const { output, symbols } = await build("src/boot-loaders/adfs-boot-stub.s");
 	const boot = new Uint8Array(output);
 	const offset =
 		address(symbols, "sector_link_offset") - address(symbols, "LOAD_ADDRESS");

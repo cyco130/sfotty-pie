@@ -1,4 +1,11 @@
 {
-	// Entry modules, relative to this file.
-	"entries": ["src/loaders/atari-dos-no-dos.s"],
+	// Entry modules, relative to this file. An entry is a path, or an object
+	// ({ "module": ..., "name": ... }) when the default name (the module's
+	// basename) won't do; future members will add build context (defines,
+	// target, CPU type).
+	"entries": [
+		"src/boot-loaders/adfs-boot-stub.s",
+		"src/boot-loaders/adfs-boot.s",
+		"src/dos.s",
+	],
 }

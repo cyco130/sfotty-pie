@@ -14,16 +14,16 @@
 .export DAUX1  := $030A ; Auxiliary register 1
 .export DAUX2  := $030B ; Auxiliary register 2
 
-Device = {
+.export Device = {
 	D1: $31
 	CASSETTE: $5F
 }
 
-Command = {
+.export Command = {
 	READ: $52
 }
 
-Direction = {
+.export Direction = {
 	COMPUTER_TO_DEVICE: $80
 	DEVICE_TO_COMPUTER: $40
 }

@@ -60,6 +60,7 @@ connection.onInitialize((params) => {
 				full: true,
 			},
 			renameProvider: { prepareProvider: true },
+			referencesProvider: true,
 		},
 	};
 });
@@ -446,6 +447,44 @@ connection.onHover((params): Hover | null => {
 			end: doc.positionAt(hit.span[1]),
 		},
 	};
+});
+
+connection.onReferences((params) => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return null;
+	const path = URI.parse(doc.uri).fsPath;
+	const hit = symbolAt(path, doc.offsetAt(params.position));
+	if (!hit) return null;
+
+	const seen = new Set<string>();
+	const locations: Location[] = [];
+	const add = (file: string, start: number, end: number): void => {
+		const key = file + "\0" + start;
+		if (seen.has(key)) return;
+		seen.add(key);
+		const fileDoc = mappingDocFor(file);
+		if (!fileDoc) return;
+		locations.push({
+			uri: fileDoc.uri,
+			range: {
+				start: fileDoc.positionAt(start),
+				end: fileDoc.positionAt(end),
+			},
+		});
+	};
+
+	for (const [file, references] of analysis.references) {
+		for (const reference of references) {
+			if (reference.symbol === hit.symbol) {
+				add(file, reference.start, reference.end);
+			}
+		}
+	}
+	if (params.context.includeDeclaration) {
+		const definition = analysis.definitions.get(hit.symbol);
+		if (definition) add(definition.file, definition.start, definition.end);
+	}
+	return locations;
 });
 
 /** Whether `symbol` is renameable, and its current spelling in source. */

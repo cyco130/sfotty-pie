@@ -12,6 +12,11 @@ import {
 
 import { buildCompletions } from "./completion.ts";
 import { buildOutline, formatValue } from "./outline.ts";
+import {
+	buildSemanticTokens,
+	TOKEN_MODIFIERS,
+	TOKEN_TYPES,
+} from "./semantic-tokens.ts";
 import { parse as parseJsonc } from "jsonc-parser";
 import {
 	createConnection,
@@ -44,6 +49,13 @@ connection.onInitialize((params) => {
 			hoverProvider: true,
 			documentSymbolProvider: true,
 			completionProvider: { triggerCharacters: [":", "."] },
+			semanticTokensProvider: {
+				legend: {
+					tokenTypes: [...TOKEN_TYPES],
+					tokenModifiers: [...TOKEN_MODIFIERS],
+				},
+				full: true,
+			},
 		},
 	};
 });
@@ -254,6 +266,9 @@ async function validateAll(): Promise<void> {
 
 	lastPublished = published;
 	analysis = { definitions, references, moduleScopes, texts };
+	// Analysis changed under the client's highlighted tokens - have it
+	// re-request them.
+	void connection.languages.semanticTokens.refresh().catch(() => {});
 }
 
 connection.onCompletion(async (params) => {
@@ -426,6 +441,20 @@ connection.onHover((params): Hover | null => {
 			start: doc.positionAt(hit.span[0]),
 			end: doc.positionAt(hit.span[1]),
 		},
+	};
+});
+
+connection.languages.semanticTokens.on((params) => {
+	const doc = documents.get(params.textDocument.uri);
+	if (!doc) return { data: [] };
+	const path = URI.parse(doc.uri).fsPath;
+	return {
+		data: buildSemanticTokens(
+			path,
+			analysis.definitions,
+			analysis.references,
+			doc,
+		),
 	};
 });
 

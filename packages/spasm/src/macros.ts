@@ -233,6 +233,51 @@ export function expandModules(
 		}
 	}
 
+	// Nested macro calls record references statically from every body -
+	// expanded or not - so navigation and unused detection work for uncalled
+	// macros too, like param uses. Expansion later records the same spans
+	// (cloned bodies keep them) and recording dedups per span, so nothing
+	// double-counts.
+	if (nav) {
+		for (const module of modules) {
+			const record = (statements: readonly Statement[]): void => {
+				for (const statement of statements) {
+					const content = statement.content;
+					if (content?.type === "if-block") {
+						for (const arm of content.arms) record(arm.body);
+					}
+					if (content?.type !== "instruction") continue;
+					if (content.memberTokens?.length) {
+						const found = lookupPath(module.id, content);
+						if (!found) continue;
+						recordRef(
+							module.id,
+							content.mnemonic,
+							module.id + SEP + content.mnemonic.text,
+						);
+						recordRef(
+							module.id,
+							content.memberTokens[0]!,
+							macroKey(found.definingId, found.macro.nameToken.text),
+						);
+					} else {
+						const found = lookup(module.id, content.mnemonic.text);
+						if (!found) continue;
+						recordRef(
+							module.id,
+							content.mnemonic,
+							macroKey(found.definingId, content.mnemonic.text),
+						);
+						recordKeywordRefs(content, found, module.id, recordRef);
+					}
+				}
+			};
+			for (const macro of macros.get(module.id)!.own.values()) {
+				record(macro.body);
+			}
+		}
+	}
+
 	let counter = 0;
 	const expanded = new Set<Macro>();
 

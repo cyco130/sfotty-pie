@@ -2241,6 +2241,36 @@ describe("macro navigation", () => {
 			"lib" + SEP + SEP + "mva",
 		);
 	});
+
+	test("an uncalled macro's body call still references the callee", async () => {
+		// mwa is never called, so it never expands - the sta_hi call in its
+		// `.if` arm must still be navigable and count as a use.
+		const helperLib =
+			".macro sta_hi dst\n\tsta dst\n.endmacro\n" +
+			".export .macro mwa src, dst\n\t.if 1\n\t\tsta_hi dst\n\t.endif\n.endmacro\n";
+		const main = '.import "lib"\n\trts\n';
+		const host = memHost({ main, lib: helperLib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		expect(
+			refAt(result, "lib", helperLib, "sta_hi", helperLib.indexOf("mwa")),
+		).toBe("lib" + SEP + SEP + "sta_hi");
+	});
+
+	test("an uncalled body's namespaced call references binding and macro", async () => {
+		const outer = 'l = .import "lib"\n.macro wrap\n\tl::mva 1, 2\n.endmacro\n';
+		const main = '.import "outer"\n\trts\n';
+		const host = memHost({ main, outer, lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const call = outer.indexOf("l::mva");
+		expect(refAt(result, "outer", outer, "l", call)).toBe("outer" + SEP + "l");
+		expect(refAt(result, "outer", outer, "mva", call)).toBe(
+			"lib" + SEP + SEP + "mva",
+		);
+	});
 });
 
 describe("module scopes", () => {

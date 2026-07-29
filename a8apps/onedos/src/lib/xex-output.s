@@ -13,10 +13,11 @@
 ; wrong for a DOS: $80 is only "free from the OS" for a program that owns
 ; the machine, and a DOS is what other programs' zero page has to survive.
 
-.export .macro output_xex start, load
+.export .macro output_xex start, load, .out dos_end
 	.define_segment "CODE"
 	.define_segment "RODATA"
 	.define_segment "DATA"
+	.define_segment "INIT"
 	.define_segment "BSS"
 	.define_segment "ZEROPAGE"
 
@@ -24,7 +25,7 @@
 		; Binary-load signature and the chunk's inclusive address range
 		.word $FFFF
 		.word load
-		.word chunk_end - 1
+		.word load_end - 1
 
 	; Zero page workspace
 	.org $80
@@ -38,13 +39,22 @@
 		.emit "CODE"
 		.emit "RODATA"
 		.emit "DATA"
-chunk_end:
+	init_start:
+		.emit "INIT"
+		check_ram_end
+	load_end:
+	.org init_start ; Overlay BSS on top of INIT
 		.emplace "BSS"
-	.if * > $C000
-	.error "Memory overflow (image extends past $C000)"
-	.endif
+		check_ram_end
+	dos_end:
 
 		; RUNAD chunk: run the program at `start`
 		.word $02E0, $02E1
 		.word start
+.endmacro
+
+.macro check_ram_end
+	.if * > $C000
+		.error "Memory overflow (image extends past $C000)"
+	.endif
 .endmacro

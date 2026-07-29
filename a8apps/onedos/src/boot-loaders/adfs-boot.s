@@ -3,22 +3,23 @@ sio = .import "../lib/sio.s"
 
 LOAD_ADDRESS = $3C00
 
-output_atari_boot LOAD_ADDRESS, init, boot_continuation
+output_atari_boot LOAD_ADDRESS, COLDSV, boot_continuation
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; OS equates
 RUNAD  := $02E0, size: 2
 INITAD := $02E2, size: 2
+COLDSV := $E477
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 .segment "BOOT_PARAMS"
 
-.res 3 ; Reserve 4 bytes for Atari DOS compatibility
+.res 3 ; Reserve 3 bytes for Atari DOS compatibility
 
 boot_drive:            .byte 0 ; Drive number to boot from ($31 for D1)
-link_mask:             .byte 0 ; Mask for the link bytes in a sector ($03 for AtariDOS, $00 for MyDOS)
+link_mask:             .byte 0 ; Mask for the link high byte in a sector ($03 for AtariDOS, $FF for MyDOS)
 has_dos:               .byte 0 ; 0: no DOS, 1: DOS with 128-byte sectors, 2: DOS with 256-byte sectors
 dos_file_first_sector: .word 0 ; First sector of the DOS image
 sector_link_offset:    .byte 0 ; Offset of the next sector link in a sector (125 or 252)
@@ -48,13 +49,19 @@ boot_continuation:
 
 	; Check if DOS is present
 	lda has_dos
-	beq boot_error
+	bne :+
+	sec
+	rts
+:
 
-	; Initialize the buffer and its offset
+	; Prime the buffer as a fake previous sector whose link points at the
+	; DOS file's first sector, in on-disk order: high byte (plus file no on
+	; real sectors) first, low byte second. The zero length makes the first
+	; read_byte fill the buffer immediately.
 	ldx sector_link_offset
-	lda dos_file_first_sector
-	sta buffer,x
 	lda dos_file_first_sector+1
+	sta buffer,x
+	lda dos_file_first_sector
 	sta buffer+1,x
 	lda #0
 	sta buffer_offset
@@ -63,8 +70,10 @@ boot_continuation:
 	; Initialize RUNAD
 	lda #<rts_addr
 	sta RUNAD
+	sta INITAD
 	lda #>rts_addr
 	sta RUNAD+1
+	sta INITAD+1
 
 	; Check $FFFF header
 	jsr read_word
@@ -90,19 +99,14 @@ read_load_address:
 	bcs boot_error
 	sta end_address
 	stx end_address+1
-	cmp chunk_address
-	txa
-	sbc end_address+1
-	bcc boot_error
 
-	; Is end address reached?
+	; Did we pass the end address?
 check_read_address:
-	lda chunk_address
-	cmp end_address
-	bne read_chunk
-	lda chunk_address+1
-	cmp end_address+1
-	beq chunk_done
+	lda end_address
+	cmp chunk_address
+	lda end_address+1
+	sbc chunk_address+1
+	bcc chunk_done
 
 	; Read the chunk
 read_chunk:
@@ -125,19 +129,20 @@ chunk_done:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-eof:
-	jmp (RUNAD) ; Jump to the RUNAD vector
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 ; Restore stack pointer and return with error
 boot_error:
+	.byte 2
 	ldx stack_save
 	txs
 	sec
 rts_addr:
 	rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+eof:
+	jmp (RUNAD) ; Jump to the RUNAD vector
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -152,10 +157,9 @@ jump_to_initad:
 ;    C: set if end of file
 read_word:
 	jsr read_byte
-	bcc not_eof
+	bcc :+
 	rts
-not_eof:
-	pha
+:	pha
 	jsr read_byte
 	bcs boot_error
 	tax
@@ -164,18 +168,24 @@ not_eof:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; Buffer is empty, read the next sector
+; Buffer is empty, read the next sector. The link at the end of the buffer is
+; in on-disk order: the byte at the link offset holds the file number (masked
+; off) and the high bits, the next byte the low bits.
 fill_buffer:
 	lda buffer,x
 	and link_mask
-	sta sio::DAUX1
-	lda buffer+1,x
 	sta sio::DAUX2
-	ora sio::DAUX1
-	beq eof ; End of file if both link bytes are zero
+	lda buffer+1,x
+	sta sio::DAUX1
+	ora sio::DAUX2
+	bne :+
+
+	; End of file if both link bytes are zero
+	sec
+	rts
 
 	; Set drive and unit number
-	lda boot_drive
+:	lda boot_drive
 	sta sio::DDEVIC
 	lda #1
 	sta sio::DUNIT
@@ -220,11 +230,7 @@ read_byte:
 	beq fill_buffer
 	tax
 	lda buffer,x
+	inc buffer_offset
 	clc
-	rts
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-init:
-	rts
+:	rts
 

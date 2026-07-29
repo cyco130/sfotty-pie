@@ -39,8 +39,8 @@ const TRACE_RING_SIZE = 8192;
 // this keeps it from being evicted by the post-boot idle loop.
 const RESET_TRACE_CAPTURE = 4096;
 
-// Tight loops up to this many distinct instructions are recorded once, not
-// every iteration (see #recentPcs).
+// In "compact" trace mode, tight loops up to this many distinct instructions
+// are recorded once, not every iteration (see #recentPcs).
 const LOOP_WINDOW = 64;
 
 // Audio chunking and pacing: ~21ms chunks, ~50ms of queue as the pacing
@@ -168,11 +168,18 @@ export class Emulator {
 		this.#pending.push({ framesLeft: Math.max(1, frames), fn });
 	}
 
-	/** Enable/disable the CPU instruction trace ring. */
-	setTrace(enabled: boolean): void {
-		this.#trace = enabled;
+	/**
+	 * Enable/disable the CPU instruction trace ring. `true` records every
+	 * instruction; `"compact"` collapses tight loops (a PC seen in the last
+	 * `LOOP_WINDOW` records is skipped), so the ring spans real control flow
+	 * instead of one delay loop.
+	 */
+	setTrace(mode: boolean | "compact"): void {
+		this.#trace = mode !== false;
+		this.#compactTrace = mode === "compact";
 		this.#traceFreezeAt = -1;
-		this.machine.onInstruction = enabled ? this.#recordTrace : undefined;
+		this.#recentPcs.fill(-1);
+		this.machine.onInstruction = this.#trace ? this.#recordTrace : undefined;
 	}
 
 	/** Clear the trace ring. */
@@ -211,31 +218,36 @@ export class Emulator {
 	#back = 0;
 
 	#trace = false;
+	#compactTrace = false;
 	#traceRing: (string | undefined)[] = new Array(TRACE_RING_SIZE);
 	#traceCount = 0;
 	// A reset clears the ring and captures the boot, then freezes (so the
 	// post-boot idle loop can't evict it). -1 = capture freely.
 	#traceFreezeAt = -1;
 	#wasResetAsserted = false;
-	// Loop compression: skip recording a PC seen in the last this-many
-	// recorded instructions, so tight loops (the XL coldstart's ~71k-iteration
-	// delay, RAM clears) collapse and the ring spans real control flow.
+	// Compact mode's loop compression: skip recording a PC seen in the last
+	// this-many recorded instructions, so tight loops (the XL coldstart's
+	// ~71k-iteration delay, RAM clears) collapse and the ring spans real
+	// control flow.
 	#recentPcs = new Int32Array(LOOP_WINDOW).fill(-1);
 	readonly #peek = (address: number): number =>
 		this.machine.mmu.read(address & 0xffff, ReadOptions.PEEK);
 
-	// Record one committed-fetch instruction, skipping a PC seen in the last
-	// LOOP_WINDOW records so tight loops collapse. Wired to the machine's
-	// onInstruction only while tracing, so there's no per-instruction cost when
-	// it's off; once a reset-capture fills, it unwires itself to freeze the ring.
+	// Record one committed-fetch instruction; in compact mode, skip a PC seen
+	// in the last LOOP_WINDOW records so tight loops collapse. Wired to the
+	// machine's onInstruction only while tracing, so there's no
+	// per-instruction cost when it's off; once a reset-capture fills, it
+	// unwires itself to freeze the ring.
 	readonly #recordTrace = (pc: number): void => {
-		if (this.#recentPcs.includes(pc)) return;
+		if (this.#compactTrace) {
+			if (this.#recentPcs.includes(pc)) return;
+			this.#recentPcs[this.#traceCount % LOOP_WINDOW] = pc;
+		}
 		this.#traceRing[this.#traceCount % TRACE_RING_SIZE] = traceLine(
 			this.machine.cpu,
 			this.#peek,
 			pc,
 		);
-		this.#recentPcs[this.#traceCount % LOOP_WINDOW] = pc;
 		this.#traceCount++;
 		if (this.#traceFreezeAt >= 0 && this.#traceCount >= this.#traceFreezeAt) {
 			this.#trace = false; // ring now holds the boot; freeze it

@@ -3,6 +3,7 @@ export { ReadOptions, type Memory } from "./bus.ts";
 export { DECODE } from "./microcode.ts";
 export {
 	disassemble,
+	operandTrail,
 	traceLine,
 	type Disassembly,
 	type PeekReader,

@@ -81,8 +81,71 @@ export function disassemble(read: PeekReader, pc: number): Disassembly {
 }
 
 /**
+ * The memory addresses an instruction's operand resolves through, with the
+ * bytes there - computed from the current registers, so it shows what the
+ * CPU is about to read. Indirect modes show the pointer fetch first
+ * (`$80=$1234; $1239=$56` for `($80),Y` with Y=5), direct and indexed modes
+ * the effective address and its byte. Pointer fetches wrap the way the NMOS
+ * does: zero-page pointers stay in page zero, and `JMP ($xxFF)` reads its
+ * high byte from the start of the same page. For stores the byte shown is
+ * what the location held *before* the write. Empty for immediate, implied,
+ * accumulator, and relative modes.
+ */
+export function operandTrail(
+	cpu: Sfotty,
+	read: PeekReader,
+	mode: string,
+	b1: number,
+	word: number,
+): string {
+	const at = (address: number, width: number): string =>
+		`$${hex(address, width)}=$${hex(read(address & 0xffff), 2)}`;
+	// A zero-page pointer: both bytes from page zero, wrapping at $FF.
+	const zpWord = (zp: number): number =>
+		read(zp & 0xff) | (read((zp + 1) & 0xff) << 8);
+
+	switch (mode) {
+		case "zpg":
+			return at(b1, 2);
+		case "zpx":
+			return at((b1 + cpu.X) & 0xff, 2);
+		case "zpy":
+			return at((b1 + cpu.Y) & 0xff, 2);
+		case "abs":
+			return at(word, 4);
+		case "abx":
+			return at((word + cpu.X) & 0xffff, 4);
+		case "aby":
+			return at((word + cpu.Y) & 0xffff, 4);
+		case "inx": {
+			const pointer = (b1 + cpu.X) & 0xff;
+			const target = zpWord(pointer);
+			return `$${hex(pointer, 2)}=$${hex(target, 4)}; ${at(target, 4)}`;
+		}
+		case "iny": {
+			const target = zpWord(b1);
+			return (
+				`$${hex(b1, 2)}=$${hex(target, 4)}; ` + at((target + cpu.Y) & 0xffff, 4)
+			);
+		}
+		case "ind": {
+			// The NMOS page-wrap bug: the high byte comes from the start of
+			// the pointer's page when the pointer sits at $xxFF.
+			const target =
+				read(word) | (read((word & 0xff00) | ((word + 1) & 0xff)) << 8);
+			return `$${hex(word, 4)}=$${hex(target, 4)}`;
+		}
+		default:
+			return ""; // imm, imp, acc, rel
+	}
+}
+
+/**
  * One register-annotated trace line for the instruction at `pc`, e.g.
- * `E477  A2 FF     LDX #$FF      A=00 X=00 Y=00 S=FF P=34 nv-bdIzc`.
+ * `E477  B1 80     LDA ($80),Y   A=00 X=00 Y=05 S=FF P=34 nv-bdIzc  [$80=$1234; $1239=$56]`.
+ *
+ * The bracketed tail is the operand's memory trail (see {@link operandTrail});
+ * registers and trail both reflect the state *before* the instruction runs.
  *
  * `pc` defaults to the CPU's PC - correct when called at an instruction
  * boundary (`cpu.state === DECODE`). Pass it explicitly from `onFetch`, which
@@ -107,10 +170,17 @@ export function traceLine(cpu: Sfotty, read: PeekReader, pc = cpu.PC): string {
 		(p & 0x02 ? "Z" : "z") +
 		(p & 0x01 ? "C" : "c");
 
+	const opcode = bytes[0]!;
+	const mode = TABLE[opcode]?.mode ?? "imp";
+	const b1 = bytes[1] ?? 0;
+	const word = ((bytes[2] ?? 0) << 8) | b1;
+	const trail = operandTrail(cpu, read, mode, b1, word);
+
 	return (
 		`${hex(pc, 4)}  ${byteText} ${text.padEnd(13)} ` +
 		`A=${hex(cpu.A, 2)} X=${hex(cpu.X, 2)} Y=${hex(cpu.Y, 2)} ` +
-		`S=${hex(cpu.S, 2)} P=${hex(p, 2)} ${flags}`
+		`S=${hex(cpu.S, 2)} P=${hex(p, 2)} ${flags}` +
+		(trail ? `  [${trail}]` : "")
 	);
 }
 

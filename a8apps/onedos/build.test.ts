@@ -1,6 +1,11 @@
 import { AtrImage } from "@sfotty-pie/a8";
 import { expect, test } from "vitest";
-import { buildDos, buildNoDosDisk, buildNoDosLoader } from "./build.ts";
+import {
+	buildDos,
+	buildNoDosDisk,
+	buildNoDosLoader,
+	buildOneDosDisk,
+} from "./build.ts";
 import {
 	DIRECTORY_FIRST,
 	DIRECTORY_SECTORS,
@@ -114,4 +119,63 @@ test("the DOS assembles to a well-formed single-chunk XEX at $0700", async () =>
 	const run = word(xex, trailer + 4);
 	expect(run).toBeGreaterThanOrEqual(chunkStart);
 	expect(run).toBeLessThanOrEqual(chunkEnd);
+});
+
+async function oneDosImage() {
+	const { image, files } = await buildOneDosDisk();
+	return { image: new AtrImage(image), files };
+}
+
+test("the OneDOS disk boots ADFS with the boot params patched for the disk", async () => {
+	const { image, files } = await oneDosImage();
+	const onDisk = new Uint8Array(
+		[1, 2, 3].flatMap((s) => [...image.readSector(s)!]),
+	);
+
+	// The DOS-compatible boot params at their fixed offsets: drive, link
+	// mask, sector size code, DOS file start, sector link offset.
+	expect(onDisk[12]).toBe(0x31);
+	expect(onDisk[13]).toBe(0x03);
+	expect(onDisk[14]).toBe(1);
+	expect(word(onDisk, 15)).toBe(files[0]!.sectors[0]);
+	expect(onDisk[17]).toBe(SECTOR_LINK_OFFSET);
+});
+
+test("ONEDOS.DOS is a well-formed DOS 2.0 file", async () => {
+	const { image, files } = await oneDosImage();
+	const dos = await buildDos();
+	const planned = files[0]!;
+	expect(planned.sectors[0]).toBe(4); // first data sector, first-fit
+
+	// The directory entry: in use, created by DOS 2, sized and named.
+	const dir = image.readSector(DIRECTORY_FIRST)!;
+	expect(dir[0]).toBe(0x42);
+	expect(word(dir, 1)).toBe(planned.sectors.length);
+	expect(word(dir, 3)).toBe(planned.sectors[0]);
+	expect(new TextDecoder().decode(dir.subarray(5, 16))).toBe("ONEDOS  DOS");
+	expect(dir[16]).toBe(0); // the next entry ends the scan
+
+	// Walk the chain: file number 0 in every link, lengths full except the
+	// tail, and the reassembled bytes are exactly the DOS image.
+	const bytes: number[] = [];
+	let sector = planned.sectors[0]!;
+	while (sector !== 0) {
+		const raw = image.readSector(sector)!;
+		const fileNumber = raw[125]! >> 2;
+		expect(fileNumber).toBe(0);
+		const next = ((raw[125]! & 0x03) << 8) | raw[126]!;
+		const length = raw[127]!;
+		expect(length).toBe(next === 0 ? dos.length % 125 || 125 : 125);
+		bytes.push(...raw.subarray(0, length));
+		sector = next;
+	}
+	expect(new Uint8Array(bytes)).toEqual(dos);
+
+	// The VTOC accounts for the file: capacity stays fresh, free shrinks.
+	const vtoc = image.readSector(VTOC_SECTOR)!;
+	expect(word(vtoc, 1)).toBe(708);
+	expect(word(vtoc, 3)).toBe(708 - planned.sectors.length);
+	const isFree = (s: number) => !!(vtoc[10 + (s >> 3)]! & (0x80 >> (s & 7)));
+	for (const s of planned.sectors) expect(isFree(s)).toBe(false);
+	expect(isFree(planned.sectors.at(-1)! + 1)).toBe(true);
 });

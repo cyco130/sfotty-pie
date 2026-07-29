@@ -82,6 +82,18 @@ export function encodeInstruction(
 		return [];
 	}
 
+	// Keyword arguments are macro-call syntax.
+	const keyword = instruction.argNames?.find((name) => name !== undefined);
+	if (keyword) {
+		context.report(
+			Codes.KeywordArgsOnInstruction,
+			"Keyword arguments are for macro calls",
+			[keyword.start, keyword.end],
+			keyword.origin ?? mnemonic.origin,
+		);
+		return [];
+	}
+
 	// Operand lists exist for macro calls; a real instruction takes at most one.
 	if (operands.length > 1) {
 		const second = expressionOf(operands[1]!);

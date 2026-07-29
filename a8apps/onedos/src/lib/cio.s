@@ -43,11 +43,32 @@
 	.endif
 .endmacro
 
-.export .macro xio channel, command, buffer = .null, buffer_len = .null, aux1 = .null, aux2 = .null, aux3 = .null, aux4 = .null, aux5 = .null, aux6 = .null
+.export .macro xio channel, command, string = .null, buffer = .null, buffer_len = .null, aux1 = .null, aux2 = .null, aux3 = .null, aux4 = .null, aux5 = .null, aux6 = .null
+	.if string != .null && buffer != .null
+		.error "xio: cannot specify both string and buffer"
+	.endif
+
 	ldx channel
 
 	lda command
 	store channel, ICCOM
+
+	.if string != .null
+		seg = .segment()
+		.rodata
+			buf_addr: .byte buffer, $9B
+			buf_len = * - buf_addr
+		.segment seg
+
+		.if buffer_len = .null
+			lda #<buf_addr
+			store channel, ICBAL
+			lda #>buf_addr
+			store channel, ICBAH
+		.else
+			.error "xio: buffer_len must not be specified when buffer is a string"
+		.endif
+	.endif
 
 	.if buffer != .null
 		.if .is_string(buffer)
@@ -66,14 +87,12 @@
 				.error "xio: buffer_len must not be specified when buffer is a string"
 			.endif
 		.elseif .is_simple_operand(buffer)
-			.if buffer_len = .null
-				.error "xio: buffer_len must be specified when buffer is not a string"
-			.else
-				lda #<buffer
-				store channel, ICBAL
-				lda #>buffer
-				store channel, ICBAH
+			lda #<buffer
+			store channel, ICBAL
+			lda #>buffer
+			store channel, ICBAH
 
+			.if buffer_len != .null
 				lda #<buffer_len
 				store channel, ICBLL
 				lda #>buffer_len
@@ -113,4 +132,58 @@
 		lda #aux6
 		store channel, ICAX6
 	.endif
+.endmacro
+
+.export .macro open channel, aux1, aux2, spec
+	ldx channel
+
+	lda Command::OPEN
+	store channel, ICCOM
+
+	lda aux1
+	store channel, ICAX1
+
+	lda aux2
+	store channel, ICAX2
+
+	.if .is_string(spec)
+		seg = .segment()
+		.rodata
+			spec_addr: .byte spec, $9B
+		.segment seg
+
+		lda #<spec_addr
+		store channel, ICBAL
+		lda #>spec_addr
+		store channel, ICBAH
+	.elseif .is_simple_operand(spec)
+		lda #<spec
+		store channel, ICBAL
+		lda #>spec
+		store channel, ICBAH
+	.else
+		.error "`spec` must be a string or a simple operand"
+	.endif
+
+	jsr CIOV
+.endmacro
+
+.export .macro close channel
+	xio channel, Command::CLOSE
+.endmacro
+
+.export .macro readLine channel, buffer, maxLength
+	xio channel, Command::GETREC, buffer: buffer, buffer_len: maxLength
+.endmacro
+
+.export .macro readBytes channel, buffer, length
+	xio channel, Command::GETCHR, buffer: buffer, buffer_len: length
+.endmacro
+
+.export .macro putLine channel, buffer, maxLength = $FFFF
+	xio channel, Command::PUTREC, buffer: buffer, buffer_len: maxLength
+.endmacro
+
+.export .macro putchr channel, buffer, length
+	xio channel, Command::PUTCHR, buffer: buffer, buffer_len: length
 .endmacro

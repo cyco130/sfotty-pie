@@ -463,16 +463,50 @@ class Parser {
 	#instruction(identifier: Token<"identifier">): Instruction {
 		const mnemonic = identifier;
 		const operands: Operand[] = [];
-		const first = this.#operand();
-		if (first) {
-			operands.push(first);
+		const argNames: (Token<"identifier"> | undefined)[] = [];
+		let sawName = false;
+
+		// `name: operand` - a keyword argument (macro calls only; a keyword
+		// arg list is a braceless dict literal, sharing the `:` association
+		// mark). The colon must not start `::`, `:=`, or a hugging `:+`/`:-`.
+		const argName = (): Token<"identifier"> | undefined => {
+			if (this.#token.type !== "identifier") return undefined;
+			const colon = this.#lookahead;
+			if (colon.type !== ":") return undefined;
+			const name = this.#token;
+			const saved = this.#save();
+			this.#consume();
+			this.#consume();
+			const next = this.#token as Token;
+			if (
+				(next.type === "+" || next.type === "-") &&
+				next.start === colon.end
+			) {
+				this.#restore(saved); // `name :+` - an anonymous-label operand
+				return undefined;
+			}
+			return name;
+		};
+
+		const one = (): boolean => {
+			const name = argName();
+			const operand = this.#operand();
+			if (!operand) {
+				if (name) throw new ParseError(this.#token, ["an operand"]);
+				return false;
+			}
+			operands.push(operand);
+			argNames.push(name);
+			if (name) sawName = true;
+			return true;
+		};
+
+		if (one()) {
 			while (this.#token.type === ",") {
 				this.#consume();
-				const next = this.#operand();
-				if (!next) {
+				if (!one()) {
 					throw new ParseError(this.#token, ["an operand"]);
 				}
-				operands.push(next);
 			}
 		}
 
@@ -480,6 +514,7 @@ class Parser {
 			type: "instruction",
 			mnemonic,
 			operands,
+			argNames: sawName ? argNames : undefined,
 		};
 	}
 
@@ -1534,6 +1569,13 @@ export interface Instruction {
 	 * instructions never carry these. */
 	memberTokens?: Token<"identifier">[];
 	operands: Operand[];
+	/**
+	 * Parallel to `operands`: each argument's keyword name (`aux1: #4`), or
+	 * `undefined` for positional ones. Absent when every argument is
+	 * positional. Keyword arguments only mean something on macro calls;
+	 * encode rejects them on real instructions.
+	 */
+	argNames?: (Token<"identifier"> | undefined)[];
 }
 
 export type Operand =

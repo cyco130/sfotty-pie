@@ -813,7 +813,7 @@ describe("macros", () => {
 
 	test("an argument-count mismatch is reported", () => {
 		expect(asm(".macro one v\n\t.byte v\n.endmacro\none\n").messages).toContain(
-			'Macro "one" expects 1 argument(s), got 0',
+			'Macro "one" is missing the argument "v"',
 		);
 	});
 
@@ -2682,7 +2682,7 @@ describe("default arguments", () => {
 		).toContain('`.out` parameter "o" cannot have a default');
 		expect(
 			asm(".macro two p, q = 1\n\tnop\n.endmacro\ntwo\n").messages,
-		).toContain('Macro "two" expects 1-2 argument(s), got 0');
+		).toContain('Macro "two" is missing the argument "p"');
 	});
 
 	test("the println pattern: defaulted segment name with a null-style dispatch", async () => {
@@ -2709,5 +2709,76 @@ describe("default arguments", () => {
 		const result = await assemble("main", memHost({ main, lib }));
 		expect(result.diagnostics).toEqual([]);
 		expect([...result.output]).toEqual([1, 2, 7, 8]);
+	});
+});
+
+describe("keyword arguments", () => {
+	const lib = [
+		".export .macro emit v1, aux1 = .null, aux2 = .null, aux3 = .null",
+		"\t.byte v1",
+		"\t.if aux1 != .null",
+		"\t\t.byte aux1",
+		"\t.endif",
+		"\t.if aux3 != .null",
+		"\t\t.byte aux3",
+		"\t.endif",
+		".endmacro",
+		"",
+	].join("\n");
+
+	test("keywords skip over defaulted params", async () => {
+		const main = [
+			'.import "lib"',
+			"\temit 1, aux3: 9",
+			"\temit 2, aux1: 5, aux3: 6",
+			"\temit v1: 3",
+			"",
+		].join("\n");
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		expect([...result.output]).toEqual([1, 9, 2, 5, 6, 3]);
+	});
+
+	test("keyword diagnostics: unknown, duplicate, positional-after, missing", async () => {
+		const bad = async (line: string) => {
+			const main = `.import "lib"\n${line}\n`;
+			const r = await assemble("main", memHost({ main, lib }));
+			return r.diagnostics.map((d) => d.message);
+		};
+		expect(await bad("\temit 1, nope: 2")).toContain(
+			'Macro "emit" has no parameter "nope"',
+		);
+		expect(await bad("\temit 1, v1: 2")).toContain(
+			'Argument "v1" is already given',
+		);
+		expect(await bad("\temit aux1: 2, 1")).toContain(
+			"A positional argument cannot follow a keyword argument",
+		);
+		expect(await bad("\temit aux1: 2")).toContain(
+			'Macro "emit" is missing the argument "v1"',
+		);
+	});
+
+	test("keyword args on a real instruction are rejected", () => {
+		expect(asm("\tlda foo: 1\n").messages).toContain(
+			"Keyword arguments are for macro calls",
+		);
+	});
+
+	test("a keyword name references its parameter", async () => {
+		const main = '.import "lib"\n\temit 1, aux3: 9\n';
+		const result = await assemble("main", memHost({ main, lib }));
+		const at = main.indexOf("aux3:");
+		const ref = result.references
+			.get("main")
+			?.find((r) => r.start === at && r.end === at + 4);
+		expect(ref?.symbol).toBe("lib\0\0emit\0aux3");
+	});
+
+	test("anonymous-label operands still parse next to keywords", () => {
+		// `bne :+` must not be mistaken for a keyword arg.
+		const src = "\tbne :+\n\tnop\n:\tnop\n";
+		const { messages } = asm(src);
+		expect(messages).toEqual([]);
 	});
 });

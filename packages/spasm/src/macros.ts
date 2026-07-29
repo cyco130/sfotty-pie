@@ -324,6 +324,7 @@ export function expandModules(
 						content.mnemonic,
 						macroKey(found.definingId, content.mnemonic.text),
 					);
+					recordKeywordRefs(content, found, scopeId, recordRef);
 					const args = callArgs(
 						content,
 						found.macro,
@@ -445,24 +446,79 @@ function callArgs(
 	file: string,
 	definingId: string,
 ): Operand[] | undefined {
-	const args = call.operands;
-	const required = macro.params.filter((p) => !p.defaultOperand).length;
-	if (args.length < required || args.length > macro.params.length) {
-		const expected =
-			required === macro.params.length
-				? `${macro.params.length}`
-				: `${required}-${macro.params.length}`;
-		report(
-			Codes.MacroArity,
-			`Macro "${macro.nameToken.text}" expects ${expected} argument(s), got ${args.length}`,
-			tokenSpan(call.mnemonic),
-			file,
-		);
-		return undefined;
+	// Split positional prefix from keyword arguments (`aux1: #4`); a
+	// positional after a keyword is ambiguous and rejected.
+	const provided: (Operand | undefined)[] = macro.params.map(() => undefined);
+	const paramIndex = new Map(
+		macro.params.map((p, i) => [p.nameToken.text, i] as const),
+	);
+	let positional = 0;
+	let sawKeyword = false;
+	for (let i = 0; i < call.operands.length; i++) {
+		const arg = call.operands[i]!;
+		const name = call.argNames?.[i];
+		if (!name) {
+			if (sawKeyword) {
+				report(
+					Codes.PositionalAfterKeyword,
+					"A positional argument cannot follow a keyword argument",
+					getOperandLocation(arg),
+					file,
+				);
+				return undefined;
+			}
+			if (positional >= macro.params.length) {
+				report(
+					Codes.MacroArity,
+					`Macro "${macro.nameToken.text}" takes ${macro.params.length} argument(s)`,
+					getOperandLocation(arg),
+					file,
+				);
+				return undefined;
+			}
+			provided[positional++] = arg;
+			continue;
+		}
+		sawKeyword = true;
+		const index = paramIndex.get(name.text);
+		if (index === undefined) {
+			report(
+				Codes.UnknownKeywordArg,
+				`Macro "${macro.nameToken.text}" has no parameter "${name.text}"`,
+				tokenSpan(name),
+				file,
+			);
+			return undefined;
+		}
+		if (provided[index] !== undefined) {
+			report(
+				Codes.DuplicateArg,
+				`Argument "${name.text}" is already given`,
+				tokenSpan(name),
+				file,
+			);
+			return undefined;
+		}
+		provided[index] = arg;
 	}
-	for (let i = 0; i < args.length; i++) {
+
+	// Every param must end up with an argument or a default; `.out` args
+	// must be plain identifiers whichever way they arrived.
+	for (let i = 0; i < macro.params.length; i++) {
 		const param = macro.params[i]!;
-		const arg = args[i]!;
+		const arg = provided[i];
+		if (arg === undefined) {
+			if (!param.defaultOperand) {
+				report(
+					Codes.MissingArg,
+					`Macro "${macro.nameToken.text}" is missing the argument "${param.nameToken.text}"`,
+					tokenSpan(call.mnemonic),
+					file,
+				);
+				return undefined;
+			}
+			continue;
+		}
 		if (
 			param.outToken &&
 			(arg.type !== "simple-operand" || arg.expression.type !== "identifier")
@@ -477,15 +533,14 @@ function callArgs(
 		}
 	}
 
-	// Fill missing trailing arguments from the defaults, substituted like
-	// body text: free names stamp to the defining module (hygiene), and a
-	// default may reference *earlier* params (filled left to right).
-	if (args.length === macro.params.length) return args;
+	// Fill the gaps from defaults, substituted like body text: free names
+	// stamp to the defining module (hygiene), and a default may reference
+	// *earlier* params (filled left to right).
 	const filled: Operand[] = [];
 	const subst = new Map<string, Substitution>();
 	for (let i = 0; i < macro.params.length; i++) {
 		const param = macro.params[i]!;
-		let arg = args[i];
+		let arg = provided[i];
 		if (arg === undefined) {
 			arg = substituteOperand(
 				structuredClone(param.defaultOperand!),
@@ -498,6 +553,28 @@ function callArgs(
 		subst.set(param.nameToken.text, { kind: "operand", operand: arg });
 	}
 	return filled;
+}
+
+// A keyword argument's name token references the param it fills - so
+// go-to-definition and rename cover call-site keywords.
+function recordKeywordRefs(
+	call: Extract<StatementContent, { type: "instruction" }>,
+	found: { macro: Macro; definingId: string },
+	scopeId: string,
+	recordRef: (
+		file: string,
+		token: { start: number; end: number },
+		symbol: string,
+	) => void,
+): void {
+	if (!call.argNames) return;
+	const key = macroKey(found.definingId, found.macro.nameToken.text);
+	for (const name of call.argNames) {
+		if (!name) continue;
+		if (found.macro.params.some((p) => p.nameToken.text === name.text)) {
+			recordRef(scopeId, name, key + SEP + name.text);
+		}
+	}
 }
 
 // Defaults are trailing-only (a positional call site could not skip a middle

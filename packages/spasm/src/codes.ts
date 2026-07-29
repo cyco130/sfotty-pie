@@ -106,6 +106,11 @@ export const Codes = {
 	UndefinedInMacroBody: "SP4013",
 	DefaultParamOrder: "SP4014",
 	OutParamDefault: "SP4015",
+	PositionalAfterKeyword: "SP4016",
+	UnknownKeywordArg: "SP4017",
+	DuplicateArg: "SP4018",
+	MissingArg: "SP4019",
+	KeywordArgsOnInstruction: "SP3037",
 
 	// 5xxx - modules
 	ImportCycle: "SP5001",

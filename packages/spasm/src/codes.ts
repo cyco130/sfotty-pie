@@ -88,6 +88,7 @@ export const Codes = {
 	OperandValueType: "SP3033",
 	ComparisonTypeMismatch: "SP3034",
 	OperandAsData: "SP3035",
+	NullAsData: "SP3036",
 
 	// 4xxx - macros
 	MacroAlreadyDefined: "SP4001",
@@ -103,6 +104,8 @@ export const Codes = {
 	ShapedArgumentInExpression: "SP4011",
 	ArgumentMustBeIdentifier: "SP4012",
 	UndefinedInMacroBody: "SP4013",
+	DefaultParamOrder: "SP4014",
+	OutParamDefault: "SP4015",
 
 	// 5xxx - modules
 	ImportCycle: "SP5001",

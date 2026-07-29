@@ -147,6 +147,7 @@ function expressionCompletions(
 	}
 	out.set(".segment", { label: ".segment", kind: KIND.keyword });
 	out.set(".pop", { label: ".pop", kind: KIND.keyword });
+	out.set(".null", { label: ".null", kind: KIND.keyword });
 	if (ASSIGNMENT_RHS.test(inputs.linePrefix)) {
 		out.set(".import", { label: ".import", kind: KIND.keyword });
 	}
@@ -157,6 +158,7 @@ function expressionCompletions(
 const EXPRESSION_KEYWORDS: ReadonlySet<string> = new Set([
 	...BUILTIN_NAMES,
 	"pop",
+	"null",
 ]);
 
 /**

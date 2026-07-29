@@ -250,6 +250,7 @@ export function formatValue(value: Value | undefined): string | undefined {
 	if (value.type === "dict") {
 		return `{ ${[...value.entries.keys()].join(", ")} }`;
 	}
+	if (value.type === "null") return ".null";
 	if (value.type === "operand") {
 		const inner = formatValue(value.value) ?? "?";
 		switch (value.shape) {

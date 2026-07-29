@@ -59,7 +59,7 @@ shell:
 	; Return to caller (will crash if caller is OS)
 	rts
 
-.macro println msg
+.macro println msg, rodata = "RODATA"
 	ldx #0
 	lda #cio::Command::PUTREC
 	sta cio::ICCOM
@@ -73,7 +73,7 @@ shell:
 	jsr cio::CIOV
 
 	current_segment = .segment()
-	.rodata
+	.segment rodata
 		msg_addr: .byte msg, $9B
 	.segment current_segment
 .endmacro

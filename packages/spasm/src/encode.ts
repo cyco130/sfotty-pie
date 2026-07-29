@@ -284,7 +284,9 @@ function encodeOperand(
 					? "a dictionary"
 					: value.type === "operand"
 						? "an operand value"
-						: "a function";
+						: value.type === "null"
+							? "null"
+							: "a function";
 		context.report(
 			Codes.OperandType,
 			`Operand must be a number, not ${kind}`,

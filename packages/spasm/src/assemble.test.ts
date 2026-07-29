@@ -2428,10 +2428,19 @@ describe("operand values", () => {
 		expect(result.symbols.get("REG")).toBe(1n);
 	});
 
-	test("mixed-kind comparison is a hard error", () => {
-		expect(asm('BAD = 1 = "one"\n\tnop\n').messages).toContain(
-			"Cannot compare a number with a string",
-		);
+	test("different kinds compare unequal, never coerce, never error", () => {
+		const src = [
+			'NUM_STR = 1 = "one"',
+			"PLAIN_OP = 0 = .immediate_operand(0)",
+			'NE = 1 != "one"',
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("NUM_STR")).toBe(0n);
+		expect(result.symbols.get("PLAIN_OP")).toBe(0n);
+		expect(result.symbols.get("NE")).toBe(1n);
 	});
 
 	test("string equality works", () => {
@@ -2545,5 +2554,160 @@ describe("operand values", () => {
 			0xa2, 0x00, 0xa9, 0x07, 0x8d, 0x42, 0x03, 0xa2, 0x10, 0xa9, 0x07, 0x9d,
 			0x42, 0x03,
 		]);
+	});
+});
+
+describe("null", () => {
+	test(".null is a value: storable, comparable across kinds, testable", () => {
+		const src = [
+			"NOTHING = .null",
+			"IS = .is_null(NOTHING)",
+			"ISNT = .is_null(3)",
+			"EQ = NOTHING = .null",
+			"CROSS = 3 = .null",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("IS")).toBe(1n);
+		expect(result.symbols.get("ISNT")).toBe(0n);
+		expect(result.symbols.get("EQ")).toBe(1n);
+		expect(result.symbols.get("CROSS")).toBe(0n);
+	});
+
+	test(".null is rejected as data, arithmetic, and operands", () => {
+		expect(asm("\t.byte .null\n").messages).toContain("`.null` is not data");
+		expect(asm("BAD = .null + 1\n\tnop\n").messages).toContain(
+			"Expected a number, got null",
+		);
+		expect(asm("N = .null\n\tlda N\n").messages).toContain(
+			"Operand must be a number, not null",
+		);
+	});
+
+	test(".is_null defers on unresolved arguments", () => {
+		const src = "CHECK = .is_null(LATER)\nLATER = .null\n\tnop\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("CHECK")).toBe(1n);
+	});
+});
+
+describe("default arguments", () => {
+	test("expression-macro defaults fill missing trailing args", () => {
+		const src = [
+			"SCALE(v, factor = 2) = v * factor",
+			"R1 = SCALE(3)",
+			"R2 = SCALE(3, 10)",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("R1")).toBe(6n);
+		expect(result.symbols.get("R2")).toBe(30n);
+	});
+
+	test("a function default may reference earlier params and module symbols", () => {
+		const src = [
+			"BASE = 100",
+			"F(p, q = p + BASE) = q",
+			"RES = F(1)",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("RES")).toBe(101n);
+	});
+
+	test("function arity reports a range", () => {
+		expect(asm("F(p, q = 1) = p\nRES = F()\n\tnop\n").messages).toContain(
+			'"F" expects 1-2 argument(s), got 0',
+		);
+	});
+
+	test("a required function param cannot follow a defaulted one", () => {
+		expect(asm("F(p = 1, q) = p\n\tnop\n").messages).toContain(
+			'Parameter "q" without a default follows one with a default',
+		);
+	});
+
+	test("macro defaults fill in, resolve in the defining module, and accept shapes", async () => {
+		const lib = [
+			"LIB_BASE = $20",
+			".export .macro load val = LIB_BASE, mode = #1",
+			"\tlda val",
+			"\tldx mode",
+			".endmacro",
+			"",
+		].join("\n");
+		const main = [
+			'.import "lib"',
+			"LIB_BASE = $99 ; a decoy: the default must NOT see this",
+			"\tload",
+			"\tload $30",
+			"",
+		].join("\n");
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		// load: lda $20 (zp, lib's LIB_BASE); ldx #1.
+		// load $30: lda $30; ldx #1.
+		expect([...result.output]).toEqual([
+			0xa5, 0x20, 0xa2, 0x01, 0xa5, 0x30, 0xa2, 0x01,
+		]);
+	});
+
+	test("a macro default may reference earlier params", () => {
+		const src = [
+			".macro pair lo, hi = lo + 1",
+			"\t.byte lo, hi",
+			".endmacro",
+			"pair 5",
+			"pair 5, 9",
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([5, 6, 5, 9]);
+	});
+
+	test("macro default rules: trailing-only, no .out defaults, arity range", () => {
+		expect(
+			asm(".macro bad p = 1, q\n\tnop\n.endmacro\n\tnop\n").messages,
+		).toContain('Parameter "q" without a default follows one with a default');
+		expect(
+			asm(".macro bad .out o = 1\n\tnop\n.endmacro\n\tnop\n").messages,
+		).toContain('`.out` parameter "o" cannot have a default');
+		expect(
+			asm(".macro two p, q = 1\n\tnop\n.endmacro\ntwo\n").messages,
+		).toContain('Macro "two" expects 1-2 argument(s), got 0');
+	});
+
+	test("the println pattern: defaulted segment name with a null-style dispatch", async () => {
+		const lib = [
+			'.export .macro emit_to value, target = "RODATA"',
+			"current = .segment()",
+			".segment target",
+			"\t.byte value",
+			".segment current",
+			".endmacro",
+			"",
+		].join("\n");
+		const main = [
+			'.import "lib"',
+			"\t.org $0600",
+			"\t.byte 1",
+			"\temit_to 7",
+			'\temit_to 8, "EXTRA"',
+			"\t.byte 2",
+			'.emit "RODATA"',
+			'.emit "EXTRA"',
+			"",
+		].join("\n");
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		expect([...result.output]).toEqual([1, 2, 7, 8]);
 	});
 });

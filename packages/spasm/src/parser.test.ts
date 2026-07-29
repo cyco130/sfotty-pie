@@ -31,6 +31,8 @@ function expr(e: Expression): string {
 			return ".segment()";
 		case "pop-expression":
 			return ".pop()";
+		case "null-literal":
+			return ".null";
 		case "builtin-call":
 			return `.${e.nameToken.type}(${e.args.map(expr).join(", ")})`;
 		case "operand-literal":
@@ -77,7 +79,7 @@ function content(c: StatementContent): string {
 		}
 		case "assignment":
 			return `${c.identifier.text}${
-				c.params ? `(${c.params.map((p) => p.text).join(", ")})` : ""
+				c.params ? `(${c.params.map((p) => p.nameToken.text).join(", ")})` : ""
 			} ${c.operatorToken.text} ${expr(c.expression)}${c.attributes
 				.map((a) => `, ${a.key.text}: ${expr(a.value)}`)
 				.join("")}`;

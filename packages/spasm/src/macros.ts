@@ -151,6 +151,7 @@ export function expandModules(
 				own.set(name, macro);
 				if (isExported) exported.add(name);
 				checkBody(macro, report, module.id);
+				checkDefaults(macro, report, module.id);
 				if (nav) {
 					const key = macroKey(module.id, name);
 					nav.definitions.set(key, {
@@ -284,7 +285,13 @@ export function expandModules(
 					content.memberTokens[0]!,
 					macroKey(found.definingId, found.macro.nameToken.text),
 				);
-				const args = callArgs(content, found.macro, report, scopeId);
+				const args = callArgs(
+					content,
+					found.macro,
+					report,
+					scopeId,
+					found.definingId,
+				);
 				if (args) {
 					const body = expandCall(
 						found.macro,
@@ -317,7 +324,13 @@ export function expandModules(
 						content.mnemonic,
 						macroKey(found.definingId, content.mnemonic.text),
 					);
-					const args = callArgs(content, found.macro, report, scopeId);
+					const args = callArgs(
+						content,
+						found.macro,
+						report,
+						scopeId,
+						found.definingId,
+					);
 					if (args) {
 						const body = expandCall(
 							found.macro,
@@ -430,12 +443,18 @@ function callArgs(
 	macro: Macro,
 	report: Reporter,
 	file: string,
+	definingId: string,
 ): Operand[] | undefined {
 	const args = call.operands;
-	if (args.length !== macro.params.length) {
+	const required = macro.params.filter((p) => !p.defaultOperand).length;
+	if (args.length < required || args.length > macro.params.length) {
+		const expected =
+			required === macro.params.length
+				? `${macro.params.length}`
+				: `${required}-${macro.params.length}`;
 		report(
 			Codes.MacroArity,
-			`Macro "${macro.nameToken.text}" expects ${macro.params.length} argument(s), got ${args.length}`,
+			`Macro "${macro.nameToken.text}" expects ${expected} argument(s), got ${args.length}`,
 			tokenSpan(call.mnemonic),
 			file,
 		);
@@ -457,7 +476,53 @@ function callArgs(
 			return undefined;
 		}
 	}
-	return args;
+
+	// Fill missing trailing arguments from the defaults, substituted like
+	// body text: free names stamp to the defining module (hygiene), and a
+	// default may reference *earlier* params (filled left to right).
+	if (args.length === macro.params.length) return args;
+	const filled: Operand[] = [];
+	const subst = new Map<string, Substitution>();
+	for (let i = 0; i < macro.params.length; i++) {
+		const param = macro.params[i]!;
+		let arg = args[i];
+		if (arg === undefined) {
+			arg = substituteOperand(
+				structuredClone(param.defaultOperand!),
+				subst,
+				definingId,
+				report,
+			);
+		}
+		filled.push(arg);
+		subst.set(param.nameToken.text, { kind: "operand", operand: arg });
+	}
+	return filled;
+}
+
+// Defaults are trailing-only (a positional call site could not skip a middle
+// argument), and `.out` params - caller-side name channels - can't have one.
+function checkDefaults(macro: Macro, report: Reporter, file: string): void {
+	let sawDefault = false;
+	for (const param of macro.params) {
+		if (param.outToken && param.defaultOperand) {
+			report(
+				Codes.OutParamDefault,
+				`\`.out\` parameter "${param.nameToken.text}" cannot have a default`,
+				tokenSpan(param.nameToken),
+				file,
+			);
+		}
+		if (param.defaultOperand) sawDefault = true;
+		else if (sawDefault) {
+			report(
+				Codes.DefaultParamOrder,
+				`Parameter "${param.nameToken.text}" without a default follows one with a default`,
+				tokenSpan(param.nameToken),
+				file,
+			);
+		}
+	}
 }
 
 // The `.out` contract: an `.out` param must be defined by the body (a label,
@@ -570,7 +635,7 @@ function recordParamUses(
 				case "assignment": {
 					visitIf(content.identifier);
 					const shadowed = content.params
-						? new Set(content.params.map((p) => p.text))
+						? new Set(content.params.map((p) => p.nameToken.text))
 						: undefined;
 					walkExpr(content.expression, shadowed);
 					for (const attribute of content.attributes) {
@@ -607,6 +672,16 @@ function recordParamUses(
 		}
 	};
 	walk(macro.body);
+	for (const param of macro.params) {
+		const operand = param.defaultOperand;
+		if (
+			operand &&
+			operand.type !== "accumulator-operand" &&
+			operand.type !== "register-operand"
+		) {
+			walkExpr(operand.expression);
+		}
+	}
 }
 
 /**
@@ -798,7 +873,7 @@ function substituteContent(
 			// An expression macro's params shadow the (code) macro's substitution
 			// inside its body - `F(x) = x + 1` keeps its own `x`.
 			const shadowed = content.params
-				? new Set(content.params.map((p) => p.text))
+				? new Set(content.params.map((p) => p.nameToken.text))
 				: undefined;
 			content.expression = substituteExpr(
 				content.expression,
@@ -1010,6 +1085,14 @@ function substituteExpr(
 			// Only ever synthesized from an already-substituted call-site
 			// operand - nothing left to substitute.
 			return expr;
+		case "null-literal":
+			return {
+				...expr,
+				nullToken: {
+					...expr.nullToken,
+					origin: expr.nullToken.origin ?? origin,
+				},
+			};
 		case "pop-expression":
 			return {
 				...expr,
@@ -1128,13 +1211,13 @@ function validateBody(
 				case "assignment": {
 					// An expression macro's params are bound within its own body.
 					const added = (content.params ?? []).filter(
-						(p) => !bound.has(p.text),
+						(p) => !bound.has(p.nameToken.text),
 					);
-					for (const p of added) bound.add(p.text);
+					for (const p of added) bound.add(p.nameToken.text);
 					check(content.expression);
 					// Attribute values are discarded without ever being evaluated,
 					// so an unresolvable name in one isn't an error.
-					for (const p of added) bound.delete(p.text);
+					for (const p of added) bound.delete(p.nameToken.text);
 					break;
 				}
 				case "instruction":

@@ -12,6 +12,7 @@ import { SEP } from "./symbols.ts";
 import {
 	decodeStringLiteral,
 	isEqual,
+	NULL,
 	type DictValue,
 	type OperandShape,
 	type OperandValue,
@@ -195,6 +196,8 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			}
 			break;
 		}
+		case "null-literal":
+			return NULL;
 		case "builtin-call":
 			return evaluateBuiltin(expr, env);
 		case "pop-expression": {
@@ -250,10 +253,15 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				);
 				return undefined;
 			}
-			if (expr.args.length !== fn.params.length) {
+			const required = fn.defaults.filter((d) => d === undefined).length;
+			if (expr.args.length < required || expr.args.length > fn.params.length) {
+				const expected =
+					required === fn.params.length
+						? `${fn.params.length}`
+						: `${required}-${fn.params.length}`;
 				env.report(
 					Codes.FunctionArity,
-					`${calleeName(expr.callee)} expects ${fn.params.length} argument(s), got ${expr.args.length}`,
+					`${calleeName(expr.callee)} expects ${expected} argument(s), got ${expr.args.length}`,
 					getExpressionLocation(expr),
 				);
 				return undefined;
@@ -269,11 +277,11 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 			}
 			// Eager arguments, evaluated in the caller's scope; the body's free
 			// names default to the defining module (lexical hygiene) by forcing
-			// the origin - params shadow via the bindings overlay.
+			// the origin - params shadow via the bindings overlay. A missing
+			// argument's default evaluates through the *inner* env instead:
+			// its free names resolve in the defining module, and it may
+			// reference earlier params (bindings fill left to right).
 			const bindings = new Map<string, Value | undefined>();
-			fn.params.forEach((param, i) => {
-				bindings.set(param, evaluate(expr.args[i]!, env));
-			});
 			const inner: EvalEnv = {
 				resolve: (name, origin, span) =>
 					origin === undefined && bindings.has(name)
@@ -288,6 +296,15 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				// once per application.
 				currentSegment: env.currentSegment,
 			};
+			fn.params.forEach((param, i) => {
+				const provided = expr.args[i];
+				bindings.set(
+					param,
+					provided !== undefined
+						? evaluate(provided, env)
+						: evaluate(fn.defaults[i]!, inner),
+				);
+			});
 			return evaluate(fn.body, inner);
 		}
 		case "dict-literal": {
@@ -417,6 +434,8 @@ function evaluateBuiltin(
 			return typeof value === "object" && value.type === "function" ? 1n : 0n;
 		case "is_operand":
 			return isOperand(value) ? 1n : 0n;
+		case "is_null":
+			return typeof value === "object" && value.type === "null" ? 1n : 0n;
 		case "operand_value": {
 			if (!isOperand(value)) {
 				env.report(
@@ -597,18 +616,21 @@ function calleeName(callee: Expression): string {
 /** The value's kind, for type-mismatch messages and equality. */
 function kindOfValue(
 	value: Value,
-): "number" | "string" | "function" | "dictionary" | "operand" {
+): "number" | "string" | "function" | "dictionary" | "operand" | "null" {
 	if (typeof value === "bigint") return "number";
 	if (typeof value === "string") return "string";
 	if (value.type === "function") return "function";
 	if (value.type === "dict") return "dictionary";
+	if (value.type === "null") return "null";
 	return "operand";
 }
 
 /** The kind with its article, for prose messages. */
 function aKind(value: Value): string {
 	const kind = kindOfValue(value);
-	return kind === "operand" ? "an operand" : `a ${kind}`;
+	if (kind === "operand") return "an operand";
+	if (kind === "null") return "null";
+	return `a ${kind}`;
 }
 
 function asNumber(
@@ -671,22 +693,15 @@ function infix(expr: InfixExpression, env: EvalEnv): Value | undefined {
 		return r === 0n ? 0n : 1n;
 	}
 
-	// Equality is structural and works for every value kind (strings,
-	// operand values, dictionaries; functions by identity) - but only between
-	// values of the SAME kind: a mixed comparison is a hard error rather than
-	// a silent 0, the same typo-net thinking as static dictionary keys.
+	// Equality is structural, works for every value kind (strings, operand
+	// values, dictionaries, null; functions by identity), and never coerces:
+	// values of different kinds are simply unequal. That is what makes
+	// `channel = .immediate_operand(0)` a total dispatch over
+	// dynamically-kinded macro arguments, and `foo = .null` a presence test.
 	if (op === "=" || op === "!=") {
 		const lv = evaluate(expr.left, env);
 		const rv = evaluate(expr.right, env);
 		if (lv === undefined || rv === undefined) return undefined;
-		if (kindOfValue(lv) !== kindOfValue(rv)) {
-			env.report(
-				Codes.ComparisonTypeMismatch,
-				`Cannot compare ${aKind(lv)} with ${aKind(rv)}`,
-				getExpressionLocation(expr),
-			);
-			return undefined;
-		}
 		return (op === "=") === isEqual(lv, rv) ? 1n : 0n;
 	}
 

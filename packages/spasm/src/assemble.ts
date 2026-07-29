@@ -1039,11 +1039,26 @@ function defineAssignment(
 		if (!fn) {
 			fn = {
 				type: "function",
-				params: assignment.params.map((p) => p.text),
+				params: assignment.params.map((p) => p.nameToken.text),
+				defaults: assignment.params.map((p) => p.defaultExpression),
 				body: assignment.expression,
 				moduleId,
 			};
 			functionValues.set(assignment, fn);
+		}
+		// A defaulted param can only be followed by defaulted params -
+		// positional call sites would be ambiguous otherwise.
+		let sawDefault = false;
+		for (const param of assignment.params) {
+			if (param.defaultExpression) sawDefault = true;
+			else if (sawDefault) {
+				report(
+					Codes.DefaultParamOrder,
+					`Parameter "${param.nameToken.text}" without a default follows one with a default`,
+					[param.nameToken.start, param.nameToken.end],
+					definitionModule,
+				);
+			}
 		}
 		checkAttributes(assignment, report, definitionModule); // none allowed
 		// Params become table symbols under the function's name (like dict
@@ -1054,10 +1069,10 @@ function defineAssignment(
 		for (const param of assignment.params) {
 			scopes.defineLocal(
 				definitionModule,
-				text + SEP + param.text,
+				text + SEP + param.nameToken.text,
 				undefined,
 				"parameter",
-				[param.start, param.end],
+				[param.nameToken.start, param.nameToken.end],
 			);
 		}
 		forEachIdentifier(assignment.expression, (token) => {
@@ -1421,10 +1436,12 @@ function emitData(
 							Codes.OperandAsData,
 							"An operand is not data - unwrap it with `.operand_value()`",
 						] as const)
-					: ([
-							Codes.FunctionAsData,
-							"A function is not data - apply it with `(...)`",
-						] as const);
+					: value.type === "null"
+						? ([Codes.NullAsData, "`.null` is not data"] as const)
+						: ([
+								Codes.FunctionAsData,
+								"A function is not data - apply it with `(...)`",
+							] as const);
 		env.report(code, message, span);
 		for (let i = 0; i < size; i++) output.push(0);
 		return;

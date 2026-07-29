@@ -89,6 +89,8 @@ export const DOT_KEYWORDS = [
 	"is_function",
 	"is_operand",
 	"operand_value",
+	"null",
+	"is_null",
 	"if",
 	"elseif",
 	"else",

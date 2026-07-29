@@ -370,7 +370,23 @@ class Parser {
 						outToken = this.#token;
 						this.#consume();
 					}
-					params.push({ outToken, nameToken: this.#expect("identifier") });
+					const nameTokenParam = this.#expect("identifier");
+					// `name = operand` - a default argument. Parsed as an
+					// operand, since that is what an argument is: `= 5`,
+					// `= "RODATA"`, and `= #5` all work.
+					let defaultOperand: Operand | undefined;
+					if ((this.#token.type as TokenType) === "=") {
+						this.#consume();
+						defaultOperand = this.#operand() ?? undefined;
+						if (!defaultOperand) {
+							throw new ParseError(this.#token, ["operand"]);
+						}
+					}
+					params.push({
+						outToken,
+						nameToken: nameTokenParam,
+						defaultOperand,
+					});
 					// Separating commas are optional, matching the call site.
 					if ((this.#token.type as TokenType) === ",") this.#consume();
 				}
@@ -821,6 +837,7 @@ class Parser {
 			case "is_dictionary":
 			case "is_function":
 			case "is_operand":
+			case "is_null":
 			case "operand_value": {
 				this.#consume();
 				const openingBracketToken = this.#expect("(");
@@ -843,6 +860,11 @@ class Parser {
 					args,
 					closingBracketToken,
 				};
+			}
+
+			case "null": {
+				this.#consume();
+				return { type: "null-literal", nullToken: token };
 			}
 
 			// `.pop()` - the value on top of the module's `.push` stack.
@@ -1000,14 +1022,26 @@ class Parser {
 	// parameter list followed by `=`. Returns null (without consuming the `=`
 	// check's token) when the shape doesn't match - the caller restores.
 	#tryFunctionParams(): {
-		params: Token<"identifier">[];
+		params: FunctionParam[];
 		operatorToken: Token<"=">;
 	} | null {
 		this.#consume(); // the "("
-		const params: Token<"identifier">[] = [];
+		const params: FunctionParam[] = [];
 		while (this.#token.type === "identifier") {
-			params.push(this.#token);
+			const nameToken = this.#token;
 			this.#consume();
+			// `name = expr` - a default argument.
+			let defaultExpression: Expression | undefined;
+			if ((this.#token.type as TokenType) === "=") {
+				this.#consume();
+				try {
+					defaultExpression = this.#expression(1);
+				} catch (error) {
+					if (error instanceof ParseError) return null; // not a param list
+					throw error;
+				}
+			}
+			params.push({ nameToken, defaultExpression });
 			// Separating commas are optional, matching macro params.
 			if ((this.#token.type as TokenType) === ",") this.#consume();
 		}
@@ -1025,7 +1059,7 @@ class Parser {
 	#finishAssignment(
 		identifier: Token<"identifier">,
 		operatorToken: Token<"=" | ":=">,
-		params: Token<"identifier">[] | null,
+		params: FunctionParam[] | null,
 	): Assignment {
 		const expression = this.#expression(1);
 		const attributes: Attribute[] = [];
@@ -1196,6 +1230,8 @@ export function getExpressionLocation(
 			return [expression.nameToken.start, expression.closingBracketToken.end];
 		case "operand-literal":
 			return getOperandLocation(expression.operand);
+		case "null-literal":
+			return [expression.nullToken.start, expression.nullToken.end];
 		case "prefix-expression":
 			return [
 				expression.operator.start,
@@ -1262,6 +1298,8 @@ export function getExpressionAnchorToken(
 			return expression.popToken;
 		case "builtin-call":
 			return expression.nameToken;
+		case "null-literal":
+			return expression.nullToken;
 		case "operand-literal": {
 			const operand = expression.operand;
 			if (operand.type === "accumulator-operand") {
@@ -1319,6 +1357,8 @@ export function forEachIdentifier(
 			) {
 				forEachIdentifier(expression.operand.expression, visit);
 			}
+			return;
+		case "null-literal":
 			return;
 		default:
 			return; // literals and `*`
@@ -1464,7 +1504,13 @@ export interface Assignment {
 	attributes: Attribute[];
 	/** Parameters of an expression macro (`DOUBLE(x) = 2 * x`); null for a
 	 * plain definition. */
-	params: Token<"identifier">[] | null;
+	params: FunctionParam[] | null;
+}
+
+/** One expression-macro parameter, with an optional default. */
+export interface FunctionParam {
+	nameToken: Token<"identifier">;
+	defaultExpression?: Expression;
 }
 
 /**
@@ -1629,6 +1675,7 @@ export const BUILTIN_NAMES = [
 	"is_function",
 	"is_operand",
 	"operand_value",
+	"is_null",
 ] as const;
 
 export type BuiltinName = (typeof BUILTIN_NAMES)[number];
@@ -1649,6 +1696,13 @@ export interface BuiltinCall {
 export interface OperandLiteral {
 	type: "operand-literal";
 	operand: Operand;
+}
+
+/** `.null`: the null value. A bare literal, not a call - like `*`, it *is*
+ * rather than *does*, so it takes no parens. */
+export interface NullLiteral {
+	type: "null-literal";
+	nullToken: Token<"null">;
 }
 
 /** `.pop()` in expression position: the value on top of the module's stack. */
@@ -1714,6 +1768,9 @@ export interface SegmentShorthand {
 export interface MacroParam {
 	outToken: Token<"out"> | null;
 	nameToken: Token<"identifier">;
+	/** `name = operand` - the default argument, definition-side (its free
+	 * names resolve in the defining module). Trailing params only. */
+	defaultOperand?: Operand;
 }
 
 export interface Macro {
@@ -1739,7 +1796,8 @@ export type Expression =
 	| SegmentExpression
 	| PopExpression
 	| BuiltinCall
-	| OperandLiteral;
+	| OperandLiteral
+	| NullLiteral;
 
 /** Function application: `DOUBLE(2)`, `lib::DOUBLE(2)`. */
 export interface CallExpression {

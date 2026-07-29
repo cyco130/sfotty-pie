@@ -9,6 +9,9 @@ import type { Expression } from "./parser.ts";
 export interface FunctionValue {
 	type: "function";
 	params: readonly string[];
+	/** Per-param default expressions (trailing only); `undefined` = required.
+	 * Evaluated in the defining module's scope, like the body. */
+	defaults: readonly (Expression | undefined)[];
 	body: Expression;
 	/** The module the body's free names resolve in (lexical hygiene). */
 	moduleId: string;
@@ -29,6 +32,19 @@ export interface DictValue {
 	type: "dict";
 	entries: ReadonlyMap<string, Value | undefined>;
 }
+
+/**
+ * The null value (`.null`): definite absence, as a first-class value - the
+ * idiomatic optional-argument sentinel (`target = .null` default,
+ * `.if target = .null` test). Distinct from `undefined`, which means "not
+ * resolved yet" and defers: null is fully resolved and answers. A singleton,
+ * so identity comparison suffices.
+ */
+export interface NullValue {
+	type: "null";
+}
+
+export const NULL: NullValue = { type: "null" };
 
 /**
  * An operand's shape, in the constructor-prefix spelling. The word order of
@@ -69,7 +85,13 @@ export interface OperandValue {
  * limit), strings, functions (expression macros), and dictionaries. The
  * typed-value system (operands, lists) grows this union additively.
  */
-export type Value = bigint | string | FunctionValue | DictValue | OperandValue;
+export type Value =
+	| bigint
+	| string
+	| FunctionValue
+	| DictValue
+	| OperandValue
+	| NullValue;
 
 /**
  * Value equality, as the fixpoint needs it: "would the next pass see the same
@@ -89,6 +111,7 @@ export function isEqual(a: Value | undefined, b: Value | undefined): boolean {
 	if (a.type === "operand" && b.type === "operand") {
 		return a.shape === b.shape && isEqual(a.value, b.value);
 	}
+	if (a.type === "null" && b.type === "null") return true;
 	if (a.type !== "dict" || b.type !== "dict") return false;
 	if (a.entries.size !== b.entries.size) return false;
 	for (const [key, value] of a.entries) {

@@ -1787,6 +1787,72 @@ describe(".error", () => {
 			"`.error` requires a string message",
 		]);
 	});
+
+	test("an anchor argument attributes the error to the caller's argument", async () => {
+		const lib =
+			'.export .macro put src\n.if .is_simple_operand(src)\n\tlda src\n.else\n.error "bad operand", src\n.endif\n.endmacro\n';
+		const main = '.import "lib"\nput ($12,x)\n';
+		const host = memHost({ main, lib });
+		const r = await assemble("main", host);
+
+		expect(r.diagnostics).toHaveLength(1);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe("bad operand");
+		// The offending argument itself, punctuation included.
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("($12,x)");
+		expect([error.start, error.end]).toEqual([arg, arg + 7]);
+
+		// The note lands on the param occurrence on the `.error` line.
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `put`");
+		expect(note.file).toBe("lib");
+		const use = lib.indexOf("src", lib.indexOf(".error"));
+		expect([note.start, note.end]).toEqual([use, use + 3]);
+	});
+
+	test("a nested anchor narrates each hop's param occurrence", async () => {
+		const inner = '.export .macro guts v\n.error "nope", v\n.endmacro\n';
+		const outer =
+			'.import "inner"\n.export .macro shell w\n\tguts w\n.endmacro\n';
+		const main = '.import "outer"\nshell #5\n';
+		const host = memHost({ main, outer, inner });
+		const r = await assemble("main", host);
+
+		expect(r.diagnostics).toHaveLength(1);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe("nope");
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("#5");
+		expect([error.start, error.end]).toEqual([arg, arg + 2]);
+
+		expect(error.notes!.map((n) => [n.message, n.file])).toEqual([
+			["While expanding `shell`", "outer"],
+			["While expanding `guts`", "inner"],
+		]);
+		expect(error.notes![0]!.start).toBe(
+			outer.indexOf("w", outer.indexOf("guts")),
+		);
+		expect(error.notes![1]!.start).toBe(
+			inner.indexOf("v", inner.indexOf(".error")),
+		);
+	});
+
+	test("a top-level anchor attributes to the expression, unevaluated", () => {
+		// `nowhere` is undefined; the anchor is location-only, so no
+		// undefined-symbol diagnostic fires.
+		const src = 'here:\n.error "boom", nowhere\n';
+		const { messages } = asm(src);
+		expect(messages).toEqual(["boom"]);
+		const r = assemble(src, "t");
+		const error = r.diagnostics[0]!;
+		expect([error.start, error.end]).toEqual([
+			src.indexOf("nowhere"),
+			src.indexOf("nowhere") + 7,
+		]);
+		expect(error.notes).toBeUndefined();
+	});
 });
 
 describe("export name forms", () => {
@@ -2252,10 +2318,11 @@ describe("macro-expansion diagnostics", () => {
 		const error = result.diagnostics[0]!;
 		expect(error.code).toBe("SP3003");
 		expect(error.message).toBe("ADC has no indirect addressing mode");
-		// The call-site argument, not the body's `adc`.
+		// The call-site argument, whole operand: the parens are the caller's
+		// tokens too, so the span widens past the expression.
 		expect(error.file).toBe("main");
-		const arg = main.indexOf("$1234");
-		expect([error.start, error.end]).toEqual([arg, arg + 5]);
+		const arg = main.indexOf("($1234)");
+		expect([error.start, error.end]).toEqual([arg, arg + 7]);
 
 		// The note underlines the whole body instruction - the mnemonic is
 		// the other half of what failed, not just the spliced operand.
@@ -2291,6 +2358,25 @@ describe("macro-expansion diagnostics", () => {
 		]);
 	});
 
+	test("a body-written shape around a spliced value keeps the value span", async () => {
+		const wrapLib = ".export .macro wrap v\n\tadc (v)\n.endmacro\n";
+		const main = '.import "lib"\n\twrap $1234\n';
+		const host = memHost({ main, lib: wrapLib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3003");
+		// The parens are the body's, the value the caller's - a whole-operand
+		// span would mix files, so only the spliced value is underlined.
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("$1234");
+		expect([error.start, error.end]).toEqual([arg, arg + 5]);
+
+		expect(error.notes).toHaveLength(1);
+		expect(error.notes![0]!.file).toBe("lib");
+	});
+
 	test("a body-written mode error attributes to the macro file, once", async () => {
 		const badLib = ".export .macro bump\n\tadc ($80)\n.endmacro\n";
 		const main = '.import "lib"\n\tbump\n\tbump\n';
@@ -2302,8 +2388,9 @@ describe("macro-expansion diagnostics", () => {
 		const error = result.diagnostics[0]!;
 		expect(error.code).toBe("SP3003");
 		expect(error.file).toBe("lib");
-		const bad = badLib.indexOf("$80");
-		expect([error.start, error.end]).toEqual([bad, bad + 3]);
+		// Fully body-owned, so the span widens to the whole operand.
+		const bad = badLib.indexOf("($80)");
+		expect([error.start, error.end]).toEqual([bad, bad + 5]);
 		expect(error.notes).toBeUndefined();
 	});
 

@@ -4,6 +4,7 @@ import {
 	getExpressionLocation,
 	getExpressionOrigin,
 	getOperandLocation,
+	getOperandPunctuationTokens,
 	type Expression,
 	type Instruction,
 	type Operand,
@@ -183,10 +184,18 @@ export function encodeInstruction(
 		// The mode is the operand's property, so the error carries the
 		// operand's span and file - in a macro expansion a spliced argument
 		// attributes this to the call site, where the shape was written.
+		// Widen to the whole operand (punctuation included) only when its
+		// tokens agree with the expression on a file; a body-written shape
+		// around a spliced value keeps the expression span, since a
+		// mixed-file span indexes nonsense.
+		const uniform =
+			operand !== null &&
+			expression !== null &&
+			getOperandPunctuationTokens(operand).every((t) => t.origin === file);
 		context.report(
 			Codes.NoSuchAddressingMode,
 			`${name} has no ${MODE_NAMES[mode]} addressing mode`,
-			span,
+			uniform ? getOperandLocation(operand) : span,
 			file,
 			{ instruction: true },
 		);

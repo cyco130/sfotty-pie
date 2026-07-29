@@ -29,6 +29,7 @@ import {
 	type ExpansionSite,
 	getExpressionAnchorToken,
 } from "./parser.ts";
+import type { SubstitutionSite } from "./lexer.ts";
 import { SourceFile } from "./source-file.ts";
 import { SEP, type Definition } from "./symbols.ts";
 import {
@@ -74,6 +75,50 @@ function noteAt(
 	file: string,
 ): MessageNote {
 	return { message, start: span[0], end: span[1], file };
+}
+
+/**
+ * "While expanding" notes for a diagnostic in a macro expansion, outermost
+ * hop first. Each hop underlines the failing value *as written in that
+ * macro's body* - the splice occurrence the value passed through (the
+ * chain aligns with the innermost hops) - falling back to the hop's call
+ * site when the value didn't pass through it; a hop that would just repeat
+ * the error's own span is dropped. `instruction` widens the innermost
+ * hop's note to start at the given mnemonic position (body coordinates),
+ * for errors about the whole instruction rather than the operand value.
+ */
+function expansionNotes(
+	trail: readonly ExpansionSite[],
+	splices: readonly SubstitutionSite[],
+	span: readonly [number, number],
+	file: string,
+	instruction?: { start: number; bodyFile: string | undefined },
+): MessageNote[] {
+	const hops = [...trail].reverse();
+	const notes: MessageNote[] = [];
+	for (let i = 0; i < hops.length; i++) {
+		const splice = splices[i - (hops.length - splices.length)];
+		let at: SubstitutionSite = splice ?? hops[i]!;
+		if (
+			instruction &&
+			i === hops.length - 1 &&
+			splice !== undefined &&
+			splice.file === instruction.bodyFile
+		) {
+			at = { file: splice.file, start: instruction.start, end: splice.end };
+		}
+		if (at.file === file && at.start === span[0] && at.end === span[1]) {
+			continue;
+		}
+		notes.push(
+			noteAt(
+				`While expanding \`${hops[i]!.macro}\``,
+				[at.start, at.end],
+				at.file,
+			),
+		);
+	}
+	return notes;
 }
 
 // Function values interned per definition site (see defineAssignment).
@@ -838,6 +883,34 @@ function collect(
 						);
 						break;
 					}
+					if (content.anchor) {
+						// An anchored `.error` attributes to the anchor's
+						// provenance - a spliced macro argument lands on the
+						// caller's argument at the call site, narrated like
+						// any other operand diagnostic. Location-only: the
+						// anchor is never evaluated.
+						const anchorSpan = getExpressionLocation(content.anchor);
+						const anchorFile = getExpressionOrigin(content.anchor) ?? moduleId;
+						const anchorTrail = statement.expansionTrail;
+						const notes =
+							anchorTrail?.length && anchorFile !== file
+								? expansionNotes(
+										anchorTrail,
+										getExpressionAnchorToken(content.anchor)?.substitutedAt ??
+											[],
+										anchorSpan,
+										anchorFile,
+									)
+								: [];
+						report(
+							Codes.UserError,
+							value,
+							anchorSpan,
+							anchorFile,
+							notes.length ? { notes } : undefined,
+						);
+						break;
+					}
 					const span: readonly [number, number] = [
 						content.errorToken.start,
 						getExpressionLocation(content.message)[1],
@@ -1363,12 +1436,10 @@ function collectContent(
 			const value = expr ? evaluate(expr, env) : undefined;
 			// In a macro-expanded instruction (stamped mnemonic), an encode
 			// error attributed elsewhere - typically to a spliced call-site
-			// argument - gets notes narrating the expansion path, outermost
-			// first. Each hop underlines the failing value *as written in
-			// that macro's body* (the anchor token's splice chain aligns with
-			// the innermost hops), falling back to the hop's call site when
-			// the value didn't pass through it; a hop that would just repeat
-			// the error's own span is dropped.
+			// argument - gets `expansionNotes` narrating the expansion path.
+			// A whole-instruction error (`options.instruction`) widens the
+			// innermost note to start at the mnemonic - it's the other half
+			// of what failed, and its token keeps its body coordinates.
 			const expansion = content.mnemonic.origin;
 			const splices = expr
 				? (getExpressionAnchorToken(expr)?.substitutedAt ?? [])
@@ -1376,55 +1447,26 @@ function collectContent(
 			const bytes = encodeInstruction(content, value, {
 				location,
 				report: (code, message, span, file, options) => {
-					let notes: MessageNote[] | undefined;
-					if (
+					const notes =
 						expansion !== undefined &&
 						(file ?? moduleId) !== expansion &&
 						trail?.length
-					) {
-						const hops = [...trail].reverse();
-						notes = [];
-						for (let i = 0; i < hops.length; i++) {
-							const splice = splices[i - (hops.length - splices.length)];
-							let at = splice ?? hops[i]!;
-							// A whole-instruction error underlines the innermost
-							// body's instruction, mnemonic through splice site -
-							// the mnemonic is the other half of what failed. The
-							// mnemonic token keeps its body coordinates, so the
-							// two ends live in the same file.
-							if (
-								options?.instruction &&
-								i === hops.length - 1 &&
-								splice?.file === expansion
-							) {
-								at = {
-									file: splice.file,
-									start: content.mnemonic.start,
-									end: splice.end,
-								};
-							}
-							if (
-								at.file === (file ?? moduleId) &&
-								at.start === span[0] &&
-								at.end === span[1]
-							) {
-								continue;
-							}
-							notes.push(
-								noteAt(
-									`While expanding \`${hops[i]!.macro}\``,
-									[at.start, at.end],
-									at.file,
-								),
-							);
-						}
-					}
+							? expansionNotes(
+									trail,
+									splices,
+									span,
+									file ?? moduleId,
+									options?.instruction
+										? { start: content.mnemonic.start, bodyFile: expansion }
+										: undefined,
+								)
+							: [];
 					env.report(
 						code,
 						message,
 						span,
 						file,
-						notes?.length ? { notes } : undefined,
+						notes.length ? { notes } : undefined,
 					);
 				},
 			});

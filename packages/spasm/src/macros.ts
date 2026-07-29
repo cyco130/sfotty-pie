@@ -6,6 +6,7 @@ import {
 	forEachIdentifier,
 	getExpressionAnchorToken,
 	getOperandLocation,
+	getOperandPunctuationTokens,
 	type Expression,
 	type ExpansionSite,
 	type Label,
@@ -754,6 +755,7 @@ function recordParamUses(
 					break;
 				case "error-directive":
 					walkExpr(content.message);
+					if (content.anchor) walkExpr(content.anchor);
 					break;
 				case "segment":
 				case "push":
@@ -1024,6 +1026,9 @@ function substituteContent(
 		case "error-directive":
 			content.errorToken.origin = content.errorToken.origin ?? origin;
 			content.message = substituteExpr(content.message, subst, origin, report);
+			if (content.anchor) {
+				content.anchor = substituteExpr(content.anchor, subst, origin, report);
+			}
 			break;
 		case "segment":
 			content.expression = substituteExpr(
@@ -1083,10 +1088,17 @@ function substituteOperand(
 			return clone;
 		}
 	}
-	return {
+	const result = {
 		...operand,
 		expression: substituteExpr(operand.expression, subst, origin, report),
 	} as Operand;
+	// A body-written shape's punctuation is stamped like literals, so
+	// diagnostics widen to the whole operand only when its tokens agree on
+	// a file. (A whole-operand splice returned above keeps caller tokens.)
+	for (const token of getOperandPunctuationTokens(result)) {
+		token.origin = token.origin ?? origin;
+	}
+	return result;
 }
 
 function substituteExpr(
@@ -1551,6 +1563,7 @@ function visitContentExpressions(
 			break;
 		case "error-directive":
 			visitExpression(content.message, visit);
+			if (content.anchor) visitExpression(content.anchor, visit);
 			break;
 		case "export":
 			if (content.content) visitContentExpressions(content.content, visit);

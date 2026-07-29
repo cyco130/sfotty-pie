@@ -338,10 +338,17 @@ class Parser {
 
 			case "error": {
 				this.#consume();
+				const message = this.#expression(1);
+				let anchor: Expression | null = null;
+				if ((this.#token.type as TokenType) === ",") {
+					this.#consume();
+					anchor = this.#expression(1);
+				}
 				return {
 					type: "error-directive",
 					errorToken: token,
-					message: this.#expression(1),
+					message,
+					anchor,
 				};
 			}
 
@@ -1438,6 +1445,46 @@ export function getOperandLocation(
 	}
 }
 
+/**
+ * The operand's own tokens beyond its expression - the punctuation (`#`,
+ * brackets, index registers) that `getOperandLocation` may span. Expansion
+ * stamps these with the defining module like literals, so diagnostics can
+ * widen from the expression to the whole operand exactly when every token
+ * agrees on a file.
+ */
+export function getOperandPunctuationTokens(operand: Operand): Token[] {
+	switch (operand.type) {
+		case "accumulator-operand":
+			return [operand.accumulatorToken];
+		case "register-operand":
+			return [operand.registerToken];
+		case "simple-operand":
+			return [];
+		case "immediate-operand":
+			return [operand.hashToken];
+		case "indexed-operand":
+			return [operand.commaToken, operand.register];
+		case "indirect-operand":
+			return [operand.openingBracketToken, operand.closingBracketToken];
+		case "indexed-indirect-operand":
+			return [
+				operand.openingBracketToken,
+				operand.commaToken,
+				operand.register,
+				operand.closingBracketToken,
+			];
+		case "indirect-indexed-operand":
+			return [
+				operand.openingBracketToken,
+				operand.closingBracketToken,
+				operand.commaToken,
+				operand.register,
+			];
+		default:
+			impossible(operand);
+	}
+}
+
 export interface Module {
 	type: "module";
 	statements: Statement[];
@@ -1510,12 +1557,18 @@ export interface IfBlock {
 	endifToken: Token<"endif">;
 }
 
-/** `.error expr` - report the (string) message when collected, on the
- * converged pass only. */
+/** `.error expr[, anchor]` - report the (string) message when collected, on
+ * the converged pass only. */
 export interface ErrorDirective {
 	type: "error-directive";
 	errorToken: Token<"error">;
 	message: Expression;
+	/**
+	 * Optional location anchor: the error attributes to this expression's
+	 * provenance - spliced from a macro argument, that's the caller's
+	 * argument at the call site. Location-only, never evaluated.
+	 */
+	anchor: Expression | null;
 }
 
 /**

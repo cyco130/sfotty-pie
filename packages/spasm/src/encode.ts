@@ -18,6 +18,14 @@ export interface EncodeContext {
 		message: string,
 		span: readonly [number, number],
 		file?: string,
+		options?: {
+			/**
+			 * The error is about the whole instruction, not just the operand
+			 * value - expansion-path notes underline the instruction as
+			 * written in the macro body, mnemonic included.
+			 */
+			instruction?: boolean;
+		},
 	): void;
 }
 
@@ -172,11 +180,15 @@ export function encodeInstruction(
 
 	const opcode = modes[mode];
 	if (opcode === undefined) {
+		// The mode is the operand's property, so the error carries the
+		// operand's span and file - in a macro expansion a spliced argument
+		// attributes this to the call site, where the shape was written.
 		context.report(
 			Codes.NoSuchAddressingMode,
 			`${name} has no ${MODE_NAMES[mode]} addressing mode`,
-			nameSpan,
-			mnemonic.origin,
+			span,
+			file,
+			{ instruction: true },
 		);
 		return [];
 	}

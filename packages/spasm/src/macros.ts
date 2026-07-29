@@ -818,12 +818,19 @@ function attachTrail(
 		start: mnemonic.start,
 		end: span?.end ?? mnemonic.end,
 	};
-	for (let i = 0; i < body.length; i++) {
-		body[i] = {
-			...body[i]!,
-			expansionTrail: [site, ...(call.expansionTrail ?? [])],
-		};
-	}
+	const expansionTrail = [site, ...(call.expansionTrail ?? [])];
+	// `.if` arms included: their statements are collected individually, so
+	// each carries the trail itself.
+	const stamp = (statements: Statement[]): void => {
+		for (let i = 0; i < statements.length; i++) {
+			statements[i] = { ...statements[i]!, expansionTrail };
+			const content = statements[i]!.content;
+			if (content?.type === "if-block") {
+				for (const arm of content.arms) stamp(arm.body);
+			}
+		}
+	};
+	stamp(body);
 }
 
 function expandCall(
@@ -1194,6 +1201,10 @@ function substituteExpr(
 		case "dict-literal":
 			return {
 				...expr,
+				openingBraceToken: {
+					...expr.openingBraceToken,
+					origin: expr.openingBraceToken.origin ?? origin,
+				},
 				entries: expr.entries.map((entry) => ({
 					...entry,
 					value: substituteExpr(entry.value, subst, origin, report, shadowed),
@@ -1207,8 +1218,19 @@ function substituteExpr(
 					substituteExpr(arg, subst, origin, report, shadowed),
 				),
 			};
+		// Literals are anchor tokens too: stamped, a body literal's
+		// diagnostics (range and mode errors) attribute to the macro's file.
+		// A spliced call-site literal is never re-substituted, so it keeps
+		// its own origin.
+		case "decimal":
+		case "hexadecimal":
+		case "binary":
+		case "string":
+		case "character":
+		case "*":
+			return { ...expr, origin: expr.origin ?? origin };
 		default:
-			return expr; // literals and `*`
+			return expr;
 	}
 }
 

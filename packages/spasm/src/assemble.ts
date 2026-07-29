@@ -195,7 +195,13 @@ function assembleModules(
 		const snapshot = scopes.snapshot();
 		scopes.beginPass();
 		diagnostics = [];
+		// Dedup on identity: a definition-site error in a macro body fires
+		// once per expansion; distinct problems always differ in span or file.
+		const seen = new Set<string>();
 		const report: Reporter = (code, message, span, file, options) => {
+			const key = [code, file ?? "", span[0], span[1], message].join("\0");
+			if (seen.has(key)) return;
+			seen.add(key);
 			diagnostics.push({
 				type: "error",
 				code,
@@ -832,15 +838,34 @@ function collect(
 						);
 						break;
 					}
-					report(
-						Codes.UserError,
-						value,
-						[
-							content.errorToken.start,
-							getExpressionLocation(content.message)[1],
-						],
-						file,
-					);
+					const span: readonly [number, number] = [
+						content.errorToken.start,
+						getExpressionLocation(content.message)[1],
+					];
+					const trail = statement.expansionTrail;
+					if (trail?.length) {
+						// A body `.error` is the macro rejecting its call:
+						// attribute to the source-level call, narrating inward
+						// down to the directive itself.
+						const hops = [...trail].reverse();
+						const notes = hops.map((hop, i) => {
+							const inner = hops[i + 1];
+							return noteAt(
+								`While expanding \`${hop.macro}\``,
+								inner ? [inner.start, inner.end] : span,
+								inner ? inner.file : file,
+							);
+						});
+						report(
+							Codes.UserError,
+							value,
+							[hops[0]!.start, hops[0]!.end],
+							hops[0]!.file,
+							{ notes },
+						);
+					} else {
+						report(Codes.UserError, value, span, file);
+					}
 					break;
 				}
 				default:
@@ -1350,7 +1375,7 @@ function collectContent(
 				: [];
 			const bytes = encodeInstruction(content, value, {
 				location,
-				report: (code, message, span, file) => {
+				report: (code, message, span, file, options) => {
 					let notes: MessageNote[] | undefined;
 					if (
 						expansion !== undefined &&
@@ -1361,7 +1386,23 @@ function collectContent(
 						notes = [];
 						for (let i = 0; i < hops.length; i++) {
 							const splice = splices[i - (hops.length - splices.length)];
-							const at = splice ?? hops[i]!;
+							let at = splice ?? hops[i]!;
+							// A whole-instruction error underlines the innermost
+							// body's instruction, mnemonic through splice site -
+							// the mnemonic is the other half of what failed. The
+							// mnemonic token keeps its body coordinates, so the
+							// two ends live in the same file.
+							if (
+								options?.instruction &&
+								i === hops.length - 1 &&
+								splice?.file === expansion
+							) {
+								at = {
+									file: splice.file,
+									start: content.mnemonic.start,
+									end: splice.end,
+								};
+							}
 							if (
 								at.file === (file ?? moduleId) &&
 								at.start === span[0] &&

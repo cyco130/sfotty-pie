@@ -1734,16 +1734,52 @@ describe(".error", () => {
 		expect(asm(src(200)).messages).toEqual(["zp overflow"]);
 	});
 
-	test("a macro-body .error attributes to the macro's file", async () => {
-		const host = memHost({
-			main: '.import "lib"\ncheck\n',
-			lib: '.export .macro check\n.if 1\n.error "boom"\n.endif\n.endmacro\n',
-		});
+	test("a macro-body .error attributes to the call site, noting the directive", async () => {
+		const main = '.import "lib"\ncheck\n';
+		const lib =
+			'.export .macro check\n.if 1\n.error "boom"\n.endif\n.endmacro\n';
+		const host = memHost({ main, lib });
 		const r = await assemble("main", host);
+
+		expect(r.diagnostics).toHaveLength(1);
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe("boom");
-		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:3:1 - error SP3022: boom/);
+		// The macro rejected its call - the call is the error.
+		expect(error.file).toBe("main");
+		const call = main.indexOf("check");
+		expect([error.start, error.end]).toEqual([call, call + 5]);
+
+		// The note walks into the body, down to the directive itself.
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `check`");
+		expect(note.file).toBe("lib");
+		expect([note.start, note.end]).toEqual([
+			lib.indexOf(".error"),
+			lib.indexOf('"boom"') + 6,
+		]);
+	});
+
+	test("a nested body .error narrates the whole path", async () => {
+		const main = '.import "outer"\ngo\n';
+		const outer = '.import "inner"\n.export .macro go\n\tvalidate\n.endmacro\n';
+		const inner = '.export .macro validate\n\t.error "nope"\n.endmacro\n';
+		const host = memHost({ main, outer, inner });
+		const r = await assemble("main", host);
+
+		expect(r.diagnostics).toHaveLength(1);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe("nope");
+		expect(error.file).toBe("main");
+		const call = main.indexOf("go", main.indexOf("outer"));
+		expect([error.start, error.end]).toEqual([call, call + 2]);
+
+		expect(error.notes!.map((n) => [n.message, n.file])).toEqual([
+			["While expanding `go`", "outer"],
+			["While expanding `validate`", "inner"],
+		]);
+		expect(error.notes![0]!.start).toBe(outer.indexOf("validate\n"));
+		expect(error.notes![1]!.start).toBe(inner.indexOf(".error"));
 	});
 
 	test("the message must be a string", () => {
@@ -2202,6 +2238,72 @@ describe("macro-expansion diagnostics", () => {
 		expect(error.file).toBe("lib");
 		const use = bigLib.indexOf("BIG", bigLib.indexOf("#"));
 		expect([error.start, error.end]).toEqual([use, use + 3]);
+		expect(error.notes).toBeUndefined();
+	});
+
+	test("a spliced operand's mode error spans the call-site arg, with a note", async () => {
+		const addLib =
+			".export .macro add operand\n\tclc\n\tadc operand\n.endmacro\n";
+		const main = '.import "lib"\n\tadd ($1234)\n';
+		const host = memHost({ main, lib: addLib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3003");
+		expect(error.message).toBe("ADC has no indirect addressing mode");
+		// The call-site argument, not the body's `adc`.
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("$1234");
+		expect([error.start, error.end]).toEqual([arg, arg + 5]);
+
+		// The note underlines the whole body instruction - the mnemonic is
+		// the other half of what failed, not just the spliced operand.
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `add`");
+		expect(note.file).toBe("lib");
+		const adc = addLib.indexOf("adc");
+		const use = addLib.indexOf("operand", adc);
+		expect([note.start, note.end]).toEqual([adc, use + 7]);
+	});
+
+	test("an instruction inside a .if arm still narrates its expansion", async () => {
+		const madLib =
+			".export .macro madd flag, operand\n\t.if flag\n\t\tadc operand\n\t.endif\n.endmacro\n";
+		const main = '.import "lib"\n\tmadd 1, ($12)\n';
+		const host = memHost({ main, lib: madLib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3003");
+		expect(error.file).toBe("main");
+
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `madd`");
+		expect(note.file).toBe("lib");
+		const adc = madLib.indexOf("adc");
+		expect([note.start, note.end]).toEqual([
+			adc,
+			madLib.indexOf("operand", adc) + 7,
+		]);
+	});
+
+	test("a body-written mode error attributes to the macro file, once", async () => {
+		const badLib = ".export .macro bump\n\tadc ($80)\n.endmacro\n";
+		const main = '.import "lib"\n\tbump\n\tbump\n';
+		const host = memHost({ main, lib: badLib });
+		const result = await assemble("main", host);
+
+		// The shape is the body's own; two expansions dedup to one error.
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3003");
+		expect(error.file).toBe("lib");
+		const bad = badLib.indexOf("$80");
+		expect([error.start, error.end]).toEqual([bad, bad + 3]);
 		expect(error.notes).toBeUndefined();
 	});
 

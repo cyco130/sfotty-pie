@@ -541,6 +541,16 @@ describe("modules", () => {
 		expect([...r.output]).toEqual([0x09]);
 	});
 
+	test("a body's macro calls inside .if arms resolve where the macro is defined", async () => {
+		const host = memHost({
+			main: '.import "lib"\nouter 1\n',
+			lib: ".macro helper\n\t.byte 9\n.endmacro\n.export .macro outer flag\n\t.if flag\n\t\thelper\n\t.endif\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([0x09]);
+	});
+
 	test("a module shared by a diamond loads once", async () => {
 		const host = memHost({
 			a: '.import "b"\n.import "c"\n',
@@ -826,6 +836,16 @@ describe("macros", () => {
 		expect(messages).toEqual([]);
 		// lda (ptr),y / sta (dst),y - the ",y" shape survives substitution.
 		expect(bytes).toEqual([0xb1, 0x20, 0x91, 0x22]);
+	});
+
+	test("a nested call inside a .if arm expands (the mwa/sta_hi pattern)", () => {
+		const src = (flag: number) =>
+			".macro inner\n\tnop\n.endmacro\n" +
+			".macro outer flag\n\t.if flag\n\t\tinner\n\t.else\n\t\tbrk\n\t.endif\n.endmacro\n" +
+			`outer ${flag}\n`;
+		expect(asm(src(1)).messages).toEqual([]);
+		expect(asm(src(1)).bytes).toEqual([0xea]);
+		expect(asm(src(0)).bytes).toEqual([0x00]);
 	});
 
 	test("multi-argument call with plain expressions", () => {
@@ -1562,6 +1582,14 @@ describe("conditional assembly (.if/.elseif/.else/.endif)", () => {
 		expect(asm(src(1)).bytes).toEqual([1]);
 		expect(asm(src(2)).bytes).toEqual([2]);
 		expect(asm(src(9)).bytes).toEqual([3]);
+	});
+
+	test("a macro call inside an arm expands", () => {
+		const { bytes, messages } = asm(
+			".macro put\n\t.byte 7\n.endmacro\n.if 1\n\tput\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
 	});
 
 	test("no matching arm and no .else collects nothing", () => {

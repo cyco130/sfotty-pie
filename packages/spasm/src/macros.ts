@@ -315,6 +315,22 @@ export function expandModules(
 				}
 				continue;
 			}
+			if (content?.type === "if-block") {
+				// Arm selection happens at assembly time (and is re-decided
+				// every pass), so expand calls in every arm; unselected arms
+				// are discarded when the block is collected.
+				out.push({
+					...statement,
+					content: {
+						...content,
+						arms: content.arms.map((arm) => ({
+							...arm,
+							body: expand(arm.body, scopeId, depth),
+						})),
+					},
+				});
+				continue;
+			}
 			if (content?.type === "instruction") {
 				const found = lookup(scopeId, content.mnemonic.text);
 				if (found) {

@@ -27,7 +27,7 @@
 		"directives": {
 			"patterns": [
 				{
-					"match": "(?i)\\.(byte|org|word|segment|define_segment|emit|emplace|discard|import|export|out|res|code|rodata|data|bss|zeropage|macro|endmacro|if|elseif|else|endif|error)(?![A-Za-z_0-9])",
+					"match": "(?i)\\.(byte|org|word|segment|define_segment|emit|emplace|discard|import|export|out|res|code|rodata|data|bss|zeropage|macro|endmacro|push|pop|if|elseif|else|endif|error)(?![A-Za-z_0-9])",
 					"name": "keyword.control.directive.spasm"
 				},
 				{

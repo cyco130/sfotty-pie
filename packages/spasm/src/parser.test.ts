@@ -27,6 +27,10 @@ function expr(e: Expression): string {
 				.join(", ")}}`;
 		case "call-expression":
 			return `${expr(e.callee)}(${e.args.map(expr).join(", ")})`;
+		case "segment-expression":
+			return ".segment()";
+		case "pop-expression":
+			return ".pop";
 		default:
 			return e.text;
 	}
@@ -73,6 +77,8 @@ function content(c: StatementContent): string {
 				.join("")}`;
 		case "org":
 			return `.org ${expr(c.expression)}`;
+		case "push":
+			return `.push ${expr(c.expression)}`;
 		case "byte":
 			return `.byte ${list(c.list)}`;
 		case "word":
@@ -80,7 +86,7 @@ function content(c: StatementContent): string {
 		case "define-segment":
 			return `.define_segment ${c.nameToken.text}`;
 		case "segment":
-			return `.segment ${c.nameToken.text}`;
+			return `.segment ${expr(c.expression)}`;
 		case "emit":
 			return `.emit ${c.nameToken.text}`;
 		case "emplace":
@@ -251,9 +257,20 @@ describe("directives", () => {
 		expect(dump('.emplace "BSS"')).toEqual(['.emplace "BSS"']);
 	});
 
-	test("a segment directive needs a string name", () => {
-		const { errors } = parse(new SourceFile("t", ".segment CODE\n"));
+	test("a segment directive takes any name expression", () => {
+		// A bare identifier is a symbol-valued name; `.pop` restores a saved
+		// one; a missing expression is the parse error.
+		expect(dump('.segment "X"')).toEqual(['.segment "X"']);
+		expect(dump(".segment CODE")).toEqual([".segment CODE"]);
+		expect(dump(".segment .pop")).toEqual([".segment .pop"]);
+		const { errors } = parse(new SourceFile("t", ".segment\n"));
 		expect(errors).toHaveLength(1);
+	});
+
+	test("the segment stack forms parse", () => {
+		expect(dump(".push .segment()")).toEqual([".push .segment()"]);
+		expect(dump(".push 1 + 2")).toEqual([".push (1 + 2)"]);
+		expect(dump(".byte .pop")).toEqual([".byte .pop"]);
 	});
 
 	test("module directives", () => {

@@ -68,7 +68,11 @@ msg_dos_entered:
 	sta cio::ICBLL
 	sta cio::ICBLH
 	jsr cio::CIOV
-.rodata
-	msg_addr: .byte msg, $9B
-.code
+
+	current_segment = .segment()
+
+	.rodata
+		msg_addr: .byte msg, $9B
+
+	.segment current_segment
 .endmacro

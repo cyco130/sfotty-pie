@@ -48,6 +48,20 @@ export interface EvalEnv {
 	strict?: boolean;
 	/** Function-application nesting depth, for the recursion cap. */
 	depth?: number;
+	/**
+	 * `.segment()` support: the current segment's name at this evaluation
+	 * point. Absent where there is no segment context (reported as an error).
+	 */
+	currentSegment?: () => string;
+	/**
+	 * `.pop` support: pop the module's value stack; an `undefined` result
+	 * means the stack was empty (the evaluator reports it). Absent where
+	 * `.pop` is banned - expression-macro bodies (pure, evaluated per
+	 * application), `.if` conditions (later arms evaluate only when earlier
+	 * ones fail, so the pop count would depend on arm selection), and
+	 * render-time `.res` counts (the collect-time stack is gone).
+	 */
+	popValue?: () => { value: Value | undefined } | undefined;
 }
 
 const MAX_APPLICATION_DEPTH = 64;
@@ -111,6 +125,40 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 		}
 		case "*":
 			return env.locationCounter;
+		case "segment-expression": {
+			if (!env.currentSegment) {
+				env.report(
+					Codes.NoCurrentSegment,
+					"`.segment()` is not available here",
+					getExpressionLocation(expr),
+					expr.segmentToken.origin,
+				);
+				return undefined;
+			}
+			return env.currentSegment();
+		}
+		case "pop-expression": {
+			if (!env.popValue) {
+				env.report(
+					Codes.PopNotAllowed,
+					"`.pop` is not allowed here",
+					getExpressionLocation(expr),
+					expr.popToken.origin,
+				);
+				return undefined;
+			}
+			const popped = env.popValue();
+			if (!popped) {
+				env.report(
+					Codes.PopEmpty,
+					"`.pop` with nothing pushed",
+					getExpressionLocation(expr),
+					expr.popToken.origin,
+				);
+				return undefined;
+			}
+			return popped.value;
+		}
 		case "grouped-expression":
 			return evaluate(expr.expression, env);
 		case "prefix-expression":
@@ -175,6 +223,10 @@ export function evaluate(expr: Expression, env: EvalEnv): Value | undefined {
 				report: env.report,
 				strict: env.strict,
 				depth,
+				// `.segment()` reads ambient state like `*`; `.pop` is
+				// deliberately NOT forwarded - bodies are pure and evaluate
+				// once per application.
+				currentSegment: env.currentSegment,
 			};
 			return evaluate(fn.body, inner);
 		}

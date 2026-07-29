@@ -76,6 +76,11 @@ export const Codes = {
 	ErrorMessageType: "SP3021",
 	UserError: "SP3022",
 	DidNotConverge: "SP3023",
+	PopEmpty: "SP3024",
+	PopNotAllowed: "SP3025",
+	UnpoppedValue: "SP3026",
+	SegmentNameType: "SP3027",
+	NoCurrentSegment: "SP3028",
 
 	// 4xxx - macros
 	MacroAlreadyDefined: "SP4001",

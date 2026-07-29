@@ -14,6 +14,7 @@ import { Scopes, type ModuleScope, type Reference } from "./scopes.ts";
 import {
 	forEachIdentifier,
 	getExpressionLocation,
+	getExpressionOrigin,
 	parse,
 	type Assignment,
 	type DictLiteral,
@@ -565,6 +566,22 @@ function collect(
 		const moduleId = module.id;
 		let current = getSegment("OUTPUT"); // reset per module
 
+		// The module's `.push`/`.pop` value stack. Collect runs every pass, so
+		// the stack resets and replays per pass; entries keep their push sites
+		// for the end-of-module balance check.
+		const valueStack: {
+			value: Value | undefined;
+			span: readonly [number, number];
+			file: string;
+		}[] = [];
+		const hooks: StackHooks = {
+			currentSegment: () => current.name,
+			popValue: () => {
+				const entry = valueStack.pop();
+				return entry && { value: entry.value };
+			},
+		};
+
 		const collectStatement = (statement: Statement): void => {
 			for (const label of statement.labels) {
 				current.items.push({
@@ -617,14 +634,54 @@ function collect(
 					break;
 				}
 				case "segment": {
-					const name = segmentName(content.nameToken, report, moduleId);
-					current = getSegment(name);
-					if (!firstSeen.has(name)) {
-						firstSeen.set(name, {
-							span: [content.nameToken.start, content.nameToken.end],
-							moduleId,
-						});
+					// The name is any string-valued expression, and unlike operands
+					// it has no pessimistic fallback - bytes have to go somewhere -
+					// so it must resolve when evaluated. The motivating forms
+					// (literals, `.pop`, `.segment()`) always do.
+					const env = moduleEnv(
+						moduleId,
+						scopes,
+						locationOf(current.name),
+						report,
+						hooks,
+					);
+					const value = evaluate(content.expression, env);
+					const span = getExpressionLocation(content.expression);
+					const file = getExpressionOrigin(content.expression) ?? moduleId;
+					if (typeof value !== "string") {
+						report(
+							Codes.SegmentNameType,
+							value === undefined
+								? "Segment name did not resolve - it must be a string, known when the statement is reached"
+								: "Segment name must be a string",
+							span,
+							file,
+						);
+						break;
 					}
+					current = getSegment(value);
+					if (!firstSeen.has(value)) {
+						firstSeen.set(value, { span, moduleId: file });
+					}
+					break;
+				}
+
+				case "push": {
+					const env = moduleEnv(
+						moduleId,
+						scopes,
+						locationOf(current.name),
+						report,
+						hooks,
+					);
+					valueStack.push({
+						value: evaluate(content.expression, env),
+						span: [
+							content.pushToken.start,
+							getExpressionLocation(content.expression)[1],
+						],
+						file: content.pushToken.origin ?? moduleId,
+					});
 					break;
 				}
 				case "segment-shorthand": {
@@ -710,6 +767,7 @@ function collect(
 							scopes,
 							locationOf(current.name),
 							report,
+							hooks,
 						);
 					} else {
 						report(
@@ -727,6 +785,7 @@ function collect(
 						scopes,
 						locationOf(current.name),
 						report,
+						hooks,
 					);
 					break;
 				case "if-block": {
@@ -739,6 +798,10 @@ function collect(
 						scopes,
 						locationOf(current.name),
 						report,
+						// `.segment()` reads fine in a condition; `.pop` does not -
+						// later arms evaluate only when earlier ones fail, so the
+						// pop count would depend on arm selection.
+						{ currentSegment: hooks.currentSegment },
 					);
 					for (const armStatement of arm?.body ?? []) {
 						collectStatement(armStatement);
@@ -751,6 +814,7 @@ function collect(
 						scopes,
 						locationOf(current.name),
 						report,
+						hooks,
 					);
 					// The keyword's hygiene origin attributes a macro-body `.error`
 					// to the macro's file.
@@ -790,6 +854,7 @@ function collect(
 							current,
 							resSizes,
 							report,
+							hooks,
 							statement.expansionTrail,
 						),
 					);
@@ -797,6 +862,16 @@ function collect(
 		};
 
 		for (const statement of module.statements) collectStatement(statement);
+
+		// Ending the module with unpopped values is an error, at each push.
+		for (const entry of valueStack) {
+			report(
+				Codes.UnpoppedValue,
+				"Pushed value is never popped",
+				entry.span,
+				entry.file,
+			);
+		}
 	}
 
 	return { segments, firstSeen, discards };
@@ -815,8 +890,9 @@ function selectArm(
 	scopes: Scopes,
 	location: bigint,
 	report: Reporter,
+	hooks?: StackHooks,
 ): IfArm | undefined {
-	const env = moduleEnv(moduleId, scopes, location, report);
+	const env = moduleEnv(moduleId, scopes, location, report, hooks);
 	for (const arm of block.arms) {
 		if (arm.condition === null) return arm; // `.else`
 		const value = evaluate(arm.condition, env);
@@ -869,11 +945,18 @@ function segmentName(
 	);
 }
 
+/** The `.segment()`/`.pop` hooks a collect-time env carries; see `EvalEnv`. */
+interface StackHooks {
+	currentSegment?: () => string;
+	popValue?: () => { value: Value | undefined } | undefined;
+}
+
 function moduleEnv(
 	moduleId: string,
 	scopes: Scopes,
 	location: bigint,
 	report: Reporter,
+	hooks?: StackHooks,
 ): EvalEnv {
 	return {
 		resolve: (name, origin, span) => {
@@ -884,6 +967,8 @@ function moduleEnv(
 		report: (code, message, span, file, options) =>
 			report(code, message, span, file ?? moduleId, options),
 		strict: true,
+		currentSegment: hooks?.currentSegment,
+		popValue: hooks?.popValue,
 	};
 }
 
@@ -938,8 +1023,9 @@ function defineAssignment(
 	scopes: Scopes,
 	location: bigint,
 	report: Reporter,
+	hooks?: StackHooks,
 ): void {
-	const env = moduleEnv(moduleId, scopes, location, report);
+	const env = moduleEnv(moduleId, scopes, location, report, hooks);
 	const { text, start, end, origin } = assignment.identifier;
 	const span: readonly [number, number] = [start, end];
 	const definitionModule = origin ?? moduleId;
@@ -1178,9 +1264,10 @@ function collectContent(
 	output: Segment,
 	resSizes: Map<string, bigint>,
 	report: Reporter,
+	hooks?: StackHooks,
 	trail?: readonly ExpansionSite[],
 ): bigint {
-	const env = moduleEnv(moduleId, scopes, location, report);
+	const env = moduleEnv(moduleId, scopes, location, report, hooks);
 
 	switch (content.type) {
 		case "org": {

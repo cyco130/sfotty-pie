@@ -1407,12 +1407,12 @@ describe("diagnostics with locations", () => {
 	test("parse errors are attributed to their module", async () => {
 		const host = memHost({
 			main: '.import "lib"\nnop\n',
-			lib: ".segment CODE\n",
+			lib: ".segment\n",
 		});
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:1:10 - error SP1001: /);
+		expect(error.formatted).toMatch(/^lib:1:\d+ - error SP1001: /);
 	});
 
 	test("single-source diagnostics use the given name", () => {
@@ -2287,5 +2287,106 @@ describe("uncalled-macro params", () => {
 		expect(refs.some((r) => r.symbol === "lib\0\0emit_boot\0unused")).toBe(
 			false,
 		);
+	});
+});
+
+describe("segment stack (.segment(), .push, .pop)", () => {
+	test("the save/restore pattern emits into the right segments", () => {
+		const src = [
+			"\t.org $0600",
+			"\t.byte 1",
+			".push .segment() ; save OUTPUT",
+			".rodata",
+			"\t.byte 9",
+			".segment .pop ; restore",
+			"\t.byte 2",
+			'.emit "RODATA"',
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		// OUTPUT: 1, 2, then the emitted RODATA: 9.
+		expect(bytes).toEqual([1, 2, 9]);
+	});
+
+	test(".segment() evaluates to the current segment's name", () => {
+		const src =
+			'HERE = .segment()\n.rodata\nTHERE = .segment()\n\tnop\n.emit "RODATA"\n';
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("HERE")).toBe("OUTPUT");
+		expect(result.symbols.get("THERE")).toBe("RODATA");
+	});
+
+	test("a macro can save and restore its caller's segment", async () => {
+		const lib = [
+			".export .macro emit_data value",
+			".push .segment()",
+			".rodata",
+			"\t.byte value",
+			".segment .pop",
+			".endmacro",
+			"",
+		].join("\n");
+		const main = [
+			'.import "lib"',
+			"\t.org $0600",
+			"\t.byte 1",
+			"\temit_data 7",
+			"\t.byte 2",
+			'.emit "RODATA"',
+			"",
+		].join("\n");
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		expect([...result.output]).toEqual([1, 2, 7]);
+	});
+
+	test("an unpopped value is an error at the push site", () => {
+		const { messages } = asm(".push 1\n\tnop\n");
+		expect(messages).toEqual(["Pushed value is never popped"]);
+	});
+
+	test("popping past the top of the stack is an error", () => {
+		const { messages } = asm("SAVED = .pop\n\tnop\n");
+		expect(messages).toEqual(["`.pop` with nothing pushed"]);
+	});
+
+	test(".pop is rejected inside expression-macro bodies", () => {
+		const { messages } = asm(
+			".push 1\nF(v) = v + .pop\n\t.byte F(1)\nDRAIN = .pop\n\tnop\n",
+		);
+		expect(messages).toContain("`.pop` is not allowed here");
+	});
+
+	test(".pop is rejected in .if conditions", () => {
+		const { messages } = asm(
+			".push 1\n.if .pop\n\tnop\n.endif\nDRAIN = .pop\n\tnop\n",
+		);
+		expect(messages).toContain("`.pop` is not allowed here");
+	});
+
+	test("a non-string segment name is an error", () => {
+		const { messages } = asm(".segment 42\n\tnop\n");
+		expect(messages).toEqual(["Segment name must be a string"]);
+	});
+
+	test("an arm-gated balanced push/pop converges quietly", () => {
+		const src = [
+			"\t.org $0600",
+			".if BIG > 0",
+			".push .segment()",
+			".rodata",
+			"\t.byte 5",
+			".segment .pop",
+			".endif",
+			"BIG = 1",
+			"\t.byte 1",
+			'.emit "RODATA"',
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 5]);
 	});
 });

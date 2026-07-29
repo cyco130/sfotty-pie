@@ -594,6 +594,10 @@ function recordParamUses(
 				case "error-directive":
 					walkExpr(content.message);
 					break;
+				case "segment":
+				case "push":
+					walkExpr(content.expression);
+					break;
 				default:
 					break;
 			}
@@ -843,7 +847,26 @@ function substituteContent(
 			content.errorToken.origin = content.errorToken.origin ?? origin;
 			content.message = substituteExpr(content.message, subst, origin, report);
 			break;
-		// Segment directives carry no substitutable expressions; import/export/
+		case "segment":
+			content.expression = substituteExpr(
+				content.expression,
+				subst,
+				origin,
+				report,
+			);
+			break;
+		case "push":
+			// The keyword is stamped so an unpopped-push error from a body
+			// attributes to the macro's file.
+			content.pushToken.origin = content.pushToken.origin ?? origin;
+			content.expression = substituteExpr(
+				content.expression,
+				subst,
+				origin,
+				report,
+			);
+			break;
+		// Emit/emplace/discard directives carry no substitutable expressions;
 		// macro are rejected from bodies at collection.
 		default:
 			break;
@@ -951,6 +974,19 @@ function substituteExpr(
 			return {
 				...expr,
 				object: substituteExpr(expr.object, subst, origin, report, shadowed),
+			};
+		case "segment-expression":
+			return {
+				...expr,
+				segmentToken: {
+					...expr.segmentToken,
+					origin: expr.segmentToken.origin ?? origin,
+				},
+			};
+		case "pop-expression":
+			return {
+				...expr,
+				popToken: { ...expr.popToken, origin: expr.popToken.origin ?? origin },
 			};
 		case "dict-literal":
 			return {

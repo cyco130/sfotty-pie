@@ -62,6 +62,8 @@ export const DOT_KEYWORDS = [
 	"zeropage",
 	"macro",
 	"endmacro",
+	"push",
+	"pop",
 	"if",
 	"elseif",
 	"else",

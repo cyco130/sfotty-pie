@@ -227,7 +227,16 @@ class Parser {
 				return {
 					type: "segment",
 					segmentToken: token,
-					nameToken: this.#expect("string"),
+					expression: this.#expression(1),
+				};
+			}
+
+			case "push": {
+				this.#consume();
+				return {
+					type: "push",
+					pushToken: token,
+					expression: this.#expression(1),
 				};
 			}
 
@@ -766,6 +775,27 @@ class Parser {
 				};
 			}
 
+			// `.segment()` - the current segment's name. The parens keep the
+			// statement and expression forms apart and leave room for the
+			// future `.segment("NAME")` segment-value form.
+			case "segment": {
+				this.#consume();
+				const openingBracketToken = this.#expect("(");
+				const closingBracketToken = this.#expect(")");
+				return {
+					type: "segment-expression",
+					segmentToken: token,
+					openingBracketToken,
+					closingBracketToken,
+				};
+			}
+
+			// `.pop` - the value on top of the module's `.push` stack.
+			case "pop": {
+				this.#consume();
+				return { type: "pop-expression", popToken: token };
+			}
+
 			default:
 				return null;
 		}
@@ -1092,6 +1122,13 @@ export function getExpressionLocation(
 				getExpressionLocation(expression.callee)[0],
 				expression.closingBracketToken.end,
 			];
+		case "segment-expression":
+			return [
+				expression.segmentToken.start,
+				expression.closingBracketToken.end,
+			];
+		case "pop-expression":
+			return [expression.popToken.start, expression.popToken.end];
 		case "prefix-expression":
 			return [
 				expression.operator.start,
@@ -1152,6 +1189,10 @@ export function getExpressionAnchorToken(
 			return getExpressionAnchorToken(expression.callee);
 		case "infix-expression":
 			return getExpressionAnchorToken(expression.left);
+		case "segment-expression":
+			return expression.segmentToken;
+		case "pop-expression":
+			return expression.popToken;
 		default:
 			impossible(expression);
 	}
@@ -1275,7 +1316,8 @@ export type StatementContent =
 	| SegmentShorthand
 	| Macro
 	| IfBlock
-	| ErrorDirective;
+	| ErrorDirective
+	| Push;
 
 /**
  * One arm of an `.if` block: the opening keyword, its condition (null for
@@ -1440,7 +1482,30 @@ export interface DefineSegment {
 export interface Segment {
 	type: "segment";
 	segmentToken: Token<"segment">;
-	nameToken: Token<"string">;
+	/** The segment name: a string literal, or any string-valued expression
+	 * (`.segment .pop` restores a saved name). */
+	expression: Expression;
+}
+
+/** `.push expr` - push a value onto the module's value stack. */
+export interface Push {
+	type: "push";
+	pushToken: Token<"push">;
+	expression: Expression;
+}
+
+/** `.segment()` in expression position: the current segment's name. */
+export interface SegmentExpression {
+	type: "segment-expression";
+	segmentToken: Token<"segment">;
+	openingBracketToken: Token<"(">;
+	closingBracketToken: Token<")">;
+}
+
+/** `.pop` in expression position: the value on top of the module's stack. */
+export interface PopExpression {
+	type: "pop-expression";
+	popToken: Token<"pop">;
 }
 
 export interface Emit {
@@ -1519,7 +1584,9 @@ export type Expression =
 	| InfixExpression
 	| MemberExpression
 	| DictLiteral
-	| CallExpression;
+	| CallExpression
+	| SegmentExpression
+	| PopExpression;
 
 /** Function application: `DOUBLE(2)`, `lib::DOUBLE(2)`. */
 export interface CallExpression {

@@ -5,5 +5,6 @@ export type { Message, MessageNote } from "./parser.ts";
 export { SEP, type Definition, type SymbolKind } from "./symbols.ts";
 export type { ModuleScope, Reference } from "./scopes.ts";
 export { DOT_KEYWORDS } from "./lexer.ts";
+export { BUILTIN_NAMES } from "./parser.ts";
 export { OPCODES } from "./opcodes.ts";
 export type { Value } from "./value.ts";

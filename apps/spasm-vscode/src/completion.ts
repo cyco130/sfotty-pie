@@ -1,4 +1,5 @@
 import {
+	BUILTIN_NAMES,
 	DOT_KEYWORDS,
 	OPCODES,
 	SEP,
@@ -106,7 +107,10 @@ function inString(linePrefix: string): boolean {
 /** Mnemonics, directives, and callable macros. */
 function statementCompletions(inputs: CompletionInputs): CompletionCandidate[] {
 	const out = new Map<string, CompletionCandidate>();
+	// Statement keywords only - the expression builtins complete in
+	// expression position instead.
 	for (const keyword of DOT_KEYWORDS) {
+		if (EXPRESSION_KEYWORDS.has(keyword)) continue;
 		out.set("." + keyword, { label: "." + keyword, kind: KIND.keyword });
 	}
 	for (const mnemonic of Object.keys(OPCODES)) {
@@ -136,11 +140,24 @@ function expressionCompletions(
 	addLocals(out, inputs);
 	addEnclosingMacroParams(out, inputs);
 	addExpressionMacroParams(out, inputs);
+	// The expression builtins: operand constructors/predicates, value
+	// predicates, `.segment()`, `.pop()`.
+	for (const name of BUILTIN_NAMES) {
+		out.set("." + name, { label: "." + name, kind: KIND.keyword });
+	}
+	out.set(".segment", { label: ".segment", kind: KIND.keyword });
+	out.set(".pop", { label: ".pop", kind: KIND.keyword });
 	if (ASSIGNMENT_RHS.test(inputs.linePrefix)) {
 		out.set(".import", { label: ".import", kind: KIND.keyword });
 	}
 	return [...out.values()];
 }
+
+/** Dot keywords that are expression builtins, not statements. */
+const EXPRESSION_KEYWORDS: ReadonlySet<string> = new Set([
+	...BUILTIN_NAMES,
+	"pop",
+]);
 
 /**
  * Inside a `.macro` body, the macro's params are in scope. The body extent

@@ -30,7 +30,11 @@ function expr(e: Expression): string {
 		case "segment-expression":
 			return ".segment()";
 		case "pop-expression":
-			return ".pop";
+			return ".pop()";
+		case "builtin-call":
+			return `.${e.nameToken.type}(${e.args.map(expr).join(", ")})`;
+		case "operand-literal":
+			return `<${operand(e.operand)}>`;
 		default:
 			return e.text;
 	}
@@ -40,6 +44,8 @@ function operand(o: Operand): string {
 	switch (o.type) {
 		case "accumulator-operand":
 			return o.accumulatorToken.text;
+		case "register-operand":
+			return o.registerToken.text;
 		case "immediate-operand":
 			return `#${expr(o.expression)}`;
 		case "simple-operand":
@@ -262,7 +268,7 @@ describe("directives", () => {
 		// one; a missing expression is the parse error.
 		expect(dump('.segment "X"')).toEqual(['.segment "X"']);
 		expect(dump(".segment CODE")).toEqual([".segment CODE"]);
-		expect(dump(".segment .pop")).toEqual([".segment .pop"]);
+		expect(dump(".segment .pop()")).toEqual([".segment .pop()"]);
 		const { errors } = parse(new SourceFile("t", ".segment\n"));
 		expect(errors).toHaveLength(1);
 	});
@@ -270,7 +276,7 @@ describe("directives", () => {
 	test("the segment stack forms parse", () => {
 		expect(dump(".push .segment()")).toEqual([".push .segment()"]);
 		expect(dump(".push 1 + 2")).toEqual([".push (1 + 2)"]);
-		expect(dump(".byte .pop")).toEqual([".byte .pop"]);
+		expect(dump(".byte .pop()")).toEqual([".byte .pop()"]);
 	});
 
 	test("module directives", () => {

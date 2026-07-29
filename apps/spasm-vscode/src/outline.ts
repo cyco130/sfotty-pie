@@ -250,5 +250,26 @@ export function formatValue(value: Value | undefined): string | undefined {
 	if (value.type === "dict") {
 		return `{ ${[...value.entries.keys()].join(", ")} }`;
 	}
+	if (value.type === "operand") {
+		const inner = formatValue(value.value) ?? "?";
+		switch (value.shape) {
+			case "a":
+			case "x":
+			case "y":
+				return value.shape;
+			case "immediate":
+				return `#${inner}`;
+			case "x_indexed":
+				return `${inner},x`;
+			case "y_indexed":
+				return `${inner},y`;
+			case "indirect":
+				return `(${inner})`;
+			case "x_indexed_indirect":
+				return `(${inner},x)`;
+			case "indirect_y_indexed":
+				return `(${inner}),y`;
+		}
+	}
 	return `(${value.params.join(", ")}) - expression macro`;
 }

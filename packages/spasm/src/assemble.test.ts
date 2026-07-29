@@ -844,12 +844,13 @@ describe("macros", () => {
 		expect(bytes).toEqual([0xa9, 0x42]);
 	});
 
-	test("a shaped operand argument in expression position is a type error", () => {
+	test("a shaped operand argument in expression position is an operand value", () => {
+		// Previously an error; now the value is introspectable - and using it
+		// as data stays an error, with an unwrap hint.
 		expect(
-			asm(".macro bad v\n\t.byte v\n.endmacro\nbad (foo),y\n").messages,
-		).toContain(
-			'Macro argument "v" has an operand value and can only be used as a whole operand',
-		);
+			asm(".macro bad v\n\t.byte v\n.endmacro\nbad (foo),y\nfoo = 1\n")
+				.messages,
+		).toContain("An operand is not data - unwrap it with `.operand_value()`");
 	});
 
 	test("a real instruction rejects an operand list", () => {
@@ -2298,7 +2299,7 @@ describe("segment stack (.segment(), .push, .pop)", () => {
 			".push .segment() ; save OUTPUT",
 			".rodata",
 			"\t.byte 9",
-			".segment .pop ; restore",
+			".segment .pop() ; restore",
 			"\t.byte 2",
 			'.emit "RODATA"',
 			"",
@@ -2324,7 +2325,7 @@ describe("segment stack (.segment(), .push, .pop)", () => {
 			".push .segment()",
 			".rodata",
 			"\t.byte value",
-			".segment .pop",
+			".segment .pop()",
 			".endmacro",
 			"",
 		].join("\n");
@@ -2348,20 +2349,20 @@ describe("segment stack (.segment(), .push, .pop)", () => {
 	});
 
 	test("popping past the top of the stack is an error", () => {
-		const { messages } = asm("SAVED = .pop\n\tnop\n");
+		const { messages } = asm("SAVED = .pop()\n\tnop\n");
 		expect(messages).toEqual(["`.pop` with nothing pushed"]);
 	});
 
 	test(".pop is rejected inside expression-macro bodies", () => {
 		const { messages } = asm(
-			".push 1\nF(v) = v + .pop\n\t.byte F(1)\nDRAIN = .pop\n\tnop\n",
+			".push 1\nF(v) = v + .pop()\n\t.byte F(1)\nDRAIN = .pop()\n\tnop\n",
 		);
 		expect(messages).toContain("`.pop` is not allowed here");
 	});
 
 	test(".pop is rejected in .if conditions", () => {
 		const { messages } = asm(
-			".push 1\n.if .pop\n\tnop\n.endif\nDRAIN = .pop\n\tnop\n",
+			".push 1\n.if .pop()\n\tnop\n.endif\nDRAIN = .pop()\n\tnop\n",
 		);
 		expect(messages).toContain("`.pop` is not allowed here");
 	});
@@ -2378,7 +2379,7 @@ describe("segment stack (.segment(), .push, .pop)", () => {
 			".push .segment()",
 			".rodata",
 			"\t.byte 5",
-			".segment .pop",
+			".segment .pop()",
 			".endif",
 			"BIG = 1",
 			"\t.byte 1",
@@ -2388,5 +2389,161 @@ describe("segment stack (.segment(), .push, .pop)", () => {
 		const { bytes, messages } = asm(src);
 		expect(messages).toEqual([]);
 		expect(bytes).toEqual([1, 5]);
+	});
+});
+
+describe("operand values", () => {
+	test("constructors coerce in operand position", () => {
+		const src = [
+			"IMM = .immediate_operand(3)",
+			"IDX = .x_indexed_operand($10)",
+			"ACC = .a_operand()",
+			"\tlda IMM",
+			"\tlda IDX",
+			"\tasl ACC",
+			"\tlda .immediate_operand(7)",
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		// lda #3; lda $10,x; asl a; lda #7
+		expect(bytes).toEqual([0xa9, 3, 0xb5, 0x10, 0x0a, 0xa9, 7]);
+	});
+
+	test("structural equality dispatches on shape and value", () => {
+		const src = [
+			"CH = .immediate_operand(0)",
+			"SAME = CH = .immediate_operand(0)",
+			"OTHER = CH = .immediate_operand(1)",
+			"SHAPE = CH = .x_indexed_operand(0)",
+			"REG = .x_operand() = .x_operand()",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("SAME")).toBe(1n);
+		expect(result.symbols.get("OTHER")).toBe(0n);
+		expect(result.symbols.get("SHAPE")).toBe(0n);
+		expect(result.symbols.get("REG")).toBe(1n);
+	});
+
+	test("mixed-kind comparison is a hard error", () => {
+		expect(asm('BAD = 1 = "one"\n\tnop\n').messages).toContain(
+			"Cannot compare a number with a string",
+		);
+	});
+
+	test("string equality works", () => {
+		const result = assemble('OK = .segment() = "OUTPUT"\n\tnop\n', "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("OK")).toBe(1n);
+	});
+
+	test("predicates classify shapes and values", () => {
+		const src = [
+			".macro probe arg",
+			"IS_IMM = .is_immediate_operand(arg)",
+			"IS_SIMPLE = .is_simple_operand(arg)",
+			"IS_STR = .is_string(arg)",
+			"IS_OP = .is_operand(arg)",
+			".endmacro",
+			'probe "hello"',
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		// A bare string argument splices as a plain expression: simple, a
+		// string, not an operand.
+		const get = (name: string) =>
+			[...result.definitions].find(([k]) => k.includes(name))?.[1].value;
+		expect(get("IS_IMM")).toBe(0n);
+		expect(get("IS_SIMPLE")).toBe(1n);
+		expect(get("IS_STR")).toBe(1n);
+		expect(get("IS_OP")).toBe(0n);
+	});
+
+	test(".operand_value unwraps; registers wrap nothing", () => {
+		const src = [
+			"V = .operand_value(.immediate_operand(41 + 1))",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("V")).toBe(42n);
+
+		expect(asm("R = .operand_value(.x_operand())\n\tnop\n").messages).toContain(
+			"A register operand wraps no value",
+		);
+		expect(asm("W = .operand_value(3)\n\tnop\n").messages).toContain(
+			"`.operand_value` takes an operand value",
+		);
+	});
+
+	test("register operands parse but no instruction takes them", () => {
+		expect(asm("\tldx y\n").messages).toContain(
+			"No instruction takes a register operand",
+		);
+		expect(asm("FOO = .x_operand()\n\tlda FOO\n").messages).toContain(
+			"No instruction takes a register operand",
+		);
+	});
+
+	test("an operand value cannot nest inside a shaped operand", () => {
+		expect(asm("FOO = .immediate_operand(3)\n\tlda #FOO\n").messages).toContain(
+			"An operand value can only be used as a whole operand",
+		);
+	});
+
+	test("operand values reject arithmetic", () => {
+		expect(asm("BAD = .immediate_operand(3) + 1\n\tnop\n").messages).toContain(
+			"Expected a number, got an operand",
+		);
+	});
+
+	test("forward references defer through constructors and predicates", () => {
+		const src = [
+			"OP = .immediate_operand(LATER)",
+			"CHECK = .is_integer(FWD)",
+			"\tlda OP",
+			"LATER = 5",
+			"FWD = 9",
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xa9, 5]);
+	});
+
+	test("the cio store/xio dispatch pattern works", async () => {
+		const lib = [
+			"ICCOM := $0342, size: 1",
+			".macro store channel, dest",
+			"\t.if .is_immediate_operand(channel) && .operand_value(channel) = 0",
+			"\t\tsta dest",
+			"\t.else",
+			"\t\tsta dest,x",
+			"\t.endif",
+			".endmacro",
+			".export .macro xio channel, command",
+			"\tldx channel",
+			"\tlda command",
+			"\tstore channel, ICCOM",
+			".endmacro",
+			"",
+		].join("\n");
+		const main = ['.import "lib"', "\txio #0, #7", "\txio #$10, #7", ""].join(
+			"\n",
+		);
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		// #0 channel: ldx #0; lda #7; sta $0342 (absolute, no ,x).
+		// #$10 channel: ldx #$10; lda #7; sta $0342,x.
+		expect([...result.output]).toEqual([
+			0xa2, 0x00, 0xa9, 0x07, 0x8d, 0x42, 0x03, 0xa2, 0x10, 0xa9, 0x07, 0x9d,
+			0x42, 0x03,
+		]);
 	});
 });

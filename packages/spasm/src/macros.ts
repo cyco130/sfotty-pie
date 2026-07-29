@@ -580,7 +580,10 @@ function recordParamUses(
 				}
 				case "instruction":
 					for (const operand of content.operands) {
-						if (operand.type !== "accumulator-operand") {
+						if (
+							operand.type !== "accumulator-operand" &&
+							operand.type !== "register-operand"
+						) {
 							walkExpr(operand.expression);
 						}
 					}
@@ -883,7 +886,12 @@ function substituteOperand(
 	origin: string,
 	report: Reporter,
 ): Operand {
-	if (operand.type === "accumulator-operand") return operand;
+	if (
+		operand.type === "accumulator-operand" ||
+		operand.type === "register-operand"
+	) {
+		return operand;
+	}
 	if (
 		operand.type === "simple-operand" &&
 		operand.expression.type === "identifier"
@@ -891,7 +899,10 @@ function substituteOperand(
 		const s = subst.get(operand.expression.text);
 		if (s?.kind === "operand") {
 			const clone = structuredClone(s.operand);
-			if (clone.type !== "accumulator-operand") {
+			if (
+				clone.type !== "accumulator-operand" &&
+				clone.type !== "register-operand"
+			) {
 				recordSplice(clone.expression, operand.expression, origin);
 			}
 			return clone;
@@ -924,13 +935,14 @@ function substituteExpr(
 					recordSplice(clone, expr, origin);
 					return clone;
 				}
-				report(
-					Codes.ShapedArgumentInExpression,
-					`Macro argument "${expr.text}" has an operand value and can only be used as a whole operand`,
-					tokenSpan(expr),
-					origin,
-				);
-				return expr;
+				// A shaped argument becomes an operand *value* - introspectable
+				// with the operand builtins, coercible back in operand position.
+				const literal: Expression = {
+					type: "operand-literal",
+					operand: structuredClone(s.operand),
+				};
+				recordSplice(literal, expr, origin);
+				return literal;
 			}
 			// Stamped like the defining occurrence in `substituteName`, so
 			// renamed references resolve where the renamed definition lands.
@@ -983,6 +995,21 @@ function substituteExpr(
 					origin: expr.segmentToken.origin ?? origin,
 				},
 			};
+		case "builtin-call":
+			return {
+				...expr,
+				nameToken: {
+					...expr.nameToken,
+					origin: expr.nameToken.origin ?? origin,
+				},
+				args: expr.args.map((argument) =>
+					substituteExpr(argument, subst, origin, report, shadowed),
+				),
+			};
+		case "operand-literal":
+			// Only ever synthesized from an already-substituted call-site
+			// operand - nothing left to substitute.
+			return expr;
 		case "pop-expression":
 			return {
 				...expr,
@@ -1113,7 +1140,10 @@ function validateBody(
 				case "instruction":
 					if (isMacro(content.mnemonic.text)) break;
 					for (const operand of content.operands) {
-						if (operand.type !== "accumulator-operand") {
+						if (
+							operand.type !== "accumulator-operand" &&
+							operand.type !== "register-operand"
+						) {
 							check(operand.expression);
 						}
 					}
@@ -1313,7 +1343,10 @@ function visitContentExpressions(
 			break;
 		case "instruction":
 			for (const operand of content.operands) {
-				if (operand.type !== "accumulator-operand") {
+				if (
+					operand.type !== "accumulator-operand" &&
+					operand.type !== "register-operand"
+				) {
 					visitExpression(operand.expression, visit);
 				}
 			}

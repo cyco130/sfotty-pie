@@ -81,6 +81,13 @@ export const Codes = {
 	UnpoppedValue: "SP3026",
 	SegmentNameType: "SP3027",
 	NoCurrentSegment: "SP3028",
+	BuiltinArity: "SP3029",
+	OperandValueOfRegister: "SP3030",
+	NoRegisterOperand: "SP3031",
+	OperandWholeOnly: "SP3032",
+	OperandValueType: "SP3033",
+	ComparisonTypeMismatch: "SP3034",
+	OperandAsData: "SP3035",
 
 	// 4xxx - macros
 	MacroAlreadyDefined: "SP4001",

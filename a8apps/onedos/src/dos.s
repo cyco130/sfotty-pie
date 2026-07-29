@@ -14,6 +14,9 @@ MEMLO  := $02E7, size: 2
 
 .segment "INIT"
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Cold initialization runs once when the DOS is first loaded
 cold_init:
 	println "Cold"
 
@@ -22,9 +25,9 @@ cold_init:
 	lda #>warm_init
 	sta DOSINI + 1
 
-	lda #<dos
+	lda #<shell
 	sta DOSVEC
-	lda #>dos
+	lda #>shell
 	sta DOSVEC + 1
 
 	clc
@@ -32,6 +35,9 @@ cold_init:
 
 .code
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Warm initialization runs after every reset
 warm_init:
 	println "Warm"
 
@@ -44,17 +50,14 @@ warm_init:
 	; Return to OS
 	rts
 
-dos:
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Shell entry, entered, e.g., when the user types "DOS" at the BASIC prompt
+shell:
 	println "Shell"
 
 	; Return to caller (will crash if caller is OS)
 	rts
-
-.rodata
-msg_installed:
-	.byte "OneDOS installed", $9B
-msg_dos_entered:
-	.byte "OneDOS entered", $9B
 
 .macro println msg
 	ldx #0
@@ -70,9 +73,7 @@ msg_dos_entered:
 	jsr cio::CIOV
 
 	current_segment = .segment()
-
 	.rodata
 		msg_addr: .byte msg, $9B
-
 	.segment current_segment
 .endmacro

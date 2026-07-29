@@ -8,7 +8,7 @@ import {
 	type Instruction,
 	type Operand,
 } from "./parser.ts";
-import type { Value } from "./value.ts";
+import type { OperandShape, OperandValue, Value } from "./value.ts";
 
 export interface EncodeContext {
 	/** Address of this instruction's first byte, for relative branch offsets. */
@@ -95,18 +95,6 @@ export function encodeInstruction(
 	}
 	const operand = operands[0] ?? null;
 
-	const mode = resolveMode(operand, operandValue, modes);
-	const opcode = modes[mode];
-	if (opcode === undefined) {
-		context.report(
-			Codes.NoSuchAddressingMode,
-			`${name} has no ${MODE_NAMES[mode]} addressing mode`,
-			nameSpan,
-			mnemonic.origin,
-		);
-		return [];
-	}
-
 	// Value errors span the operand's *expression* and attribute to the file
 	// its tokens come from: in a macro-expanded instruction the expression may
 	// be a spliced call-site argument (caller's file) or a body expression
@@ -119,11 +107,108 @@ export function encodeInstruction(
 			? getOperandLocation(operand)
 			: nameSpan;
 	const file = expression ? getExpressionOrigin(expression) : mnemonic.origin;
-	return [opcode, ...encodeOperand(mode, operandValue, span, file, context)];
+
+	// A bare `x`/`y` never encodes - registers are macro-argument currency.
+	if (operand?.type === "register-operand") {
+		context.report(
+			Codes.NoRegisterOperand,
+			"No instruction takes a register operand",
+			getOperandLocation(operand),
+			operand.registerToken.origin ?? mnemonic.origin,
+		);
+		return [];
+	}
+
+	// Operand-value coercion: a *simple* operand whose value is an operand
+	// value becomes that operand, shape and all - `lda foo` with
+	// `foo = .immediate_operand(3)` is `lda #3`. Inside a shaped operand
+	// (`lda #foo`) an operand value cannot nest.
+	let mode: Mode;
+	let value = operandValue;
+	const coerced =
+		operand?.type === "simple-operand" && isOperandValue(operandValue)
+			? operandValue
+			: null;
+	if (coerced) {
+		if (coerced.shape === "x" || coerced.shape === "y") {
+			context.report(
+				Codes.NoRegisterOperand,
+				"No instruction takes a register operand",
+				span,
+				file,
+			);
+			return [];
+		}
+		value = coerced.value;
+		mode = modeForShape(coerced.shape, value, modes);
+	} else {
+		if (
+			operand &&
+			operand.type !== "simple-operand" &&
+			isOperandValue(operandValue)
+		) {
+			context.report(
+				Codes.OperandWholeOnly,
+				"An operand value can only be used as a whole operand",
+				span,
+				file,
+			);
+			return [];
+		}
+		mode = resolveMode(operand, operandValue, modes);
+	}
+
+	const opcode = modes[mode];
+	if (opcode === undefined) {
+		context.report(
+			Codes.NoSuchAddressingMode,
+			`${name} has no ${MODE_NAMES[mode]} addressing mode`,
+			nameSpan,
+			mnemonic.origin,
+		);
+		return [];
+	}
+
+	return [opcode, ...encodeOperand(mode, value, span, file, context)];
+}
+
+function isOperandValue(value: Value | undefined): value is OperandValue {
+	return (
+		typeof value === "object" && value !== null && value.type === "operand"
+	);
+}
+
+/** The mode a coerced operand value selects (register shapes are handled by
+ * the caller; `a` maps to the accumulator mode). */
+function modeForShape(
+	shape: OperandShape,
+	value: Value | undefined,
+	modes: Modes,
+): Mode {
+	switch (shape) {
+		case "a":
+			return "acc";
+		case "immediate":
+			return "imm";
+		case "x_indexed":
+			return sized(value, "zpx", "abx", modes);
+		case "y_indexed":
+			return sized(value, "zpy", "aby", modes);
+		case "indirect":
+			return "ind";
+		case "x_indexed_indirect":
+			return "inx";
+		case "indirect_y_indexed":
+			return "iny";
+		default:
+			return "imp"; // x/y - unreachable, rejected by the caller
+	}
 }
 
 function expressionOf(operand: Operand | null): Expression | null {
-	if (operand === null || operand.type === "accumulator-operand") return null;
+	if (operand === null) return null;
+	if (operand.type === "accumulator-operand") return null;
+	if (operand.type === "register-operand") return null;
 	return operand.expression;
 }
 
@@ -142,6 +227,8 @@ function resolveMode(
 	switch (operand.type) {
 		case "accumulator-operand":
 			return "acc";
+		case "register-operand":
+			return "imp"; // unreachable - rejected before mode resolution
 		case "immediate-operand":
 			return "imm";
 		case "indirect-operand":
@@ -190,11 +277,17 @@ function encodeOperand(
 
 	if (value === undefined) return new Array<number>(size).fill(0); // unresolved
 	if (typeof value !== "bigint") {
+		const kind =
+			typeof value === "string"
+				? "a string"
+				: value.type === "dict"
+					? "a dictionary"
+					: value.type === "operand"
+						? "an operand value"
+						: "a function";
 		context.report(
 			Codes.OperandType,
-			typeof value === "string"
-				? "Operand must be a number, not a string"
-				: "Operand must be a number, not a function",
+			`Operand must be a number, not ${kind}`,
 			span,
 			file,
 		);

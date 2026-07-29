@@ -494,6 +494,13 @@ class Parser {
 				};
 			}
 
+			case "x":
+			case "y": {
+				const registerToken = token;
+				this.#consume();
+				return { type: "register-operand", registerToken };
+			}
+
 			case "(":
 				{
 					const openingBracketToken = token;
@@ -790,10 +797,66 @@ class Parser {
 				};
 			}
 
-			// `.pop` - the value on top of the module's `.push` stack.
+			case "a_operand":
+			case "x_operand":
+			case "y_operand":
+			case "immediate_operand":
+			case "x_indexed_operand":
+			case "y_indexed_operand":
+			case "indirect_operand":
+			case "x_indexed_indirect_operand":
+			case "indirect_y_indexed_operand":
+			case "is_a_operand":
+			case "is_x_operand":
+			case "is_y_operand":
+			case "is_immediate_operand":
+			case "is_x_indexed_operand":
+			case "is_y_indexed_operand":
+			case "is_indirect_operand":
+			case "is_x_indexed_indirect_operand":
+			case "is_indirect_y_indexed_operand":
+			case "is_simple_operand":
+			case "is_integer":
+			case "is_string":
+			case "is_dictionary":
+			case "is_function":
+			case "is_operand":
+			case "operand_value": {
+				this.#consume();
+				const openingBracketToken = this.#expect("(");
+				const args: Expression[] = [];
+				if ((this.#token.type as TokenType) !== ")") {
+					for (;;) {
+						args.push(this.#expression(1));
+						if ((this.#token.type as TokenType) === ",") {
+							this.#consume();
+							continue;
+						}
+						break;
+					}
+				}
+				const closingBracketToken = this.#expect(")");
+				return {
+					type: "builtin-call",
+					nameToken: token,
+					openingBracketToken,
+					args,
+					closingBracketToken,
+				};
+			}
+
+			// `.pop()` - the value on top of the module's `.push` stack.
+			// Expression builtins are calls; statements take bare arguments.
 			case "pop": {
 				this.#consume();
-				return { type: "pop-expression", popToken: token };
+				const openingBracketToken = this.#expect("(");
+				const closingBracketToken = this.#expect(")");
+				return {
+					type: "pop-expression",
+					popToken: token,
+					openingBracketToken,
+					closingBracketToken,
+				};
 			}
 
 			default:
@@ -1128,7 +1191,11 @@ export function getExpressionLocation(
 				expression.closingBracketToken.end,
 			];
 		case "pop-expression":
-			return [expression.popToken.start, expression.popToken.end];
+			return [expression.popToken.start, expression.closingBracketToken.end];
+		case "builtin-call":
+			return [expression.nameToken.start, expression.closingBracketToken.end];
+		case "operand-literal":
+			return getOperandLocation(expression.operand);
 		case "prefix-expression":
 			return [
 				expression.operator.start,
@@ -1193,6 +1260,16 @@ export function getExpressionAnchorToken(
 			return expression.segmentToken;
 		case "pop-expression":
 			return expression.popToken;
+		case "builtin-call":
+			return expression.nameToken;
+		case "operand-literal": {
+			const operand = expression.operand;
+			if (operand.type === "accumulator-operand") {
+				return operand.accumulatorToken;
+			}
+			if (operand.type === "register-operand") return operand.registerToken;
+			return getExpressionAnchorToken(operand.expression);
+		}
 		default:
 			impossible(expression);
 	}
@@ -1230,6 +1307,19 @@ export function forEachIdentifier(
 				forEachIdentifier(entry.value, visit);
 			}
 			return;
+		case "builtin-call":
+			for (const argument of expression.args) {
+				forEachIdentifier(argument, visit);
+			}
+			return;
+		case "operand-literal":
+			if (
+				expression.operand.type !== "accumulator-operand" &&
+				expression.operand.type !== "register-operand"
+			) {
+				forEachIdentifier(expression.operand.expression, visit);
+			}
+			return;
 		default:
 			return; // literals and `*`
 	}
@@ -1241,6 +1331,8 @@ export function getOperandLocation(
 	switch (operand.type) {
 		case "accumulator-operand":
 			return [operand.accumulatorToken.start, operand.accumulatorToken.end];
+		case "register-operand":
+			return [operand.registerToken.start, operand.registerToken.end];
 		case "simple-operand":
 			return getExpressionLocation(operand.expression);
 		case "immediate-operand":
@@ -1400,6 +1492,7 @@ export interface Instruction {
 
 export type Operand =
 	| AccumulatorOperand
+	| RegisterOperand
 	| SimpleOperand
 	| ImmediateOperand
 	| IndexedOperand
@@ -1410,6 +1503,13 @@ export type Operand =
 export interface AccumulatorOperand {
 	type: "accumulator-operand";
 	accumulatorToken: Token<"a">;
+}
+
+/** A bare `x` or `y` operand. No instruction accepts one - they exist as
+ * macro-argument currency (register-shaped operand values). */
+export interface RegisterOperand {
+	type: "register-operand";
+	registerToken: Token<"x"> | Token<"y">;
 }
 
 export interface SimpleOperand {
@@ -1502,10 +1602,61 @@ export interface SegmentExpression {
 	closingBracketToken: Token<")">;
 }
 
-/** `.pop` in expression position: the value on top of the module's stack. */
+/** The operand/value builtin names, callable in expression position. */
+export const BUILTIN_NAMES = [
+	"a_operand",
+	"x_operand",
+	"y_operand",
+	"immediate_operand",
+	"x_indexed_operand",
+	"y_indexed_operand",
+	"indirect_operand",
+	"x_indexed_indirect_operand",
+	"indirect_y_indexed_operand",
+	"is_a_operand",
+	"is_x_operand",
+	"is_y_operand",
+	"is_immediate_operand",
+	"is_x_indexed_operand",
+	"is_y_indexed_operand",
+	"is_indirect_operand",
+	"is_x_indexed_indirect_operand",
+	"is_indirect_y_indexed_operand",
+	"is_simple_operand",
+	"is_integer",
+	"is_string",
+	"is_dictionary",
+	"is_function",
+	"is_operand",
+	"operand_value",
+] as const;
+
+export type BuiltinName = (typeof BUILTIN_NAMES)[number];
+
+/** A builtin call (`.immediate_operand(3)`, `.is_string(v)`). */
+export interface BuiltinCall {
+	type: "builtin-call";
+	nameToken: Token<BuiltinName>;
+	openingBracketToken: Token<"(">;
+	args: Expression[];
+	closingBracketToken: Token<")">;
+}
+
+/**
+ * A shaped operand spliced into expression position by macro substitution -
+ * never parsed from source. Evaluates to an `OperandValue`.
+ */
+export interface OperandLiteral {
+	type: "operand-literal";
+	operand: Operand;
+}
+
+/** `.pop()` in expression position: the value on top of the module's stack. */
 export interface PopExpression {
 	type: "pop-expression";
 	popToken: Token<"pop">;
+	openingBracketToken: Token<"(">;
+	closingBracketToken: Token<")">;
 }
 
 export interface Emit {
@@ -1586,7 +1737,9 @@ export type Expression =
 	| DictLiteral
 	| CallExpression
 	| SegmentExpression
-	| PopExpression;
+	| PopExpression
+	| BuiltinCall
+	| OperandLiteral;
 
 /** Function application: `DOUBLE(2)`, `lib::DOUBLE(2)`. */
 export interface CallExpression {

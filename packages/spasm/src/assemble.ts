@@ -1389,7 +1389,9 @@ function collectContent(
 }
 
 function operandExpression(operand: Operand | null): Expression | null {
-	if (operand === null || operand.type === "accumulator-operand") return null;
+	if (operand === null) return null;
+	if (operand.type === "accumulator-operand") return null;
+	if (operand.type === "register-operand") return null;
 	return operand.expression;
 }
 
@@ -1414,10 +1416,15 @@ function emitData(
 						Codes.DictionaryAsData,
 						"A dictionary is not data - select an entry with `::`",
 					] as const)
-				: ([
-						Codes.FunctionAsData,
-						"A function is not data - apply it with `(...)`",
-					] as const);
+				: value.type === "operand"
+					? ([
+							Codes.OperandAsData,
+							"An operand is not data - unwrap it with `.operand_value()`",
+						] as const)
+					: ([
+							Codes.FunctionAsData,
+							"A function is not data - apply it with `(...)`",
+						] as const);
 		env.report(code, message, span);
 		for (let i = 0; i < size; i++) output.push(0);
 		return;

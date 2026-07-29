@@ -34,3 +34,18 @@
 	WRITE: $08
 	UPDATE: OpenMode::READ | OpenMode::WRITE
 }
+
+.macro store channel, dest
+	.if .is_immediate_operand(channel) && .operand_value(channel) = 0
+		sta dest
+	.else
+		sta dest,x
+	.endif
+.endmacro
+
+.export .macro xio channel, command
+	ldx channel
+
+	lda command
+	store channel, ICCOM
+.endmacro

@@ -4,6 +4,7 @@
 
 export * from "./atr.ts";
 export * from "./atari-dos.ts";
+export * from "./boot-sectors.ts";
 export * from "./detect.ts";
 export * from "./filesystem.ts";
 export * from "./host-names.ts";

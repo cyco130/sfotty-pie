@@ -5,6 +5,7 @@ import { createCommand } from "./commands/create.ts";
 import { extractCommand } from "./commands/extract.ts";
 import { lsCommand } from "./commands/ls.ts";
 import { rmCommand } from "./commands/rm.ts";
+import { writeBootSectorsCommand } from "./commands/write-boot-sectors.ts";
 
 const USAGE = `usage: spift <command> [options]
 
@@ -40,6 +41,12 @@ commands:
     Remove files matching the SPECs (native wildcards, quoted) from the
     root directory. Locked files need --force (-f), which also quiets
     specs that match nothing. Directories cannot be removed yet.
+
+  write-boot-sectors IMAGE_FILE BOOT_FILE [--pad] [-f]
+    Write a boot file over the image's first sectors (128-byte boot
+    sectors on 256-bps images are handled). The file must span a whole
+    number of sectors - --pad zero-fills the tail - and its second byte
+    must claim that count; --force (-f) writes despite a mismatch.
 `;
 
 async function main(): Promise<void> {
@@ -59,6 +66,9 @@ async function main(): Promise<void> {
 			break;
 		case "rm":
 			await rmCommand(args);
+			break;
+		case "write-boot-sectors":
+			await writeBootSectorsCommand(args);
 			break;
 		case undefined:
 		case "help":

@@ -102,13 +102,14 @@ test("the directory is empty", async () => {
 	}
 });
 
-test("the DOS assembles to a well-formed single-chunk XEX at $0700", async () => {
+test("the DOS assembles to a well-formed single-chunk XEX at $0710", async () => {
 	const xex = await buildDos();
 
 	expect(word(xex, 0)).toBe(0xffff);
 	const chunkStart = word(xex, 2);
 	const chunkEnd = word(xex, 4); // inclusive
-	expect(chunkStart).toBe(0x0700);
+	// $0700-$070F holds the public parameter block; code starts after it.
+	expect(chunkStart).toBe(0x0710);
 	const chunkLength = chunkEnd - chunkStart + 1;
 	// signature+range (6) + chunk + RUNAD range (4) + RUNAD value (2)
 	expect(xex.length).toBe(6 + chunkLength + 6);

@@ -14,6 +14,7 @@
 ; the machine, and a DOS is what other programs' zero page has to survive.
 
 .export .macro output_xex start, load, .out dos_end
+	.define_segment "PUBLIC"
 	.define_segment "CODE"
 	.define_segment "RODATA"
 	.define_segment "DATA"
@@ -21,21 +22,24 @@
 	.define_segment "BSS"
 	.define_segment "ZEROPAGE"
 
+	; Zero page workspace
+	.org $80
+
+	.emplace "ZEROPAGE"
+
+	.if * > $100
+		.error "Zero page overflow"
+	.endif
+
 	.segment "OUTPUT"
 		; Binary-load signature and the chunk's inclusive address range
 		.word $FFFF
 		.word load
 		.word load_end - 1
 
-	; Zero page workspace
-	.org $80
-		.emplace "ZEROPAGE"
-	.if * > $100
-	.error "Zero page overflow"
-	.endif
-
 	; The load chunk
 	.org load
+		.emit "PUBLIC"
 		.emit "CODE"
 		.emit "RODATA"
 		.emit "DATA"

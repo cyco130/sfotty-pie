@@ -20,7 +20,10 @@
 }
 
 .export Command = {
-	READ: $52
+	PUT: $50     ; Write sector without verification
+	READ: $52    ; Read sector
+	STATUS: $53  ; Get status
+	WRITE: $57   ; Write sector with verification
 }
 
 .export Direction = {

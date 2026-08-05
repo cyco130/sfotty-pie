@@ -1,3 +1,4 @@
+.import "../public.s"
 .import "../lib/boot-output.s"
 sio = .import "../lib/sio.s"
 
@@ -43,6 +44,14 @@ stack_save: .res 2   ; Saved stack pointer
 
 ; The boot continuation entry
 boot_continuation:
+	; Set the serial I/O entry point
+	lda #$43 ; JMP absolute
+	sta JSIO
+	lda #<sio::SIOV
+	sta JSIO + 1
+	lda #>sio::SIOV
+	sta JSIO + 2
+
 	; Save the stack pointer
 	tsx
 	stx stack_save
@@ -214,7 +223,7 @@ fill_buffer:
 	sta sio::DBYTHI
 
 	; Do read
-	jsr sio::SIOV
+	jsr JSIO
 	bcs boot_error
 
 	lda #0

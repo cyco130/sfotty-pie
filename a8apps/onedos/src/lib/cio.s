@@ -1,21 +1,39 @@
+.export ZIOCB  := $20, size: 16
+
+.export ICHIDZ := $20, size: 1 ; Handler ID, set by CIO
+.export ICDNOZ := $21, size: 1 ; Device number, set by CIO
+.export ICCOMZ := $22, size: 1 ; Command, set by caller
+.export ICSTAZ := $23, size: 1 ; Status, set by CIO
+.export ICBALZ := $24, size: 1 ; Buffer address low, set by caller
+.export ICBAHZ := $25, size: 1 ; Buffer address high, set by caller
+.export ICPTLZ := $26, size: 1 ; Put byte routine address minus 1, low byte, set by CIO
+.export ICPTHZ := $27, size: 1 ; Put byte routine address minus 1, high byte, set by CIO
+.export ICBLLZ := $28, size: 1 ; Buffer length low, set by caller
+.export ICBLHZ := $29, size: 1 ; Buffer length high, set by caller
+.export ICAX1Z := $2A, size: 1 ; Auxiliary byte 1, open mode, set by caller
+.export ICAX2Z := $2B, size: 1 ; Auxiliary byte 2, set by caller
+.export ICSPRZ := $2C, size: 2
+.export ICIDNO := $2E, size: 1
+.export CIOCHR := $2F, size: 1
+
 .export IOCB :=	$0340, size: 16
 
-.export ICHID := $0340, size: 1
-.export ICDNO := $0341, size: 1
-.export ICCOM := $0342, size: 1
-.export ICSTA := $0343, size: 1
-.export ICBAL := $0344, size: 1
-.export ICBAH := $0345, size: 1
-.export ICPTL := $0346, size: 1
-.export ICPTH := $0347, size: 1
-.export ICBLL := $0348, size: 1
-.export ICBLH := $0349, size: 1
-.export ICAX1 := $034A, size: 1
-.export ICAX2 := $034B, size: 1
-.export ICAX3 := $034C, size: 1
-.export ICAX4 := $034D, size: 1
-.export ICAX5 := $034E, size: 1
-.export ICAX6 := $034F, size: 1
+.export ICHID := $0340, size: 1 ; Handler ID, set by CIO
+.export ICDNO := $0341, size: 1 ; Device number, set by CIO
+.export ICCOM := $0342, size: 1 ; Command, set by caller
+.export ICSTA := $0343, size: 1 ; Status, set by CIO
+.export ICBAL := $0344, size: 1 ; Buffer address low, set by caller
+.export ICBAH := $0345, size: 1 ; Buffer address high, set by caller
+.export ICPTL := $0346, size: 1 ; Put byte routine address minus 1, low byte, set by CIO
+.export ICPTH := $0347, size: 1 ; Put byte routine address minus 1, high byte, set by CIO
+.export ICBLL := $0348, size: 1 ; Buffer length low, set by caller
+.export ICBLH := $0349, size: 1 ; Buffer length high, set by caller
+.export ICAX1 := $034A, size: 1 ; Auxiliary byte 1, open mode, set by caller
+.export ICAX2 := $034B, size: 1 ; Auxiliary byte 2, set by caller
+.export ICAX3 := $034C, size: 1 ; Auxiliary byte 3, sector number low
+.export ICAX4 := $034D, size: 1 ; Auxiliary byte 4, sector number high
+.export ICAX5 := $034E, size: 1 ; Auxiliary byte 5, sector offset
+.export ICAX6 := $034F, size: 1 ; Auxiliary byte 6
 
 .export CIOV := $E456
 
@@ -36,45 +54,44 @@
 }
 
 .macro store channel, dest
-	.if channel = .immediate_operand(0)
-		sta dest
+	.if .is_immediate_operand(channel)
+		sta dest + .operand_value(channel)
 	.else
 		sta dest,x
 	.endif
 .endmacro
 
-.export .macro xio channel, command, string = .null, buffer = .null, buffer_len = .null, aux1 = .null, aux2 = .null, aux3 = .null, aux4 = .null, aux5 = .null, aux6 = .null
-	.if string != .null && buffer != .null
-		.error "xio: cannot specify both string and buffer"
-	.endif
+; Buffer address and buffer length
+; - Both set explicitly
+; - Address and its length attribute
+; - String with the length attribute computed from its length
 
-	ldx channel
+.export .macro xio                   \
+	command,                         \ ; Command code
+	channel = .immediate_operand(0), \ ; Channel * 16
+	buffer = .null,                  \ ; Buffer address or string
+	buffer_len = .null,              \ ; Buffer length (use "unset" to skip)
+	aux1 = .null,                    \ ; Auxiliary byte 1
+	aux2 = .null,                    \ ; Auxiliary byte 2
+	aux3 = .null,                    \ ; Auxiliary byte 3
+	aux4 = .null,                    \ ; Auxiliary byte 4
+	aux5 = .null,                    \ ; Auxiliary byte 5
+	aux6 = .null                     \ ; Auxiliary byte 6
+	end = $9B                        \ ; Append to the end of a string, use "" to skip
+	rodata = "RODATA"                  ; Segment for string literals
+
+	.if !.is_immediate_operand(channel)
+		ldx channel
+	.endif
 
 	lda command
 	store channel, ICCOM
 
-	.if string != .null
-		seg = .segment()
-		.rodata
-			buf_addr: .byte buffer, $9B
-			buf_len = * - buf_addr
-		.segment seg
-
-		.if buffer_len = .null
-			lda #<buf_addr
-			store channel, ICBAL
-			lda #>buf_addr
-			store channel, ICBAH
-		.else
-			.error "xio: buffer_len must not be specified when buffer is a string"
-		.endif
-	.endif
-
 	.if buffer != .null
 		.if .is_string(buffer)
 			seg = .segment()
-			.rodata
-				buf_addr: .byte buffer, $9B
+			.segment rodata
+				buf_addr: .byte buffer, end
 				buf_len = * - buf_addr
 			.segment seg
 
@@ -83,6 +100,10 @@
 				store channel, ICBAL
 				lda #>buf_addr
 				store channel, ICBAH
+			.elseif buffer_len = "unset"
+				; Don't set
+			.elseif .is_simple_operand(buffer_len)
+
 			.else
 				.error "xio: buffer_len must not be specified when buffer is a string"
 			.endif
@@ -132,58 +153,34 @@
 		lda #aux6
 		store channel, ICAX6
 	.endif
-.endmacro
 
-.export .macro open channel, aux1, aux2, spec
-	ldx channel
-
-	lda Command::OPEN
-	store channel, ICCOM
-
-	lda aux1
-	store channel, ICAX1
-
-	lda aux2
-	store channel, ICAX2
-
-	.if .is_string(spec)
-		seg = .segment()
-		.rodata
-			spec_addr: .byte spec, $9B
-		.segment seg
-
-		lda #<spec_addr
-		store channel, ICBAL
-		lda #>spec_addr
-		store channel, ICBAH
-	.elseif .is_simple_operand(spec)
-		lda #<spec
-		store channel, ICBAL
-		lda #>spec
-		store channel, ICBAH
-	.else
-		.error "`spec` must be a string or a simple operand"
+	.if .is_immediate_operand(channel)
+		ldx channel
 	.endif
 
 	jsr CIOV
 .endmacro
 
+.export .macro open channel, aux1, aux2, spec
+	xio Command::OPEN, channel: channel, aux1: aux1, aux2: aux2, buffer: spec, buffer_len: "unset"
+.endmacro
+
 .export .macro close channel
-	xio channel, Command::CLOSE
+	xio Command::CLOSE, channel
 .endmacro
 
-.export .macro readLine channel, buffer, maxLength
-	xio channel, Command::GETREC, buffer: buffer, buffer_len: maxLength
+.export .macro read_line channel, buffer, max_len = .null
+	xio Command::GETREC, channel, buffer: buffer, buffer_len: max_len
 .endmacro
 
-.export .macro readBytes channel, buffer, length
-	xio channel, Command::GETCHR, buffer: buffer, buffer_len: length
+.export .macro read_bytes channel, buffer, length = .null
+	xio Command::GETCHR, channel, buffer: buffer, buffer_len: length
 .endmacro
 
-.export .macro putLine channel, buffer, maxLength = $FFFF
-	xio channel, Command::PUTREC, buffer: buffer, buffer_len: maxLength
+.export .macro put_line channel, buffer, max_len = .immediate_operand($FFFF)
+	xio Command::PUTREC, channel, buffer: buffer, buffer_len: max_len
 .endmacro
 
-.export .macro putchr channel, buffer, length
-	xio channel, Command::PUTCHR, buffer: buffer, buffer_len: length
+.export .macro put_bytes channel, buffer, length = .null
+	xio Command::PUTCHR, channel, buffer: buffer, buffer_len: length
 .endmacro

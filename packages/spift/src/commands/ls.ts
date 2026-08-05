@@ -1,10 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import { openAtr } from "../atr.ts";
-import { openAtariDos, type AtariDosVariant } from "../atari-dos.ts";
-import { detectFilesystem } from "../detect.ts";
 import type { DirEntry, DirEntryAttribute } from "../filesystem.ts";
-import { CliError, UsageError } from "../cli-error.ts";
+import { UsageError } from "../cli-error.ts";
+import { openImageFilesystem } from "./open-image.ts";
 
 export interface LsArgs {
 	image: string;
@@ -55,45 +52,7 @@ export function parseLsArgs(args: string[]): LsArgs {
 
 export async function lsCommand(args: string[]): Promise<void> {
 	const parsed = parseLsArgs(args);
-
-	let bytes: Uint8Array;
-	try {
-		bytes = await readFile(parsed.image);
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-			throw new CliError(`${parsed.image}: no such file`);
-		}
-		throw error;
-	}
-
-	let medium;
-	try {
-		medium = openAtr(bytes);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		throw new CliError(`${parsed.image}: ${message}`);
-	}
-
-	if (parsed.fs === "sparta") {
-		throw new CliError("SpartaDOS filesystem support is not implemented yet");
-	}
-	let variant: AtariDosVariant | undefined;
-	if (parsed.fs === undefined) {
-		const detected = detectFilesystem(medium);
-		if (detected === undefined) {
-			throw new CliError(
-				`${parsed.image}: no recognizable filesystem (use --fs to override)`,
-			);
-		}
-		if (detected.family === "sparta") {
-			throw new CliError(
-				`${parsed.image}: SpartaDOS filesystem support is not implemented yet`,
-			);
-		}
-		variant = detected.variant;
-	}
-
-	const filesystem = openAtariDos(medium, variant);
+	const filesystem = await openImageFilesystem(parsed.image, parsed.fs);
 	const entries = [...filesystem.entries(parsed.spec)];
 	const color = process.stdout.isTTY === true && !process.env.NO_COLOR;
 	process.stdout.write(

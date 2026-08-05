@@ -66,6 +66,167 @@ function list(bytes: Uint8Array, spec?: string) {
 	return [...openAtariDos(openAtr(bytes)).entries(spec)];
 }
 
+interface DataSector {
+	sector: number;
+	next: number;
+	length: number;
+	fill: number;
+	fileNumber?: number;
+	fullLink?: boolean;
+}
+
+// Single-density only: pokes a data sector's payload and its three-byte
+// link/length trailer.
+function writeDataSector(bytes: Uint8Array, options: DataSector): void {
+	const at = ATR_HEADER_SIZE + (options.sector - 1) * 128;
+	bytes.fill(options.fill, at, at + 125);
+	bytes[at + 125] = options.fullLink
+		? options.next >> 8
+		: ((options.fileNumber ?? 0) << 2) | ((options.next >> 8) & 0x03);
+	bytes[at + 126] = options.next & 0xff;
+	bytes[at + 127] = options.length;
+}
+
+function readAs(
+	bytes: Uint8Array,
+	name: string,
+): { length: number; diagnostics: string[]; bytes: Uint8Array } | null {
+	const contents = openAtariDos(openAtr(bytes)).readFile(name);
+	return contents === null
+		? null
+		: { ...contents, length: contents.bytes.length };
+}
+
+test("readFile walks a DOS 2 chain", () => {
+	const disk = makeDisk({
+		entries: [{ flags: 0x42, name: "A.DAT", start: 100, sectors: 2 }],
+	});
+	writeDataSector(disk, { sector: 100, next: 101, length: 125, fill: 1 });
+	writeDataSector(disk, { sector: 101, next: 0, length: 10, fill: 2 });
+	const contents = readAs(disk, "a.dat");
+	expect(contents?.diagnostics).toEqual([]);
+	expect(contents?.length).toBe(135);
+	expect(contents?.bytes[0]).toBe(1);
+	expect(contents?.bytes[130]).toBe(2);
+});
+
+test("readFile walks a DOS 1 chain (last-sector flag, full sectors)", () => {
+	const disk = makeDisk({
+		entries: [{ flags: 0x40, name: "OLD.DAT", start: 100, sectors: 2 }],
+	});
+	// Mid-chain DOS 1 sectors are always full; the length byte is a
+	// sequence cross-check we ignore.
+	writeDataSector(disk, { sector: 100, next: 101, length: 0x64, fill: 3 });
+	writeDataSector(disk, { sector: 101, next: 0, length: 0x80 | 20, fill: 4 });
+	const contents = readAs(disk, "old.dat");
+	expect(contents?.diagnostics).toEqual([]);
+	expect(contents?.length).toBe(145);
+});
+
+test("readFile follows MyDOS full links without file-number checks", () => {
+	const disk = makeDisk({
+		sectorCount: 2000,
+		entries: [{ flags: 0x46, name: "BIG.DAT", start: 1500, sectors: 2 }],
+	});
+	writeDataSector(disk, {
+		sector: 1500,
+		next: 1501,
+		length: 125,
+		fill: 5,
+		fullLink: true,
+	});
+	writeDataSector(disk, {
+		sector: 1501,
+		next: 0,
+		length: 5,
+		fill: 6,
+		fullLink: true,
+	});
+	expect(readAs(disk, "big.dat")).toMatchObject({
+		length: 130,
+		diagnostics: [],
+	});
+});
+
+test("readFile stops on a file-number mismatch, keeping earlier data", () => {
+	const disk = makeDisk({
+		entries: [{ flags: 0x42, name: "A.DAT", start: 100, sectors: 2 }],
+	});
+	writeDataSector(disk, { sector: 100, next: 101, length: 125, fill: 1 });
+	writeDataSector(disk, {
+		sector: 101,
+		next: 0,
+		length: 10,
+		fill: 2,
+		fileNumber: 5,
+	});
+	const contents = readAs(disk, "a.dat");
+	expect(contents?.length).toBe(125);
+	expect(contents?.diagnostics).toEqual([
+		"sector 101: file number 5 does not match directory slot 0",
+	]);
+});
+
+test("readFile reports loops, escapes, and bad lengths", () => {
+	const disk = makeDisk({
+		entries: [
+			{ flags: 0x42, name: "LOOP.DAT", start: 100, sectors: 2 },
+			{ flags: 0x42, name: "GONE.DAT", start: 102, sectors: 1 },
+			{ flags: 0x42, name: "FAT.DAT", start: 103, sectors: 1 },
+		],
+	});
+	writeDataSector(disk, { sector: 100, next: 101, length: 125, fill: 1 });
+	writeDataSector(disk, { sector: 101, next: 100, length: 125, fill: 1 });
+	writeDataSector(disk, {
+		sector: 102,
+		next: 900,
+		length: 125,
+		fill: 1,
+		fileNumber: 1,
+	});
+	writeDataSector(disk, {
+		sector: 103,
+		next: 0,
+		length: 126,
+		fill: 1,
+		fileNumber: 2,
+	});
+	expect(readAs(disk, "loop.dat")?.diagnostics).toEqual([
+		"sector 100: sector chain loops",
+	]);
+	expect(readAs(disk, "gone.dat")?.diagnostics).toEqual([
+		"sector 900: outside the image",
+	]);
+	const fat = readAs(disk, "fat.dat");
+	expect(fat?.length).toBe(125);
+	expect(fat?.diagnostics).toEqual([
+		"sector 103: data length 126 exceeds sector capacity 125",
+	]);
+});
+
+test("readFile flags a sector-count mismatch on clean chains", () => {
+	const disk = makeDisk({
+		entries: [{ flags: 0x42, name: "A.DAT", start: 100, sectors: 5 }],
+	});
+	writeDataSector(disk, { sector: 100, next: 0, length: 7, fill: 1 });
+	expect(readAs(disk, "a.dat")?.diagnostics).toEqual([
+		"sector chain has 1 sectors, the directory entry says 5",
+	]);
+});
+
+test("readFile returns null for missing names and directories", () => {
+	const disk = makeDisk({
+		entries: [
+			{ flags: 0x42, name: "A.DAT", start: 100, sectors: 1 },
+			{ flags: 0x10, name: "SUBDIR", start: 200, sectors: 8 },
+		],
+	});
+	writeDataSector(disk, { sector: 100, next: 0, length: 1, fill: 1 });
+	expect(readAs(disk, "b.dat")).toBeNull();
+	expect(readAs(disk, "subdir")).toBeNull();
+	expect(readAs(disk, "A.DAT")?.length).toBe(1);
+});
+
 test("detects DOS 2.0S and 2.0D", () => {
 	expect(detectAtariDos(openAtr(makeDisk()))).toBe("dos20s");
 	expect(detectAtariDos(openAtr(makeDisk({ sectorSize: 256 })))).toBe("dos20d");

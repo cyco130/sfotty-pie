@@ -28,6 +28,15 @@ export interface DirEntry {
 	attributes: DirEntryAttributes;
 }
 
+export interface FileContents {
+	bytes: Uint8Array;
+	/**
+	 * Problems met while walking the file, human-readable. Non-empty means
+	 * bytes holds whatever was recoverable, possibly truncated.
+	 */
+	diagnostics: string[];
+}
+
 export interface Filesystem {
 	readonly family: string;
 	readonly variant: string;
@@ -36,4 +45,10 @@ export interface Filesystem {
 	 * the family's native wildcard semantics.
 	 */
 	entries(spec?: string): IterableIterator<DirEntry>;
+	/**
+	 * Reads a file by its decoded name (as entries() reports it). Returns
+	 * null when no such file exists; never throws on a damaged file - the
+	 * recoverable bytes come back with diagnostics.
+	 */
+	readFile(name: string): FileContents | null;
 }

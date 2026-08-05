@@ -4,7 +4,12 @@
 // total and free sector counts), root directory at sectors 361-368.
 
 import type { SectorMedium } from "./sector-medium.ts";
-import type { DirEntry, DirEntryAttribute, Filesystem } from "./filesystem.ts";
+import type {
+	DirEntry,
+	DirEntryAttribute,
+	FileContents,
+	Filesystem,
+} from "./filesystem.ts";
 
 export const ATARI_DOS_VARIANTS = [
 	"dos10",
@@ -91,6 +96,18 @@ export function detectAtariDos(
 	return undefined;
 }
 
+interface RawEntry {
+	/** Directory slot 0..63 - also the file number stored in chain links. */
+	index: number;
+	flags: number;
+	name: string;
+	ext: string;
+	sectors: number;
+	startSector: number;
+	isDir: boolean;
+	displayName: string;
+}
+
 /**
  * Opens an Atari DOS filesystem on a medium. The variant is detected when
  * not given; an undetectable (or forced) filesystem falls back to the DOS
@@ -104,69 +121,187 @@ export function openAtariDos(
 		variant ??
 		detectAtariDos(medium) ??
 		(medium.sectorSize === 256 ? "dos20d" : "dos20s");
+
+	// Yields every present entry (in use, MyDOS subdirectory, or a DOS 2.5
+	// extended file hidden behind the output bit with in-use clear), stopping
+	// at the first never-used slot.
+	function* scanDirectory(): IterableIterator<RawEntry> {
+		let index = -1;
+		for (
+			let sectorNumber = DIRECTORY_FIRST;
+			sectorNumber <= DIRECTORY_LAST;
+			sectorNumber++
+		) {
+			const sector = medium.readSector(sectorNumber);
+			if (sector === null) {
+				return;
+			}
+			for (let slot = 0; slot < ENTRIES_PER_SECTOR; slot++) {
+				index++;
+				const at = slot * ENTRY_SIZE;
+				const flags = sector[at] ?? 0;
+				if (flags === 0) {
+					return; // a never-used entry ends the directory
+				}
+				if ((flags & FLAG_DELETED) !== 0) {
+					continue;
+				}
+				const isDir = (flags & FLAG_DIRECTORY) !== 0;
+				const inUse = (flags & FLAG_IN_USE) !== 0;
+				const dos25Extended = !inUse && !isDir && (flags & FLAG_OUTPUT) !== 0;
+				if (!inUse && !isDir && !dos25Extended) {
+					continue;
+				}
+				const name = decodeField(sector.subarray(at + 5, at + 13));
+				const ext = decodeField(sector.subarray(at + 13, at + 16));
+				yield {
+					index,
+					flags,
+					name,
+					ext,
+					sectors: (sector[at + 1] ?? 0) | ((sector[at + 2] ?? 0) << 8),
+					startSector: (sector[at + 3] ?? 0) | ((sector[at + 4] ?? 0) << 8),
+					isDir,
+					displayName: ext === "" ? name : `${name}.${ext}`,
+				};
+			}
+		}
+	}
+
 	return {
 		family: "atari",
 		variant: resolved,
 		*entries(spec?: string): IterableIterator<DirEntry> {
 			const matches = spec === undefined ? undefined : compileSpec(spec);
-			for (
-				let sectorNumber = DIRECTORY_FIRST;
-				sectorNumber <= DIRECTORY_LAST;
-				sectorNumber++
-			) {
-				const sector = medium.readSector(sectorNumber);
-				if (sector === null) {
-					return;
+			for (const raw of scanDirectory()) {
+				if (matches !== undefined && !matches(raw.name, raw.ext)) {
+					continue;
 				}
-				for (let index = 0; index < ENTRIES_PER_SECTOR; index++) {
-					const at = index * ENTRY_SIZE;
-					const flags = sector[at] ?? 0;
-					if (flags === 0) {
-						return; // a never-used entry ends the directory
-					}
-					if ((flags & FLAG_DELETED) !== 0) {
-						continue;
-					}
-					const isDir = (flags & FLAG_DIRECTORY) !== 0;
-					const inUse = (flags & FLAG_IN_USE) !== 0;
-					// DOS 2.5 hides files unreachable by DOS 2.0 (sectors
-					// past 719) behind the output bit with in-use clear.
-					const dos25Extended = !inUse && !isDir && (flags & FLAG_OUTPUT) !== 0;
-					if (!inUse && !isDir && !dos25Extended) {
-						continue;
-					}
-					const name = decodeField(sector.subarray(at + 5, at + 13));
-					const ext = decodeField(sector.subarray(at + 13, at + 16));
-					if (matches !== undefined && !matches(name, ext)) {
-						continue;
-					}
-					const attributes: DirEntryAttribute[] = [];
-					if ((flags & FLAG_LOCKED) !== 0) {
-						attributes.push("ReadOnly");
-					}
-					if (inUse && (flags & FLAG_OUTPUT) !== 0) {
-						attributes.push("OpenForOutput");
-					}
-					if (inUse && (flags & FLAG_DOS2) === 0) {
-						attributes.push("AtariDos10");
-					}
-					if (dos25Extended) {
-						attributes.push("AtariDos25");
-					}
-					if ((flags & FLAG_NO_LINK) !== 0) {
-						attributes.push("AtariMyDos");
-					}
-					yield {
-						name: ext === "" ? name : `${name}.${ext}`,
-						kind: isDir ? "dir" : "file",
-						sectors: (sector[at + 1] ?? 0) | ((sector[at + 2] ?? 0) << 8),
-						startSector: (sector[at + 3] ?? 0) | ((sector[at + 4] ?? 0) << 8),
-						attributes,
-					};
+				const inUse = (raw.flags & FLAG_IN_USE) !== 0;
+				const attributes: DirEntryAttribute[] = [];
+				if ((raw.flags & FLAG_LOCKED) !== 0) {
+					attributes.push("ReadOnly");
 				}
+				if (inUse && (raw.flags & FLAG_OUTPUT) !== 0) {
+					attributes.push("OpenForOutput");
+				}
+				if (inUse && (raw.flags & FLAG_DOS2) === 0) {
+					attributes.push("AtariDos10");
+				}
+				if (!inUse && !raw.isDir) {
+					attributes.push("AtariDos25");
+				}
+				if ((raw.flags & FLAG_NO_LINK) !== 0) {
+					attributes.push("AtariMyDos");
+				}
+				yield {
+					name: raw.displayName,
+					kind: raw.isDir ? "dir" : "file",
+					sectors: raw.sectors,
+					startSector: raw.startSector,
+					attributes,
+				};
 			}
 		},
+		readFile(name: string): FileContents | null {
+			// First match wins; duplicate names only occur on damaged disks.
+			for (const raw of scanDirectory()) {
+				if (!raw.isDir && raw.displayName === name.toLowerCase()) {
+					return walkChain(medium, raw);
+				}
+			}
+			return null;
+		},
 	};
+}
+
+function walkChain(medium: SectorMedium, entry: RawEntry): FileContents {
+	const diagnostics: string[] = [];
+	const chunks: Uint8Array[] = [];
+	// Per-entry format flags, not the disk variant, drive the walk: a DOS 1
+	// file on a DOS 2 disk still has its DOS 1 chain encoding.
+	const dos1 =
+		(entry.flags & FLAG_IN_USE) !== 0 && (entry.flags & FLAG_DOS2) === 0;
+	const fullLinks = (entry.flags & FLAG_NO_LINK) !== 0;
+	const visited = new Set<number>();
+	let sector = entry.startSector;
+	let clean = true;
+	while (sector !== 0) {
+		if (visited.has(sector)) {
+			diagnostics.push(`sector ${sector}: sector chain loops`);
+			clean = false;
+			break;
+		}
+		visited.add(sector);
+		const data = medium.readSector(sector);
+		if (data === null || data.length < 3) {
+			diagnostics.push(`sector ${sector}: outside the image`);
+			clean = false;
+			break;
+		}
+		const capacity = data.length - 3;
+		const hi = data[capacity] ?? 0;
+		const lo = data[capacity + 1] ?? 0;
+		const lengthByte = data[capacity + 2] ?? 0;
+		let next: number;
+		if (fullLinks) {
+			// MyDOS format: the whole byte is the link high byte, no file
+			// number cross-check possible.
+			next = (hi << 8) | lo;
+		} else {
+			const fileNumber = hi >> 2;
+			if (fileNumber !== entry.index) {
+				diagnostics.push(
+					`sector ${sector}: file number ${fileNumber} does not ` +
+						`match directory slot ${entry.index}`,
+				);
+				clean = false;
+				break;
+			}
+			next = ((hi & 0x03) << 8) | lo;
+		}
+		let dataBytes: number;
+		let last = false;
+		if (dos1) {
+			// DOS 1.0: bit 7 of the length byte marks the last sector and its
+			// low bits hold that sector's data length; full sectors hold the
+			// full capacity and use the byte as a sequence cross-check.
+			last = (lengthByte & 0x80) !== 0;
+			dataBytes = last ? lengthByte & 0x7f : capacity;
+		} else {
+			dataBytes = lengthByte;
+		}
+		if (dataBytes > capacity) {
+			diagnostics.push(
+				`sector ${sector}: data length ${dataBytes} exceeds ` +
+					`sector capacity ${capacity}`,
+			);
+			clean = false;
+			dataBytes = capacity;
+		}
+		chunks.push(data.subarray(0, dataBytes));
+		if (last) {
+			break;
+		}
+		sector = next;
+	}
+	if (clean && visited.size !== entry.sectors) {
+		diagnostics.push(
+			`sector chain has ${visited.size} sectors, the directory ` +
+				`entry says ${entry.sectors}`,
+		);
+	}
+	let total = 0;
+	for (const chunk of chunks) {
+		total += chunk.length;
+	}
+	const bytes = new Uint8Array(total);
+	let at = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, at);
+		at += chunk.length;
+	}
+	return { bytes, diagnostics };
 }
 
 function decodeField(bytes: Uint8Array): string {

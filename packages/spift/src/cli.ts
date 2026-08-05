@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { CliError, UsageError } from "./cli-error.ts";
 import { createCommand } from "./commands/create.ts";
+import { extractCommand } from "./commands/extract.ts";
 import { lsCommand } from "./commands/ls.ts";
 
 const USAGE = `usage: spift <command> [options]
@@ -19,6 +20,13 @@ commands:
     quote it to keep the shell from expanding it). The filesystem is
     autodetected; --fs overrides. --long (-l) adds sector counts, start
     sectors, and attributes.
+
+  extract IMAGE_FILE [SPEC] [-o DIR] [--fs atari|sparta] [-f]
+    Extract files matching SPEC (default: all) from the root directory
+    into DIR (default: the current directory, created if missing). Host
+    names are lowercased and made filesystem-safe. Refuses to overwrite
+    existing files unless --force (-f) is given; damaged files extract
+    what is recoverable, with warnings, and exit 1.
 `;
 
 async function main(): Promise<void> {
@@ -29,6 +37,9 @@ async function main(): Promise<void> {
 			break;
 		case "ls":
 			await lsCommand(args);
+			break;
+		case "extract":
+			await extractCommand(args);
 			break;
 		case undefined:
 		case "help":

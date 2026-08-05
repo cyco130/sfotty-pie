@@ -596,6 +596,26 @@ test("deleteFile works on DOS 1.0 disks but not large MyDOS", () => {
 	);
 });
 
+test("delete and overwrite report damaged chains and free what they can", () => {
+	const disk = makeDisk({ formatted: true });
+	const fs = openAtariDos(openAtr(disk));
+	fs.writeFile("loop.dat", new Uint8Array(300)); // chain 4 -> 5 -> 6
+	// Corrupt the chain: sector 4 links back to itself.
+	const sector4 = ATR_HEADER_SIZE + 3 * 128;
+	disk[sector4 + 125] = 0;
+	disk[sector4 + 126] = 4;
+	expect(fs.deleteFile("loop.dat")).toEqual(["sector 4: sector chain loops"]);
+	// Only the reachable sector came back; 5 and 6 stay leaked.
+	expect(freeCount(disk)).toBe(707 - 2);
+	// Overwrite path: a clean write, then the same corruption.
+	expect(fs.writeFile("a.dat", new Uint8Array(1))).toEqual([]); // sector 4
+	disk[sector4 + 125] = 0;
+	disk[sector4 + 126] = 4;
+	expect(fs.writeFile("a.dat", new Uint8Array(1), { overwrite: true })).toEqual(
+		["sector 4: sector chain loops"],
+	);
+});
+
 test("specs use native wildcard semantics", () => {
 	const disk = makeDisk({
 		entries: [

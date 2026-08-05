@@ -91,18 +91,29 @@ export async function rmCommand(args: string[]): Promise<void> {
 		}
 	}
 
+	let damaged = false;
 	for (const entry of entries) {
+		let diagnostics: string[];
 		try {
-			filesystem.deleteFile(entry.name, { force: parsed.force });
+			diagnostics = filesystem.deleteFile(entry.name, {
+				force: parsed.force,
+			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			throw new CliError(`${entry.name}: ${message}`);
 		}
+		for (const diagnostic of diagnostics) {
+			process.stderr.write(`spift: ${entry.name}: ${diagnostic}\n`);
+		}
+		damaged ||= diagnostics.length > 0;
 		process.stdout.write(`removed ${entry.name}\n`);
 	}
 
 	// Nothing touched the disk until here.
 	if (entries.length > 0) {
 		await writeFile(parsed.image, medium.bytes);
+	}
+	if (damaged) {
+		process.exitCode = 1;
 	}
 }

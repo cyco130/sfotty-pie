@@ -29,19 +29,24 @@ export interface AtariDosFilesystem extends Filesystem {
 	 * 8.3 in [A-Z0-9_@] (see toAtariName). Throws on unsupported variants
 	 * (DOS 1.0, large MyDOS), a full directory or disk, or an existing name
 	 * unless overwrite is set. Mutations stay in the medium's memory.
+	 * Returns the traversal diagnostics from freeing an overwritten file's
+	 * chain - non-empty means that chain was damaged (loop, bad link) and
+	 * only its reachable sectors were freed.
 	 */
 	writeFile(
 		name: string,
 		bytes: Uint8Array,
 		options?: { overwrite?: boolean },
-	): void;
+	): string[];
 	/**
 	 * Deletes a file: frees its chain in the bitmap and sets the deleted
 	 * flag (the rest of the entry stays, like the DOSes leave it). Throws
 	 * when the name is missing, a directory, or locked (unless force), and
-	 * on large MyDOS disks. Mutations stay in the medium's memory.
+	 * on large MyDOS disks. Mutations stay in the medium's memory. Returns
+	 * the traversal diagnostics from freeing the chain - non-empty means it
+	 * was damaged and only its reachable sectors were freed.
 	 */
-	deleteFile(name: string, options?: { force?: boolean }): void;
+	deleteFile(name: string, options?: { force?: boolean }): string[];
 }
 
 const VTOC_SECTOR = 360;
@@ -235,8 +240,8 @@ export function openAtariDos(
 			name: string,
 			bytes: Uint8Array,
 			options?: { overwrite?: boolean },
-		): void {
-			writeAtariFile(
+		): string[] {
+			return writeAtariFile(
 				medium,
 				resolved,
 				name,
@@ -244,8 +249,8 @@ export function openAtariDos(
 				options?.overwrite === true,
 			);
 		},
-		deleteFile(name: string, options?: { force?: boolean }): void {
-			deleteAtariFile(medium, resolved, name, options?.force === true);
+		deleteFile(name: string, options?: { force?: boolean }): string[] {
+			return deleteAtariFile(medium, resolved, name, options?.force === true);
 		},
 	};
 }
@@ -394,7 +399,7 @@ function writeAtariFile(
 	name: string,
 	fileBytes: Uint8Array,
 	overwrite: boolean,
-): void {
+): string[] {
 	const writeSector = medium.writeSector?.bind(medium);
 	if (writeSector === undefined) {
 		throw new Error("the medium is read-only");
@@ -448,10 +453,15 @@ function writeAtariFile(
 	const accounting = vtocAccounting(medium, variant);
 	const { isFree, mark } = accounting;
 
-	// Overwrite frees the old chain first so its sectors are reusable.
+	// Overwrite frees the old chain first so its sectors are reusable. A
+	// damaged chain (loop, bad link) still frees its reachable sectors; the
+	// walk's findings are reported to the caller.
+	const diagnostics: string[] = [];
 	if (existing !== -1) {
 		const raw = rawEntryFromSlot(slotIn(existing), existing);
-		for (const sector of walkChain(medium, raw).visited) {
+		const walk = walkChain(medium, raw);
+		diagnostics.push(...walk.contents.diagnostics);
+		for (const sector of walk.visited) {
 			mark(sector, true);
 		}
 	}
@@ -520,6 +530,7 @@ function writeAtariFile(
 	}
 	directory.flushSlot(writeSector, slot);
 	accounting.flush(writeSector);
+	return diagnostics;
 }
 
 function deleteAtariFile(
@@ -527,7 +538,7 @@ function deleteAtariFile(
 	variant: AtariDosVariant,
 	name: string,
 	force: boolean,
-): void {
+): string[] {
 	const writeSector = medium.writeSector?.bind(medium);
 	if (writeSector === undefined) {
 		throw new Error("the medium is read-only");
@@ -571,7 +582,10 @@ function deleteAtariFile(
 	}
 
 	const accounting = vtocAccounting(medium, variant);
-	for (const sector of walkChain(medium, raw).visited) {
+	// A damaged chain still frees its reachable sectors; the walk's findings
+	// go back to the caller.
+	const walk = walkChain(medium, raw);
+	for (const sector of walk.visited) {
 		accounting.mark(sector, true);
 	}
 	// The deleted flag alone, like the DOSes do - the rest of the entry
@@ -580,6 +594,7 @@ function deleteAtariFile(
 	entry[0] = FLAG_DELETED;
 	directory.flushSlot(writeSector, found);
 	accounting.flush(writeSector);
+	return walk.contents.diagnostics;
 }
 
 function encodeAtariName(display: string): { name: string; ext: string } {

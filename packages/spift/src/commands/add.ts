@@ -116,15 +116,21 @@ export async function addCommand(args: string[]): Promise<void> {
 		}
 	}
 
+	let damaged = false;
 	for (const source of sources) {
+		let diagnostics: string[];
 		try {
-			filesystem.writeFile(source.native, source.bytes, {
+			diagnostics = filesystem.writeFile(source.native, source.bytes, {
 				overwrite: parsed.force,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			throw new CliError(`${source.host}: ${message}`);
 		}
+		for (const diagnostic of diagnostics) {
+			process.stderr.write(`spift: ${source.native}: ${diagnostic}\n`);
+		}
+		damaged ||= diagnostics.length > 0;
 		const renamed =
 			source.native === source.host.toLowerCase()
 				? ""
@@ -136,4 +142,7 @@ export async function addCommand(args: string[]): Promise<void> {
 
 	// Nothing touched the disk until here.
 	await writeFile(parsed.image, medium.bytes);
+	if (damaged) {
+		process.exitCode = 1;
+	}
 }

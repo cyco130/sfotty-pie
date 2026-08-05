@@ -15,6 +15,7 @@ spift extract dos25.atr '*.com'  # extract matching files here
 spift add dos25.atr game.xex     # add host files to the image
 spift rm dos25.atr '*.tmp'       # remove matching files
 spift write-boot-sectors blank.atr boot.bin
+spift extract-boot-sectors dos25.atr boot.bin
 ```
 
 `create` writes a blank image - a valid header over all-zero sector data, no filesystem installed. The image type is inferred from the file name, or given with `--type`/`-t`; only `atr` exists so far. Existing files are not overwritten unless `--force`/`-f` is given.
@@ -26,6 +27,8 @@ spift write-boot-sectors blank.atr boot.bin
 `rm` removes files matching its specs. Locked files need `--force`/`-f` (which also quiets specs that match nothing); directories cannot be removed yet. Deleted entries keep their name under the deleted flag, the way the DOSes leave them for undelete tools.
 
 `write-boot-sectors` lays a boot file over an image's first sectors - a container-level operation that works on blank images too, so `create` + `write-boot-sectors` builds a boot disk from scratch. The file must span a whole number of sectors (the three 128-byte boot sectors of 256-bps images are accounted for; `--pad` zero-fills the tail) and its second byte - the boot record's sector count - must match, unless `--force`/`-f`.
+
+`extract-boot-sectors` is the counterpart: it pulls the boot sectors into a file, sized by the boot record's own count byte. When that byte claims zero or more sectors than the image holds, pass `--sector-count` explicitly. Existing output files are not overwritten without `--force`/`-f`.
 
 `add` copies host files into an image (DOS 2.0/2.5 disks; DOS 1.0 and large MyDOS refuse). Names convert to uppercase 8.3 - letters, digits, `_` and `@`, everything else becomes `_`. Overwriting a file already on the image needs `--force`/`-f`; two sources mangling to the same name is always an error. On DOS 2.5, files reaching past sector 719 get the extended marking, and the VTOC2 shared bitmap is silently repaired from the main VTOC (which DOS 2.0 keeps current). The image is only written back after the whole batch succeeds. Run `spift help` for details.
 

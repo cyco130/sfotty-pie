@@ -2,6 +2,7 @@
 import { CliError, UsageError } from "./cli-error.ts";
 import { addCommand } from "./commands/add.ts";
 import { createCommand } from "./commands/create.ts";
+import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
 import { extractCommand } from "./commands/extract.ts";
 import { lsCommand } from "./commands/ls.ts";
 import { rmCommand } from "./commands/rm.ts";
@@ -47,6 +48,12 @@ commands:
     sectors on 256-bps images are handled). The file must span a whole
     number of sectors - --pad zero-fills the tail - and its second byte
     must claim that count; --force (-f) writes despite a mismatch.
+
+  extract-boot-sectors IMAGE_FILE OUTPUT_FILE [--sector-count N] [-f]
+    Extract the boot sectors into a file. The count comes from the boot
+    record's second byte; when that claims zero or more sectors than the
+    image holds, --sector-count is required. Refuses to overwrite an
+    existing file unless --force (-f) is given.
 `;
 
 async function main(): Promise<void> {
@@ -69,6 +76,9 @@ async function main(): Promise<void> {
 			break;
 		case "write-boot-sectors":
 			await writeBootSectorsCommand(args);
+			break;
+		case "extract-boot-sectors":
+			await extractBootSectorsCommand(args);
 			break;
 		case undefined:
 		case "help":

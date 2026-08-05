@@ -4,6 +4,7 @@ import { addCommand } from "./commands/add.ts";
 import { createCommand } from "./commands/create.ts";
 import { extractCommand } from "./commands/extract.ts";
 import { lsCommand } from "./commands/ls.ts";
+import { rmCommand } from "./commands/rm.ts";
 
 const USAGE = `usage: spift <command> [options]
 
@@ -34,6 +35,11 @@ commands:
     Names convert to uppercase 8.3 (letters, digits, _ and @; anything
     else becomes _). Two sources mangling to the same name is an error;
     overwriting a file already on the image requires --force (-f).
+
+  rm IMAGE_FILE SPEC... [--fs atari|sparta] [-f]
+    Remove files matching the SPECs (native wildcards, quoted) from the
+    root directory. Locked files need --force (-f), which also quiets
+    specs that match nothing. Directories cannot be removed yet.
 `;
 
 async function main(): Promise<void> {
@@ -50,6 +56,9 @@ async function main(): Promise<void> {
 			break;
 		case "add":
 			await addCommand(args);
+			break;
+		case "rm":
+			await rmCommand(args);
 			break;
 		case undefined:
 		case "help":

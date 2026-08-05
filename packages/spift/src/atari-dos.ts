@@ -35,6 +35,13 @@ export interface AtariDosFilesystem extends Filesystem {
 		bytes: Uint8Array,
 		options?: { overwrite?: boolean },
 	): void;
+	/**
+	 * Deletes a file: frees its chain in the bitmap and sets the deleted
+	 * flag (the rest of the entry stays, like the DOSes leave it). Throws
+	 * when the name is missing, a directory, or locked (unless force), and
+	 * on large MyDOS disks. Mutations stay in the medium's memory.
+	 */
+	deleteFile(name: string, options?: { force?: boolean }): void;
 }
 
 const VTOC_SECTOR = 360;
@@ -237,6 +244,147 @@ export function openAtariDos(
 				options?.overwrite === true,
 			);
 		},
+		deleteFile(name: string, options?: { force?: boolean }): void {
+			deleteAtariFile(medium, resolved, name, options?.force === true);
+		},
+	};
+}
+
+interface LoadedDirectory {
+	slotIn(index: number): Uint8Array;
+	/** Writes the directory sector holding a slot back to the medium. */
+	flushSlot(
+		writeSector: NonNullable<SectorMedium["writeSector"]>,
+		slot: number,
+	): void;
+}
+
+function loadDirectory(medium: SectorMedium): LoadedDirectory {
+	const dirSectors: Uint8Array[] = [];
+	for (let s = DIRECTORY_FIRST; s <= DIRECTORY_LAST; s++) {
+		const sector = medium.readSector(s);
+		if (sector === null) {
+			throw new Error("the directory is outside the image");
+		}
+		dirSectors.push(sector);
+	}
+	return {
+		slotIn(index: number): Uint8Array {
+			const sector = dirSectors[index >> 3];
+			return sector === undefined
+				? new Uint8Array(0)
+				: sector.subarray(
+						(index & 7) * ENTRY_SIZE,
+						(index & 7) * ENTRY_SIZE + ENTRY_SIZE,
+					);
+		},
+		flushSlot(writeSector, slot): void {
+			const sector = dirSectors[slot >> 3];
+			if (
+				sector === undefined ||
+				!writeSector(DIRECTORY_FIRST + (slot >> 3), sector)
+			) {
+				throw new Error("directory write failed");
+			}
+		},
+	};
+}
+
+function rawEntryFromSlot(entry: Uint8Array, index: number): RawEntry {
+	const name = decodeField(entry.subarray(5, 13));
+	const ext = decodeField(entry.subarray(13, 16));
+	return {
+		index,
+		flags: entry[0] ?? 0,
+		name,
+		ext,
+		sectors: (entry[1] ?? 0) | ((entry[2] ?? 0) << 8),
+		startSector: (entry[3] ?? 0) | ((entry[4] ?? 0) << 8),
+		isDir: ((entry[0] ?? 0) & FLAG_DIRECTORY) !== 0,
+		displayName: ext === "" ? name : `${name}.${ext}`,
+	};
+}
+
+interface VtocAccounting {
+	readonly hasVtoc2: boolean;
+	isFree(sector: number): boolean;
+	mark(sector: number, free: boolean): void;
+	flush(writeSector: NonNullable<SectorMedium["writeSector"]>): void;
+}
+
+/**
+ * The usage bitmap plus free counters, held in memory until flush. On DOS
+ * 2.5 the main VTOC is authoritative for the shared region (sectors
+ * 48..719) - DOS 2.0 writes to ED disks without updating VTOC2, so its
+ * shared copy can be stale; flush repairs it silently. The main free count
+ * covers sectors below 720 only; VTOC2's own count (bytes 122-123) covers
+ * 720..1023 (verified against wild ED disks).
+ */
+function vtocAccounting(
+	medium: SectorMedium,
+	variant: AtariDosVariant,
+): VtocAccounting {
+	const vtoc = medium.readSector(VTOC_SECTOR);
+	if (vtoc === null) {
+		throw new Error("the VTOC is outside the image");
+	}
+	const vtoc2 = variant === "dos25" ? medium.readSector(1024) : null;
+	let lowDelta = 0;
+	let highDelta = 0;
+	const bitPlace = (
+		sector: number,
+	): [buffer: Uint8Array, at: number, mask: number] | null => {
+		if (sector < 720 || vtoc2 === null) {
+			if (sector > 943 || 10 + (sector >> 3) >= vtoc.length) {
+				return null;
+			}
+			return [vtoc, 10 + (sector >> 3), 0x80 >> (sector & 7)];
+		}
+		if (sector > 1023) {
+			return null;
+		}
+		const offset = sector - 720;
+		return [vtoc2, 84 + (offset >> 3), 0x80 >> (offset & 7)];
+	};
+	const isFree = (sector: number): boolean => {
+		const place = bitPlace(sector);
+		return place !== null && ((place[0][place[1]] ?? 0) & place[2]) !== 0;
+	};
+	return {
+		hasVtoc2: vtoc2 !== null,
+		isFree,
+		mark(sector: number, free: boolean): void {
+			const place = bitPlace(sector);
+			if (place === null || isFree(sector) === free) {
+				return;
+			}
+			const [buffer, at, mask] = place;
+			buffer[at] = (buffer[at] ?? 0) ^ mask;
+			const delta = free ? 1 : -1;
+			if (sector < 720) {
+				lowDelta += delta;
+			} else {
+				highDelta += delta;
+			}
+		},
+		flush(writeSector): void {
+			const lowFree = ((vtoc[3] ?? 0) | ((vtoc[4] ?? 0) << 8)) + lowDelta;
+			vtoc[3] = lowFree & 0xff;
+			vtoc[4] = (lowFree >> 8) & 0xff;
+			if (!writeSector(VTOC_SECTOR, vtoc)) {
+				throw new Error("VTOC write failed");
+			}
+			if (vtoc2 !== null) {
+				vtoc2.set(vtoc.subarray(16, 100), 0);
+				const highFree =
+					((vtoc2[122] ?? 0) | ((vtoc2[123] ?? 0) << 8)) + highDelta;
+				vtoc2[122] = highFree & 0xff;
+				vtoc2[123] = (highFree >> 8) & 0xff;
+				if (!writeSector(1024, vtoc2)) {
+					throw new Error("VTOC2 write failed");
+				}
+			}
+		},
 	};
 }
 
@@ -263,25 +411,9 @@ function writeAtariFile(
 	}
 	const native = encodeAtariName(name);
 
-	// Load the directory and find both a slot to use and any existing file
-	// of the same name.
-	const dirSectors: Uint8Array[] = [];
-	for (let s = DIRECTORY_FIRST; s <= DIRECTORY_LAST; s++) {
-		const sector = medium.readSector(s);
-		if (sector === null) {
-			throw new Error("the directory is outside the image");
-		}
-		dirSectors.push(sector);
-	}
-	const slotIn = (index: number): Uint8Array => {
-		const sector = dirSectors[index >> 3];
-		return sector === undefined
-			? new Uint8Array(0)
-			: sector.subarray(
-					(index & 7) * ENTRY_SIZE,
-					(index & 7) * ENTRY_SIZE + ENTRY_SIZE,
-				);
-	};
+	// Find both a slot to use and any existing file of the same name.
+	const directory = loadDirectory(medium);
+	const { slotIn } = directory;
 	let freeSlot = -1;
 	let existing = -1;
 	for (let index = 0; index < 8 * ENTRIES_PER_SECTOR; index++) {
@@ -313,66 +445,12 @@ function writeAtariFile(
 		throw new Error("the directory is full");
 	}
 
-	// VTOC accounting. On DOS 2.5 the main VTOC is authoritative for the
-	// shared region (sectors 48..719) - DOS 2.0 writes to ED disks without
-	// updating VTOC2, so its shared copy can be stale; it gets repaired
-	// silently below. The main free count covers sectors below 720 only;
-	// VTOC2's own count (bytes 122-123) covers 720..1023 (verified against
-	// wild ED disks).
-	const vtoc = medium.readSector(VTOC_SECTOR);
-	if (vtoc === null) {
-		throw new Error("the VTOC is outside the image");
-	}
-	const vtoc2 = variant === "dos25" ? medium.readSector(1024) : null;
-	let lowDelta = 0;
-	let highDelta = 0;
-	const bitPlace = (
-		sector: number,
-	): [buffer: Uint8Array, at: number, mask: number] | null => {
-		if (sector < 720 || vtoc2 === null) {
-			if (sector > 943 || 10 + (sector >> 3) >= vtoc.length) {
-				return null;
-			}
-			return [vtoc, 10 + (sector >> 3), 0x80 >> (sector & 7)];
-		}
-		if (sector > 1023) {
-			return null;
-		}
-		const offset = sector - 720;
-		return [vtoc2, 84 + (offset >> 3), 0x80 >> (offset & 7)];
-	};
-	const isFree = (sector: number): boolean => {
-		const place = bitPlace(sector);
-		return place !== null && ((place[0][place[1]] ?? 0) & place[2]) !== 0;
-	};
-	const mark = (sector: number, free: boolean): void => {
-		const place = bitPlace(sector);
-		if (place === null || isFree(sector) === free) {
-			return;
-		}
-		const [buffer, at, mask] = place;
-		buffer[at] = (buffer[at] ?? 0) ^ mask;
-		const delta = free ? 1 : -1;
-		if (sector < 720) {
-			lowDelta += delta;
-		} else {
-			highDelta += delta;
-		}
-	};
+	const accounting = vtocAccounting(medium, variant);
+	const { isFree, mark } = accounting;
 
 	// Overwrite frees the old chain first so its sectors are reusable.
 	if (existing !== -1) {
-		const entry = slotIn(existing);
-		const raw: RawEntry = {
-			index: existing,
-			flags: entry[0] ?? 0,
-			name: decodeField(entry.subarray(5, 13)),
-			ext: decodeField(entry.subarray(13, 16)),
-			sectors: (entry[1] ?? 0) | ((entry[2] ?? 0) << 8),
-			startSector: (entry[3] ?? 0) | ((entry[4] ?? 0) << 8),
-			isDir: false,
-			displayName: name.toLowerCase(),
-		};
+		const raw = rawEntryFromSlot(slotIn(existing), existing);
 		for (const sector of walkChain(medium, raw).visited) {
 			mark(sector, true);
 		}
@@ -383,7 +461,10 @@ function writeAtariFile(
 	// of the bitmap.
 	const capacity = medium.sectorSize - 3;
 	const needed = Math.max(1, Math.ceil(fileBytes.length / capacity));
-	const maxSector = Math.min(medium.sectorCount, vtoc2 !== null ? 1023 : 943);
+	const maxSector = Math.min(
+		medium.sectorCount,
+		accounting.hasVtoc2 ? 1023 : 943,
+	);
 	const allocated: number[] = [];
 	for (let s = 4; s <= maxSector && allocated.length < needed; s++) {
 		if (s >= VTOC_SECTOR && s <= DIRECTORY_LAST) {
@@ -424,7 +505,7 @@ function writeAtariFile(
 	// The directory entry. A file reaching past sector 719 on DOS 2.5 gets
 	// the extended marking (output bit, in-use clear) that hides it from
 	// DOS 2.0.
-	const extended = vtoc2 !== null && allocated.some((s) => s > 719);
+	const extended = accounting.hasVtoc2 && allocated.some((s) => s > 719);
 	const entry = slotIn(slot);
 	entry[0] = extended ? FLAG_OUTPUT | FLAG_DOS2 : FLAG_IN_USE | FLAG_DOS2;
 	entry[1] = allocated.length & 0xff;
@@ -437,31 +518,68 @@ function writeAtariFile(
 	for (let i = 0; i < 3; i++) {
 		entry[13 + i] = native.ext.charCodeAt(i) || 0x20;
 	}
-	const dirSector = dirSectors[slot >> 3];
-	if (
-		dirSector === undefined ||
-		!writeSector(DIRECTORY_FIRST + (slot >> 3), dirSector)
-	) {
-		throw new Error("directory write failed");
-	}
+	directory.flushSlot(writeSector, slot);
+	accounting.flush(writeSector);
+}
 
-	// Flush the accounting; VTOC2's shared copy is rewritten from the main
-	// VTOC (the silent repair).
-	const lowFree = ((vtoc[3] ?? 0) | ((vtoc[4] ?? 0) << 8)) + lowDelta;
-	vtoc[3] = lowFree & 0xff;
-	vtoc[4] = (lowFree >> 8) & 0xff;
-	if (!writeSector(VTOC_SECTOR, vtoc)) {
-		throw new Error("VTOC write failed");
+function deleteAtariFile(
+	medium: SectorMedium,
+	variant: AtariDosVariant,
+	name: string,
+	force: boolean,
+): void {
+	const writeSector = medium.writeSector?.bind(medium);
+	if (writeSector === undefined) {
+		throw new Error("the medium is read-only");
 	}
-	if (vtoc2 !== null) {
-		vtoc2.set(vtoc.subarray(16, 100), 0);
-		const highFree = ((vtoc2[122] ?? 0) | ((vtoc2[123] ?? 0) << 8)) + highDelta;
-		vtoc2[122] = highFree & 0xff;
-		vtoc2[123] = (highFree >> 8) & 0xff;
-		if (!writeSector(1024, vtoc2)) {
-			throw new Error("VTOC2 write failed");
+	if (variant === "mydos") {
+		// Freeing sectors past 943 needs the extra VTOC pages this driver
+		// doesn't handle yet; refuse rather than leak them. (DOS 1.0 is fine:
+		// deletion only touches the directory flag and the shared bitmap
+		// format, and we can walk DOS 1 chains.)
+		throw new Error("deleting files on large MyDOS disks is not yet supported");
+	}
+	const native = encodeAtariName(name);
+
+	const directory = loadDirectory(medium);
+	let found = -1;
+	for (let index = 0; index < 8 * ENTRIES_PER_SECTOR; index++) {
+		const entry = directory.slotIn(index);
+		const flags = entry[0] ?? 0;
+		if (flags === 0) {
+			break;
+		}
+		if ((flags & FLAG_DELETED) !== 0) {
+			continue;
+		}
+		const slotName = decodeField(entry.subarray(5, 13)).toUpperCase();
+		const slotExt = decodeField(entry.subarray(13, 16)).toUpperCase();
+		if (slotName === native.name && slotExt === native.ext) {
+			found = index;
+			break;
 		}
 	}
+	if (found === -1) {
+		throw new Error(`${name.toLowerCase()} not found on the image`);
+	}
+	const raw = rawEntryFromSlot(directory.slotIn(found), found);
+	if (raw.isDir) {
+		throw new Error(`${name.toLowerCase()} is a directory`);
+	}
+	if ((raw.flags & FLAG_LOCKED) !== 0 && !force) {
+		throw new Error(`${name.toLowerCase()} is locked`);
+	}
+
+	const accounting = vtocAccounting(medium, variant);
+	for (const sector of walkChain(medium, raw).visited) {
+		accounting.mark(sector, true);
+	}
+	// The deleted flag alone, like the DOSes do - the rest of the entry
+	// stays for undelete tools.
+	const entry = directory.slotIn(found);
+	entry[0] = FLAG_DELETED;
+	directory.flushSlot(writeSector, found);
+	accounting.flush(writeSector);
 }
 
 function encodeAtariName(display: string): { name: string; ext: string } {

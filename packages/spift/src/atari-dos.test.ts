@@ -529,6 +529,73 @@ test("writeFile silently repairs the stale VTOC2 shared region", () => {
 	]);
 });
 
+test("deleteFile frees the chain and reuses the slot", () => {
+	const disk = makeDisk({ formatted: true });
+	const fs = openAtariDos(openAtr(disk));
+	fs.writeFile("a.dat", new Uint8Array(300));
+	fs.deleteFile("a.dat");
+	expect([...fs.entries()]).toHaveLength(0);
+	expect(fs.readFile("a.dat")).toBeNull();
+	expect(freeCount(disk)).toBe(707);
+	// The slot keeps its content under the deleted flag, and gets reused.
+	expect(disk[ATR_HEADER_SIZE + 360 * 128]).toBe(0x80);
+	fs.writeFile("b.dat", new Uint8Array(1));
+	expect([...fs.entries()]).toHaveLength(1);
+	expect(disk[ATR_HEADER_SIZE + 360 * 128]).toBe(0x42);
+});
+
+test("deleteFile validates the target", () => {
+	const disk = makeDisk({
+		formatted: true,
+		entries: [{ flags: 0x10, name: "SUBDIR" }],
+	});
+	const fs = openAtariDos(openAtr(disk));
+	expect(() => fs.deleteFile("nope.dat")).toThrow(/not found/);
+	expect(() => fs.deleteFile("subdir")).toThrow(/is a directory/);
+	fs.writeFile("lock.dat", new Uint8Array(10));
+	const slotFlags = ATR_HEADER_SIZE + 360 * 128 + 16; // slot 1, sector 361
+	disk[slotFlags] = (disk[slotFlags] ?? 0) | 0x20;
+	expect(() => fs.deleteFile("lock.dat")).toThrow(/is locked/);
+	fs.deleteFile("lock.dat", { force: true });
+	expect([...fs.entries("lock.dat")]).toHaveLength(0);
+	expect(freeCount(disk)).toBe(707);
+});
+
+test("deleteFile restores both DOS 2.5 counters for extended files", () => {
+	const disk = makeDisk({ sectorCount: 1040, total: 1010, formatted: true });
+	const fs = openAtariDos(openAtr(disk));
+	fs.writeFile("big.dat", new Uint8Array(708 * 125));
+	fs.deleteFile("big.dat");
+	expect(freeCount(disk)).toBe(707);
+	const vtoc2 = openAtr(disk).readSector(1024);
+	expect((vtoc2?.[122] ?? 0) | ((vtoc2?.[123] ?? 0) << 8)).toBe(304);
+});
+
+test("deleteFile works on DOS 1.0 disks but not large MyDOS", () => {
+	const dos1 = makeDisk({
+		code: 1,
+		total: 709,
+		formatted: true,
+		entries: [{ flags: 0x40, name: "OLD.DAT", start: 100, sectors: 1 }],
+	});
+	writeDataSector(dos1, { sector: 100, next: 0, length: 0x80 | 5, fill: 1 });
+	const fs = openAtariDos(openAtr(dos1));
+	expect(fs.variant).toBe("dos10");
+	fs.deleteFile("old.dat");
+	expect([...fs.entries()]).toHaveLength(0);
+	const mydos = makeDisk({
+		sectorSize: 256,
+		sectorCount: 1440,
+		code: 3,
+		total: 1440,
+		formatted: true,
+		entries: [{ flags: 0x42, name: "A.DAT" }],
+	});
+	expect(() => openAtariDos(openAtr(mydos)).deleteFile("a.dat")).toThrow(
+		/MyDOS/,
+	);
+});
+
 test("specs use native wildcard semantics", () => {
 	const disk = makeDisk({
 		entries: [

@@ -29,7 +29,7 @@ export class AtrImage {
 			throw new Error(`Unsupported ATR sector size (${sectorSize})`);
 		}
 
-		this.sectorSize = sectorSize;
+		this.#sectorSize = sectorSize;
 		this.writeProtected = options.writeProtected ?? false;
 		this.#raw = contents;
 		this.#data = contents.subarray(16);
@@ -37,21 +37,26 @@ export class AtrImage {
 		const length = this.#data.length;
 		if (sectorSize === 128) {
 			this.#boot128 = false;
-			this.sectorCount = Math.floor(length / 128);
+			this.#sectorCount = Math.floor(length / 128);
 		} else {
 			this.#boot128 = length % 256 === 128;
-			this.sectorCount = this.#boot128
+			this.#sectorCount = this.#boot128
 				? Math.floor((length - 384) / 256) + 3
 				: Math.floor(length / 256);
 		}
 
-		if (this.sectorCount < 1) {
+		if (this.#sectorCount < 1) {
 			throw new Error("ATR image has no sectors");
 		}
 	}
 
-	readonly sectorSize: 128 | 256;
-	readonly sectorCount: number;
+	get sectorSize(): 128 | 256 {
+		return this.#sectorSize;
+	}
+
+	get sectorCount(): number {
+		return this.#sectorCount;
+	}
 	/** The write-protect notch: mutable, like flipping the tab on a real
 	 *  disk - hosts may toggle it on a mounted image. */
 	writeProtected: boolean;
@@ -92,12 +97,47 @@ export class AtrImage {
 		return this.#raw;
 	}
 
+	/**
+	 * Reformat the medium in place: new geometry, every sector zeroed, a
+	 * fresh backing buffer - but the same object identity, like a real disk
+	 * staying in the drive through a format. The caller is responsible for
+	 * the write-protect check, as with {@link writeSector}. Double-density
+	 * images get the customary 128-byte boot-sector slots.
+	 */
+	format(sectorSize: 128 | 256, sectorCount: number): void {
+		if (sectorCount < 1 || sectorCount > 0xffff) {
+			throw new Error(`Bad sector count (${sectorCount})`);
+		}
+		const bootSlots = sectorSize === 256 ? Math.min(sectorCount, 3) : 0;
+		const dataSize =
+			sectorSize === 256
+				? bootSlots * 128 + (sectorCount - bootSlots) * 256
+				: sectorCount * 128;
+		const raw = new Uint8Array(16 + dataSize);
+		const paragraphs = dataSize / 16;
+		raw[0] = 0x96;
+		raw[1] = 0x02;
+		raw[2] = paragraphs & 0xff;
+		raw[3] = (paragraphs >> 8) & 0xff;
+		raw[4] = sectorSize & 0xff;
+		raw[5] = sectorSize >> 8;
+		raw[6] = (paragraphs >> 16) & 0xff;
+		this.#raw = raw;
+		this.#data = raw.subarray(16);
+		this.#sectorSize = sectorSize;
+		this.#sectorCount = sectorCount;
+		this.#boot128 = sectorSize === 256;
+		this.dirty = true;
+	}
+
+	#sectorSize: 128 | 256;
+	#sectorCount: number;
 	// The full image (header + data); #data views the data region of the same
 	// buffer, so writes through #data are visible in #raw and thus toBytes().
-	readonly #raw: Uint8Array;
-	readonly #data: Uint8Array;
+	#raw: Uint8Array;
+	#data: Uint8Array;
 	// Whether sectors 1-3 occupy 128-byte slots on a double-density image.
-	readonly #boot128: boolean;
+	#boot128: boolean;
 
 	// The data-region offset and transfer length of a 1-based sector, or null
 	// when out of range. Boot sectors (1-3) always transfer 128 bytes; on a

@@ -4,6 +4,7 @@ import {
 	ATR_MAGIC,
 	atrDataSize,
 	createBlankAtr,
+	openAtr,
 } from "./atr.ts";
 
 function readHeader(bytes: Uint8Array) {
@@ -69,6 +70,48 @@ test("8192-byte sectors", () => {
 	const bytes = createBlankAtr({ sectorSize: 8192, sectorCount: 2 });
 	expect(bytes.length).toBe(ATR_HEADER_SIZE + 2 * 8192);
 	expect(readHeader(bytes).sectorSize).toBe(8192);
+});
+
+test("openAtr rejects non-ATR bytes", () => {
+	expect(() => openAtr(new Uint8Array(8))).toThrow(/shorter than/);
+	expect(() => openAtr(new Uint8Array(1024))).toThrow(/bad magic/);
+});
+
+test("openAtr round-trips created geometries", () => {
+	for (const [sectorSize, sectorCount] of [
+		[128, 720],
+		[128, 1040],
+		[256, 720],
+		[512, 16],
+	] as const) {
+		const image = openAtr(createBlankAtr({ sectorSize, sectorCount }));
+		expect([image.sectorSize, image.sectorCount]).toEqual([
+			sectorSize,
+			sectorCount,
+		]);
+	}
+});
+
+test("openAtr reads 128-byte boot sectors on double density", () => {
+	const bytes = createBlankAtr({ sectorSize: 256, sectorCount: 720 });
+	bytes[ATR_HEADER_SIZE + 2 * 128] = 0xaa; // first byte of sector 3
+	bytes[ATR_HEADER_SIZE + 384] = 0xbb; // first byte of sector 4
+	const image = openAtr(bytes);
+	expect(image.readSector(3)).toHaveLength(128);
+	expect(image.readSector(3)?.[0]).toBe(0xaa);
+	expect(image.readSector(4)).toHaveLength(256);
+	expect(image.readSector(4)?.[0]).toBe(0xbb);
+});
+
+test("openAtr returns null out of range and zeroes past EOF", () => {
+	const sparse = createBlankAtr().subarray(0, ATR_HEADER_SIZE + 128);
+	const image = openAtr(sparse);
+	expect(image.sectorCount).toBe(720); // header stays authoritative
+	expect(image.readSector(0)).toBeNull();
+	expect(image.readSector(721)).toBeNull();
+	const past = image.readSector(700);
+	expect(past).toHaveLength(128);
+	expect(past?.every((byte) => byte === 0)).toBe(true);
 });
 
 test("rejects invalid geometry", () => {

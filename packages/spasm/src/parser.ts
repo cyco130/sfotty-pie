@@ -227,7 +227,16 @@ class Parser {
 				return {
 					type: "segment",
 					segmentToken: token,
-					nameToken: this.#expect("string"),
+					expression: this.#expression(1),
+				};
+			}
+
+			case "push": {
+				this.#consume();
+				return {
+					type: "push",
+					pushToken: token,
+					expression: this.#expression(1),
 				};
 			}
 
@@ -329,10 +338,17 @@ class Parser {
 
 			case "error": {
 				this.#consume();
+				const message = this.#expression(1);
+				let anchor: Expression | null = null;
+				if ((this.#token.type as TokenType) === ",") {
+					this.#consume();
+					anchor = this.#expression(1);
+				}
 				return {
 					type: "error-directive",
 					errorToken: token,
-					message: this.#expression(1),
+					message,
+					anchor,
 				};
 			}
 
@@ -361,7 +377,23 @@ class Parser {
 						outToken = this.#token;
 						this.#consume();
 					}
-					params.push({ outToken, nameToken: this.#expect("identifier") });
+					const nameTokenParam = this.#expect("identifier");
+					// `name = operand` - a default argument. Parsed as an
+					// operand, since that is what an argument is: `= 5`,
+					// `= "RODATA"`, and `= #5` all work.
+					let defaultOperand: Operand | undefined;
+					if ((this.#token.type as TokenType) === "=") {
+						this.#consume();
+						defaultOperand = this.#operand() ?? undefined;
+						if (!defaultOperand) {
+							throw new ParseError(this.#token, ["operand"]);
+						}
+					}
+					params.push({
+						outToken,
+						nameToken: nameTokenParam,
+						defaultOperand,
+					});
 					// Separating commas are optional, matching the call site.
 					if ((this.#token.type as TokenType) === ",") this.#consume();
 				}
@@ -438,16 +470,50 @@ class Parser {
 	#instruction(identifier: Token<"identifier">): Instruction {
 		const mnemonic = identifier;
 		const operands: Operand[] = [];
-		const first = this.#operand();
-		if (first) {
-			operands.push(first);
+		const argNames: (Token<"identifier"> | undefined)[] = [];
+		let sawName = false;
+
+		// `name: operand` - a keyword argument (macro calls only; a keyword
+		// arg list is a braceless dict literal, sharing the `:` association
+		// mark). The colon must not start `::`, `:=`, or a hugging `:+`/`:-`.
+		const argName = (): Token<"identifier"> | undefined => {
+			if (this.#token.type !== "identifier") return undefined;
+			const colon = this.#lookahead;
+			if (colon.type !== ":") return undefined;
+			const name = this.#token;
+			const saved = this.#save();
+			this.#consume();
+			this.#consume();
+			const next = this.#token as Token;
+			if (
+				(next.type === "+" || next.type === "-") &&
+				next.start === colon.end
+			) {
+				this.#restore(saved); // `name :+` - an anonymous-label operand
+				return undefined;
+			}
+			return name;
+		};
+
+		const one = (): boolean => {
+			const name = argName();
+			const operand = this.#operand();
+			if (!operand) {
+				if (name) throw new ParseError(this.#token, ["an operand"]);
+				return false;
+			}
+			operands.push(operand);
+			argNames.push(name);
+			if (name) sawName = true;
+			return true;
+		};
+
+		if (one()) {
 			while (this.#token.type === ",") {
 				this.#consume();
-				const next = this.#operand();
-				if (!next) {
+				if (!one()) {
 					throw new ParseError(this.#token, ["an operand"]);
 				}
-				operands.push(next);
 			}
 		}
 
@@ -455,6 +521,7 @@ class Parser {
 			type: "instruction",
 			mnemonic,
 			operands,
+			argNames: sawName ? argNames : undefined,
 		};
 	}
 
@@ -483,6 +550,13 @@ class Parser {
 					type: "accumulator-operand",
 					accumulatorToken,
 				};
+			}
+
+			case "x":
+			case "y": {
+				const registerToken = token;
+				this.#consume();
+				return { type: "register-operand", registerToken };
 			}
 
 			case "(":
@@ -766,6 +840,89 @@ class Parser {
 				};
 			}
 
+			// `.segment()` - the current segment's name. The parens keep the
+			// statement and expression forms apart and leave room for the
+			// future `.segment("NAME")` segment-value form.
+			case "segment": {
+				this.#consume();
+				const openingBracketToken = this.#expect("(");
+				const closingBracketToken = this.#expect(")");
+				return {
+					type: "segment-expression",
+					segmentToken: token,
+					openingBracketToken,
+					closingBracketToken,
+				};
+			}
+
+			case "a_operand":
+			case "x_operand":
+			case "y_operand":
+			case "immediate_operand":
+			case "x_indexed_operand":
+			case "y_indexed_operand":
+			case "indirect_operand":
+			case "x_indexed_indirect_operand":
+			case "indirect_y_indexed_operand":
+			case "is_a_operand":
+			case "is_x_operand":
+			case "is_y_operand":
+			case "is_immediate_operand":
+			case "is_x_indexed_operand":
+			case "is_y_indexed_operand":
+			case "is_indirect_operand":
+			case "is_x_indexed_indirect_operand":
+			case "is_indirect_y_indexed_operand":
+			case "is_simple_operand":
+			case "is_integer":
+			case "is_string":
+			case "is_dictionary":
+			case "is_function":
+			case "is_operand":
+			case "is_null":
+			case "operand_value": {
+				this.#consume();
+				const openingBracketToken = this.#expect("(");
+				const args: Expression[] = [];
+				if ((this.#token.type as TokenType) !== ")") {
+					for (;;) {
+						args.push(this.#expression(1));
+						if ((this.#token.type as TokenType) === ",") {
+							this.#consume();
+							continue;
+						}
+						break;
+					}
+				}
+				const closingBracketToken = this.#expect(")");
+				return {
+					type: "builtin-call",
+					nameToken: token,
+					openingBracketToken,
+					args,
+					closingBracketToken,
+				};
+			}
+
+			case "null": {
+				this.#consume();
+				return { type: "null-literal", nullToken: token };
+			}
+
+			// `.pop()` - the value on top of the module's `.push` stack.
+			// Expression builtins are calls; statements take bare arguments.
+			case "pop": {
+				this.#consume();
+				const openingBracketToken = this.#expect("(");
+				const closingBracketToken = this.#expect(")");
+				return {
+					type: "pop-expression",
+					popToken: token,
+					openingBracketToken,
+					closingBracketToken,
+				};
+			}
+
 			default:
 				return null;
 		}
@@ -907,14 +1064,26 @@ class Parser {
 	// parameter list followed by `=`. Returns null (without consuming the `=`
 	// check's token) when the shape doesn't match - the caller restores.
 	#tryFunctionParams(): {
-		params: Token<"identifier">[];
+		params: FunctionParam[];
 		operatorToken: Token<"=">;
 	} | null {
 		this.#consume(); // the "("
-		const params: Token<"identifier">[] = [];
+		const params: FunctionParam[] = [];
 		while (this.#token.type === "identifier") {
-			params.push(this.#token);
+			const nameToken = this.#token;
 			this.#consume();
+			// `name = expr` - a default argument.
+			let defaultExpression: Expression | undefined;
+			if ((this.#token.type as TokenType) === "=") {
+				this.#consume();
+				try {
+					defaultExpression = this.#expression(1);
+				} catch (error) {
+					if (error instanceof ParseError) return null; // not a param list
+					throw error;
+				}
+			}
+			params.push({ nameToken, defaultExpression });
 			// Separating commas are optional, matching macro params.
 			if ((this.#token.type as TokenType) === ",") this.#consume();
 		}
@@ -932,7 +1101,7 @@ class Parser {
 	#finishAssignment(
 		identifier: Token<"identifier">,
 		operatorToken: Token<"=" | ":=">,
-		params: Token<"identifier">[] | null,
+		params: FunctionParam[] | null,
 	): Assignment {
 		const expression = this.#expression(1);
 		const attributes: Attribute[] = [];
@@ -1092,6 +1261,19 @@ export function getExpressionLocation(
 				getExpressionLocation(expression.callee)[0],
 				expression.closingBracketToken.end,
 			];
+		case "segment-expression":
+			return [
+				expression.segmentToken.start,
+				expression.closingBracketToken.end,
+			];
+		case "pop-expression":
+			return [expression.popToken.start, expression.closingBracketToken.end];
+		case "builtin-call":
+			return [expression.nameToken.start, expression.closingBracketToken.end];
+		case "operand-literal":
+			return getOperandLocation(expression.operand);
+		case "null-literal":
+			return [expression.nullToken.start, expression.nullToken.end];
 		case "prefix-expression":
 			return [
 				expression.operator.start,
@@ -1152,8 +1334,76 @@ export function getExpressionAnchorToken(
 			return getExpressionAnchorToken(expression.callee);
 		case "infix-expression":
 			return getExpressionAnchorToken(expression.left);
+		case "segment-expression":
+			return expression.segmentToken;
+		case "pop-expression":
+			return expression.popToken;
+		case "builtin-call":
+			return expression.nameToken;
+		case "null-literal":
+			return expression.nullToken;
+		case "operand-literal": {
+			const operand = expression.operand;
+			if (operand.type === "accumulator-operand") {
+				return operand.accumulatorToken;
+			}
+			if (operand.type === "register-operand") return operand.registerToken;
+			return getExpressionAnchorToken(operand.expression);
+		}
 		default:
 			impossible(expression);
+	}
+}
+
+/** Visit every identifier token in expression position (path keys are not
+ * identifiers in this sense - only a path's root resolves as a name). */
+export function forEachIdentifier(
+	expression: Expression,
+	visit: (token: Token<"identifier">) => void,
+): void {
+	switch (expression.type) {
+		case "identifier":
+			visit(expression);
+			return;
+		case "member-expression":
+			forEachIdentifier(expression.object, visit);
+			return;
+		case "grouped-expression":
+		case "prefix-expression":
+			forEachIdentifier(expression.expression, visit);
+			return;
+		case "infix-expression":
+			forEachIdentifier(expression.left, visit);
+			forEachIdentifier(expression.right, visit);
+			return;
+		case "call-expression":
+			forEachIdentifier(expression.callee, visit);
+			for (const argument of expression.args) {
+				forEachIdentifier(argument, visit);
+			}
+			return;
+		case "dict-literal":
+			for (const entry of expression.entries) {
+				forEachIdentifier(entry.value, visit);
+			}
+			return;
+		case "builtin-call":
+			for (const argument of expression.args) {
+				forEachIdentifier(argument, visit);
+			}
+			return;
+		case "operand-literal":
+			if (
+				expression.operand.type !== "accumulator-operand" &&
+				expression.operand.type !== "register-operand"
+			) {
+				forEachIdentifier(expression.operand.expression, visit);
+			}
+			return;
+		case "null-literal":
+			return;
+		default:
+			return; // literals and `*`
 	}
 }
 
@@ -1163,6 +1413,8 @@ export function getOperandLocation(
 	switch (operand.type) {
 		case "accumulator-operand":
 			return [operand.accumulatorToken.start, operand.accumulatorToken.end];
+		case "register-operand":
+			return [operand.registerToken.start, operand.registerToken.end];
 		case "simple-operand":
 			return getExpressionLocation(operand.expression);
 		case "immediate-operand":
@@ -1188,6 +1440,46 @@ export function getOperandLocation(
 		case "indirect-indexed-operand":
 			return [operand.openingBracketToken.start, operand.register.end];
 
+		default:
+			impossible(operand);
+	}
+}
+
+/**
+ * The operand's own tokens beyond its expression - the punctuation (`#`,
+ * brackets, index registers) that `getOperandLocation` may span. Expansion
+ * stamps these with the defining module like literals, so diagnostics can
+ * widen from the expression to the whole operand exactly when every token
+ * agrees on a file.
+ */
+export function getOperandPunctuationTokens(operand: Operand): Token[] {
+	switch (operand.type) {
+		case "accumulator-operand":
+			return [operand.accumulatorToken];
+		case "register-operand":
+			return [operand.registerToken];
+		case "simple-operand":
+			return [];
+		case "immediate-operand":
+			return [operand.hashToken];
+		case "indexed-operand":
+			return [operand.commaToken, operand.register];
+		case "indirect-operand":
+			return [operand.openingBracketToken, operand.closingBracketToken];
+		case "indexed-indirect-operand":
+			return [
+				operand.openingBracketToken,
+				operand.commaToken,
+				operand.register,
+				operand.closingBracketToken,
+			];
+		case "indirect-indexed-operand":
+			return [
+				operand.openingBracketToken,
+				operand.closingBracketToken,
+				operand.commaToken,
+				operand.register,
+			];
 		default:
 			impossible(operand);
 	}
@@ -1238,7 +1530,8 @@ export type StatementContent =
 	| SegmentShorthand
 	| Macro
 	| IfBlock
-	| ErrorDirective;
+	| ErrorDirective
+	| Push;
 
 /**
  * One arm of an `.if` block: the opening keyword, its condition (null for
@@ -1264,12 +1557,18 @@ export interface IfBlock {
 	endifToken: Token<"endif">;
 }
 
-/** `.error expr` - report the (string) message when collected, on the
- * converged pass only. */
+/** `.error expr[, anchor]` - report the (string) message when collected, on
+ * the converged pass only. */
 export interface ErrorDirective {
 	type: "error-directive";
 	errorToken: Token<"error">;
 	message: Expression;
+	/**
+	 * Optional location anchor: the error attributes to this expression's
+	 * provenance - spliced from a macro argument, that's the caller's
+	 * argument at the call site. Location-only, never evaluated.
+	 */
+	anchor: Expression | null;
 }
 
 /**
@@ -1293,7 +1592,13 @@ export interface Assignment {
 	attributes: Attribute[];
 	/** Parameters of an expression macro (`DOUBLE(x) = 2 * x`); null for a
 	 * plain definition. */
-	params: Token<"identifier">[] | null;
+	params: FunctionParam[] | null;
+}
+
+/** One expression-macro parameter, with an optional default. */
+export interface FunctionParam {
+	nameToken: Token<"identifier">;
+	defaultExpression?: Expression;
 }
 
 /**
@@ -1317,10 +1622,18 @@ export interface Instruction {
 	 * instructions never carry these. */
 	memberTokens?: Token<"identifier">[];
 	operands: Operand[];
+	/**
+	 * Parallel to `operands`: each argument's keyword name (`aux1: #4`), or
+	 * `undefined` for positional ones. Absent when every argument is
+	 * positional. Keyword arguments only mean something on macro calls;
+	 * encode rejects them on real instructions.
+	 */
+	argNames?: (Token<"identifier"> | undefined)[];
 }
 
 export type Operand =
 	| AccumulatorOperand
+	| RegisterOperand
 	| SimpleOperand
 	| ImmediateOperand
 	| IndexedOperand
@@ -1331,6 +1644,13 @@ export type Operand =
 export interface AccumulatorOperand {
 	type: "accumulator-operand";
 	accumulatorToken: Token<"a">;
+}
+
+/** A bare `x` or `y` operand. No instruction accepts one - they exist as
+ * macro-argument currency (register-shaped operand values). */
+export interface RegisterOperand {
+	type: "register-operand";
+	registerToken: Token<"x"> | Token<"y">;
 }
 
 export interface SimpleOperand {
@@ -1403,7 +1723,89 @@ export interface DefineSegment {
 export interface Segment {
 	type: "segment";
 	segmentToken: Token<"segment">;
-	nameToken: Token<"string">;
+	/** The segment name: a string literal, or any string-valued expression
+	 * (`.segment .pop` restores a saved name). */
+	expression: Expression;
+}
+
+/** `.push expr` - push a value onto the module's value stack. */
+export interface Push {
+	type: "push";
+	pushToken: Token<"push">;
+	expression: Expression;
+}
+
+/** `.segment()` in expression position: the current segment's name. */
+export interface SegmentExpression {
+	type: "segment-expression";
+	segmentToken: Token<"segment">;
+	openingBracketToken: Token<"(">;
+	closingBracketToken: Token<")">;
+}
+
+/** The operand/value builtin names, callable in expression position. */
+export const BUILTIN_NAMES = [
+	"a_operand",
+	"x_operand",
+	"y_operand",
+	"immediate_operand",
+	"x_indexed_operand",
+	"y_indexed_operand",
+	"indirect_operand",
+	"x_indexed_indirect_operand",
+	"indirect_y_indexed_operand",
+	"is_a_operand",
+	"is_x_operand",
+	"is_y_operand",
+	"is_immediate_operand",
+	"is_x_indexed_operand",
+	"is_y_indexed_operand",
+	"is_indirect_operand",
+	"is_x_indexed_indirect_operand",
+	"is_indirect_y_indexed_operand",
+	"is_simple_operand",
+	"is_integer",
+	"is_string",
+	"is_dictionary",
+	"is_function",
+	"is_operand",
+	"operand_value",
+	"is_null",
+] as const;
+
+export type BuiltinName = (typeof BUILTIN_NAMES)[number];
+
+/** A builtin call (`.immediate_operand(3)`, `.is_string(v)`). */
+export interface BuiltinCall {
+	type: "builtin-call";
+	nameToken: Token<BuiltinName>;
+	openingBracketToken: Token<"(">;
+	args: Expression[];
+	closingBracketToken: Token<")">;
+}
+
+/**
+ * A shaped operand spliced into expression position by macro substitution -
+ * never parsed from source. Evaluates to an `OperandValue`.
+ */
+export interface OperandLiteral {
+	type: "operand-literal";
+	operand: Operand;
+}
+
+/** `.null`: the null value. A bare literal, not a call - like `*`, it *is*
+ * rather than *does*, so it takes no parens. */
+export interface NullLiteral {
+	type: "null-literal";
+	nullToken: Token<"null">;
+}
+
+/** `.pop()` in expression position: the value on top of the module's stack. */
+export interface PopExpression {
+	type: "pop-expression";
+	popToken: Token<"pop">;
+	openingBracketToken: Token<"(">;
+	closingBracketToken: Token<")">;
 }
 
 export interface Emit {
@@ -1461,6 +1863,9 @@ export interface SegmentShorthand {
 export interface MacroParam {
 	outToken: Token<"out"> | null;
 	nameToken: Token<"identifier">;
+	/** `name = operand` - the default argument, definition-side (its free
+	 * names resolve in the defining module). Trailing params only. */
+	defaultOperand?: Operand;
 }
 
 export interface Macro {
@@ -1482,7 +1887,12 @@ export type Expression =
 	| InfixExpression
 	| MemberExpression
 	| DictLiteral
-	| CallExpression;
+	| CallExpression
+	| SegmentExpression
+	| PopExpression
+	| BuiltinCall
+	| OperandLiteral
+	| NullLiteral;
 
 /** Function application: `DOUBLE(2)`, `lib::DOUBLE(2)`. */
 export interface CallExpression {

@@ -9,6 +9,9 @@ import type { Expression } from "./parser.ts";
 export interface FunctionValue {
 	type: "function";
 	params: readonly string[];
+	/** Per-param default expressions (trailing only); `undefined` = required.
+	 * Evaluated in the defining module's scope, like the body. */
+	defaults: readonly (Expression | undefined)[];
 	body: Expression;
 	/** The module the body's free names resolve in (lexical hygiene). */
 	moduleId: string;
@@ -31,11 +34,64 @@ export interface DictValue {
 }
 
 /**
+ * The null value (`.null`): definite absence, as a first-class value - the
+ * idiomatic optional-argument sentinel (`target = .null` default,
+ * `.if target = .null` test). Distinct from `undefined`, which means "not
+ * resolved yet" and defers: null is fully resolved and answers. A singleton,
+ * so identity comparison suffices.
+ */
+export interface NullValue {
+	type: "null";
+}
+
+export const NULL: NullValue = { type: "null" };
+
+/**
+ * An operand's shape, in the constructor-prefix spelling. The word order of
+ * the indirect pair encodes the operation order: `x_indexed_indirect` indexes
+ * then dereferences (`(v,x)`); `indirect_y_indexed` dereferences then indexes
+ * (`(v),y`).
+ */
+export type OperandShape =
+	| "a"
+	| "x"
+	| "y"
+	| "immediate"
+	| "x_indexed"
+	| "y_indexed"
+	| "indirect"
+	| "x_indexed_indirect"
+	| "indirect_y_indexed";
+
+/**
+ * An operand value: a shaped instruction operand as a first-class value,
+ * made by a constructor builtin (`.immediate_operand(3)`) or by passing a
+ * shaped argument to a macro. Register shapes wrap nothing; the rest hold
+ * their expression's value (`undefined` while unresolved, like a dictionary
+ * entry). In operand position the value *becomes* that operand
+ * (`lda .immediate_operand(3)` is `lda #3`); in expressions it can be
+ * stored, compared, and introspected, but not used in arithmetic or as data.
+ * A *simple* operand has no value of this type - a plain value already is
+ * one, which is why there is no constructor for it.
+ */
+export interface OperandValue {
+	type: "operand";
+	shape: OperandShape;
+	value?: Value | undefined;
+}
+
+/**
  * A resolved compile-time value: integers (`bigint`, so width is never the
  * limit), strings, functions (expression macros), and dictionaries. The
  * typed-value system (operands, lists) grows this union additively.
  */
-export type Value = bigint | string | FunctionValue | DictValue;
+export type Value =
+	| bigint
+	| string
+	| FunctionValue
+	| DictValue
+	| OperandValue
+	| NullValue;
 
 /**
  * Value equality, as the fixpoint needs it: "would the next pass see the same
@@ -52,6 +108,10 @@ export function isEqual(a: Value | undefined, b: Value | undefined): boolean {
 	if (a === b) return true; // covers bigint, string, and function identity
 	if (a === undefined || b === undefined) return false;
 	if (typeof a !== "object" || typeof b !== "object") return false;
+	if (a.type === "operand" && b.type === "operand") {
+		return a.shape === b.shape && isEqual(a.value, b.value);
+	}
+	if (a.type === "null" && b.type === "null") return true;
 	if (a.type !== "dict" || b.type !== "dict") return false;
 	if (a.entries.size !== b.entries.size) return false;
 	for (const [key, value] of a.entries) {

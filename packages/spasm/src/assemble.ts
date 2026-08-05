@@ -12,7 +12,9 @@ import {
 } from "./macros.ts";
 import { Scopes, type ModuleScope, type Reference } from "./scopes.ts";
 import {
+	forEachIdentifier,
 	getExpressionLocation,
+	getExpressionOrigin,
 	parse,
 	type Assignment,
 	type DictLiteral,
@@ -27,6 +29,7 @@ import {
 	type ExpansionSite,
 	getExpressionAnchorToken,
 } from "./parser.ts";
+import type { SubstitutionSite } from "./lexer.ts";
 import { SourceFile } from "./source-file.ts";
 import { SEP, type Definition } from "./symbols.ts";
 import {
@@ -72,6 +75,50 @@ function noteAt(
 	file: string,
 ): MessageNote {
 	return { message, start: span[0], end: span[1], file };
+}
+
+/**
+ * "While expanding" notes for a diagnostic in a macro expansion, outermost
+ * hop first. Each hop underlines the failing value *as written in that
+ * macro's body* - the splice occurrence the value passed through (the
+ * chain aligns with the innermost hops) - falling back to the hop's call
+ * site when the value didn't pass through it; a hop that would just repeat
+ * the error's own span is dropped. `instruction` widens the innermost
+ * hop's note to start at the given mnemonic position (body coordinates),
+ * for errors about the whole instruction rather than the operand value.
+ */
+function expansionNotes(
+	trail: readonly ExpansionSite[],
+	splices: readonly SubstitutionSite[],
+	span: readonly [number, number],
+	file: string,
+	instruction?: { start: number; bodyFile: string | undefined },
+): MessageNote[] {
+	const hops = [...trail].reverse();
+	const notes: MessageNote[] = [];
+	for (let i = 0; i < hops.length; i++) {
+		const splice = splices[i - (hops.length - splices.length)];
+		let at: SubstitutionSite = splice ?? hops[i]!;
+		if (
+			instruction &&
+			i === hops.length - 1 &&
+			splice !== undefined &&
+			splice.file === instruction.bodyFile
+		) {
+			at = { file: splice.file, start: instruction.start, end: splice.end };
+		}
+		if (at.file === file && at.start === span[0] && at.end === span[1]) {
+			continue;
+		}
+		notes.push(
+			noteAt(
+				`While expanding \`${hops[i]!.macro}\``,
+				[at.start, at.end],
+				at.file,
+			),
+		);
+	}
+	return notes;
 }
 
 // Function values interned per definition site (see defineAssignment).
@@ -193,7 +240,13 @@ function assembleModules(
 		const snapshot = scopes.snapshot();
 		scopes.beginPass();
 		diagnostics = [];
+		// Dedup on identity: a definition-site error in a macro body fires
+		// once per expansion; distinct problems always differ in span or file.
+		const seen = new Set<string>();
 		const report: Reporter = (code, message, span, file, options) => {
+			const key = [code, file ?? "", span[0], span[1], message].join("\0");
+			if (seen.has(key)) return;
+			seen.add(key);
 			diagnostics.push({
 				type: "error",
 				code,
@@ -564,6 +617,22 @@ function collect(
 		const moduleId = module.id;
 		let current = getSegment("OUTPUT"); // reset per module
 
+		// The module's `.push`/`.pop` value stack. Collect runs every pass, so
+		// the stack resets and replays per pass; entries keep their push sites
+		// for the end-of-module balance check.
+		const valueStack: {
+			value: Value | undefined;
+			span: readonly [number, number];
+			file: string;
+		}[] = [];
+		const hooks: StackHooks = {
+			currentSegment: () => current.name,
+			popValue: () => {
+				const entry = valueStack.pop();
+				return entry && { value: entry.value };
+			},
+		};
+
 		const collectStatement = (statement: Statement): void => {
 			for (const label of statement.labels) {
 				current.items.push({
@@ -616,14 +685,54 @@ function collect(
 					break;
 				}
 				case "segment": {
-					const name = segmentName(content.nameToken, report, moduleId);
-					current = getSegment(name);
-					if (!firstSeen.has(name)) {
-						firstSeen.set(name, {
-							span: [content.nameToken.start, content.nameToken.end],
-							moduleId,
-						});
+					// The name is any string-valued expression, and unlike operands
+					// it has no pessimistic fallback - bytes have to go somewhere -
+					// so it must resolve when evaluated. The motivating forms
+					// (literals, `.pop`, `.segment()`) always do.
+					const env = moduleEnv(
+						moduleId,
+						scopes,
+						locationOf(current.name),
+						report,
+						hooks,
+					);
+					const value = evaluate(content.expression, env);
+					const span = getExpressionLocation(content.expression);
+					const file = getExpressionOrigin(content.expression) ?? moduleId;
+					if (typeof value !== "string") {
+						report(
+							Codes.SegmentNameType,
+							value === undefined
+								? "Segment name did not resolve - it must be a string, known when the statement is reached"
+								: "Segment name must be a string",
+							span,
+							file,
+						);
+						break;
 					}
+					current = getSegment(value);
+					if (!firstSeen.has(value)) {
+						firstSeen.set(value, { span, moduleId: file });
+					}
+					break;
+				}
+
+				case "push": {
+					const env = moduleEnv(
+						moduleId,
+						scopes,
+						locationOf(current.name),
+						report,
+						hooks,
+					);
+					valueStack.push({
+						value: evaluate(content.expression, env),
+						span: [
+							content.pushToken.start,
+							getExpressionLocation(content.expression)[1],
+						],
+						file: content.pushToken.origin ?? moduleId,
+					});
 					break;
 				}
 				case "segment-shorthand": {
@@ -709,6 +818,7 @@ function collect(
 							scopes,
 							locationOf(current.name),
 							report,
+							hooks,
 						);
 					} else {
 						report(
@@ -726,6 +836,7 @@ function collect(
 						scopes,
 						locationOf(current.name),
 						report,
+						hooks,
 					);
 					break;
 				case "if-block": {
@@ -738,6 +849,10 @@ function collect(
 						scopes,
 						locationOf(current.name),
 						report,
+						// `.segment()` reads fine in a condition; `.pop` does not -
+						// later arms evaluate only when earlier ones fail, so the
+						// pop count would depend on arm selection.
+						{ currentSegment: hooks.currentSegment },
 					);
 					for (const armStatement of arm?.body ?? []) {
 						collectStatement(armStatement);
@@ -750,6 +865,7 @@ function collect(
 						scopes,
 						locationOf(current.name),
 						report,
+						hooks,
 					);
 					// The keyword's hygiene origin attributes a macro-body `.error`
 					// to the macro's file.
@@ -767,15 +883,62 @@ function collect(
 						);
 						break;
 					}
-					report(
-						Codes.UserError,
-						value,
-						[
-							content.errorToken.start,
-							getExpressionLocation(content.message)[1],
-						],
-						file,
-					);
+					if (content.anchor) {
+						// An anchored `.error` attributes to the anchor's
+						// provenance - a spliced macro argument lands on the
+						// caller's argument at the call site, narrated like
+						// any other operand diagnostic. Location-only: the
+						// anchor is never evaluated.
+						const anchorSpan = getExpressionLocation(content.anchor);
+						const anchorFile = getExpressionOrigin(content.anchor) ?? moduleId;
+						const anchorTrail = statement.expansionTrail;
+						const notes =
+							anchorTrail?.length && anchorFile !== file
+								? expansionNotes(
+										anchorTrail,
+										getExpressionAnchorToken(content.anchor)?.substitutedAt ??
+											[],
+										anchorSpan,
+										anchorFile,
+									)
+								: [];
+						report(
+							Codes.UserError,
+							value,
+							anchorSpan,
+							anchorFile,
+							notes.length ? { notes } : undefined,
+						);
+						break;
+					}
+					const span: readonly [number, number] = [
+						content.errorToken.start,
+						getExpressionLocation(content.message)[1],
+					];
+					const trail = statement.expansionTrail;
+					if (trail?.length) {
+						// A body `.error` is the macro rejecting its call:
+						// attribute to the source-level call, narrating inward
+						// down to the directive itself.
+						const hops = [...trail].reverse();
+						const notes = hops.map((hop, i) => {
+							const inner = hops[i + 1];
+							return noteAt(
+								`While expanding \`${hop.macro}\``,
+								inner ? [inner.start, inner.end] : span,
+								inner ? inner.file : file,
+							);
+						});
+						report(
+							Codes.UserError,
+							value,
+							[hops[0]!.start, hops[0]!.end],
+							hops[0]!.file,
+							{ notes },
+						);
+					} else {
+						report(Codes.UserError, value, span, file);
+					}
 					break;
 				}
 				default:
@@ -789,6 +952,7 @@ function collect(
 							current,
 							resSizes,
 							report,
+							hooks,
 							statement.expansionTrail,
 						),
 					);
@@ -796,6 +960,16 @@ function collect(
 		};
 
 		for (const statement of module.statements) collectStatement(statement);
+
+		// Ending the module with unpopped values is an error, at each push.
+		for (const entry of valueStack) {
+			report(
+				Codes.UnpoppedValue,
+				"Pushed value is never popped",
+				entry.span,
+				entry.file,
+			);
+		}
 	}
 
 	return { segments, firstSeen, discards };
@@ -814,8 +988,9 @@ function selectArm(
 	scopes: Scopes,
 	location: bigint,
 	report: Reporter,
+	hooks?: StackHooks,
 ): IfArm | undefined {
-	const env = moduleEnv(moduleId, scopes, location, report);
+	const env = moduleEnv(moduleId, scopes, location, report, hooks);
 	for (const arm of block.arms) {
 		if (arm.condition === null) return arm; // `.else`
 		const value = evaluate(arm.condition, env);
@@ -868,11 +1043,18 @@ function segmentName(
 	);
 }
 
+/** The `.segment()`/`.pop` hooks a collect-time env carries; see `EvalEnv`. */
+interface StackHooks {
+	currentSegment?: () => string;
+	popValue?: () => { value: Value | undefined } | undefined;
+}
+
 function moduleEnv(
 	moduleId: string,
 	scopes: Scopes,
 	location: bigint,
 	report: Reporter,
+	hooks?: StackHooks,
 ): EvalEnv {
 	return {
 		resolve: (name, origin, span) => {
@@ -883,6 +1065,8 @@ function moduleEnv(
 		report: (code, message, span, file, options) =>
 			report(code, message, span, file ?? moduleId, options),
 		strict: true,
+		currentSegment: hooks?.currentSegment,
+		popValue: hooks?.popValue,
 	};
 }
 
@@ -937,8 +1121,9 @@ function defineAssignment(
 	scopes: Scopes,
 	location: bigint,
 	report: Reporter,
+	hooks?: StackHooks,
 ): void {
-	const env = moduleEnv(moduleId, scopes, location, report);
+	const env = moduleEnv(moduleId, scopes, location, report, hooks);
 	const { text, start, end, origin } = assignment.identifier;
 	const span: readonly [number, number] = [start, end];
 	const definitionModule = origin ?? moduleId;
@@ -952,13 +1137,50 @@ function defineAssignment(
 		if (!fn) {
 			fn = {
 				type: "function",
-				params: assignment.params.map((p) => p.text),
+				params: assignment.params.map((p) => p.nameToken.text),
+				defaults: assignment.params.map((p) => p.defaultExpression),
 				body: assignment.expression,
 				moduleId,
 			};
 			functionValues.set(assignment, fn);
 		}
+		// A defaulted param can only be followed by defaulted params -
+		// positional call sites would be ambiguous otherwise.
+		let sawDefault = false;
+		for (const param of assignment.params) {
+			if (param.defaultExpression) sawDefault = true;
+			else if (sawDefault) {
+				report(
+					Codes.DefaultParamOrder,
+					`Parameter "${param.nameToken.text}" without a default follows one with a default`,
+					[param.nameToken.start, param.nameToken.end],
+					definitionModule,
+				);
+			}
+		}
 		checkAttributes(assignment, report, definitionModule); // none allowed
+		// Params become table symbols under the function's name (like dict
+		// entries), and body occurrences record as references - so rename,
+		// find-references, and unused detection see them. Values stay
+		// undefined: application binds eagerly through its own overlay.
+		const paramNames = new Set(fn.params);
+		for (const param of assignment.params) {
+			scopes.defineLocal(
+				definitionModule,
+				text + SEP + param.nameToken.text,
+				undefined,
+				"parameter",
+				[param.nameToken.start, param.nameToken.end],
+			);
+		}
+		forEachIdentifier(assignment.expression, (token) => {
+			if (paramNames.has(token.text) && token.origin === undefined) {
+				scopes.recordReference(definitionModule, text + SEP + token.text, [
+					token.start,
+					token.end,
+				]);
+			}
+		});
 		const prior = scopes.defineLocal(
 			definitionModule,
 			text,
@@ -1155,9 +1377,10 @@ function collectContent(
 	output: Segment,
 	resSizes: Map<string, bigint>,
 	report: Reporter,
+	hooks?: StackHooks,
 	trail?: readonly ExpansionSite[],
 ): bigint {
-	const env = moduleEnv(moduleId, scopes, location, report);
+	const env = moduleEnv(moduleId, scopes, location, report, hooks);
 
 	switch (content.type) {
 		case "org": {
@@ -1213,52 +1436,37 @@ function collectContent(
 			const value = expr ? evaluate(expr, env) : undefined;
 			// In a macro-expanded instruction (stamped mnemonic), an encode
 			// error attributed elsewhere - typically to a spliced call-site
-			// argument - gets notes narrating the expansion path, outermost
-			// first. Each hop underlines the failing value *as written in
-			// that macro's body* (the anchor token's splice chain aligns with
-			// the innermost hops), falling back to the hop's call site when
-			// the value didn't pass through it; a hop that would just repeat
-			// the error's own span is dropped.
+			// argument - gets `expansionNotes` narrating the expansion path.
+			// A whole-instruction error (`options.instruction`) widens the
+			// innermost note to start at the mnemonic - it's the other half
+			// of what failed, and its token keeps its body coordinates.
 			const expansion = content.mnemonic.origin;
 			const splices = expr
 				? (getExpressionAnchorToken(expr)?.substitutedAt ?? [])
 				: [];
 			const bytes = encodeInstruction(content, value, {
 				location,
-				report: (code, message, span, file) => {
-					let notes: MessageNote[] | undefined;
-					if (
+				report: (code, message, span, file, options) => {
+					const notes =
 						expansion !== undefined &&
 						(file ?? moduleId) !== expansion &&
 						trail?.length
-					) {
-						const hops = [...trail].reverse();
-						notes = [];
-						for (let i = 0; i < hops.length; i++) {
-							const splice = splices[i - (hops.length - splices.length)];
-							const at = splice ?? hops[i]!;
-							if (
-								at.file === (file ?? moduleId) &&
-								at.start === span[0] &&
-								at.end === span[1]
-							) {
-								continue;
-							}
-							notes.push(
-								noteAt(
-									`While expanding \`${hops[i]!.macro}\``,
-									[at.start, at.end],
-									at.file,
-								),
-							);
-						}
-					}
+							? expansionNotes(
+									trail,
+									splices,
+									span,
+									file ?? moduleId,
+									options?.instruction
+										? { start: content.mnemonic.start, bodyFile: expansion }
+										: undefined,
+								)
+							: [];
 					env.report(
 						code,
 						message,
 						span,
 						file,
-						notes?.length ? { notes } : undefined,
+						notes.length ? { notes } : undefined,
 					);
 				},
 			});
@@ -1279,7 +1487,9 @@ function collectContent(
 }
 
 function operandExpression(operand: Operand | null): Expression | null {
-	if (operand === null || operand.type === "accumulator-operand") return null;
+	if (operand === null) return null;
+	if (operand.type === "accumulator-operand") return null;
+	if (operand.type === "register-operand") return null;
 	return operand.expression;
 }
 
@@ -1304,10 +1514,17 @@ function emitData(
 						Codes.DictionaryAsData,
 						"A dictionary is not data - select an entry with `::`",
 					] as const)
-				: ([
-						Codes.FunctionAsData,
-						"A function is not data - apply it with `(...)`",
-					] as const);
+				: value.type === "operand"
+					? ([
+							Codes.OperandAsData,
+							"An operand is not data - unwrap it with `.operand_value()`",
+						] as const)
+					: value.type === "null"
+						? ([Codes.NullAsData, "`.null` is not data"] as const)
+						: ([
+								Codes.FunctionAsData,
+								"A function is not data - apply it with `(...)`",
+							] as const);
 		env.report(code, message, span);
 		for (let i = 0; i < size; i++) output.push(0);
 		return;

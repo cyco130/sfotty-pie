@@ -13,7 +13,6 @@ export const TOKEN_TYPES = [
 	"function",
 	"variable",
 	"parameter",
-	"macro",
 	"enumMember",
 ] as const;
 
@@ -111,13 +110,16 @@ function classify(
 	const definition = definitions.get(symbol);
 	if (!definition) return undefined;
 	switch (definition.kind) {
+		// Macros (both kinds) are the callable things, so they read like
+		// function calls in any language; labels are addresses - the "plain
+		// symbols" - and read like variables, with constants readonly.
 		case "label":
-			return { type: TYPE.function, modifiers: 0 };
+			return { type: TYPE.variable, modifiers: 0 };
 		case "namespace":
 			return { type: TYPE.namespace, modifiers: 0 };
 		case "function":
 		case "macro":
-			return { type: TYPE.macro, modifiers: 0 };
+			return { type: TYPE.function, modifiers: 0 };
 		case "parameter":
 			return { type: TYPE.parameter, modifiers: 0 };
 		case "constant":

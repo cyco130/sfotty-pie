@@ -541,6 +541,16 @@ describe("modules", () => {
 		expect([...r.output]).toEqual([0x09]);
 	});
 
+	test("a body's macro calls inside .if arms resolve where the macro is defined", async () => {
+		const host = memHost({
+			main: '.import "lib"\nouter 1\n',
+			lib: ".macro helper\n\t.byte 9\n.endmacro\n.export .macro outer flag\n\t.if flag\n\t\thelper\n\t.endif\n.endmacro\n",
+		});
+		const r = await assemble("main", host);
+		expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+		expect([...r.output]).toEqual([0x09]);
+	});
+
 	test("a module shared by a diamond loads once", async () => {
 		const host = memHost({
 			a: '.import "b"\n.import "c"\n',
@@ -813,7 +823,7 @@ describe("macros", () => {
 
 	test("an argument-count mismatch is reported", () => {
 		expect(asm(".macro one v\n\t.byte v\n.endmacro\none\n").messages).toContain(
-			'Macro "one" expects 1 argument(s), got 0',
+			'Macro "one" is missing the argument "v"',
 		);
 	});
 
@@ -826,6 +836,16 @@ describe("macros", () => {
 		expect(messages).toEqual([]);
 		// lda (ptr),y / sta (dst),y - the ",y" shape survives substitution.
 		expect(bytes).toEqual([0xb1, 0x20, 0x91, 0x22]);
+	});
+
+	test("a nested call inside a .if arm expands (the mwa/sta_hi pattern)", () => {
+		const src = (flag: number) =>
+			".macro inner\n\tnop\n.endmacro\n" +
+			".macro outer flag\n\t.if flag\n\t\tinner\n\t.else\n\t\tbrk\n\t.endif\n.endmacro\n" +
+			`outer ${flag}\n`;
+		expect(asm(src(1)).messages).toEqual([]);
+		expect(asm(src(1)).bytes).toEqual([0xea]);
+		expect(asm(src(0)).bytes).toEqual([0x00]);
 	});
 
 	test("multi-argument call with plain expressions", () => {
@@ -844,12 +864,13 @@ describe("macros", () => {
 		expect(bytes).toEqual([0xa9, 0x42]);
 	});
 
-	test("a shaped operand argument in expression position is a type error", () => {
+	test("a shaped operand argument in expression position is an operand value", () => {
+		// Previously an error; now the value is introspectable - and using it
+		// as data stays an error, with an unwrap hint.
 		expect(
-			asm(".macro bad v\n\t.byte v\n.endmacro\nbad (foo),y\n").messages,
-		).toContain(
-			'Macro argument "v" has an operand value and can only be used as a whole operand',
-		);
+			asm(".macro bad v\n\t.byte v\n.endmacro\nbad (foo),y\nfoo = 1\n")
+				.messages,
+		).toContain("An operand is not data - unwrap it with `.operand_value()`");
 	});
 
 	test("a real instruction rejects an operand list", () => {
@@ -1407,12 +1428,12 @@ describe("diagnostics with locations", () => {
 	test("parse errors are attributed to their module", async () => {
 		const host = memHost({
 			main: '.import "lib"\nnop\n',
-			lib: ".segment CODE\n",
+			lib: ".segment\n",
 		});
 		const r = await assemble("main", host);
 		const error = r.diagnostics[0]!;
 		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:1:10 - error SP1001: /);
+		expect(error.formatted).toMatch(/^lib:1:\d+ - error SP1001: /);
 	});
 
 	test("single-source diagnostics use the given name", () => {
@@ -1563,6 +1584,14 @@ describe("conditional assembly (.if/.elseif/.else/.endif)", () => {
 		expect(asm(src(9)).bytes).toEqual([3]);
 	});
 
+	test("a macro call inside an arm expands", () => {
+		const { bytes, messages } = asm(
+			".macro put\n\t.byte 7\n.endmacro\n.if 1\n\tput\n.endif\n",
+		);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([7]);
+	});
+
 	test("no matching arm and no .else collects nothing", () => {
 		expect(asm(".if 0\n.byte 1\n.endif\n.byte 9\n").bytes).toEqual([9]);
 	});
@@ -1705,22 +1734,124 @@ describe(".error", () => {
 		expect(asm(src(200)).messages).toEqual(["zp overflow"]);
 	});
 
-	test("a macro-body .error attributes to the macro's file", async () => {
-		const host = memHost({
-			main: '.import "lib"\ncheck\n',
-			lib: '.export .macro check\n.if 1\n.error "boom"\n.endif\n.endmacro\n',
-		});
+	test("a macro-body .error attributes to the call site, noting the directive", async () => {
+		const main = '.import "lib"\ncheck\n';
+		const lib =
+			'.export .macro check\n.if 1\n.error "boom"\n.endif\n.endmacro\n';
+		const host = memHost({ main, lib });
 		const r = await assemble("main", host);
+
+		expect(r.diagnostics).toHaveLength(1);
 		const error = r.diagnostics[0]!;
 		expect(error.message).toBe("boom");
-		expect(error.file).toBe("lib");
-		expect(error.formatted).toMatch(/^lib:3:1 - error SP3022: boom/);
+		// The macro rejected its call - the call is the error.
+		expect(error.file).toBe("main");
+		const call = main.indexOf("check");
+		expect([error.start, error.end]).toEqual([call, call + 5]);
+
+		// The note walks into the body, down to the directive itself.
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `check`");
+		expect(note.file).toBe("lib");
+		expect([note.start, note.end]).toEqual([
+			lib.indexOf(".error"),
+			lib.indexOf('"boom"') + 6,
+		]);
+	});
+
+	test("a nested body .error narrates the whole path", async () => {
+		const main = '.import "outer"\ngo\n';
+		const outer = '.import "inner"\n.export .macro go\n\tvalidate\n.endmacro\n';
+		const inner = '.export .macro validate\n\t.error "nope"\n.endmacro\n';
+		const host = memHost({ main, outer, inner });
+		const r = await assemble("main", host);
+
+		expect(r.diagnostics).toHaveLength(1);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe("nope");
+		expect(error.file).toBe("main");
+		const call = main.indexOf("go", main.indexOf("outer"));
+		expect([error.start, error.end]).toEqual([call, call + 2]);
+
+		expect(error.notes!.map((n) => [n.message, n.file])).toEqual([
+			["While expanding `go`", "outer"],
+			["While expanding `validate`", "inner"],
+		]);
+		expect(error.notes![0]!.start).toBe(outer.indexOf("validate\n"));
+		expect(error.notes![1]!.start).toBe(inner.indexOf(".error"));
 	});
 
 	test("the message must be a string", () => {
 		expect(asm(".error 42\n").messages).toEqual([
 			"`.error` requires a string message",
 		]);
+	});
+
+	test("an anchor argument attributes the error to the caller's argument", async () => {
+		const lib =
+			'.export .macro put src\n.if .is_simple_operand(src)\n\tlda src\n.else\n.error "bad operand", src\n.endif\n.endmacro\n';
+		const main = '.import "lib"\nput ($12,x)\n';
+		const host = memHost({ main, lib });
+		const r = await assemble("main", host);
+
+		expect(r.diagnostics).toHaveLength(1);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe("bad operand");
+		// The offending argument itself, punctuation included.
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("($12,x)");
+		expect([error.start, error.end]).toEqual([arg, arg + 7]);
+
+		// The note lands on the param occurrence on the `.error` line.
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `put`");
+		expect(note.file).toBe("lib");
+		const use = lib.indexOf("src", lib.indexOf(".error"));
+		expect([note.start, note.end]).toEqual([use, use + 3]);
+	});
+
+	test("a nested anchor narrates each hop's param occurrence", async () => {
+		const inner = '.export .macro guts v\n.error "nope", v\n.endmacro\n';
+		const outer =
+			'.import "inner"\n.export .macro shell w\n\tguts w\n.endmacro\n';
+		const main = '.import "outer"\nshell #5\n';
+		const host = memHost({ main, outer, inner });
+		const r = await assemble("main", host);
+
+		expect(r.diagnostics).toHaveLength(1);
+		const error = r.diagnostics[0]!;
+		expect(error.message).toBe("nope");
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("#5");
+		expect([error.start, error.end]).toEqual([arg, arg + 2]);
+
+		expect(error.notes!.map((n) => [n.message, n.file])).toEqual([
+			["While expanding `shell`", "outer"],
+			["While expanding `guts`", "inner"],
+		]);
+		expect(error.notes![0]!.start).toBe(
+			outer.indexOf("w", outer.indexOf("guts")),
+		);
+		expect(error.notes![1]!.start).toBe(
+			inner.indexOf("v", inner.indexOf(".error")),
+		);
+	});
+
+	test("a top-level anchor attributes to the expression, unevaluated", () => {
+		// `nowhere` is undefined; the anchor is location-only, so no
+		// undefined-symbol diagnostic fires.
+		const src = 'here:\n.error "boom", nowhere\n';
+		const { messages } = asm(src);
+		expect(messages).toEqual(["boom"]);
+		const r = assemble(src, "t");
+		const error = r.diagnostics[0]!;
+		expect([error.start, error.end]).toEqual([
+			src.indexOf("nowhere"),
+			src.indexOf("nowhere") + 7,
+		]);
+		expect(error.notes).toBeUndefined();
 	});
 });
 
@@ -2110,6 +2241,36 @@ describe("macro navigation", () => {
 			"lib" + SEP + SEP + "mva",
 		);
 	});
+
+	test("an uncalled macro's body call still references the callee", async () => {
+		// mwa is never called, so it never expands - the sta_hi call in its
+		// `.if` arm must still be navigable and count as a use.
+		const helperLib =
+			".macro sta_hi dst\n\tsta dst\n.endmacro\n" +
+			".export .macro mwa src, dst\n\t.if 1\n\t\tsta_hi dst\n\t.endif\n.endmacro\n";
+		const main = '.import "lib"\n\trts\n';
+		const host = memHost({ main, lib: helperLib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		expect(
+			refAt(result, "lib", helperLib, "sta_hi", helperLib.indexOf("mwa")),
+		).toBe("lib" + SEP + SEP + "sta_hi");
+	});
+
+	test("an uncalled body's namespaced call references binding and macro", async () => {
+		const outer = 'l = .import "lib"\n.macro wrap\n\tl::mva 1, 2\n.endmacro\n';
+		const main = '.import "outer"\n\trts\n';
+		const host = memHost({ main, outer, lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const call = outer.indexOf("l::mva");
+		expect(refAt(result, "outer", outer, "l", call)).toBe("outer" + SEP + "l");
+		expect(refAt(result, "outer", outer, "mva", call)).toBe(
+			"lib" + SEP + SEP + "mva",
+		);
+	});
 });
 
 describe("module scopes", () => {
@@ -2176,6 +2337,93 @@ describe("macro-expansion diagnostics", () => {
 		expect(error.notes).toBeUndefined();
 	});
 
+	test("a spliced operand's mode error spans the call-site arg, with a note", async () => {
+		const addLib =
+			".export .macro add operand\n\tclc\n\tadc operand\n.endmacro\n";
+		const main = '.import "lib"\n\tadd ($1234)\n';
+		const host = memHost({ main, lib: addLib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3003");
+		expect(error.message).toBe("ADC has no indirect addressing mode");
+		// The call-site argument, whole operand: the parens are the caller's
+		// tokens too, so the span widens past the expression.
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("($1234)");
+		expect([error.start, error.end]).toEqual([arg, arg + 7]);
+
+		// The note underlines the whole body instruction - the mnemonic is
+		// the other half of what failed, not just the spliced operand.
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `add`");
+		expect(note.file).toBe("lib");
+		const adc = addLib.indexOf("adc");
+		const use = addLib.indexOf("operand", adc);
+		expect([note.start, note.end]).toEqual([adc, use + 7]);
+	});
+
+	test("an instruction inside a .if arm still narrates its expansion", async () => {
+		const madLib =
+			".export .macro madd flag, operand\n\t.if flag\n\t\tadc operand\n\t.endif\n.endmacro\n";
+		const main = '.import "lib"\n\tmadd 1, ($12)\n';
+		const host = memHost({ main, lib: madLib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3003");
+		expect(error.file).toBe("main");
+
+		expect(error.notes).toHaveLength(1);
+		const note = error.notes![0]!;
+		expect(note.message).toBe("While expanding `madd`");
+		expect(note.file).toBe("lib");
+		const adc = madLib.indexOf("adc");
+		expect([note.start, note.end]).toEqual([
+			adc,
+			madLib.indexOf("operand", adc) + 7,
+		]);
+	});
+
+	test("a body-written shape around a spliced value keeps the value span", async () => {
+		const wrapLib = ".export .macro wrap v\n\tadc (v)\n.endmacro\n";
+		const main = '.import "lib"\n\twrap $1234\n';
+		const host = memHost({ main, lib: wrapLib });
+		const result = await assemble("main", host);
+
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3003");
+		// The parens are the body's, the value the caller's - a whole-operand
+		// span would mix files, so only the spliced value is underlined.
+		expect(error.file).toBe("main");
+		const arg = main.indexOf("$1234");
+		expect([error.start, error.end]).toEqual([arg, arg + 5]);
+
+		expect(error.notes).toHaveLength(1);
+		expect(error.notes![0]!.file).toBe("lib");
+	});
+
+	test("a body-written mode error attributes to the macro file, once", async () => {
+		const badLib = ".export .macro bump\n\tadc ($80)\n.endmacro\n";
+		const main = '.import "lib"\n\tbump\n\tbump\n';
+		const host = memHost({ main, lib: badLib });
+		const result = await assemble("main", host);
+
+		// The shape is the body's own; two expansions dedup to one error.
+		expect(result.diagnostics).toHaveLength(1);
+		const error = result.diagnostics[0]!;
+		expect(error.code).toBe("SP3003");
+		expect(error.file).toBe("lib");
+		// Fully body-owned, so the span widens to the whole operand.
+		const bad = badLib.indexOf("($80)");
+		expect([error.start, error.end]).toEqual([bad, bad + 5]);
+		expect(error.notes).toBeUndefined();
+	});
+
 	test("a plain range error spans the expression, not the # marker", () => {
 		const src = "\tlda #$1234\n";
 		const result = assemble(src, "t");
@@ -2234,5 +2482,550 @@ describe("export references", () => {
 			.get("lib")
 			?.find((r) => r.start === lib.indexOf("FOO", lib.indexOf(".export")));
 		expect(exportRef?.symbol).toBe("lib\0FOO");
+	});
+});
+
+describe("expression-macro params", () => {
+	const SEP = "\0";
+
+	test("params are parameter symbols; body uses record references", () => {
+		const src = "SCALE(v, unused) = 2 * v\n\t.byte SCALE(3, 0)\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+
+		const v = result.definitions.get("t" + SEP + "SCALE" + SEP + "v")!;
+		expect(v.kind).toBe("parameter");
+		expect([v.start, v.end]).toEqual([
+			src.indexOf("v,"),
+			src.indexOf("v,") + 1,
+		]);
+
+		const use = src.indexOf("v", src.indexOf("2 *"));
+		const ref = result.references
+			.get("t")
+			?.find((r) => r.start === use && r.end === use + 1);
+		expect(ref?.symbol).toBe("t" + SEP + "SCALE" + SEP + "v");
+
+		// The unused param has a definition and no references.
+		const unusedKey = "t" + SEP + "SCALE" + SEP + "unused";
+		expect(result.definitions.get(unusedKey)?.kind).toBe("parameter");
+		const refs = [...result.references.values()].flat();
+		expect(refs.some((r) => r.symbol === unusedKey)).toBe(false);
+
+		// Params stay out of the public symbols map.
+		expect([...result.symbols.keys()]).toEqual([]);
+	});
+});
+
+describe("uncalled-macro params", () => {
+	test("param uses are recorded without any call", async () => {
+		const lib =
+			".export .macro emit_boot target, unused\n\tjmp target\n.endmacro\n";
+		const host = memHost({ main: '.import "lib"\n\tnop\n', lib });
+		const result = await assemble("main", host);
+		expect(result.diagnostics).toEqual([]);
+
+		const use = lib.indexOf("target", lib.indexOf("jmp"));
+		const ref = result.references
+			.get("lib")
+			?.find((r) => r.start === use && r.end === use + 6);
+		expect(ref?.symbol).toBe("lib\0\0emit_boot\0target");
+
+		const refs = [...result.references.values()].flat();
+		expect(refs.some((r) => r.symbol === "lib\0\0emit_boot\0unused")).toBe(
+			false,
+		);
+	});
+});
+
+describe("segment stack (.segment(), .push, .pop)", () => {
+	test("the save/restore pattern emits into the right segments", () => {
+		const src = [
+			"\t.org $0600",
+			"\t.byte 1",
+			".push .segment() ; save OUTPUT",
+			".rodata",
+			"\t.byte 9",
+			".segment .pop() ; restore",
+			"\t.byte 2",
+			'.emit "RODATA"',
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		// OUTPUT: 1, 2, then the emitted RODATA: 9.
+		expect(bytes).toEqual([1, 2, 9]);
+	});
+
+	test(".segment() evaluates to the current segment's name", () => {
+		const src =
+			'HERE = .segment()\n.rodata\nTHERE = .segment()\n\tnop\n.emit "RODATA"\n';
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("HERE")).toBe("OUTPUT");
+		expect(result.symbols.get("THERE")).toBe("RODATA");
+	});
+
+	test("a macro can save and restore its caller's segment", async () => {
+		const lib = [
+			".export .macro emit_data value",
+			".push .segment()",
+			".rodata",
+			"\t.byte value",
+			".segment .pop()",
+			".endmacro",
+			"",
+		].join("\n");
+		const main = [
+			'.import "lib"',
+			"\t.org $0600",
+			"\t.byte 1",
+			"\temit_data 7",
+			"\t.byte 2",
+			'.emit "RODATA"',
+			"",
+		].join("\n");
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		expect([...result.output]).toEqual([1, 2, 7]);
+	});
+
+	test("an unpopped value is an error at the push site", () => {
+		const { messages } = asm(".push 1\n\tnop\n");
+		expect(messages).toEqual(["Pushed value is never popped"]);
+	});
+
+	test("popping past the top of the stack is an error", () => {
+		const { messages } = asm("SAVED = .pop()\n\tnop\n");
+		expect(messages).toEqual(["`.pop` with nothing pushed"]);
+	});
+
+	test(".pop is rejected inside expression-macro bodies", () => {
+		const { messages } = asm(
+			".push 1\nF(v) = v + .pop()\n\t.byte F(1)\nDRAIN = .pop()\n\tnop\n",
+		);
+		expect(messages).toContain("`.pop` is not allowed here");
+	});
+
+	test(".pop is rejected in .if conditions", () => {
+		const { messages } = asm(
+			".push 1\n.if .pop()\n\tnop\n.endif\nDRAIN = .pop()\n\tnop\n",
+		);
+		expect(messages).toContain("`.pop` is not allowed here");
+	});
+
+	test("a non-string segment name is an error", () => {
+		const { messages } = asm(".segment 42\n\tnop\n");
+		expect(messages).toEqual(["Segment name must be a string"]);
+	});
+
+	test("an arm-gated balanced push/pop converges quietly", () => {
+		const src = [
+			"\t.org $0600",
+			".if BIG > 0",
+			".push .segment()",
+			".rodata",
+			"\t.byte 5",
+			".segment .pop()",
+			".endif",
+			"BIG = 1",
+			"\t.byte 1",
+			'.emit "RODATA"',
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([1, 5]);
+	});
+});
+
+describe("operand values", () => {
+	test("constructors coerce in operand position", () => {
+		const src = [
+			"IMM = .immediate_operand(3)",
+			"IDX = .x_indexed_operand($10)",
+			"ACC = .a_operand()",
+			"\tlda IMM",
+			"\tlda IDX",
+			"\tasl ACC",
+			"\tlda .immediate_operand(7)",
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		// lda #3; lda $10,x; asl a; lda #7
+		expect(bytes).toEqual([0xa9, 3, 0xb5, 0x10, 0x0a, 0xa9, 7]);
+	});
+
+	test("structural equality dispatches on shape and value", () => {
+		const src = [
+			"CH = .immediate_operand(0)",
+			"SAME = CH = .immediate_operand(0)",
+			"OTHER = CH = .immediate_operand(1)",
+			"SHAPE = CH = .x_indexed_operand(0)",
+			"REG = .x_operand() = .x_operand()",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("SAME")).toBe(1n);
+		expect(result.symbols.get("OTHER")).toBe(0n);
+		expect(result.symbols.get("SHAPE")).toBe(0n);
+		expect(result.symbols.get("REG")).toBe(1n);
+	});
+
+	test("different kinds compare unequal, never coerce, never error", () => {
+		const src = [
+			'NUM_STR = 1 = "one"',
+			"PLAIN_OP = 0 = .immediate_operand(0)",
+			'NE = 1 != "one"',
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("NUM_STR")).toBe(0n);
+		expect(result.symbols.get("PLAIN_OP")).toBe(0n);
+		expect(result.symbols.get("NE")).toBe(1n);
+	});
+
+	test("string equality works", () => {
+		const result = assemble('OK = .segment() = "OUTPUT"\n\tnop\n', "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("OK")).toBe(1n);
+	});
+
+	test("predicates classify shapes and values", () => {
+		const src = [
+			".macro probe arg",
+			"IS_IMM = .is_immediate_operand(arg)",
+			"IS_SIMPLE = .is_simple_operand(arg)",
+			"IS_STR = .is_string(arg)",
+			"IS_OP = .is_operand(arg)",
+			".endmacro",
+			'probe "hello"',
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		// A bare string argument splices as a plain expression: simple, a
+		// string, not an operand.
+		const get = (name: string) =>
+			[...result.definitions].find(([k]) => k.includes(name))?.[1].value;
+		expect(get("IS_IMM")).toBe(0n);
+		expect(get("IS_SIMPLE")).toBe(1n);
+		expect(get("IS_STR")).toBe(1n);
+		expect(get("IS_OP")).toBe(0n);
+	});
+
+	test(".operand_value unwraps; registers wrap nothing", () => {
+		const src = [
+			"V = .operand_value(.immediate_operand(41 + 1))",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("V")).toBe(42n);
+
+		expect(asm("R = .operand_value(.x_operand())\n\tnop\n").messages).toContain(
+			"A register operand wraps no value",
+		);
+		expect(asm("W = .operand_value(3)\n\tnop\n").messages).toContain(
+			"`.operand_value` takes an operand value",
+		);
+	});
+
+	test("register operands parse but no instruction takes them", () => {
+		expect(asm("\tldx y\n").messages).toContain(
+			"No instruction takes a register operand",
+		);
+		expect(asm("FOO = .x_operand()\n\tlda FOO\n").messages).toContain(
+			"No instruction takes a register operand",
+		);
+	});
+
+	test("an operand value cannot nest inside a shaped operand", () => {
+		expect(asm("FOO = .immediate_operand(3)\n\tlda #FOO\n").messages).toContain(
+			"An operand value can only be used as a whole operand",
+		);
+	});
+
+	test("operand values reject arithmetic", () => {
+		expect(asm("BAD = .immediate_operand(3) + 1\n\tnop\n").messages).toContain(
+			"Expected a number, got an operand",
+		);
+	});
+
+	test("forward references defer through constructors and predicates", () => {
+		const src = [
+			"OP = .immediate_operand(LATER)",
+			"CHECK = .is_integer(FWD)",
+			"\tlda OP",
+			"LATER = 5",
+			"FWD = 9",
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([0xa9, 5]);
+	});
+
+	test("the cio store/xio dispatch pattern works", async () => {
+		const lib = [
+			"ICCOM := $0342, size: 1",
+			".macro store channel, dest",
+			"\t.if .is_immediate_operand(channel) && .operand_value(channel) = 0",
+			"\t\tsta dest",
+			"\t.else",
+			"\t\tsta dest,x",
+			"\t.endif",
+			".endmacro",
+			".export .macro xio channel, command",
+			"\tldx channel",
+			"\tlda command",
+			"\tstore channel, ICCOM",
+			".endmacro",
+			"",
+		].join("\n");
+		const main = ['.import "lib"', "\txio #0, #7", "\txio #$10, #7", ""].join(
+			"\n",
+		);
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		// #0 channel: ldx #0; lda #7; sta $0342 (absolute, no ,x).
+		// #$10 channel: ldx #$10; lda #7; sta $0342,x.
+		expect([...result.output]).toEqual([
+			0xa2, 0x00, 0xa9, 0x07, 0x8d, 0x42, 0x03, 0xa2, 0x10, 0xa9, 0x07, 0x9d,
+			0x42, 0x03,
+		]);
+	});
+});
+
+describe("null", () => {
+	test(".null is a value: storable, comparable across kinds, testable", () => {
+		const src = [
+			"NOTHING = .null",
+			"IS = .is_null(NOTHING)",
+			"ISNT = .is_null(3)",
+			"EQ = NOTHING = .null",
+			"CROSS = 3 = .null",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("IS")).toBe(1n);
+		expect(result.symbols.get("ISNT")).toBe(0n);
+		expect(result.symbols.get("EQ")).toBe(1n);
+		expect(result.symbols.get("CROSS")).toBe(0n);
+	});
+
+	test(".null is rejected as data, arithmetic, and operands", () => {
+		expect(asm("\t.byte .null\n").messages).toContain("`.null` is not data");
+		expect(asm("BAD = .null + 1\n\tnop\n").messages).toContain(
+			"Expected a number, got null",
+		);
+		expect(asm("N = .null\n\tlda N\n").messages).toContain(
+			"Operand must be a number, not null",
+		);
+	});
+
+	test(".is_null defers on unresolved arguments", () => {
+		const src = "CHECK = .is_null(LATER)\nLATER = .null\n\tnop\n";
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("CHECK")).toBe(1n);
+	});
+});
+
+describe("default arguments", () => {
+	test("expression-macro defaults fill missing trailing args", () => {
+		const src = [
+			"SCALE(v, factor = 2) = v * factor",
+			"R1 = SCALE(3)",
+			"R2 = SCALE(3, 10)",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("R1")).toBe(6n);
+		expect(result.symbols.get("R2")).toBe(30n);
+	});
+
+	test("a function default may reference earlier params and module symbols", () => {
+		const src = [
+			"BASE = 100",
+			"F(p, q = p + BASE) = q",
+			"RES = F(1)",
+			"\tnop",
+			"",
+		].join("\n");
+		const result = assemble(src, "t");
+		expect(result.diagnostics).toEqual([]);
+		expect(result.symbols.get("RES")).toBe(101n);
+	});
+
+	test("function arity reports a range", () => {
+		expect(asm("F(p, q = 1) = p\nRES = F()\n\tnop\n").messages).toContain(
+			'"F" expects 1-2 argument(s), got 0',
+		);
+	});
+
+	test("a required function param cannot follow a defaulted one", () => {
+		expect(asm("F(p = 1, q) = p\n\tnop\n").messages).toContain(
+			'Parameter "q" without a default follows one with a default',
+		);
+	});
+
+	test("macro defaults fill in, resolve in the defining module, and accept shapes", async () => {
+		const lib = [
+			"LIB_BASE = $20",
+			".export .macro load val = LIB_BASE, mode = #1",
+			"\tlda val",
+			"\tldx mode",
+			".endmacro",
+			"",
+		].join("\n");
+		const main = [
+			'.import "lib"',
+			"LIB_BASE = $99 ; a decoy: the default must NOT see this",
+			"\tload",
+			"\tload $30",
+			"",
+		].join("\n");
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		// load: lda $20 (zp, lib's LIB_BASE); ldx #1.
+		// load $30: lda $30; ldx #1.
+		expect([...result.output]).toEqual([
+			0xa5, 0x20, 0xa2, 0x01, 0xa5, 0x30, 0xa2, 0x01,
+		]);
+	});
+
+	test("a macro default may reference earlier params", () => {
+		const src = [
+			".macro pair lo, hi = lo + 1",
+			"\t.byte lo, hi",
+			".endmacro",
+			"pair 5",
+			"pair 5, 9",
+			"",
+		].join("\n");
+		const { bytes, messages } = asm(src);
+		expect(messages).toEqual([]);
+		expect(bytes).toEqual([5, 6, 5, 9]);
+	});
+
+	test("macro default rules: trailing-only, no .out defaults, arity range", () => {
+		expect(
+			asm(".macro bad p = 1, q\n\tnop\n.endmacro\n\tnop\n").messages,
+		).toContain('Parameter "q" without a default follows one with a default');
+		expect(
+			asm(".macro bad .out o = 1\n\tnop\n.endmacro\n\tnop\n").messages,
+		).toContain('`.out` parameter "o" cannot have a default');
+		expect(
+			asm(".macro two p, q = 1\n\tnop\n.endmacro\ntwo\n").messages,
+		).toContain('Macro "two" is missing the argument "p"');
+	});
+
+	test("the println pattern: defaulted segment name with a null-style dispatch", async () => {
+		const lib = [
+			'.export .macro emit_to value, target = "RODATA"',
+			"current = .segment()",
+			".segment target",
+			"\t.byte value",
+			".segment current",
+			".endmacro",
+			"",
+		].join("\n");
+		const main = [
+			'.import "lib"',
+			"\t.org $0600",
+			"\t.byte 1",
+			"\temit_to 7",
+			'\temit_to 8, "EXTRA"',
+			"\t.byte 2",
+			'.emit "RODATA"',
+			'.emit "EXTRA"',
+			"",
+		].join("\n");
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		expect([...result.output]).toEqual([1, 2, 7, 8]);
+	});
+});
+
+describe("keyword arguments", () => {
+	const lib = [
+		".export .macro emit v1, aux1 = .null, aux2 = .null, aux3 = .null",
+		"\t.byte v1",
+		"\t.if aux1 != .null",
+		"\t\t.byte aux1",
+		"\t.endif",
+		"\t.if aux3 != .null",
+		"\t\t.byte aux3",
+		"\t.endif",
+		".endmacro",
+		"",
+	].join("\n");
+
+	test("keywords skip over defaulted params", async () => {
+		const main = [
+			'.import "lib"',
+			"\temit 1, aux3: 9",
+			"\temit 2, aux1: 5, aux3: 6",
+			"\temit v1: 3",
+			"",
+		].join("\n");
+		const result = await assemble("main", memHost({ main, lib }));
+		expect(result.diagnostics).toEqual([]);
+		expect([...result.output]).toEqual([1, 9, 2, 5, 6, 3]);
+	});
+
+	test("keyword diagnostics: unknown, duplicate, positional-after, missing", async () => {
+		const bad = async (line: string) => {
+			const main = `.import "lib"\n${line}\n`;
+			const r = await assemble("main", memHost({ main, lib }));
+			return r.diagnostics.map((d) => d.message);
+		};
+		expect(await bad("\temit 1, nope: 2")).toContain(
+			'Macro "emit" has no parameter "nope"',
+		);
+		expect(await bad("\temit 1, v1: 2")).toContain(
+			'Argument "v1" is already given',
+		);
+		expect(await bad("\temit aux1: 2, 1")).toContain(
+			"A positional argument cannot follow a keyword argument",
+		);
+		expect(await bad("\temit aux1: 2")).toContain(
+			'Macro "emit" is missing the argument "v1"',
+		);
+	});
+
+	test("keyword args on a real instruction are rejected", () => {
+		expect(asm("\tlda foo: 1\n").messages).toContain(
+			"Keyword arguments are for macro calls",
+		);
+	});
+
+	test("a keyword name references its parameter", async () => {
+		const main = '.import "lib"\n\temit 1, aux3: 9\n';
+		const result = await assemble("main", memHost({ main, lib }));
+		const at = main.indexOf("aux3:");
+		const ref = result.references
+			.get("main")
+			?.find((r) => r.start === at && r.end === at + 4);
+		expect(ref?.symbol).toBe("lib\0\0emit\0aux3");
+	});
+
+	test("anonymous-label operands still parse next to keywords", () => {
+		// `bne :+` must not be mistaken for a keyword arg.
+		const src = "\tbne :+\n\tnop\n:\tnop\n";
+		const { messages } = asm(src);
+		expect(messages).toEqual([]);
 	});
 });

@@ -758,10 +758,11 @@ export class EmulatorHost {
 		return this.#emulator;
 	}
 
-	/** Toggle the CPU instruction trace (persists across reboots). */
-	setCpuTrace(enabled: boolean): void {
-		this.#cpuTrace = enabled;
-		this.#emulator.setTrace(enabled);
+	/** Toggle the CPU instruction trace (persists across reboots): `true`
+	 *  records every instruction, `"compact"` collapses tight loops. */
+	setCpuTrace(mode: boolean | "compact"): void {
+		this.#cpuTrace = mode;
+		this.#emulator.setTrace(mode);
 	}
 
 	dumpCpuTrace(count?: number): string[] {
@@ -2377,7 +2378,8 @@ export class EmulatorHost {
 	#bootImagePicker: (() => void) | null = null;
 	// What to do with the next file the shared picker yields (boot vs. attach).
 	#pendingPick: (file: File) => void = (file) => void this.loadFile(file);
-	#cpuTrace = false; // persists across reboots; reapplied to each emulator
+	// Persists across reboots; reapplied to each emulator.
+	#cpuTrace: boolean | "compact" = false;
 	#turboMode = false; // persists across reboots; reapplied to each emulator
 	// What's mounted, kept across reboots and re-applied by #makeEmulator. The
 	// cartridge slot and the disk drives are independent (a cart and a disk can

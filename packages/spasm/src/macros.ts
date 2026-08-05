@@ -3,8 +3,10 @@ import type { Token } from "./lexer.ts";
 import type { LoadedModule } from "./loader.ts";
 import {
 	ANONYMOUS_LABEL,
+	forEachIdentifier,
 	getExpressionAnchorToken,
 	getOperandLocation,
+	getOperandPunctuationTokens,
 	type Expression,
 	type ExpansionSite,
 	type Label,
@@ -26,14 +28,8 @@ type Reporter = (
 ) => void;
 
 // A param substitutes to an argument operand; a body-local label renames.
-// `onUse` reports each substituted occurrence (macro-nav records the body
-// spans of param uses through it).
 type Substitution =
-	| {
-			kind: "operand";
-			operand: Operand;
-			onUse?: (token: { start: number; end: number }) => void;
-	  }
+	| { kind: "operand"; operand: Operand }
 	| { kind: "rename"; name: string };
 
 /**
@@ -156,6 +152,7 @@ export function expandModules(
 				own.set(name, macro);
 				if (isExported) exported.add(name);
 				checkBody(macro, report, module.id);
+				checkDefaults(macro, report, module.id);
 				if (nav) {
 					const key = macroKey(module.id, name);
 					nav.definitions.set(key, {
@@ -174,6 +171,12 @@ export function expandModules(
 							value: undefined,
 						});
 					}
+					// Param uses record statically from the body, so tooling
+					// (rename, unused detection) works for uncalled macros too
+					// - expansion doesn't need to happen for uses to be known.
+					recordParamUses(macro, (token) =>
+						recordRef(module.id, token, key + SEP + token.text),
+					);
 				}
 			}
 		}
@@ -230,6 +233,51 @@ export function expandModules(
 		}
 	}
 
+	// Nested macro calls record references statically from every body -
+	// expanded or not - so navigation and unused detection work for uncalled
+	// macros too, like param uses. Expansion later records the same spans
+	// (cloned bodies keep them) and recording dedups per span, so nothing
+	// double-counts.
+	if (nav) {
+		for (const module of modules) {
+			const record = (statements: readonly Statement[]): void => {
+				for (const statement of statements) {
+					const content = statement.content;
+					if (content?.type === "if-block") {
+						for (const arm of content.arms) record(arm.body);
+					}
+					if (content?.type !== "instruction") continue;
+					if (content.memberTokens?.length) {
+						const found = lookupPath(module.id, content);
+						if (!found) continue;
+						recordRef(
+							module.id,
+							content.mnemonic,
+							module.id + SEP + content.mnemonic.text,
+						);
+						recordRef(
+							module.id,
+							content.memberTokens[0]!,
+							macroKey(found.definingId, found.macro.nameToken.text),
+						);
+					} else {
+						const found = lookup(module.id, content.mnemonic.text);
+						if (!found) continue;
+						recordRef(
+							module.id,
+							content.mnemonic,
+							macroKey(found.definingId, content.mnemonic.text),
+						);
+						recordKeywordRefs(content, found, module.id, recordRef);
+					}
+				}
+			};
+			for (const macro of macros.get(module.id)!.own.values()) {
+				record(macro.body);
+			}
+		}
+	}
+
 	let counter = 0;
 	const expanded = new Set<Macro>();
 
@@ -283,7 +331,13 @@ export function expandModules(
 					content.memberTokens[0]!,
 					macroKey(found.definingId, found.macro.nameToken.text),
 				);
-				const args = callArgs(content, found.macro, report, scopeId);
+				const args = callArgs(
+					content,
+					found.macro,
+					report,
+					scopeId,
+					found.definingId,
+				);
 				if (args) {
 					const body = expandCall(
 						found.macro,
@@ -291,7 +345,6 @@ export function expandModules(
 						args,
 						() => ++counter,
 						report,
-						recordRef,
 					);
 					if (statement.labels.length && body.length) {
 						body[0] = {
@@ -308,6 +361,22 @@ export function expandModules(
 				}
 				continue;
 			}
+			if (content?.type === "if-block") {
+				// Arm selection happens at assembly time (and is re-decided
+				// every pass), so expand calls in every arm; unselected arms
+				// are discarded when the block is collected.
+				out.push({
+					...statement,
+					content: {
+						...content,
+						arms: content.arms.map((arm) => ({
+							...arm,
+							body: expand(arm.body, scopeId, depth),
+						})),
+					},
+				});
+				continue;
+			}
 			if (content?.type === "instruction") {
 				const found = lookup(scopeId, content.mnemonic.text);
 				if (found) {
@@ -317,7 +386,14 @@ export function expandModules(
 						content.mnemonic,
 						macroKey(found.definingId, content.mnemonic.text),
 					);
-					const args = callArgs(content, found.macro, report, scopeId);
+					recordKeywordRefs(content, found, scopeId, recordRef);
+					const args = callArgs(
+						content,
+						found.macro,
+						report,
+						scopeId,
+						found.definingId,
+					);
 					if (args) {
 						const body = expandCall(
 							found.macro,
@@ -325,7 +401,6 @@ export function expandModules(
 							args,
 							() => ++counter,
 							report,
-							recordRef,
 						);
 						// Carry the call's own labels onto the first expanded statement.
 						if (statement.labels.length && body.length) {
@@ -431,20 +506,81 @@ function callArgs(
 	macro: Macro,
 	report: Reporter,
 	file: string,
+	definingId: string,
 ): Operand[] | undefined {
-	const args = call.operands;
-	if (args.length !== macro.params.length) {
-		report(
-			Codes.MacroArity,
-			`Macro "${macro.nameToken.text}" expects ${macro.params.length} argument(s), got ${args.length}`,
-			tokenSpan(call.mnemonic),
-			file,
-		);
-		return undefined;
+	// Split positional prefix from keyword arguments (`aux1: #4`); a
+	// positional after a keyword is ambiguous and rejected.
+	const provided: (Operand | undefined)[] = macro.params.map(() => undefined);
+	const paramIndex = new Map(
+		macro.params.map((p, i) => [p.nameToken.text, i] as const),
+	);
+	let positional = 0;
+	let sawKeyword = false;
+	for (let i = 0; i < call.operands.length; i++) {
+		const arg = call.operands[i]!;
+		const name = call.argNames?.[i];
+		if (!name) {
+			if (sawKeyword) {
+				report(
+					Codes.PositionalAfterKeyword,
+					"A positional argument cannot follow a keyword argument",
+					getOperandLocation(arg),
+					file,
+				);
+				return undefined;
+			}
+			if (positional >= macro.params.length) {
+				report(
+					Codes.MacroArity,
+					`Macro "${macro.nameToken.text}" takes ${macro.params.length} argument(s)`,
+					getOperandLocation(arg),
+					file,
+				);
+				return undefined;
+			}
+			provided[positional++] = arg;
+			continue;
+		}
+		sawKeyword = true;
+		const index = paramIndex.get(name.text);
+		if (index === undefined) {
+			report(
+				Codes.UnknownKeywordArg,
+				`Macro "${macro.nameToken.text}" has no parameter "${name.text}"`,
+				tokenSpan(name),
+				file,
+			);
+			return undefined;
+		}
+		if (provided[index] !== undefined) {
+			report(
+				Codes.DuplicateArg,
+				`Argument "${name.text}" is already given`,
+				tokenSpan(name),
+				file,
+			);
+			return undefined;
+		}
+		provided[index] = arg;
 	}
-	for (let i = 0; i < args.length; i++) {
+
+	// Every param must end up with an argument or a default; `.out` args
+	// must be plain identifiers whichever way they arrived.
+	for (let i = 0; i < macro.params.length; i++) {
 		const param = macro.params[i]!;
-		const arg = args[i]!;
+		const arg = provided[i];
+		if (arg === undefined) {
+			if (!param.defaultOperand) {
+				report(
+					Codes.MissingArg,
+					`Macro "${macro.nameToken.text}" is missing the argument "${param.nameToken.text}"`,
+					tokenSpan(call.mnemonic),
+					file,
+				);
+				return undefined;
+			}
+			continue;
+		}
 		if (
 			param.outToken &&
 			(arg.type !== "simple-operand" || arg.expression.type !== "identifier")
@@ -458,7 +594,74 @@ function callArgs(
 			return undefined;
 		}
 	}
-	return args;
+
+	// Fill the gaps from defaults, substituted like body text: free names
+	// stamp to the defining module (hygiene), and a default may reference
+	// *earlier* params (filled left to right).
+	const filled: Operand[] = [];
+	const subst = new Map<string, Substitution>();
+	for (let i = 0; i < macro.params.length; i++) {
+		const param = macro.params[i]!;
+		let arg = provided[i];
+		if (arg === undefined) {
+			arg = substituteOperand(
+				structuredClone(param.defaultOperand!),
+				subst,
+				definingId,
+				report,
+			);
+		}
+		filled.push(arg);
+		subst.set(param.nameToken.text, { kind: "operand", operand: arg });
+	}
+	return filled;
+}
+
+// A keyword argument's name token references the param it fills - so
+// go-to-definition and rename cover call-site keywords.
+function recordKeywordRefs(
+	call: Extract<StatementContent, { type: "instruction" }>,
+	found: { macro: Macro; definingId: string },
+	scopeId: string,
+	recordRef: (
+		file: string,
+		token: { start: number; end: number },
+		symbol: string,
+	) => void,
+): void {
+	if (!call.argNames) return;
+	const key = macroKey(found.definingId, found.macro.nameToken.text);
+	for (const name of call.argNames) {
+		if (!name) continue;
+		if (found.macro.params.some((p) => p.nameToken.text === name.text)) {
+			recordRef(scopeId, name, key + SEP + name.text);
+		}
+	}
+}
+
+// Defaults are trailing-only (a positional call site could not skip a middle
+// argument), and `.out` params - caller-side name channels - can't have one.
+function checkDefaults(macro: Macro, report: Reporter, file: string): void {
+	let sawDefault = false;
+	for (const param of macro.params) {
+		if (param.outToken && param.defaultOperand) {
+			report(
+				Codes.OutParamDefault,
+				`\`.out\` parameter "${param.nameToken.text}" cannot have a default`,
+				tokenSpan(param.nameToken),
+				file,
+			);
+		}
+		if (param.defaultOperand) sawDefault = true;
+		else if (sawDefault) {
+			report(
+				Codes.DefaultParamOrder,
+				`Parameter "${param.nameToken.text}" without a default follows one with a default`,
+				tokenSpan(param.nameToken),
+				file,
+			);
+		}
+	}
 }
 
 // The `.out` contract: an `.out` param must be defined by the body (a label,
@@ -531,6 +734,97 @@ function validateParams(
 }
 
 /**
+ * Visit every occurrence of a macro param in the body - the same positions
+ * substitution touches: labels and assignment names (`.out` definitions and
+ * forwarding), operand and directive expressions, `.if` conditions and arm
+ * bodies. An expression-macro definition's own params shadow the code
+ * macro's inside its body expression.
+ */
+function recordParamUses(
+	macro: Macro,
+	visit: (token: Token<"identifier">) => void,
+): void {
+	const params = new Set(macro.params.map((p) => p.nameToken.text));
+	const visitIf = (token: Token<"identifier">): void => {
+		if (params.has(token.text)) visit(token);
+	};
+	const walkExpr = (
+		expression: Expression,
+		shadowed?: ReadonlySet<string>,
+	): void => {
+		forEachIdentifier(expression, (token) => {
+			if (!shadowed?.has(token.text)) visitIf(token);
+		});
+	};
+	const walk = (statements: readonly Statement[]): void => {
+		for (const statement of statements) {
+			for (const label of statement.labels) visitIf(label.identifier);
+			const content = statement.content;
+			switch (content?.type) {
+				case "byte":
+				case "word":
+					for (const [expression] of content.list) walkExpr(expression);
+					break;
+				case "org":
+					walkExpr(content.expression);
+					break;
+				case "res":
+					walkExpr(content.count);
+					break;
+				case "assignment": {
+					visitIf(content.identifier);
+					const shadowed = content.params
+						? new Set(content.params.map((p) => p.nameToken.text))
+						: undefined;
+					walkExpr(content.expression, shadowed);
+					for (const attribute of content.attributes) {
+						walkExpr(attribute.value);
+					}
+					break;
+				}
+				case "instruction":
+					for (const operand of content.operands) {
+						if (
+							operand.type !== "accumulator-operand" &&
+							operand.type !== "register-operand"
+						) {
+							walkExpr(operand.expression);
+						}
+					}
+					break;
+				case "if-block":
+					for (const arm of content.arms) {
+						if (arm.condition) walkExpr(arm.condition);
+						walk(arm.body);
+					}
+					break;
+				case "error-directive":
+					walkExpr(content.message);
+					if (content.anchor) walkExpr(content.anchor);
+					break;
+				case "segment":
+				case "push":
+					walkExpr(content.expression);
+					break;
+				default:
+					break;
+			}
+		}
+	};
+	walk(macro.body);
+	for (const param of macro.params) {
+		const operand = param.defaultOperand;
+		if (
+			operand &&
+			operand.type !== "accumulator-operand" &&
+			operand.type !== "register-operand"
+		) {
+			walkExpr(operand.expression);
+		}
+	}
+}
+
+/**
  * Append the splice site - the param occurrence at `origin` this argument
  * replaces - to the cloned expression's anchor token, outermost-first: each
  * expansion level appends, so the chain reads from the original call inward.
@@ -571,12 +865,19 @@ function attachTrail(
 		start: mnemonic.start,
 		end: span?.end ?? mnemonic.end,
 	};
-	for (let i = 0; i < body.length; i++) {
-		body[i] = {
-			...body[i]!,
-			expansionTrail: [site, ...(call.expansionTrail ?? [])],
-		};
-	}
+	const expansionTrail = [site, ...(call.expansionTrail ?? [])];
+	// `.if` arms included: their statements are collected individually, so
+	// each carries the trail itself.
+	const stamp = (statements: Statement[]): void => {
+		for (let i = 0; i < statements.length; i++) {
+			statements[i] = { ...statements[i]!, expansionTrail };
+			const content = statements[i]!.content;
+			if (content?.type === "if-block") {
+				for (const arm of content.arms) stamp(arm.body);
+			}
+		}
+	};
+	stamp(body);
 }
 
 function expandCall(
@@ -585,27 +886,10 @@ function expandCall(
 	args: Operand[],
 	gensym: () => number,
 	report: Reporter,
-	recordRef?: (
-		file: string,
-		token: { start: number; end: number },
-		symbol: string,
-	) => void,
 ): Statement[] {
 	const subst = new Map<string, Substitution>();
 	macro.params.forEach((param, i) => {
-		const name = param.nameToken.text;
-		subst.set(name, {
-			kind: "operand",
-			operand: args[i]!,
-			// A substituted occurrence is a param use at a body span - record
-			// it against the param's definition.
-			onUse: (token) =>
-				recordRef?.(
-					definingId,
-					token,
-					macroKey(definingId, macro.nameToken.text) + SEP + name,
-				),
-		});
+		subst.set(param.nameToken.text, { kind: "operand", operand: args[i]! });
 	});
 	const suffix = `@${gensym()}`;
 	for (const name of localNames(macro.body)) {
@@ -689,7 +973,6 @@ function substituteName(
 		};
 	}
 	if (s?.kind === "operand") {
-		s.onUse?.(identifier);
 		if (
 			s.operand.type === "simple-operand" &&
 			s.operand.expression.type === "identifier"
@@ -737,7 +1020,7 @@ function substituteContent(
 			// An expression macro's params shadow the (code) macro's substitution
 			// inside its body - `F(x) = x + 1` keeps its own `x`.
 			const shadowed = content.params
-				? new Set(content.params.map((p) => p.text))
+				? new Set(content.params.map((p) => p.nameToken.text))
 				: undefined;
 			content.expression = substituteExpr(
 				content.expression,
@@ -788,8 +1071,30 @@ function substituteContent(
 		case "error-directive":
 			content.errorToken.origin = content.errorToken.origin ?? origin;
 			content.message = substituteExpr(content.message, subst, origin, report);
+			if (content.anchor) {
+				content.anchor = substituteExpr(content.anchor, subst, origin, report);
+			}
 			break;
-		// Segment directives carry no substitutable expressions; import/export/
+		case "segment":
+			content.expression = substituteExpr(
+				content.expression,
+				subst,
+				origin,
+				report,
+			);
+			break;
+		case "push":
+			// The keyword is stamped so an unpopped-push error from a body
+			// attributes to the macro's file.
+			content.pushToken.origin = content.pushToken.origin ?? origin;
+			content.expression = substituteExpr(
+				content.expression,
+				subst,
+				origin,
+				report,
+			);
+			break;
+		// Emit/emplace/discard directives carry no substitutable expressions;
 		// macro are rejected from bodies at collection.
 		default:
 			break;
@@ -806,25 +1111,39 @@ function substituteOperand(
 	origin: string,
 	report: Reporter,
 ): Operand {
-	if (operand.type === "accumulator-operand") return operand;
+	if (
+		operand.type === "accumulator-operand" ||
+		operand.type === "register-operand"
+	) {
+		return operand;
+	}
 	if (
 		operand.type === "simple-operand" &&
 		operand.expression.type === "identifier"
 	) {
 		const s = subst.get(operand.expression.text);
 		if (s?.kind === "operand") {
-			s.onUse?.(operand.expression);
 			const clone = structuredClone(s.operand);
-			if (clone.type !== "accumulator-operand") {
+			if (
+				clone.type !== "accumulator-operand" &&
+				clone.type !== "register-operand"
+			) {
 				recordSplice(clone.expression, operand.expression, origin);
 			}
 			return clone;
 		}
 	}
-	return {
+	const result = {
 		...operand,
 		expression: substituteExpr(operand.expression, subst, origin, report),
 	} as Operand;
+	// A body-written shape's punctuation is stamped like literals, so
+	// diagnostics widen to the whole operand only when its tokens agree on
+	// a file. (A whole-operand splice returned above keeps caller tokens.)
+	for (const token of getOperandPunctuationTokens(result)) {
+		token.origin = token.origin ?? origin;
+	}
+	return result;
 }
 
 function substituteExpr(
@@ -841,7 +1160,6 @@ function substituteExpr(
 			if (shadowed?.has(expr.text)) return expr;
 			const s = subst.get(expr.text);
 			if (s?.kind === "operand") {
-				s.onUse?.(expr);
 				// Operand is a super-type of simple values: only a simple operand
 				// (a plain expression) has a value usable inside an expression.
 				if (s.operand.type === "simple-operand") {
@@ -849,13 +1167,14 @@ function substituteExpr(
 					recordSplice(clone, expr, origin);
 					return clone;
 				}
-				report(
-					Codes.ShapedArgumentInExpression,
-					`Macro argument "${expr.text}" has an operand value and can only be used as a whole operand`,
-					tokenSpan(expr),
-					origin,
-				);
-				return expr;
+				// A shaped argument becomes an operand *value* - introspectable
+				// with the operand builtins, coercible back in operand position.
+				const literal: Expression = {
+					type: "operand-literal",
+					operand: structuredClone(s.operand),
+				};
+				recordSplice(literal, expr, origin);
+				return literal;
 			}
 			// Stamped like the defining occurrence in `substituteName`, so
 			// renamed references resolve where the renamed definition lands.
@@ -900,9 +1219,49 @@ function substituteExpr(
 				...expr,
 				object: substituteExpr(expr.object, subst, origin, report, shadowed),
 			};
+		case "segment-expression":
+			return {
+				...expr,
+				segmentToken: {
+					...expr.segmentToken,
+					origin: expr.segmentToken.origin ?? origin,
+				},
+			};
+		case "builtin-call":
+			return {
+				...expr,
+				nameToken: {
+					...expr.nameToken,
+					origin: expr.nameToken.origin ?? origin,
+				},
+				args: expr.args.map((argument) =>
+					substituteExpr(argument, subst, origin, report, shadowed),
+				),
+			};
+		case "operand-literal":
+			// Only ever synthesized from an already-substituted call-site
+			// operand - nothing left to substitute.
+			return expr;
+		case "null-literal":
+			return {
+				...expr,
+				nullToken: {
+					...expr.nullToken,
+					origin: expr.nullToken.origin ?? origin,
+				},
+			};
+		case "pop-expression":
+			return {
+				...expr,
+				popToken: { ...expr.popToken, origin: expr.popToken.origin ?? origin },
+			};
 		case "dict-literal":
 			return {
 				...expr,
+				openingBraceToken: {
+					...expr.openingBraceToken,
+					origin: expr.openingBraceToken.origin ?? origin,
+				},
 				entries: expr.entries.map((entry) => ({
 					...entry,
 					value: substituteExpr(entry.value, subst, origin, report, shadowed),
@@ -916,8 +1275,19 @@ function substituteExpr(
 					substituteExpr(arg, subst, origin, report, shadowed),
 				),
 			};
+		// Literals are anchor tokens too: stamped, a body literal's
+		// diagnostics (range and mode errors) attribute to the macro's file.
+		// A spliced call-site literal is never re-substituted, so it keeps
+		// its own origin.
+		case "decimal":
+		case "hexadecimal":
+		case "binary":
+		case "string":
+		case "character":
+		case "*":
+			return { ...expr, origin: expr.origin ?? origin };
 		default:
-			return expr; // literals and `*`
+			return expr;
 	}
 }
 
@@ -1013,19 +1383,22 @@ function validateBody(
 				case "assignment": {
 					// An expression macro's params are bound within its own body.
 					const added = (content.params ?? []).filter(
-						(p) => !bound.has(p.text),
+						(p) => !bound.has(p.nameToken.text),
 					);
-					for (const p of added) bound.add(p.text);
+					for (const p of added) bound.add(p.nameToken.text);
 					check(content.expression);
 					// Attribute values are discarded without ever being evaluated,
 					// so an unresolvable name in one isn't an error.
-					for (const p of added) bound.delete(p.text);
+					for (const p of added) bound.delete(p.nameToken.text);
 					break;
 				}
 				case "instruction":
 					if (isMacro(content.mnemonic.text)) break;
 					for (const operand of content.operands) {
-						if (operand.type !== "accumulator-operand") {
+						if (
+							operand.type !== "accumulator-operand" &&
+							operand.type !== "register-operand"
+						) {
 							check(operand.expression);
 						}
 					}
@@ -1225,13 +1598,17 @@ function visitContentExpressions(
 			break;
 		case "instruction":
 			for (const operand of content.operands) {
-				if (operand.type !== "accumulator-operand") {
+				if (
+					operand.type !== "accumulator-operand" &&
+					operand.type !== "register-operand"
+				) {
 					visitExpression(operand.expression, visit);
 				}
 			}
 			break;
 		case "error-directive":
 			visitExpression(content.message, visit);
+			if (content.anchor) visitExpression(content.anchor, visit);
 			break;
 		case "export":
 			if (content.content) visitContentExpressions(content.content, visit);

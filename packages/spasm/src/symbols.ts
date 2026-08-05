@@ -12,9 +12,16 @@ export const SEP = "\0";
  * A label is address-valued (`name:` / `name := expr`); a constant is
  * `name = expr`; a namespace is a dict-valued `name = { ... }` (the dict node
  * itself - its entries are ordinary constants under qualified names); a
- * function is an expression macro (`DOUBLE(x) = 2 * x`).
+ * function is an expression macro (`DOUBLE(x) = 2 * x`); a parameter is an
+ * expression macro's param, defined under the function's qualified name
+ * (`DOUBLE SEP x`) so tooling sees its site and uses.
  */
-export type SymbolKind = "label" | "constant" | "namespace" | "function";
+export type SymbolKind =
+	| "label"
+	| "constant"
+	| "namespace"
+	| "function"
+	| "parameter";
 
 interface Entry {
 	value: Value | undefined;

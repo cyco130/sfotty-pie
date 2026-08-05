@@ -1,4 +1,5 @@
 import {
+	BUILTIN_NAMES,
 	DOT_KEYWORDS,
 	OPCODES,
 	SEP,
@@ -106,7 +107,10 @@ function inString(linePrefix: string): boolean {
 /** Mnemonics, directives, and callable macros. */
 function statementCompletions(inputs: CompletionInputs): CompletionCandidate[] {
 	const out = new Map<string, CompletionCandidate>();
+	// Statement keywords only - the expression builtins complete in
+	// expression position instead.
 	for (const keyword of DOT_KEYWORDS) {
+		if (EXPRESSION_KEYWORDS.has(keyword)) continue;
 		out.set("." + keyword, { label: "." + keyword, kind: KIND.keyword });
 	}
 	for (const mnemonic of Object.keys(OPCODES)) {
@@ -136,11 +140,78 @@ function expressionCompletions(
 	addLocals(out, inputs);
 	addEnclosingMacroParams(out, inputs);
 	addExpressionMacroParams(out, inputs);
+	addKeywordArgs(out, inputs);
+	// The expression builtins: operand constructors/predicates, value
+	// predicates, `.segment()`, `.pop()`.
+	for (const name of BUILTIN_NAMES) {
+		out.set("." + name, { label: "." + name, kind: KIND.keyword });
+	}
+	out.set(".segment", { label: ".segment", kind: KIND.keyword });
+	out.set(".pop", { label: ".pop", kind: KIND.keyword });
+	out.set(".null", { label: ".null", kind: KIND.keyword });
 	if (ASSIGNMENT_RHS.test(inputs.linePrefix)) {
 		out.set(".import", { label: ".import", kind: KIND.keyword });
 	}
 	return [...out.values()];
 }
+
+// The head of a macro-call line: optional labels, then the callee (possibly
+// `ns::name`), then whitespace - meaning the cursor is in the argument area.
+const CALL_HEAD =
+	/^[ \t]*(?::[ \t]+)?(?:@?[A-Za-z_]\w*[ \t]*:[ \t]+)*(@?[A-Za-z_]\w*(?:::@?[A-Za-z_]\w*)?)[ \t]/;
+
+/**
+ * In a macro call's argument area, offer the params as keyword arguments
+ * (`aux1:`), skipping ones already given by name on the line.
+ */
+function addKeywordArgs(
+	out: Map<string, CompletionCandidate>,
+	inputs: CompletionInputs,
+): void {
+	const head = CALL_HEAD.exec(inputs.linePrefix)?.[1];
+	if (!head) return;
+
+	// Resolve the callee to a macro: own, splat-exported, or `ns::name`.
+	const scope = inputs.moduleScopes.get(inputs.path);
+	let key: string | undefined;
+	const sep = head.indexOf("::");
+	if (sep !== -1) {
+		const bound = scope?.bindings.get(head.slice(0, sep));
+		const name = head.slice(sep + 2);
+		if (bound && inputs.moduleScopes.get(bound)?.macroExports.has(name)) {
+			key = bound + "\0\0" + name;
+		}
+	} else if (inputs.definitions.has(inputs.path + "\0\0" + head)) {
+		key = inputs.path + "\0\0" + head;
+	} else {
+		for (const importId of scope?.splats ?? []) {
+			if (inputs.moduleScopes.get(importId)?.macroExports.has(head)) {
+				key = importId + "\0\0" + head;
+				break;
+			}
+		}
+	}
+	if (key === undefined) return;
+
+	const prefix = key + "\0";
+	for (const [symbol, definition] of inputs.definitions) {
+		if (definition.kind !== "parameter" || !symbol.startsWith(prefix)) {
+			continue;
+		}
+		const name = symbol.slice(prefix.length);
+		if (name.includes("\0")) continue;
+		// Already given by name on this line?
+		if (new RegExp(`\\b${name}[ \\t]*:`).test(inputs.linePrefix)) continue;
+		out.set(name + ":", { label: name + ":", kind: KIND.variable });
+	}
+}
+
+/** Dot keywords that are expression builtins, not statements. */
+const EXPRESSION_KEYWORDS: ReadonlySet<string> = new Set([
+	...BUILTIN_NAMES,
+	"pop",
+	"null",
+]);
 
 /**
  * Inside a `.macro` body, the macro's params are in scope. The body extent

@@ -14,10 +14,13 @@ A lone module often can't assemble standalone - a library that fills segments th
 
 ```jsonc
 {
-  // Entry modules, relative to this file.
-  "entries": ["src/main.s"],
+  // Entry modules, relative to this file. An entry is a path, or an
+  // object when the default name (the module's basename) won't do.
+  "entries": ["src/main.s", { "module": "src/dos.s", "name": "dos" }],
 }
 ```
+
+Multiple entries assemble independently and their analyses merge: navigation, rename, and unused detection are entry-invariant (same sources, same spans), while converged values are per-program - a shared module's label can land at different addresses per entry, and hover then shows each value labeled with its entry's name (`= $3D22 (adfs-boot-stub) | $20F8 (adfs-boot)`). Entry objects will grow build-context members over time (injected defines, target, CPU type).
 
 Open files not reached from any configured entry (or with no config anywhere up to the workspace folder) fall back to standalone assembly. The config is read from disk, so edits to it apply on save.
 

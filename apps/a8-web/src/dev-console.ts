@@ -40,6 +40,7 @@ import { builtinFirmware } from "virtual:firmware-library";
  * machine/cpu access, peek/poke, a disassembler, and the CPU/command traces.
  *
  *   a8.trace.cpu(true); ...reproduce...; a8.trace.dump(300)
+ *   a8.trace.cpu("compact")  // collapse tight loops (long captures)
  *   a8.peek(0x0244)        a8.disasm(a8.cpu.PC)
  */
 export function installDevConsole(host: EmulatorHost): void {
@@ -83,7 +84,9 @@ export function installDevConsole(host: EmulatorHost): void {
 		// The image-library harness (uploads/canonicalization/blob store).
 		images,
 		trace: {
-			cpu: (enabled: boolean) => host.setCpuTrace(enabled),
+			// true = every instruction; "compact" = tight loops collapse so
+			// the ring spans more control flow; false = off.
+			cpu: (mode: boolean | "compact") => host.setCpuTrace(mode),
 			commands: (enabled: boolean) => setCommandTrace(enabled),
 			clear: () => host.clearCpuTrace(),
 			// No count -> the whole capture (after a reset, the captured boot).

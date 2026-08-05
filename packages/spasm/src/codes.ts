@@ -76,6 +76,19 @@ export const Codes = {
 	ErrorMessageType: "SP3021",
 	UserError: "SP3022",
 	DidNotConverge: "SP3023",
+	PopEmpty: "SP3024",
+	PopNotAllowed: "SP3025",
+	UnpoppedValue: "SP3026",
+	SegmentNameType: "SP3027",
+	NoCurrentSegment: "SP3028",
+	BuiltinArity: "SP3029",
+	OperandValueOfRegister: "SP3030",
+	NoRegisterOperand: "SP3031",
+	OperandWholeOnly: "SP3032",
+	OperandValueType: "SP3033",
+	ComparisonTypeMismatch: "SP3034",
+	OperandAsData: "SP3035",
+	NullAsData: "SP3036",
 
 	// 4xxx - macros
 	MacroAlreadyDefined: "SP4001",
@@ -91,6 +104,13 @@ export const Codes = {
 	ShapedArgumentInExpression: "SP4011",
 	ArgumentMustBeIdentifier: "SP4012",
 	UndefinedInMacroBody: "SP4013",
+	DefaultParamOrder: "SP4014",
+	OutParamDefault: "SP4015",
+	PositionalAfterKeyword: "SP4016",
+	UnknownKeywordArg: "SP4017",
+	DuplicateArg: "SP4018",
+	MissingArg: "SP4019",
+	KeywordArgsOnInstruction: "SP3037",
 
 	// 5xxx - modules
 	ImportCycle: "SP5001",

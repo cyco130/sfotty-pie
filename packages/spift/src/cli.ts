@@ -5,6 +5,7 @@ import { createCommand } from "./commands/create.ts";
 import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
 import { extractCommand } from "./commands/extract.ts";
 import { lsCommand } from "./commands/ls.ts";
+import { mkfsCommand } from "./commands/mkfs.ts";
 import { rmCommand } from "./commands/rm.ts";
 import { writeBootSectorsCommand } from "./commands/write-boot-sectors.ts";
 
@@ -17,6 +18,14 @@ commands:
     the file name when omitted; supported types: atr. Defaults to --sd
     (720 x 128-byte sectors); --ed is 1040 x 128 and --dd is 720 x 256.
     Refuses to overwrite an existing file unless --force (-f) is given.
+
+  mkfs IMAGE_FILE [--fs atari/VARIANT | --variant VARIANT]
+                  [--boot-sectors FILE]
+    Write an empty filesystem onto an image. Variants: dos10, dos20s,
+    dos20d, dos25, mydos. Without one, a standard single-density image
+    gets dos20s, enhanced density is refused as ambiguous (dos25 and
+    mydos both fit), and anything else gets mydos. --boot-sectors fills
+    the boot area from a file sized exactly for the variant.
 
   ls IMAGE_FILE [SPEC] [--fs atari|sparta] [-l]
     List the root directory of the filesystem on an image. SPEC filters
@@ -61,6 +70,9 @@ async function main(): Promise<void> {
 	switch (command) {
 		case "create":
 			await createCommand(args);
+			break;
+		case "mkfs":
+			await mkfsCommand(args);
 			break;
 		case "ls":
 			await lsCommand(args);

@@ -26,9 +26,9 @@ export interface AtariDosFilesystem extends Filesystem {
 	/**
 	 * Writes a file into the root directory, always in DOS 2 chain format.
 	 * The name is a decoded display name ("game.com") whose fields must fit
-	 * 8.3 in [A-Z0-9_@] (see toAtariName). Throws on unsupported variants
-	 * (DOS 1.0, large MyDOS), a full directory or disk, or an existing name
-	 * unless overwrite is set. Mutations stay in the medium's memory.
+	 * 8.3 in [A-Z0-9_@] (see toAtariName). Throws on DOS 1.0 disks (a DOS 2
+	 * chain would corrupt them), a full directory or disk, or an existing
+	 * name unless overwrite is set. Mutations stay in the medium's memory.
 	 * Returns the traversal diagnostics from freeing an overwritten file's
 	 * chain - non-empty means that chain was damaged (loop, bad link) and
 	 * only its reachable sectors were freed.
@@ -41,8 +41,8 @@ export interface AtariDosFilesystem extends Filesystem {
 	/**
 	 * Deletes a file: frees its chain in the bitmap and sets the deleted
 	 * flag (the rest of the entry stays, like the DOSes leave it). Throws
-	 * when the name is missing, a directory, or locked (unless force), and
-	 * on large MyDOS disks. Mutations stay in the medium's memory. Returns
+	 * when the name is missing, a directory, or locked (unless force).
+	 * Mutations stay in the medium's memory. Returns
 	 * the traversal diagnostics from freeing the chain - non-empty means it
 	 * was damaged and only its reachable sectors were freed.
 	 */
@@ -52,6 +52,17 @@ export interface AtariDosFilesystem extends Filesystem {
 const VTOC_SECTOR = 360;
 const DIRECTORY_FIRST = 361;
 const DIRECTORY_LAST = 368;
+// The VTOC's bitmap (bytes 10..127) addresses sectors 0..943 at either
+// density. MyDOS covers bigger disks with extra whole-sector bitmap pages
+// allocated backwards from sector 359, each holding sectorSize * 8 bits and
+// continuing where the main bitmap stops. Verified against a MyDOS 4.53
+// enhanced-density format: code 3, one extra page at 359 covering
+// 944..1967, sector 358 left free for data - so pages are single sectors at
+// both densities, and the VTOC code is the VTOC sector count plus one.
+const MAIN_VTOC_LIMIT = 943;
+const EXTRA_VTOC_FIRST = 359;
+const DOS25_VTOC2_SECTOR = 1024;
+const DOS25_LIMIT = 1023;
 const ENTRY_SIZE = 16;
 // Double-density disks only use the first half of each 256-byte directory
 // sector (BiboDOS and TopDOS excepted), so it's 8 entries at every density.
@@ -105,19 +116,57 @@ export function detectAtariDos(
 			return medium.sectorSize === 256 ? "dos20d" : "dos20s";
 		}
 	}
-	// MyDOS encodes the VTOC sector count in the code byte; check it against
-	// what MyDOS would use for this geometry (2, plus one per extra VTOC page
-	// managing 2048 sectors past the first 943).
+	// MyDOS encodes its VTOC sector count in the code byte; check it against
+	// what MyDOS would use for this geometry.
 	if (code >= 2 && total <= medium.sectorCount) {
-		const extraPages = Math.max(
-			0,
-			Math.ceil((medium.sectorCount - 943) / 2048),
-		);
-		if (code === 2 + extraPages) {
+		if (code === 2 + extraVtocPages(medium.sectorSize, medium.sectorCount)) {
 			return "mydos";
 		}
 	}
 	return undefined;
+}
+
+/** Extra MyDOS bitmap pages a geometry needs past the main VTOC. */
+function extraVtocPages(sectorSize: number, sectorCount: number): number {
+	if (sectorCount <= MAIN_VTOC_LIMIT) {
+		return 0;
+	}
+	return Math.ceil((sectorCount - MAIN_VTOC_LIMIT) / (sectorSize * 8));
+}
+
+interface VtocLayout {
+	/** Extra bitmap pages at 359, 358, ... (MyDOS only). */
+	extraPages: number;
+	/** Highest sector the bitmap can address. */
+	limit: number;
+	/** The VTOC code byte. */
+	code: number;
+	hasVtoc2: boolean;
+}
+
+function vtocLayout(
+	variant: AtariDosVariant,
+	sectorSize: number,
+	sectorCount: number,
+): VtocLayout {
+	if (variant === "dos25") {
+		return { extraPages: 0, limit: DOS25_LIMIT, code: 2, hasVtoc2: true };
+	}
+	if (variant !== "mydos") {
+		return {
+			extraPages: 0,
+			limit: MAIN_VTOC_LIMIT,
+			code: variant === "dos10" ? 1 : 2,
+			hasVtoc2: false,
+		};
+	}
+	const extraPages = extraVtocPages(sectorSize, sectorCount);
+	return {
+		extraPages,
+		limit: MAIN_VTOC_LIMIT + extraPages * sectorSize * 8,
+		code: 2 + extraPages,
+		hasVtoc2: false,
+	};
 }
 
 interface RawEntry {
@@ -311,19 +360,23 @@ function rawEntryFromSlot(entry: Uint8Array, index: number): RawEntry {
 }
 
 interface VtocAccounting {
-	readonly hasVtoc2: boolean;
+	readonly layout: VtocLayout;
 	isFree(sector: number): boolean;
 	mark(sector: number, free: boolean): void;
 	flush(writeSector: NonNullable<SectorMedium["writeSector"]>): void;
 }
 
 /**
- * The usage bitmap plus free counters, held in memory until flush. On DOS
- * 2.5 the main VTOC is authoritative for the shared region (sectors
+ * The usage bitmap plus free counters, held in memory until flush.
+ *
+ * On DOS 2.5 the main VTOC is authoritative for the shared region (sectors
  * 48..719) - DOS 2.0 writes to ED disks without updating VTOC2, so its
  * shared copy can be stale; flush repairs it silently. The main free count
  * covers sectors below 720 only; VTOC2's own count (bytes 122-123) covers
  * 720..1023 (verified against wild ED disks).
+ *
+ * MyDOS instead keeps one count for the whole disk in the main VTOC and
+ * spills the bitmap into extra sectors below 360 (see MAIN_VTOC_LIMIT).
  */
 function vtocAccounting(
 	medium: SectorMedium,
@@ -333,19 +386,40 @@ function vtocAccounting(
 	if (vtoc === null) {
 		throw new Error("the VTOC is outside the image");
 	}
-	const vtoc2 = variant === "dos25" ? medium.readSector(1024) : null;
+	const layout = vtocLayout(variant, medium.sectorSize, medium.sectorCount);
+	const vtoc2 = layout.hasVtoc2 ? medium.readSector(DOS25_VTOC2_SECTOR) : null;
+	const extras: Uint8Array[] = [];
+	for (let page = 0; page < layout.extraPages; page++) {
+		const sector = medium.readSector(EXTRA_VTOC_FIRST - page);
+		if (sector === null) {
+			throw new Error(
+				`VTOC page at sector ${EXTRA_VTOC_FIRST - page} is outside the image`,
+			);
+		}
+		extras.push(sector);
+	}
+	const bitsPerPage = medium.sectorSize * 8;
 	let lowDelta = 0;
 	let highDelta = 0;
 	const bitPlace = (
 		sector: number,
 	): [buffer: Uint8Array, at: number, mask: number] | null => {
+		if (sector > MAIN_VTOC_LIMIT && extras.length > 0) {
+			const offset = sector - MAIN_VTOC_LIMIT - 1;
+			const page = extras[Math.floor(offset / bitsPerPage)];
+			if (page === undefined) {
+				return null;
+			}
+			const bit = offset % bitsPerPage;
+			return [page, bit >> 3, 0x80 >> (bit & 7)];
+		}
 		if (sector < 720 || vtoc2 === null) {
-			if (sector > 943 || 10 + (sector >> 3) >= vtoc.length) {
+			if (sector > MAIN_VTOC_LIMIT || 10 + (sector >> 3) >= vtoc.length) {
 				return null;
 			}
 			return [vtoc, 10 + (sector >> 3), 0x80 >> (sector & 7)];
 		}
-		if (sector > 1023) {
+		if (sector > DOS25_LIMIT) {
 			return null;
 		}
 		const offset = sector - 720;
@@ -356,7 +430,7 @@ function vtocAccounting(
 		return place !== null && ((place[0][place[1]] ?? 0) & place[2]) !== 0;
 	};
 	return {
-		hasVtoc2: vtoc2 !== null,
+		layout,
 		isFree,
 		mark(sector: number, free: boolean): void {
 			const place = bitPlace(sector);
@@ -366,7 +440,9 @@ function vtocAccounting(
 			const [buffer, at, mask] = place;
 			buffer[at] = (buffer[at] ?? 0) ^ mask;
 			const delta = free ? 1 : -1;
-			if (sector < 720) {
+			// Only DOS 2.5 splits its accounting; everyone else counts the
+			// whole disk in the main VTOC.
+			if (sector < 720 || vtoc2 === null) {
 				lowDelta += delta;
 			} else {
 				highDelta += delta;
@@ -385,10 +461,17 @@ function vtocAccounting(
 					((vtoc2[122] ?? 0) | ((vtoc2[123] ?? 0) << 8)) + highDelta;
 				vtoc2[122] = highFree & 0xff;
 				vtoc2[123] = (highFree >> 8) & 0xff;
-				if (!writeSector(1024, vtoc2)) {
+				if (!writeSector(DOS25_VTOC2_SECTOR, vtoc2)) {
 					throw new Error("VTOC2 write failed");
 				}
 			}
+			extras.forEach((page, index) => {
+				if (!writeSector(EXTRA_VTOC_FIRST - index, page)) {
+					throw new Error(
+						`VTOC page at sector ${EXTRA_VTOC_FIRST - index}: write failed`,
+					);
+				}
+			});
 		},
 	};
 }
@@ -408,11 +491,6 @@ function writeAtariFile(
 		// OneDOS precedent: DOS 1.0 files are read, never created - a DOS 2
 		// format chain would corrupt the disk for DOS 1.0 itself.
 		throw new Error("adding files to DOS 1.0 disks is not supported");
-	}
-	if (variant === "mydos") {
-		// Detected mydos implies a >943-sector disk (smaller MyDOS disks
-		// detect as DOS 2.0), which needs extra VTOC pages and full links.
-		throw new Error("adding files to large MyDOS disks is not yet supported");
 	}
 	const native = encodeAtariName(name);
 
@@ -471,14 +549,13 @@ function writeAtariFile(
 	// of the bitmap.
 	const capacity = medium.sectorSize - 3;
 	const needed = Math.max(1, Math.ceil(fileBytes.length / capacity));
-	const maxSector = Math.min(
-		medium.sectorCount,
-		accounting.hasVtoc2 ? 1023 : 943,
-	);
+	const layout = accounting.layout;
+	const maxSector = Math.min(medium.sectorCount, layout.limit);
+	const firstExtraVtoc = EXTRA_VTOC_FIRST - layout.extraPages + 1;
 	const allocated: number[] = [];
 	for (let s = 4; s <= maxSector && allocated.length < needed; s++) {
-		if (s >= VTOC_SECTOR && s <= DIRECTORY_LAST) {
-			continue;
+		if (s >= firstExtraVtoc && s <= DIRECTORY_LAST) {
+			continue; // extra VTOC pages, the VTOC, and the directory
 		}
 		if (isFree(s)) {
 			allocated.push(s);
@@ -494,7 +571,11 @@ function writeAtariFile(
 		mark(s, false);
 	}
 
-	// The chain, always in DOS 2 format (never DOS 1).
+	// The chain, always in DOS 2 format (never DOS 1). Sector numbers past
+	// 1023 do not fit the 10-bit link field, so those files use the whole
+	// two bytes as MyDOS does and carry the no-file-number flag that tells
+	// every reader (ours included) to skip the cross-check.
+	const fullLinks = allocated.some((sector) => sector > 1023);
 	for (let i = 0; i < allocated.length; i++) {
 		const sector = allocated[i] ?? 0;
 		const next = allocated[i + 1] ?? 0;
@@ -504,7 +585,9 @@ function writeAtariFile(
 		);
 		const buffer = new Uint8Array(medium.sectorSize);
 		buffer.set(chunk);
-		buffer[capacity] = (slot << 2) | ((next >> 8) & 0x03);
+		buffer[capacity] = fullLinks
+			? (next >> 8) & 0xff
+			: (slot << 2) | ((next >> 8) & 0x03);
 		buffer[capacity + 1] = next & 0xff;
 		buffer[capacity + 2] = chunk.length;
 		if (!writeSector(sector, buffer)) {
@@ -515,9 +598,11 @@ function writeAtariFile(
 	// The directory entry. A file reaching past sector 719 on DOS 2.5 gets
 	// the extended marking (output bit, in-use clear) that hides it from
 	// DOS 2.0.
-	const extended = accounting.hasVtoc2 && allocated.some((s) => s > 719);
+	const extended = layout.hasVtoc2 && allocated.some((s) => s > 719);
 	const entry = slotIn(slot);
-	entry[0] = extended ? FLAG_OUTPUT | FLAG_DOS2 : FLAG_IN_USE | FLAG_DOS2;
+	entry[0] =
+		(extended ? FLAG_OUTPUT | FLAG_DOS2 : FLAG_IN_USE | FLAG_DOS2) |
+		(fullLinks ? FLAG_NO_LINK : 0);
 	entry[1] = allocated.length & 0xff;
 	entry[2] = allocated.length >> 8;
 	entry[3] = (allocated[0] ?? 0) & 0xff;
@@ -542,13 +627,6 @@ function deleteAtariFile(
 	const writeSector = medium.writeSector?.bind(medium);
 	if (writeSector === undefined) {
 		throw new Error("the medium is read-only");
-	}
-	if (variant === "mydos") {
-		// Freeing sectors past 943 needs the extra VTOC pages this driver
-		// doesn't handle yet; refuse rather than leak them. (DOS 1.0 is fine:
-		// deletion only touches the directory flag and the shared bitmap
-		// format, and we can walk DOS 1 chains.)
-		throw new Error("deleting files on large MyDOS disks is not yet supported");
 	}
 	const native = encodeAtariName(name);
 
@@ -595,6 +673,271 @@ function deleteAtariFile(
 	directory.flushSlot(writeSector, found);
 	accounting.flush(writeSector);
 	return walk.contents.diagnostics;
+}
+
+/**
+ * Boot sectors each variant reserves - one for DOS 1.0, three for the rest
+ * (verified against disks formatted by the real DOSes).
+ */
+export const ATARI_DOS_BOOT_SECTORS: Record<AtariDosVariant, number> = {
+	dos10: 1,
+	dos20s: 3,
+	dos20d: 3,
+	dos25: 3,
+	mydos: 3,
+};
+
+const VARIANT_LABELS: Record<AtariDosVariant, string> = {
+	dos10: "DOS 1.0",
+	dos20s: "DOS 2.0S",
+	dos20d: "DOS 2.0D",
+	dos25: "DOS 2.5",
+	mydos: "MyDOS",
+};
+
+/**
+ * The variant to format a geometry with when the caller doesn't say:
+ * DOS 2.0S for a standard single-density disk, MyDOS for anything else,
+ * and undefined for enhanced density - DOS 2.5 and MyDOS are equally
+ * plausible there, so the caller has to choose.
+ */
+export function defaultAtariDosVariant(
+	sectorSize: number,
+	sectorCount: number,
+): AtariDosVariant | undefined {
+	if (sectorSize === 128 && sectorCount === 720) {
+		return "dos20s";
+	}
+	if (sectorSize === 128 && sectorCount === 1040) {
+		return undefined;
+	}
+	return "mydos";
+}
+
+/**
+ * Why the variant cannot be put on this geometry, or undefined when it
+ * can.
+ */
+export function checkAtariDosGeometry(
+	variant: AtariDosVariant,
+	sectorSize: number,
+	sectorCount: number,
+): string | undefined {
+	const label = VARIANT_LABELS[variant];
+	if (sectorSize !== 128 && sectorSize !== 256) {
+		return `the Atari DOS filesystems need 128- or 256-byte sectors, not ${sectorSize}`;
+	}
+	if (sectorSize === 256 && (variant === "dos10" || variant === "dos25")) {
+		return `${label} only supports 128-byte sectors`;
+	}
+	if (variant === "dos25") {
+		if (sectorCount < 1024) {
+			return (
+				`${label} needs at least 1024 sectors ` +
+				`(its second VTOC lives at sector 1024), image has ${sectorCount}`
+			);
+		}
+	} else if (sectorCount <= DIRECTORY_LAST) {
+		return (
+			`${label} needs more than ${DIRECTORY_LAST} sectors ` +
+			`(VTOC at ${VTOC_SECTOR}, directory at ` +
+			`${DIRECTORY_FIRST}-${DIRECTORY_LAST}), image has ${sectorCount}`
+		);
+	}
+	// MyDOS's extra bitmap pages always fit: the largest ATR (65535 sectors)
+	// needs 64 of them at 128 bytes per sector, ending at sector 296 - well
+	// clear of the boot area.
+	//
+	// Sectors past a variant's reach are not an error either; the filesystem
+	// leaves them unused, which is what the formatter reports.
+	return undefined;
+}
+
+export interface FormatAtariDosOptions {
+	/**
+	 * Boot sector contents: exactly the variant's boot area (1 sector for
+	 * DOS 1.0, 3 for the rest, 128 bytes each). Left zeroed when absent.
+	 */
+	bootSectors?: Uint8Array;
+}
+
+export interface FormatAtariDosResult {
+	variant: AtariDosVariant;
+	/** Data sectors the filesystem can hold, as the VTOC states it. */
+	totalSectors: number;
+	freeSectors: number;
+	/** Sectors the variant cannot address, so the filesystem wastes them. */
+	unusableSectors: number;
+}
+
+/**
+ * Writes an empty filesystem onto a medium: the VTOC (plus DOS 2.5's
+ * second VTOC), an empty directory, and optionally boot sectors. Existing
+ * contents are overwritten. Throws when the variant does not fit the
+ * geometry (see checkAtariDosGeometry) or the boot sectors are the wrong
+ * shape. Mutations stay in the medium's memory.
+ */
+export function formatAtariDos(
+	medium: SectorMedium,
+	variant: AtariDosVariant,
+	options?: FormatAtariDosOptions,
+): FormatAtariDosResult {
+	const writeSector = medium.writeSector?.bind(medium);
+	if (writeSector === undefined) {
+		throw new Error("the medium is read-only");
+	}
+	const problem = checkAtariDosGeometry(
+		variant,
+		medium.sectorSize,
+		medium.sectorCount,
+	);
+	if (problem !== undefined) {
+		throw new Error(problem);
+	}
+
+	const bootCount = ATARI_DOS_BOOT_SECTORS[variant];
+	const boot = options?.bootSectors;
+	if (boot !== undefined) {
+		if (boot.length !== bootCount * 128) {
+			throw new Error(
+				`${VARIANT_LABELS[variant]} reserves ${bootCount} boot ` +
+					`sector(s) (${bootCount * 128} bytes), the file has ` +
+					`${boot.length}; write-boot-sectors handles other shapes`,
+			);
+		}
+		if (boot[1] !== bootCount) {
+			throw new Error(
+				`the boot record claims ${boot[1] ?? 0} boot sector(s) but ` +
+					`${VARIANT_LABELS[variant]} reserves ${bootCount}; ` +
+					`write-boot-sectors handles other shapes`,
+			);
+		}
+	}
+
+	const layout = vtocLayout(variant, medium.sectorSize, medium.sectorCount);
+	const limit = Math.min(medium.sectorCount, layout.limit);
+	const hasVtoc2 = layout.hasVtoc2;
+	// The extra MyDOS bitmap pages sit just below the VTOC and are not data.
+	const firstExtraVtoc = EXTRA_VTOC_FIRST - layout.extraPages + 1;
+	// Sector 720 is unusable to every DOS 2 family member - only MyDOS
+	// reclaims it (both verified against real formats).
+	const wastes720 = variant !== "mydos";
+	const usable = (sector: number): boolean => {
+		if (sector < 1 || sector > limit) {
+			return false;
+		}
+		if (sector <= bootCount) {
+			return false;
+		}
+		if (sector >= firstExtraVtoc && sector <= DIRECTORY_LAST) {
+			return false;
+		}
+		if (sector === 720 && wastes720) {
+			return false;
+		}
+		return true;
+	};
+
+	const vtoc = new Uint8Array(medium.sectorSize);
+	// The main bitmap covers sectors 0..943 in bytes 10..127; on DOS 2.5
+	// everything from 720 up is left "used" here and tracked in the VTOC2.
+	let freeLow = 0;
+	for (let sector = 0; sector <= MAIN_VTOC_LIMIT; sector++) {
+		const free = usable(sector) && !(hasVtoc2 && sector >= 720);
+		if (free) {
+			vtoc[10 + (sector >> 3)] =
+				(vtoc[10 + (sector >> 3)] ?? 0) | (0x80 >> (sector & 7));
+			if (sector < 720) {
+				freeLow++;
+			}
+		}
+	}
+	// MyDOS's freed sector 720 counts in the main VTOC's own tally.
+	let freeHigh = 0;
+	if (!hasVtoc2) {
+		for (let sector = 720; sector <= MAIN_VTOC_LIMIT; sector++) {
+			if (usable(sector)) {
+				freeHigh++;
+			}
+		}
+	}
+
+	const vtoc2 = hasVtoc2 ? new Uint8Array(medium.sectorSize) : null;
+	if (vtoc2 !== null) {
+		// Bytes 0..83 mirror the main VTOC's sectors 48..719; 84..121 map
+		// 720..1023; 122..123 count the free sectors above 719.
+		vtoc2.set(vtoc.subarray(16, 100), 0);
+		for (let sector = 720; sector <= DOS25_LIMIT; sector++) {
+			if (usable(sector)) {
+				const offset = sector - 720;
+				vtoc2[84 + (offset >> 3)] =
+					(vtoc2[84 + (offset >> 3)] ?? 0) | (0x80 >> (offset & 7));
+				freeHigh++;
+			}
+		}
+		vtoc2[122] = freeHigh & 0xff;
+		vtoc2[123] = (freeHigh >> 8) & 0xff;
+	}
+
+	// MyDOS's extra bitmap pages carry on from where the main one stops,
+	// one whole sector each, allocated backwards from 359.
+	const bitsPerPage = medium.sectorSize * 8;
+	const extras: Uint8Array[] = [];
+	for (let page = 0; page < layout.extraPages; page++) {
+		const buffer = new Uint8Array(medium.sectorSize);
+		for (let bit = 0; bit < bitsPerPage; bit++) {
+			const sector = MAIN_VTOC_LIMIT + 1 + page * bitsPerPage + bit;
+			if (usable(sector)) {
+				buffer[bit >> 3] = (buffer[bit >> 3] ?? 0) | (0x80 >> (bit & 7));
+				freeHigh++;
+			}
+		}
+		extras.push(buffer);
+	}
+
+	const total = freeLow + freeHigh;
+	const mainFree = hasVtoc2 ? freeLow : total;
+	vtoc[0] = layout.code;
+	vtoc[1] = total & 0xff;
+	vtoc[2] = (total >> 8) & 0xff;
+	vtoc[3] = mainFree & 0xff;
+	vtoc[4] = (mainFree >> 8) & 0xff;
+
+	// Boot sectors, then the empty directory, then the accounting.
+	for (let sector = 1; sector <= bootCount; sector++) {
+		const buffer = new Uint8Array(medium.readSector(sector)?.length ?? 128);
+		if (boot !== undefined) {
+			buffer.set(boot.subarray((sector - 1) * 128, sector * 128));
+		}
+		if (!writeSector(sector, buffer)) {
+			throw new Error(`sector ${sector}: write failed`);
+		}
+	}
+	for (let sector = DIRECTORY_FIRST; sector <= DIRECTORY_LAST; sector++) {
+		if (!writeSector(sector, new Uint8Array(medium.sectorSize))) {
+			throw new Error(`sector ${sector}: write failed`);
+		}
+	}
+	if (!writeSector(VTOC_SECTOR, vtoc)) {
+		throw new Error("VTOC write failed");
+	}
+	if (vtoc2 !== null && !writeSector(DOS25_VTOC2_SECTOR, vtoc2)) {
+		throw new Error("VTOC2 write failed");
+	}
+	extras.forEach((page, index) => {
+		if (!writeSector(EXTRA_VTOC_FIRST - index, page)) {
+			throw new Error(
+				`VTOC page at sector ${EXTRA_VTOC_FIRST - index}: write failed`,
+			);
+		}
+	});
+
+	return {
+		variant,
+		totalSectors: total,
+		freeSectors: total,
+		unusableSectors: Math.max(0, medium.sectorCount - limit),
+	};
 }
 
 function encodeAtariName(display: string): { name: string; ext: string } {

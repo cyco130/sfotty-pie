@@ -479,21 +479,11 @@ test("writeFile reports full disks and directories", () => {
 	).toThrow(/directory is full/);
 });
 
-test("writeFile refuses DOS 1.0 and large MyDOS disks", () => {
+test("writeFile refuses DOS 1.0 disks", () => {
 	const dos1 = makeDisk({ code: 1, total: 709, formatted: true });
 	expect(() =>
 		openAtariDos(openAtr(dos1)).writeFile("a.dat", new Uint8Array(1)),
 	).toThrow(/DOS 1.0/);
-	const mydos = makeDisk({
-		sectorSize: 256,
-		sectorCount: 1440,
-		code: 3,
-		total: 1440,
-		formatted: true,
-	});
-	expect(() =>
-		openAtariDos(openAtr(mydos)).writeFile("a.dat", new Uint8Array(1)),
-	).toThrow(/MyDOS/);
 });
 
 test("writeFile marks DOS 2.5 files reaching past sector 719", () => {
@@ -571,7 +561,7 @@ test("deleteFile restores both DOS 2.5 counters for extended files", () => {
 	expect((vtoc2?.[122] ?? 0) | ((vtoc2?.[123] ?? 0) << 8)).toBe(304);
 });
 
-test("deleteFile works on DOS 1.0 disks but not large MyDOS", () => {
+test("deleteFile works on DOS 1.0 disks", () => {
 	const dos1 = makeDisk({
 		code: 1,
 		total: 709,
@@ -583,17 +573,6 @@ test("deleteFile works on DOS 1.0 disks but not large MyDOS", () => {
 	expect(fs.variant).toBe("dos10");
 	fs.deleteFile("old.dat");
 	expect([...fs.entries()]).toHaveLength(0);
-	const mydos = makeDisk({
-		sectorSize: 256,
-		sectorCount: 1440,
-		code: 3,
-		total: 1440,
-		formatted: true,
-		entries: [{ flags: 0x42, name: "A.DAT" }],
-	});
-	expect(() => openAtariDos(openAtr(mydos)).deleteFile("a.dat")).toThrow(
-		/MyDOS/,
-	);
 });
 
 test("delete and overwrite report damaged chains and free what they can", () => {

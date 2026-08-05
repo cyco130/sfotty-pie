@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { detectAtariDos, openAtariDos } from "./atari-dos.ts";
+import { detectAtariDos, openAtariDos, toAtariName } from "./atari-dos.ts";
 import { ATR_HEADER_SIZE, createBlankAtr, openAtr } from "./atr.ts";
 import { detectFilesystem } from "./detect.ts";
 
@@ -17,6 +17,8 @@ interface FixtureOptions {
 	total?: number;
 	free?: number;
 	entries?: FixtureEntry[];
+	/** Build real usage bitmaps (and VTOC2 on ED) like a fresh format. */
+	formatted?: boolean;
 }
 
 function makeDisk(options: FixtureOptions = {}): Uint8Array {
@@ -40,6 +42,32 @@ function makeDisk(options: FixtureOptions = {}): Uint8Array {
 	bytes[vtoc + 2] = total >> 8;
 	bytes[vtoc + 3] = free & 0xff;
 	bytes[vtoc + 4] = free >> 8;
+	if (options.formatted) {
+		let lowFree = 0;
+		for (let s = 4; s <= Math.min(719, sectorCount); s++) {
+			if (s >= 360 && s <= 368) {
+				continue;
+			}
+			bytes[vtoc + 10 + (s >> 3)] =
+				(bytes[vtoc + 10 + (s >> 3)] ?? 0) | (0x80 >> (s & 7));
+			lowFree++;
+		}
+		bytes[vtoc + 3] = lowFree & 0xff;
+		bytes[vtoc + 4] = lowFree >> 8;
+		if (sectorCount >= 1024) {
+			const vtoc2 = sectorOffset(1024);
+			for (let i = 0; i < 84; i++) {
+				bytes[vtoc2 + i] = bytes[vtoc + 16 + i] ?? 0;
+			}
+			for (let s = 720; s <= 1023; s++) {
+				const off = s - 720;
+				bytes[vtoc2 + 84 + (off >> 3)] =
+					(bytes[vtoc2 + 84 + (off >> 3)] ?? 0) | (0x80 >> (off & 7));
+			}
+			bytes[vtoc2 + 122] = 304 & 0xff;
+			bytes[vtoc2 + 123] = 304 >> 8;
+		}
+	}
 	entries.forEach((entry, index) => {
 		const at = sectorOffset(361 + Math.floor(index / 8)) + (index % 8) * 16;
 		bytes[at] = entry.flags;
@@ -384,6 +412,121 @@ test("fills all eight directory sectors, double density included", () => {
 	});
 	expect(list(disk)).toHaveLength(64);
 	expect(list(disk).at(-1)?.name).toBe("f63.dat");
+});
+
+test("toAtariName mangles host names into the native policy", () => {
+	expect(toAtariName("game.xex")).toBe("game.xex");
+	expect(toAtariName("Some File!.data")).toBe("some_fil.dat");
+	expect(toAtariName("a.tar.gz")).toBe("a_tar.gz");
+	expect(toAtariName(".profile")).toBe("profile");
+	expect(toAtariName("ok@_1.x")).toBe("ok@_1.x");
+	expect(toAtariName("café.txt")).toBe("caf_.txt");
+});
+
+function freeCount(bytes: Uint8Array): number {
+	const vtoc = openAtr(bytes).readSector(360);
+	return (vtoc?.[3] ?? 0) | ((vtoc?.[4] ?? 0) << 8);
+}
+
+test("writeFile round-trips through readFile", () => {
+	const disk = makeDisk({ formatted: true });
+	const fs = openAtariDos(openAtr(disk));
+	const payload = Uint8Array.from({ length: 300 }, (_, i) => i & 0xff);
+	fs.writeFile("test.dat", payload);
+	const back = fs.readFile("test.dat");
+	expect(back?.diagnostics).toEqual([]);
+	expect([...(back?.bytes ?? [])]).toEqual([...payload]);
+	const entry = [...fs.entries("test.dat")][0];
+	expect(entry).toMatchObject({ sectors: 3, attributes: [] });
+	expect(freeCount(disk)).toBe(707 - 3);
+});
+
+test("writeFile gives zero-length files a sector", () => {
+	const disk = makeDisk({ formatted: true });
+	const fs = openAtariDos(openAtr(disk));
+	fs.writeFile("empty.dat", new Uint8Array(0));
+	expect([...fs.entries("empty.dat")][0]?.sectors).toBe(1);
+	expect(fs.readFile("empty.dat")?.bytes).toHaveLength(0);
+	expect(freeCount(disk)).toBe(707 - 1);
+});
+
+test("writeFile refuses an existing name unless overwriting", () => {
+	const disk = makeDisk({ formatted: true });
+	const fs = openAtariDos(openAtr(disk));
+	fs.writeFile("a.dat", new Uint8Array(300));
+	expect(() => fs.writeFile("a.dat", new Uint8Array(1))).toThrow(
+		/already exists/,
+	);
+	fs.writeFile("a.dat", new Uint8Array(1), { overwrite: true });
+	expect(fs.readFile("a.dat")?.bytes).toHaveLength(1);
+	expect(freeCount(disk)).toBe(707 - 1); // the old three sectors came back
+	expect([...fs.entries()]).toHaveLength(1);
+});
+
+test("writeFile reports full disks and directories", () => {
+	const disk = makeDisk({ formatted: true });
+	const fs = openAtariDos(openAtr(disk));
+	expect(() => fs.writeFile("big.dat", new Uint8Array(708 * 125))).toThrow(
+		/not enough free space/,
+	);
+	const names = Array.from({ length: 64 }, (_, i) => `F${i}.DAT`);
+	const packed = makeDisk({
+		formatted: true,
+		entries: names.map((name) => ({ flags: 0x42, name })),
+	});
+	expect(() =>
+		openAtariDos(openAtr(packed)).writeFile("one.mor", new Uint8Array(1)),
+	).toThrow(/directory is full/);
+});
+
+test("writeFile refuses DOS 1.0 and large MyDOS disks", () => {
+	const dos1 = makeDisk({ code: 1, total: 709, formatted: true });
+	expect(() =>
+		openAtariDos(openAtr(dos1)).writeFile("a.dat", new Uint8Array(1)),
+	).toThrow(/DOS 1.0/);
+	const mydos = makeDisk({
+		sectorSize: 256,
+		sectorCount: 1440,
+		code: 3,
+		total: 1440,
+		formatted: true,
+	});
+	expect(() =>
+		openAtariDos(openAtr(mydos)).writeFile("a.dat", new Uint8Array(1)),
+	).toThrow(/MyDOS/);
+});
+
+test("writeFile marks DOS 2.5 files reaching past sector 719", () => {
+	const disk = makeDisk({ sectorCount: 1040, total: 1010, formatted: true });
+	const fs = openAtariDos(openAtr(disk));
+	expect(fs.variant).toBe("dos25");
+	const payload = Uint8Array.from({ length: 708 * 125 }, (_, i) => i & 0xff);
+	fs.writeFile("big.dat", payload);
+	const entry = [...fs.entries("big.dat")][0];
+	expect(entry?.sectors).toBe(708);
+	expect(entry?.attributes).toContain("AtariDos25");
+	const back = fs.readFile("big.dat");
+	expect(back?.diagnostics).toEqual([]);
+	expect(back?.bytes).toHaveLength(708 * 125);
+	const vtoc2 = openAtr(disk).readSector(1024);
+	expect((vtoc2?.[122] ?? 0) | ((vtoc2?.[123] ?? 0) << 8)).toBe(304 - 1);
+	expect(freeCount(disk)).toBe(0);
+});
+
+test("writeFile silently repairs the stale VTOC2 shared region", () => {
+	const disk = makeDisk({ sectorCount: 1040, total: 1010, formatted: true });
+	// Simulate DOS 2.0 having written to the disk: VTOC2's copy of the
+	// shared bitmap goes stale (here: zeroed).
+	const vtoc2At = ATR_HEADER_SIZE + 1023 * 128;
+	disk.fill(0, vtoc2At, vtoc2At + 84);
+	const fs = openAtariDos(openAtr(disk));
+	fs.writeFile("a.dat", new Uint8Array(10));
+	const image = openAtr(disk);
+	const vtoc = image.readSector(360);
+	const vtoc2 = image.readSector(1024);
+	expect([...(vtoc2?.subarray(0, 84) ?? [])]).toEqual([
+		...(vtoc?.subarray(16, 100) ?? []),
+	]);
 });
 
 test("specs use native wildcard semantics", () => {

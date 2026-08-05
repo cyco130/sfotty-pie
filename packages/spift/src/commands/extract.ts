@@ -64,7 +64,7 @@ export function parseExtractArgs(args: string[]): ExtractArgs {
 
 export async function extractCommand(args: string[]): Promise<void> {
 	const parsed = parseExtractArgs(args);
-	const filesystem = await openImageFilesystem(parsed.image, parsed.fs);
+	const { filesystem } = await openImageFilesystem(parsed.image, parsed.fs);
 
 	const matched = [...filesystem.entries(parsed.spec)];
 	const files: DirEntry[] = [];

@@ -7,4 +7,10 @@ export interface SectorMedium {
 	readonly sectorCount: number;
 	/** 1-based; null when the sector is out of range. */
 	readSector(sector: number): Uint8Array | null;
+	/**
+	 * 1-based; data must be exactly the sector's actual length. Returns false
+	 * when the sector is out of range or the length is wrong. Absent on
+	 * read-only media.
+	 */
+	writeSector?(sector: number, data: ArrayLike<number>): boolean;
 }

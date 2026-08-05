@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { CliError, UsageError } from "./cli-error.ts";
+import { addCommand } from "./commands/add.ts";
 import { createCommand } from "./commands/create.ts";
 import { extractCommand } from "./commands/extract.ts";
 import { lsCommand } from "./commands/ls.ts";
@@ -27,6 +28,12 @@ commands:
     names are lowercased and made filesystem-safe. Refuses to overwrite
     existing files unless --force (-f) is given; damaged files extract
     what is recoverable, with warnings, and exit 1.
+
+  add IMAGE_FILE FILE... [--fs atari|sparta] [-f]
+    Add host files to the root directory of the filesystem on an image.
+    Names convert to uppercase 8.3 (letters, digits, _ and @; anything
+    else becomes _). Two sources mangling to the same name is an error;
+    overwriting a file already on the image requires --force (-f).
 `;
 
 async function main(): Promise<void> {
@@ -40,6 +47,9 @@ async function main(): Promise<void> {
 			break;
 		case "extract":
 			await extractCommand(args);
+			break;
+		case "add":
+			await addCommand(args);
 			break;
 		case undefined:
 		case "help":

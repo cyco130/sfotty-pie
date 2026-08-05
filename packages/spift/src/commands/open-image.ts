@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { openAtr } from "../atr.ts";
+import { openAtr, type AtrImage } from "../atr.ts";
 import {
 	openAtariDos,
 	type AtariDosFilesystem,
@@ -7,6 +7,11 @@ import {
 } from "../atari-dos.ts";
 import { detectFilesystem } from "../detect.ts";
 import { CliError } from "../cli-error.ts";
+
+export interface OpenedImage {
+	filesystem: AtariDosFilesystem;
+	medium: AtrImage;
+}
 
 /**
  * Shared front half of the filesystem commands: load the image, open the
@@ -16,7 +21,7 @@ import { CliError } from "../cli-error.ts";
 export async function openImageFilesystem(
 	image: string,
 	fs: "atari" | "sparta" | undefined,
-): Promise<AtariDosFilesystem> {
+): Promise<OpenedImage> {
 	let bytes: Uint8Array;
 	try {
 		bytes = await readFile(image);
@@ -54,5 +59,5 @@ export async function openImageFilesystem(
 		variant = detected.variant;
 	}
 
-	return openAtariDos(medium, variant);
+	return { filesystem: openAtariDos(medium, variant), medium };
 }

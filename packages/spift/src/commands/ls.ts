@@ -52,7 +52,7 @@ export function parseLsArgs(args: string[]): LsArgs {
 
 export async function lsCommand(args: string[]): Promise<void> {
 	const parsed = parseLsArgs(args);
-	const filesystem = await openImageFilesystem(parsed.image, parsed.fs);
+	const { filesystem } = await openImageFilesystem(parsed.image, parsed.fs);
 	const entries = [...filesystem.entries(parsed.spec)];
 	const color = process.stdout.isTTY === true && !process.env.NO_COLOR;
 	process.stdout.write(

@@ -71,19 +71,30 @@ export function createBlankAtr(
 }
 
 export interface AtrImage extends SectorMedium {
-	/** The raw image bytes, header included. */
+	/**
+	 * The image bytes, header included. Sparse images (file shorter than the
+	 * header-claimed size) are materialized to full capacity on open, so this
+	 * is not always the same array that was passed in.
+	 */
 	readonly bytes: Uint8Array;
+	writeSector(sector: number, data: ArrayLike<number>): boolean;
 }
 
 /**
  * Opens an in-memory ATR image for sector access. Throws on a bad magic or
- * an unknown sector size; everything else is read leniently.
+ * an unknown sector size; everything else is read leniently. Writes mutate
+ * the returned bytes in memory - flushing them anywhere is the caller's
+ * business.
  */
-export function openAtr(bytes: Uint8Array): AtrImage {
-	if (bytes.length < ATR_HEADER_SIZE) {
+export function openAtr(inputBytes: Uint8Array): AtrImage {
+	if (inputBytes.length < ATR_HEADER_SIZE) {
 		throw new Error("not an ATR image (shorter than the 16-byte header)");
 	}
-	const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	const view = new DataView(
+		inputBytes.buffer,
+		inputBytes.byteOffset,
+		inputBytes.byteLength,
+	);
 	if (view.getUint16(0, true) !== ATR_MAGIC) {
 		throw new Error("not an ATR image (bad magic)");
 	}
@@ -93,10 +104,16 @@ export function openAtr(bytes: Uint8Array): AtrImage {
 	}
 	// The header is authoritative for capacity: sparse images (trailing empty
 	// sectors omitted, a common wild convention) read as zeroes past EOF, and
-	// content beyond the claimed size is ignored.
+	// content beyond the claimed size is ignored. Materializing sparse images
+	// up front keeps the write path trivial.
 	const paragraphs =
 		view.getUint16(2, true) + view.getUint16(6, true) * 0x10000;
 	const dataSize = paragraphs * 16;
+	let bytes = inputBytes;
+	if (bytes.length < ATR_HEADER_SIZE + dataSize) {
+		bytes = new Uint8Array(ATR_HEADER_SIZE + dataSize);
+		bytes.set(inputBytes);
+	}
 	const data = bytes.subarray(ATR_HEADER_SIZE);
 
 	// For 256-byte sectors the standard layout stores the three boot sectors
@@ -116,22 +133,21 @@ export function openAtr(bytes: Uint8Array): AtrImage {
 		sectorCount = Math.floor(dataSize / sectorSize);
 	}
 
+	const locateSector = (sector: number): [offset: number, size: number] => {
+		if (sectorSize === 256 && sector <= 3) {
+			return [(sector - 1) * 128, 128];
+		}
+		if (sectorSize === 256) {
+			return [sector4Offset + (sector - 4) * 256, 256];
+		}
+		return [(sector - 1) * sectorSize, sectorSize];
+	};
+
 	const readSector = (sector: number): Uint8Array | null => {
 		if (!Number.isInteger(sector) || sector < 1 || sector > sectorCount) {
 			return null;
 		}
-		let offset: number;
-		let size: number;
-		if (sectorSize === 256 && sector <= 3) {
-			offset = (sector - 1) * 128;
-			size = 128;
-		} else if (sectorSize === 256) {
-			offset = sector4Offset + (sector - 4) * 256;
-			size = 256;
-		} else {
-			offset = (sector - 1) * sectorSize;
-			size = sectorSize;
-		}
+		const [offset, size] = locateSector(sector);
 		const out = new Uint8Array(size);
 		out.set(
 			data.subarray(
@@ -142,5 +158,17 @@ export function openAtr(bytes: Uint8Array): AtrImage {
 		return out;
 	};
 
-	return { bytes, sectorSize, sectorCount, readSector };
+	const writeSector = (sector: number, input: ArrayLike<number>): boolean => {
+		if (!Number.isInteger(sector) || sector < 1 || sector > sectorCount) {
+			return false;
+		}
+		const [offset, size] = locateSector(sector);
+		if (input.length !== size || offset + size > data.length) {
+			return false;
+		}
+		data.set(input, offset);
+		return true;
+	};
+
+	return { bytes, sectorSize, sectorCount, readSector, writeSector };
 }

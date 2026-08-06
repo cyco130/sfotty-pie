@@ -111,6 +111,12 @@ export async function rmCommand(args: string[]): Promise<void> {
 		process.stdout.write(`removed ${entry.name}\n`);
 	}
 
+	// Removing the file the boot record loads unsets it, which is quiet
+	// enough to be worth saying out loud.
+	if (entries.some((entry) => entry.attributes.includes("BootFile"))) {
+		process.stdout.write(`${parsed.image} is no longer bootable\n`);
+	}
+
 	// Nothing touched the disk until here.
 	if (entries.length > 0) {
 		await writeFile(parsed.image, medium.bytes);

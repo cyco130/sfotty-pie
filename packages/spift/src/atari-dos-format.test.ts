@@ -5,6 +5,8 @@ import {
 	detectAtariDos,
 	formatAtariDos,
 	openAtariDos,
+	readAtariDosFilePointer,
+	writeAtariDosFilePointer,
 } from "./atari-dos.ts";
 import { createBlankAtr, openAtr } from "./atr.ts";
 import type { AtariDosVariant } from "./atari-dos.ts";
@@ -161,6 +163,89 @@ test("allocation follows the bitmap from sector 1, never sector 0", () => {
 	const fs3 = openAtariDos(loose, "dos20s");
 	fs3.writeFile("boot.dat", new Uint8Array(1));
 	expect([...fs3.entries("boot.dat")][0]?.startSector).toBe(1);
+});
+
+test("the boot record's DOS file pointer round-trips per variant", () => {
+	// DOS 2 keeps it at bytes 15-16; DOS 1.0 at 16-17 with $ff at byte 14,
+	// both measured from the real masters.
+	const dos2 = fresh(128, 720);
+	formatAtariDos(dos2, "dos20s");
+	expect(readAtariDosFilePointer(dos2, "dos20s")).toBe(0);
+	writeAtariDosFilePointer(dos2, "dos20s", 4);
+	expect(readAtariDosFilePointer(dos2, "dos20s")).toBe(4);
+	const boot2 = dos2.readSector(1)!;
+	expect([boot2[15], boot2[16]]).toEqual([4, 0]);
+
+	const dos1 = fresh(128, 720);
+	formatAtariDos(dos1, "dos10");
+	writeAtariDosFilePointer(dos1, "dos10", 300);
+	const boot1 = dos1.readSector(1)!;
+	expect(boot1[14]).toBe(0xff);
+	expect([boot1[16], boot1[17]]).toEqual([300 & 0xff, 300 >> 8]);
+	expect(readAtariDosFilePointer(dos1, "dos10")).toBe(300);
+	// Clearing drops the flag DOS 1.0's boot code insists on.
+	writeAtariDosFilePointer(dos1, "dos10", 0);
+	expect(dos1.readSector(1)?.[14]).toBe(0);
+	expect(readAtariDosFilePointer(dos1, "dos10")).toBe(0);
+});
+
+test("the DOS file shows up as an attribute on the file it points at", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "dos20s");
+	const fs = openAtariDos(image, "dos20s");
+	fs.writeFile("dos.sys", new Uint8Array(300));
+	fs.writeFile("other.dat", new Uint8Array(10));
+	const dos = [...fs.entries("dos.sys")][0];
+	expect(dos?.attributes).not.toContain("BootFile");
+	writeAtariDosFilePointer(image, "dos20s", dos?.startSector ?? 0);
+	expect([...fs.entries("dos.sys")][0]?.attributes).toContain("BootFile");
+	expect([...fs.entries("other.dat")][0]?.attributes).not.toContain("BootFile");
+});
+
+test("the boot pointer follows the DOS file, and dies with it", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "dos20s");
+	const fs = openAtariDos(image, "dos20s");
+	// Written second, so it sits past the filler rather than at sector 4.
+	fs.writeFile("filler.dat", new Uint8Array(500));
+	fs.writeFile("dos.sys", new Uint8Array(300));
+	const original = [...fs.entries("dos.sys")][0]?.startSector ?? 0;
+	writeAtariDosFilePointer(image, "dos20s", original);
+	// Free the sectors ahead of it, then rewrite it: first-free allocation
+	// now puts it earlier on the disk, and the pointer has to follow or the
+	// disk quietly stops booting.
+	fs.deleteFile("filler.dat");
+	fs.writeFile("dos.sys", new Uint8Array(300), { overwrite: true });
+	const moved = [...fs.entries("dos.sys")][0]?.startSector ?? 0;
+	expect(moved).toBe(4);
+	expect(moved).not.toBe(original);
+	expect(readAtariDosFilePointer(image, "dos20s")).toBe(moved);
+	expect([...fs.entries("dos.sys")][0]?.attributes).toContain("BootFile");
+
+	// Rewriting an unrelated file leaves the pointer alone.
+	fs.writeFile("other.dat", new Uint8Array(30));
+	fs.writeFile("other.dat", new Uint8Array(40), { overwrite: true });
+	expect(readAtariDosFilePointer(image, "dos20s")).toBe(moved);
+
+	// Deleting it unsets the pointer rather than leaving it dangling.
+	fs.deleteFile("dos.sys");
+	expect(readAtariDosFilePointer(image, "dos20s")).toBe(0);
+});
+
+test("deleting an ordinary file leaves the boot pointer alone", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "dos10");
+	const fs = openAtariDos(image, "dos10");
+	fs.writeFile("dos.sys", new Uint8Array(300), { format: "dos1" });
+	fs.writeFile("other.dat", new Uint8Array(10), { format: "dos1" });
+	const dos = [...fs.entries("dos.sys")][0]?.startSector ?? 0;
+	writeAtariDosFilePointer(image, "dos10", dos);
+	fs.deleteFile("other.dat");
+	expect(readAtariDosFilePointer(image, "dos10")).toBe(dos);
+	// ... and DOS 1.0's present flag survives too.
+	expect(image.readSector(1)?.[14]).toBe(0xff);
+	fs.deleteFile("dos.sys");
+	expect(image.readSector(1)?.[14]).toBe(0);
 });
 
 test("a formatted disk accepts files immediately", () => {

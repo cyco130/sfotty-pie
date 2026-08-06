@@ -109,10 +109,9 @@ export async function addCommand(args: string[]): Promise<void> {
 
 	// Existing-name conflicts are collected up front too; -f is only about
 	// files already on the image, never about the same batch.
+	const before = [...filesystem.entries()];
 	if (!parsed.force) {
-		const existing = new Set(
-			[...filesystem.entries()].map((entry) => entry.name),
-		);
+		const existing = new Set(before.map((entry) => entry.name));
 		const conflicts = sources
 			.filter((source) => existing.has(source.native))
 			.map((source) => source.native);
@@ -122,6 +121,13 @@ export async function addCommand(args: string[]): Promise<void> {
 			);
 		}
 	}
+	// Replacing the file the boot record loads moves it; the driver keeps
+	// the pointer pinned to it, and this reports where it went.
+	const bootFile = before.find(
+		(entry) =>
+			entry.attributes.includes("BootFile") &&
+			sources.some((source) => source.native === entry.name),
+	);
 
 	let damaged = false;
 	for (const source of sources) {
@@ -146,6 +152,16 @@ export async function addCommand(args: string[]): Promise<void> {
 		process.stdout.write(
 			`${source.host}  ${source.bytes.length} bytes${renamed}\n`,
 		);
+	}
+
+	if (bootFile !== undefined) {
+		const moved = [...filesystem.entries(bootFile.name)][0];
+		if (moved !== undefined && moved.startSector !== bootFile.startSector) {
+			process.stdout.write(
+				`${parsed.image} still boots ${moved.name}, now from sector ` +
+					`${moved.startSector}\n`,
+			);
+		}
 	}
 
 	// Nothing touched the disk until here.

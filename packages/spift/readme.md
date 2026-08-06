@@ -18,6 +18,7 @@ spift add dos25.atr game.xex     # add host files to the image
 spift rm dos25.atr '*.tmp'       # remove matching files
 spift write-boot-sectors blank.atr boot.bin
 spift extract-boot-sectors dos25.atr boot.bin
+spift install-dos blank.atr --from dos20s.atr   # make it bootable
 ```
 
 `create` writes a blank image - a valid header over all-zero sector data, no filesystem installed. The image type is inferred from the file name, or given with `--type`/`-t`; only `atr` exists so far. Existing files are not overwritten unless `--force`/`-f` is given.
@@ -35,6 +36,8 @@ On a terminal, names are colored: directories blue, deleted entries red, open-fo
 `rm` removes files matching its specs. Locked files need `--force`/`-f` (which also quiets specs that match nothing); directories cannot be removed yet. Deleted entries keep their name under the deleted flag, the way the DOSes leave them for undelete tools.
 
 `write-boot-sectors` lays a boot file over an image's first sectors - a container-level operation that works on blank images too, so `create` + `write-boot-sectors` builds a boot disk from scratch. The file must span a whole number of sectors (the three 128-byte boot sectors of 256-bps images are accounted for; `--pad` zero-fills the tail) and its second byte - the boot record's sector count - must match, unless `--force`/`-f`.
+
+`install-dos` makes a disk bootable the way a DOS's own "write DOS files" does: it copies a master's boot sectors, the file that master's boot record loads, and `DUP.SYS` beside it, then points the new disk's boot record at the copy. It refuses masters whose boot area or density disagrees with the target's filesystem, since the installed DOS would then read the disk wrongly. `set-dos-file` is the low-level half - it points the boot record at a file already on the image (default `dos.sys`), or unsets it with `--clear`. Neither needs the file contiguous or in any particular place; the boot code follows the sector chain. In `ls -l` the file the boot record points at is marked `dos-file`, which is derived from the boot record rather than any directory flag. The pointer is maintained from then on: rewriting that file follows it to wherever it lands, and deleting it marks the disk non-bootable rather than leaving the boot record aimed at freed sectors.
 
 `extract-boot-sectors` is the counterpart: it pulls the boot sectors into a file, sized by the boot record's own count byte. When that byte claims zero or more sectors than the image holds, pass `--sector-count` explicitly. Existing output files are not overwritten without `--force`/`-f`.
 

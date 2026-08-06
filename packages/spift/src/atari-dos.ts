@@ -281,6 +281,7 @@ export function openAtariDos(
 			options?: { includeUnlisted?: boolean },
 		): IterableIterator<DirEntry> {
 			const matches = spec === undefined ? undefined : compileSpec(spec);
+			const dosFileSector = readAtariDosFilePointer(medium, resolved);
 			for (const raw of scanDirectory()) {
 				const shown = listable(raw);
 				if (!shown && options?.includeUnlisted !== true) {
@@ -309,6 +310,13 @@ export function openAtariDos(
 				}
 				if ((raw.flags & FLAG_NO_LINK) !== 0) {
 					attributes.push("AtariMyDos");
+				}
+				if (
+					!raw.isDir &&
+					dosFileSector !== 0 &&
+					raw.startSector === dosFileSector
+				) {
+					attributes.push("BootFile");
 				}
 				yield {
 					name: raw.displayName,
@@ -579,8 +587,10 @@ function writeAtariFile(
 	// damaged chain (loop, bad link) still frees its reachable sectors; the
 	// walk's findings are reported to the caller.
 	const diagnostics: string[] = [];
+	let replacedStart = -1;
 	if (existing !== -1) {
 		const raw = rawEntryFromSlot(slotIn(existing), existing);
+		replacedStart = raw.startSector;
 		const walk = walkChain(medium, raw);
 		diagnostics.push(...walk.contents.diagnostics);
 		for (const sector of walk.visited) {
@@ -685,6 +695,15 @@ function writeAtariFile(
 	}
 	directory.flushSlot(writeSector, slot);
 	accounting.flush(writeSector);
+
+	// Rewriting the file the boot record loads moves it, so the pointer has
+	// to follow or the disk stops booting.
+	if (
+		replacedStart > 0 &&
+		readAtariDosFilePointer(medium, variant) === replacedStart
+	) {
+		writeAtariDosFilePointer(medium, variant, allocated[0] ?? 0);
+	}
 	return diagnostics;
 }
 
@@ -742,6 +761,12 @@ function deleteAtariFile(
 	entry[0] = FLAG_DELETED;
 	directory.flushSlot(writeSector, found);
 	accounting.flush(writeSector);
+
+	// A disk whose boot record points at a file that is gone would fail at
+	// boot time with no explanation; say so in the boot record instead.
+	if (readAtariDosFilePointer(medium, variant) === raw.startSector) {
+		writeAtariDosFilePointer(medium, variant, 0);
+	}
 	return walk.contents.diagnostics;
 }
 
@@ -756,6 +781,72 @@ export const ATARI_DOS_BOOT_SECTORS: Record<AtariDosVariant, number> = {
 	dos25: 3,
 	mydos: 3,
 };
+
+// Where the boot record keeps the first sector of the file it loads. DOS 2
+// and its derivatives put it at 15-16; DOS 1.0 puts it one byte later and
+// additionally requires $ff at byte 14 (where DOS 2 keeps its sector size
+// code) or it refuses to boot. Measured across the DOS 1.0, 2.0S, 2.0D,
+// 2.5, MyDOS 4.53 and 4.55 masters.
+const DOS_FILE_POINTER = 15;
+const DOS10_FILE_POINTER = 16;
+const DOS10_PRESENT_FLAG = 14;
+
+function bootRecord(medium: SectorMedium): Uint8Array {
+	const sector = medium.readSector(1);
+	if (sector === null || sector.length < 18) {
+		throw new Error("the boot record is outside the image");
+	}
+	return sector;
+}
+
+/**
+ * The sector the boot record loads its DOS from - the "DOS file" - or 0
+ * when the image has none set.
+ */
+export function readAtariDosFilePointer(
+	medium: SectorMedium,
+	variant: AtariDosVariant,
+): number {
+	const boot = medium.readSector(1);
+	if (boot === null || boot.length < 18) {
+		return 0;
+	}
+	if (variant === "dos10") {
+		return boot[DOS10_PRESENT_FLAG] !== 0xff
+			? 0
+			: (boot[DOS10_FILE_POINTER] ?? 0) |
+					((boot[DOS10_FILE_POINTER + 1] ?? 0) << 8);
+	}
+	return (
+		(boot[DOS_FILE_POINTER] ?? 0) | ((boot[DOS_FILE_POINTER + 1] ?? 0) << 8)
+	);
+}
+
+/**
+ * Points the boot record at a sector, which is all that stands between a
+ * disk holding a DOS and a disk that boots it. Sector 0 clears it. On DOS
+ * 1.0 this also maintains the $ff flag its boot code checks.
+ */
+export function writeAtariDosFilePointer(
+	medium: SectorMedium,
+	variant: AtariDosVariant,
+	sector: number,
+): void {
+	const writeSector = medium.writeSector?.bind(medium);
+	if (writeSector === undefined) {
+		throw new Error("the medium is read-only");
+	}
+	const boot = bootRecord(medium);
+	const at = variant === "dos10" ? DOS10_FILE_POINTER : DOS_FILE_POINTER;
+	boot[at] = sector & 0xff;
+	boot[at + 1] = (sector >> 8) & 0xff;
+	if (variant === "dos10") {
+		boot[DOS10_PRESENT_FLAG] = sector === 0 ? 0 : 0xff;
+	}
+	if (!writeSector(1, boot)) {
+		throw new Error("boot record write failed");
+	}
+}
 
 const VARIANT_LABELS: Record<AtariDosVariant, string> = {
 	dos10: "DOS 1.0",

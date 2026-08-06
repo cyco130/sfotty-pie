@@ -15,6 +15,12 @@ export type DirEntryAttribute =
 	| "OpenForOutput"
 	/** The entry was deleted; its name and chain are still readable. */
 	| "Deleted"
+	/**
+	 * The file the boot record loads - what makes the disk bootable. Derived
+	 * from the boot record rather than the directory entry, so it is a
+	 * property of the image as a whole, not a flag someone set on the file.
+	 */
+	| "BootFile"
 	/** Atari: DOS 1.0 format sector chain (different data-length encoding). */
 	| "AtariDos10"
 	/** Atari: DOS 2.5 extended file, hidden from DOS 2.0 (sectors past 719). */

@@ -4,7 +4,9 @@ import { addCommand } from "./commands/add.ts";
 import { createCommand } from "./commands/create.ts";
 import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
 import { extractCommand } from "./commands/extract.ts";
+import { installDosCommand } from "./commands/install-dos.ts";
 import { lsCommand } from "./commands/ls.ts";
+import { setDosFileCommand } from "./commands/set-dos-file.ts";
 import { mkfsCommand } from "./commands/mkfs.ts";
 import { rmCommand } from "./commands/rm.ts";
 import { writeBootSectorsCommand } from "./commands/write-boot-sectors.ts";
@@ -64,6 +66,16 @@ commands:
     number of sectors - --pad zero-fills the tail - and its second byte
     must claim that count; --force (-f) writes despite a mismatch.
 
+  set-dos-file IMAGE_FILE [NAME] [--fs FILESYSTEM] [--clear]
+    Point the image's boot record at the file it should load (default:
+    dos.sys), which is what makes a disk bootable. --clear unsets it.
+
+  install-dos IMAGE_FILE --from MASTER_IMAGE [--fs FILESYSTEM] [-f]
+    Copy a DOS from a master disk: its boot sectors, the file its boot
+    record loads, and DUP.SYS beside it, then point the boot record at
+    the copy. Refuses masters whose boot area or density does not match
+    the target's filesystem. --force (-f) overwrites existing files.
+
   extract-boot-sectors IMAGE_FILE OUTPUT_FILE [--sector-count N] [-f]
     Extract the boot sectors into a file. The count comes from the boot
     record's second byte; when that claims zero or more sectors than the
@@ -97,6 +109,12 @@ async function main(): Promise<void> {
 			break;
 		case "extract-boot-sectors":
 			await extractBootSectorsCommand(args);
+			break;
+		case "set-dos-file":
+			await setDosFileCommand(args);
+			break;
+		case "install-dos":
+			await installDosCommand(args);
 			break;
 		case undefined:
 		case "help":

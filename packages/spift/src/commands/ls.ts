@@ -84,7 +84,7 @@ export async function lsCommand(args: string[]): Promise<void> {
 		);
 	}
 	process.stdout.write(
-		parsed.long ? renderLong(entries, color) : renderShort(entries),
+		parsed.long ? renderLong(entries, color) : renderShort(entries, color),
 	);
 }
 
@@ -133,8 +133,26 @@ const ATTRIBUTE_LABELS: Record<DirEntryAttribute, string> = {
 	AtariMyDos: "mydos",
 };
 
-export function renderShort(entries: readonly DirEntry[]): string {
-	return entries.map((entry) => displayName(entry) + "\n").join("");
+// Entries a directory listing would pass over: deleted, or left open for
+// output, which the DOSes treat as just as absent. Only -v shows them, and
+// then in red so they don't read as ordinary files.
+function isGhost(entry: DirEntry): boolean {
+	return (
+		entry.attributes.includes("Deleted") ||
+		entry.attributes.includes("OpenForOutput")
+	);
+}
+
+export function renderShort(
+	entries: readonly DirEntry[],
+	color: boolean,
+): string {
+	return entries
+		.map((entry) => {
+			const name = displayName(entry);
+			return (color && isGhost(entry) ? `\x1b[31m${name}\x1b[0m` : name) + "\n";
+		})
+		.join("");
 }
 
 export function renderLong(
@@ -161,7 +179,11 @@ export function renderLong(
 			.map((label) =>
 				paint(
 					label,
-					label === "deleted" ? "31" : label === "read-only" ? "33" : "36",
+					label === "deleted" || label === "open-output"
+						? "31"
+						: label === "read-only"
+							? "33"
+							: "36",
 				),
 			)
 			.join(" ");

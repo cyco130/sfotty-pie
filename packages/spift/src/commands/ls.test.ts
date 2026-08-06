@@ -56,7 +56,33 @@ const ENTRIES: DirEntry[] = [
 ];
 
 test("short listing is names only, dirs slashed", () => {
-	expect(renderShort(ENTRIES)).toBe("dos.sys\nlocked.fil\ngames/\n");
+	expect(renderShort(ENTRIES, false)).toBe("dos.sys\nlocked.fil\ngames/\n");
+});
+
+test("short listing paints deleted and half-written names red", () => {
+	const ghosts: DirEntry[] = [
+		{
+			name: "gone.bin",
+			kind: "file",
+			sectors: 1,
+			startSector: 9,
+			attributes: ["Deleted"],
+		},
+		{
+			name: "half.bin",
+			kind: "file",
+			sectors: 1,
+			startSector: 10,
+			attributes: ["OpenForOutput"],
+		},
+	];
+	expect(renderShort([...ENTRIES, ...ghosts], true)).toContain(
+		"\x1b[31mgone.bin\x1b[0m",
+	);
+	expect(renderShort(ghosts, true)).toContain("\x1b[31mhalf.bin\x1b[0m");
+	// Ordinary entries stay unpainted, and nothing is painted without color.
+	expect(renderShort(ENTRIES, true)).not.toContain("\x1b[");
+	expect(renderShort(ghosts, false)).toBe("gone.bin\nhalf.bin\n");
 });
 
 test("long listing justifies columns and shows attributes", () => {

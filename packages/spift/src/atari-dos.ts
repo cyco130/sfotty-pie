@@ -272,9 +272,7 @@ export function openAtariDos(
 				// its own DIR only ever reports the main count.
 				const vtoc2 = medium.readSector(DOS25_VTOC2_SECTOR);
 				free += (vtoc2?.[122] ?? 0) | ((vtoc2?.[123] ?? 0) << 8);
-				details.push(
-					`${mainFree} below sector 720, which is all DOS 2.5 itself reports`,
-				);
+				details.push(`${mainFree} below sector 720`);
 			}
 			return { totalSectors: total, freeSectors: free, details };
 		},

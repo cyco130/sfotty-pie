@@ -168,7 +168,7 @@ export function renderShort(
 	return entries
 		.map((entry) => {
 			const codes = nameColor(entry);
-			const name = displayName(entry, color);
+			const name = displayName(entry);
 			return (
 				(color && codes !== "" ? `\x1b[${codes}m${name}\x1b[0m` : name) + "\n"
 			);
@@ -183,14 +183,21 @@ export function renderLong(
 	const paint = (text: string, codes: string): string =>
 		color && codes !== "" ? `\x1b[${codes}m${text}\x1b[0m` : text;
 	const rows = entries.map((entry) => ({
-		name: displayName(entry, color),
+		name: displayName(entry),
 		nameCodes: nameColor(entry),
 		sectors: String(entry.sectors),
 		start: String(entry.startSector),
-		attributes: entry.attributes.map((a) => ({
-			label: ATTRIBUTE_LABELS[a],
-			codes: ATTRIBUTE_COLORS[a],
-		})),
+		// Names carry no marker, so this column is where a directory is
+		// spelled out for anything that cannot see color.
+		attributes: [
+			...(entry.kind === "dir"
+				? [{ label: "dir", codes: DIRECTORY_COLOR }]
+				: []),
+			...entry.attributes.map((a) => ({
+				label: ATTRIBUTE_LABELS[a],
+				codes: ATTRIBUTE_COLORS[a],
+			})),
+		],
 	}));
 	const width = (texts: string[]): number =>
 		texts.reduce((max, text) => Math.max(max, text.length), 0);
@@ -213,9 +220,8 @@ export function renderLong(
 	return out;
 }
 
-// Directories are shown by color where there is one, and fall back to a
-// trailing slash when output is piped - so the distinction survives either
-// way, the way ls and ls -F split it.
-function displayName(entry: DirEntry, color: boolean): string {
-	return entry.kind === "dir" && !color ? `${entry.name}/` : entry.name;
+// Names are the names; directories are shown by color, and -l spells out
+// what a plain listing leaves to it.
+function displayName(entry: DirEntry): string {
+	return entry.name;
 }

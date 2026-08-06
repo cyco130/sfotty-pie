@@ -28,7 +28,7 @@ spift extract-boot-sectors dos25.atr boot.bin
 
 `--long`/`-l` leads with two status lines - the physical image (format, sector count, sector size) and the filesystem (id, capacity, free space, volume label where the family has one) - then adds sector counts, start sectors, and attributes per file. On DOS 2.5 the free figure is the honest total across both VTOCs, with a note giving the smaller number its own DIR reports. `--verbose`/`-v` additionally lists what a directory listing passes over, marked `deleted` or `open-output`; like the DOSes, the scan still stops at the first never-used slot, so entries beyond it stay invisible.
 
-On a terminal, directories are shown in blue and those passed-over entries in red (deleted) and magenta (open for output). Piped output carries no color, so directories fall back to a trailing `/` there, the way `ls` and `ls -F` divide it.
+On a terminal, names are colored: directories blue, deleted entries red, open-for-output ones magenta. Names themselves are never decorated - `-l` is where the same facts appear as words, `dir` included, for anything reading the output rather than looking at it.
 
 `extract` copies matching files (default: all) out of an image into `-o DIR` (default: here). Host names are lowercased and made filesystem-safe; nothing is overwritten without `--force`/`-f`, checked before any file is written. Damaged files still extract whatever is recoverable, with warnings and exit code 1.
 

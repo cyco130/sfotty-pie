@@ -55,8 +55,8 @@ const ENTRIES: DirEntry[] = [
 	},
 ];
 
-test("short listing is names only, dirs slashed", () => {
-	expect(renderShort(ENTRIES, false)).toBe("dos.sys\nlocked.fil\ngames/\n");
+test("short listing is names only", () => {
+	expect(renderShort(ENTRIES, false)).toBe("dos.sys\nlocked.fil\ngames\n");
 });
 
 test("short listing gives each kind of ghost its own color", () => {
@@ -87,7 +87,7 @@ test("long listing justifies columns and shows attributes", () => {
 	expect(renderLong(ENTRIES, false)).toBe(
 		"dos.sys     37    4\n" +
 			"locked.fil   5  141  read-only dos2.5\n" +
-			"games/       8  400\n",
+			"games        8  400  dir\n",
 	);
 });
 
@@ -124,11 +124,10 @@ test("status shows volume labels and family details", () => {
 
 test("long listing colors are gated and reset", () => {
 	const colored = renderLong(ENTRIES, true);
-	// Colored output identifies directories by color, so the trailing slash
-	// only appears when there is no color to carry it.
+	// Names carry no directory marker now; color says it on a terminal and
+	// the attribute column says it everywhere.
 	expect(colored).toContain("\x1b[1;34mgames");
 	expect(colored).not.toContain("games/");
-	expect(renderLong(ENTRIES, false)).toContain("games/");
 	expect(colored).toContain("\x1b[33mread-only\x1b[0m");
 	expect(renderLong(ENTRIES, false)).not.toContain("\x1b[");
 });

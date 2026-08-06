@@ -134,6 +134,35 @@ test("files reach into the extra VTOC region with full links", () => {
 	expect(vtocOf(image).free).toBe(97);
 });
 
+test("allocation follows the bitmap from sector 1, never sector 0", () => {
+	// DOS 1.0 reserves one boot sector, so 2 and 3 are ordinary data - and
+	// that is where real DOS 1.0 puts DOS.SYS.
+	const dos1 = fresh(128, 720);
+	formatAtariDos(dos1, "dos10");
+	const fs1 = openAtariDos(dos1, "dos10");
+	fs1.writeFile("first.dat", new Uint8Array(1), { format: "dos1" });
+	expect([...fs1.entries("first.dat")][0]?.startSector).toBe(2);
+
+	// DOS 2 formats mark all three boot sectors used, so data starts at 4.
+	const dos2 = fresh(128, 720);
+	formatAtariDos(dos2, "dos20s");
+	const fs2 = openAtariDos(dos2, "dos20s");
+	fs2.writeFile("first.dat", new Uint8Array(1));
+	expect([...fs2.entries("first.dat")][0]?.startSector).toBe(4);
+
+	// A bitmap that offers a boot sector gets taken up on it, as the real
+	// DOSes do - but bit 0 is never a candidate.
+	const loose = fresh(128, 720);
+	formatAtariDos(loose, "dos20s");
+	const vtoc = loose.readSector(360)!;
+	// Free sector 1, and "sector 0" too, which must stay ignored.
+	vtoc[10] = (vtoc[10] ?? 0) | 0x80 | (0x80 >> 1);
+	loose.writeSector(360, vtoc);
+	const fs3 = openAtariDos(loose, "dos20s");
+	fs3.writeFile("boot.dat", new Uint8Array(1));
+	expect([...fs3.entries("boot.dat")][0]?.startSector).toBe(1);
+});
+
 test("a formatted disk accepts files immediately", () => {
 	const image = fresh(128, 720);
 	formatAtariDos(image, "dos20s");

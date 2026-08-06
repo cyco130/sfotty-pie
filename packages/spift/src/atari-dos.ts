@@ -597,9 +597,17 @@ function writeAtariFile(
 	const maxSector = Math.min(medium.sectorCount, layout.limit);
 	const firstExtraVtoc = EXTRA_VTOC_FIRST - layout.extraPages + 1;
 	const allocated: number[] = [];
-	for (let s = 4; s <= maxSector && allocated.length < needed; s++) {
+	// Sector 0 does not exist - the bitmap's bit 0 stands for it and every
+	// format marks it used - so the scan starts at 1 and otherwise takes
+	// the bitmap at its word. That includes the boot sectors: they are
+	// marked used by every format, and when a bitmap does offer them the
+	// DOSes hand them out too (measured on DOS 1.0, 2.0S, 2.5, and MyDOS
+	// alike). The VTOC and directory are skipped regardless - scribbling
+	// there would destroy the bitmap this loop is reading, a worse failure
+	// than overwriting boot code.
+	for (let s = 1; s <= maxSector && allocated.length < needed; s++) {
 		if (s >= firstExtraVtoc && s <= DIRECTORY_LAST) {
-			continue; // extra VTOC pages, the VTOC, and the directory
+			continue;
 		}
 		if (isFree(s)) {
 			allocated.push(s);

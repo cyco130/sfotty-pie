@@ -11,6 +11,7 @@ export interface AddArgs {
 	files: string[];
 	fs: "atari" | "sparta" | undefined;
 	variant: AtariDosVariant | undefined;
+	targetDir: string | undefined;
 	force: boolean;
 }
 
@@ -21,6 +22,7 @@ export function parseAddArgs(args: string[]): AddArgs {
 			args,
 			options: {
 				fs: { type: "string" },
+				"target-dir": { type: "string", short: "C" },
 				force: { type: "boolean", short: "f" },
 			},
 			allowPositionals: true,
@@ -48,6 +50,7 @@ export function parseAddArgs(args: string[]): AddArgs {
 		files,
 		fs: selection?.family,
 		variant: selection?.variant,
+		targetDir: values["target-dir"],
 		force: values.force ?? false,
 	};
 }
@@ -107,9 +110,21 @@ export async function addCommand(args: string[]): Promise<void> {
 	// chains, which nothing later can read.
 	const format = parsed.variant === "dos10" ? "dos1" : "dos2";
 
+	// Files land in the target directory, which has to exist already - mkdir
+	// is the tool for making it.
+	const target = parsed.targetDir;
+	const pathOf = (native: string): string =>
+		target === undefined ? native : `${target}/${native}`;
+
 	// Existing-name conflicts are collected up front too; -f is only about
 	// files already on the image, never about the same batch.
-	const before = [...filesystem.entries()];
+	let before;
+	try {
+		before = [...filesystem.entries(target)];
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new CliError(`${parsed.image}: ${message}`);
+	}
 	if (!parsed.force) {
 		const existing = new Set(before.map((entry) => entry.name));
 		const conflicts = sources
@@ -133,7 +148,7 @@ export async function addCommand(args: string[]): Promise<void> {
 	for (const source of sources) {
 		let diagnostics: string[];
 		try {
-			diagnostics = filesystem.writeFile(source.native, source.bytes, {
+			diagnostics = filesystem.writeFile(pathOf(source.native), source.bytes, {
 				overwrite: parsed.force,
 				format,
 			});
@@ -155,7 +170,7 @@ export async function addCommand(args: string[]): Promise<void> {
 	}
 
 	if (bootFile !== undefined) {
-		const moved = [...filesystem.entries(bootFile.name)][0];
+		const moved = [...filesystem.entries(bootFile.path)][0];
 		if (moved !== undefined && moved.startSector !== bootFile.startSector) {
 			process.stdout.write(
 				`${parsed.image} still boots ${moved.name}, now from sector ` +

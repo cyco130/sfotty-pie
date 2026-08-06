@@ -8,6 +8,7 @@ test("parses image, specs, and options", () => {
 		fs: undefined,
 		variant: undefined,
 		force: false,
+		recursive: false,
 	});
 	expect(parseRmArgs(["disk.atr", "a.dat", "b.dat", "-f"])).toEqual({
 		image: "disk.atr",
@@ -15,6 +16,7 @@ test("parses image, specs, and options", () => {
 		fs: undefined,
 		variant: undefined,
 		force: true,
+		recursive: false,
 	});
 });
 

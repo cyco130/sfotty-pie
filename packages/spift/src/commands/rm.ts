@@ -12,6 +12,7 @@ export interface RmArgs {
 	fs: "atari" | "sparta" | undefined;
 	variant: AtariDosVariant | undefined;
 	force: boolean;
+	recursive: boolean;
 }
 
 export function parseRmArgs(args: string[]): RmArgs {
@@ -22,6 +23,7 @@ export function parseRmArgs(args: string[]): RmArgs {
 			options: {
 				fs: { type: "string" },
 				force: { type: "boolean", short: "f" },
+				recursive: { type: "boolean", short: "r" },
 			},
 			allowPositionals: true,
 		});
@@ -49,6 +51,7 @@ export function parseRmArgs(args: string[]): RmArgs {
 		fs: selection?.family,
 		variant: selection?.variant,
 		force: values.force ?? false,
+		recursive: values.recursive ?? false,
 	};
 }
 
@@ -64,22 +67,45 @@ export async function rmCommand(args: string[]): Promise<void> {
 	// does. -f follows rm: a spec matching nothing stops being an error.
 	const targets = new Map<string, DirEntry>();
 	for (const spec of parsed.specs) {
-		const matched = [...filesystem.entries(spec)];
-		if (matched.length === 0 && !parsed.force) {
-			throw new CliError(`no files match "${spec}"`);
-		}
-		for (const entry of matched) {
-			targets.set(entry.path, entry);
+		let matched;
+		try {
+			// A spec names things to remove, so a directory means itself
+			// rather than its contents - "rm games" is about games.
+			matched = [...filesystem.entries(spec, { listContents: false })];
+			if (matched.length === 0 && !parsed.force) {
+				throw new CliError(`no files match "${spec}"`);
+			}
+			for (const entry of matched) {
+				targets.set(entry.path, entry);
+				// -r takes everything under a matched directory, whatever it
+				// is named; the spec only had to pick the directory.
+				if (entry.kind === "dir" && parsed.recursive) {
+					for (const inner of filesystem.entries(entry.path, {
+						recursive: true,
+					})) {
+						targets.set(inner.path, inner);
+					}
+				}
+			}
+		} catch (error) {
+			if (error instanceof CliError) {
+				throw error;
+			}
+			const message = error instanceof Error ? error.message : String(error);
+			throw new CliError(`${parsed.image}: ${message}`);
 		}
 	}
-	const entries = [...targets.values()];
+	// Deepest first, so a directory is empty by the time its turn comes.
+	const entries = [...targets.values()].sort(
+		(a, b) => b.path.split("/").length - a.path.split("/").length,
+	);
 
 	const directories = entries.filter((entry) => entry.kind === "dir");
-	if (directories.length > 0) {
+	if (directories.length > 0 && !parsed.recursive) {
 		throw new CliError(
-			`cannot remove directories: ${directories
-				.map((entry) => `${entry.path}/`)
-				.join(", ")} (not supported yet)`,
+			`cannot remove directories without --recursive: ${directories
+				.map((entry) => entry.path)
+				.join(", ")}`,
 		);
 	}
 	if (!parsed.force) {
@@ -97,6 +123,11 @@ export async function rmCommand(args: string[]): Promise<void> {
 	for (const entry of entries) {
 		let diagnostics: string[];
 		try {
+			if (entry.kind === "dir") {
+				filesystem.removeDirectory(entry.path);
+				process.stdout.write(`removed ${entry.path}\n`);
+				continue;
+			}
 			diagnostics = filesystem.deleteFile(entry.path, {
 				force: parsed.force,
 			});
@@ -105,10 +136,10 @@ export async function rmCommand(args: string[]): Promise<void> {
 			throw new CliError(`${entry.path}: ${message}`);
 		}
 		for (const diagnostic of diagnostics) {
-			process.stderr.write(`spift: ${entry.name}: ${diagnostic}\n`);
+			process.stderr.write(`spift: ${entry.path}: ${diagnostic}\n`);
 		}
 		damaged ||= diagnostics.length > 0;
-		process.stdout.write(`removed ${entry.name}\n`);
+		process.stdout.write(`removed ${entry.path}\n`);
 	}
 
 	// Removing the file the boot record loads unsets it, which is quiet

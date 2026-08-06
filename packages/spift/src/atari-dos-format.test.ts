@@ -248,6 +248,69 @@ test("deleting an ordinary file leaves the boot pointer alone", () => {
 	expect(image.readSector(1)?.[14]).toBe(0);
 });
 
+test("mkdir writes a MyDOS-shaped directory", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "mydos");
+	const fs = openAtariDos(image, "mydos");
+	fs.makeDirectory("games");
+	const entry = [...fs.entries("games", { listContents: false })][0];
+	// The measured shape: $10 exactly (in-use clear, which is what makes
+	// other DOSes skip it), size 8, and eight zeroed contiguous sectors.
+	expect(entry).toMatchObject({ kind: "dir", sectors: 8 });
+	const raw = image.readSector(361)!; // the root directory's first sector
+	expect(raw[0]).toBe(0x10);
+	const block = entry?.startSector ?? 0;
+	for (let i = 0; i < 8; i++) {
+		expect(image.readSector(block + i)?.every((b) => b === 0)).toBe(true);
+	}
+	// The eight sectors are marked used, and the directory reads as empty.
+	expect(vtocOf(image).free).toBe(708 - 8);
+	expect([...fs.entries("games")]).toHaveLength(0);
+});
+
+test("directories nest, hold files, and go away again", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "mydos");
+	const fs = openAtariDos(image, "mydos");
+	fs.makeDirectory("a/b/c", { parents: true });
+	expect([...fs.entries(undefined, { recursive: true })].map((e) => e.path)) //
+		.toEqual(["a", "a/b", "a/b/c"]);
+	// -p accepts what is already there; without it, a second try is an error.
+	fs.makeDirectory("a/b", { parents: true });
+	expect(() => fs.makeDirectory("a/b")).toThrow(/already exists/);
+
+	fs.writeFile("a/b/c/deep.dat", Uint8Array.from([7, 7, 7]));
+	expect(fs.readFile("a/b/c/deep.dat")?.bytes).toHaveLength(3);
+	expect(() => fs.removeDirectory("a/b/c")).toThrow(/not empty/);
+	expect(() => fs.removeDirectory("a/b/c/deep.dat")).toThrow(/is a file/);
+
+	fs.deleteFile("a/b/c/deep.dat");
+	const free = vtocOf(image).free;
+	fs.removeDirectory("a/b/c");
+	expect(vtocOf(image).free).toBe(free + 8); // the block comes back
+	expect([...fs.entries("a/b")]).toHaveLength(0);
+});
+
+test("mkdir needs a contiguous run, not just free sectors", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "mydos");
+	// Free every other sector: plenty of room, no run of eight.
+	const vtoc = image.readSector(360)!;
+	vtoc.fill(0, 10, 128);
+	let free = 0;
+	for (let s = 4; s <= 350; s += 2) {
+		vtoc[10 + (s >> 3)] = (vtoc[10 + (s >> 3)] ?? 0) | (0x80 >> (s & 7));
+		free++;
+	}
+	vtoc[3] = free & 0xff;
+	vtoc[4] = free >> 8;
+	image.writeSector(360, vtoc);
+	expect(free).toBeGreaterThan(100);
+	expect(() => openAtariDos(image, "mydos").makeDirectory("nope")).toThrow(
+		/no run of 8 free sectors/,
+	);
+});
+
 test("a formatted disk accepts files immediately", () => {
 	const image = fresh(128, 720);
 	formatAtariDos(image, "dos20s");

@@ -332,7 +332,11 @@ export function openAtariDos(
 		},
 		*entries(
 			spec?: string,
-			options?: { includeUnlisted?: boolean; recursive?: boolean },
+			options?: {
+				includeUnlisted?: boolean;
+				recursive?: boolean;
+				listContents?: boolean;
+			},
 		): IterableIterator<DirEntry> {
 			// A spec is a path plus a leaf pattern: the path picks the
 			// directory to start from, the pattern filters names there (and,
@@ -343,8 +347,14 @@ export function openAtariDos(
 					? undefined
 					: (parts.pop() as string);
 			// A spec that names a directory outright lists that directory,
-			// the way "ls games" does; only a pattern filters.
-			if (pattern !== undefined && !/[*?]/.test(pattern)) {
+			// the way "ls games" does; only a pattern filters. Callers that
+			// mean the directory itself - rm, which removes it rather than
+			// looking inside - turn this off.
+			if (
+				options?.listContents !== false &&
+				pattern !== undefined &&
+				!/[*?]/.test(pattern)
+			) {
 				const parent = resolveDirectory(parts);
 				if (lookup(parent, pattern)?.isDir === true) {
 					parts.push(pattern);
@@ -458,6 +468,68 @@ export function openAtariDos(
 				bytes,
 				options?.overwrite === true,
 				options?.format ?? "dos2",
+			);
+		},
+		makeDirectory(path: string, options?: { parents?: boolean }): void {
+			const parts = splitAtariPath(path);
+			const leaf = parts.pop();
+			if (leaf === undefined) {
+				throw new Error("no directory name given");
+			}
+			if (options?.parents !== true) {
+				makeAtariDirectory(medium, resolved, resolveDirectory(parts), leaf);
+				return;
+			}
+			// -p: make each missing component in turn, and treat one that is
+			// already there as done. Nothing is flushed to disk until the
+			// whole command succeeds, so a failure part way leaves no trace.
+			let first = DIRECTORY_FIRST;
+			for (const component of [...parts, leaf]) {
+				const existing = lookup(first, component);
+				if (existing?.isDir === true) {
+					first = existing.startSector;
+					continue;
+				}
+				if (existing !== undefined) {
+					throw new Error(`${component} is a file, not a directory`);
+				}
+				makeAtariDirectory(medium, resolved, first, component);
+				first = lookup(first, component)?.startSector ?? first;
+			}
+		},
+		removeDirectory(path: string): void {
+			const parts = splitAtariPath(path);
+			const leaf = parts.pop();
+			if (leaf === undefined) {
+				throw new Error("the root directory cannot be removed");
+			}
+			const parentFirst = resolveDirectory(parts);
+			let index = -1;
+			let found: RawEntry | undefined;
+			for (const raw of scanDirectory(parentFirst)) {
+				if (listable(raw) && raw.displayName === leaf) {
+					found = raw;
+					index = raw.index;
+					break;
+				}
+			}
+			if (found === undefined) {
+				throw new Error(`${leaf} does not exist`);
+			}
+			if (!found.isDir) {
+				throw new Error(`${leaf} is a file, not a directory`);
+			}
+			for (const raw of scanDirectory(found.startSector)) {
+				if (listable(raw)) {
+					throw new Error(`${leaf} is not empty`);
+				}
+			}
+			removeAtariDirectory(
+				medium,
+				resolved,
+				parentFirst,
+				index,
+				found.startSector,
 			);
 		},
 		deleteFile(path: string, options?: { force?: boolean }): string[] {
@@ -673,6 +745,132 @@ function vtocAccounting(
 			});
 		},
 	};
+}
+
+/**
+ * The first sector of a run of `count` free sectors, or 0 when the bitmap
+ * has no such run. Directories need this rather than the scattered
+ * first-free sectors a file can live in: MyDOS stores a directory as one
+ * contiguous 8-sector extent, and refuses to create one otherwise (a disk
+ * with 174 free but non-adjacent sectors gives it ERROR 162).
+ */
+function findContiguousRun(
+	medium: SectorMedium,
+	accounting: VtocAccounting,
+	count: number,
+): number {
+	const layout = accounting.layout;
+	const maxSector = Math.min(medium.sectorCount, layout.limit);
+	const firstExtraVtoc = EXTRA_VTOC_FIRST - layout.extraPages + 1;
+	let run = 0;
+	for (let sector = 1; sector <= maxSector; sector++) {
+		const reserved = sector >= firstExtraVtoc && sector <= DIRECTORY_LAST;
+		if (reserved || !accounting.isFree(sector)) {
+			run = 0;
+			continue;
+		}
+		run++;
+		if (run === count) {
+			return sector - count + 1;
+		}
+	}
+	return 0;
+}
+
+function makeAtariDirectory(
+	medium: SectorMedium,
+	variant: AtariDosVariant,
+	parentFirst: number,
+	name: string,
+): void {
+	const writeSector = medium.writeSector?.bind(medium);
+	if (writeSector === undefined) {
+		throw new Error("the medium is read-only");
+	}
+	const native = encodeAtariName(name);
+	const directory = loadDirectory(medium, parentFirst);
+
+	let freeSlot = -1;
+	for (let index = 0; index < DIRECTORY_SECTORS * ENTRIES_PER_SECTOR; index++) {
+		const entry = directory.slotIn(index);
+		const flags = entry[0] ?? 0;
+		if (flags === 0) {
+			if (freeSlot === -1) {
+				freeSlot = index;
+			}
+			break;
+		}
+		if ((flags & FLAG_DELETED) !== 0) {
+			if (freeSlot === -1) {
+				freeSlot = index;
+			}
+			continue;
+		}
+		const slotName = decodeField(entry.subarray(5, 13)).toUpperCase();
+		const slotExt = decodeField(entry.subarray(13, 16)).toUpperCase();
+		if (slotName === native.name && slotExt === native.ext) {
+			throw new Error(`${name.toLowerCase()} already exists`);
+		}
+	}
+	if (freeSlot === -1) {
+		throw new Error("the directory is full");
+	}
+
+	const accounting = vtocAccounting(medium, variant);
+	const start = findContiguousRun(medium, accounting, DIRECTORY_SECTORS);
+	if (start === 0) {
+		throw new Error(
+			`no run of ${DIRECTORY_SECTORS} free sectors for a directory ` +
+				`(a directory has to be contiguous, however much space is free)`,
+		);
+	}
+	// A fresh directory is eight zeroed sectors: every slot never-used, so a
+	// scan of it stops immediately.
+	for (let i = 0; i < DIRECTORY_SECTORS; i++) {
+		if (!writeSector(start + i, new Uint8Array(medium.sectorSize))) {
+			throw new Error(`sector ${start + i}: write failed`);
+		}
+		accounting.mark(start + i, false);
+	}
+
+	// MyDOS writes exactly $10 here: the in-use bit stays clear, which is
+	// what makes DOSes without subdirectories skip the entry.
+	const entry = directory.slotIn(freeSlot);
+	entry[0] = FLAG_DIRECTORY;
+	entry[1] = DIRECTORY_SECTORS;
+	entry[2] = 0;
+	entry[3] = start & 0xff;
+	entry[4] = (start >> 8) & 0xff;
+	for (let i = 0; i < 8; i++) {
+		entry[5 + i] = native.name.charCodeAt(i) || 0x20;
+	}
+	for (let i = 0; i < 3; i++) {
+		entry[13 + i] = native.ext.charCodeAt(i) || 0x20;
+	}
+	directory.flushSlot(writeSector, freeSlot);
+	accounting.flush(writeSector);
+}
+
+function removeAtariDirectory(
+	medium: SectorMedium,
+	variant: AtariDosVariant,
+	parentFirst: number,
+	entryIndex: number,
+	block: number,
+): void {
+	const writeSector = medium.writeSector?.bind(medium);
+	if (writeSector === undefined) {
+		throw new Error("the medium is read-only");
+	}
+	const directory = loadDirectory(medium, parentFirst);
+	const accounting = vtocAccounting(medium, variant);
+	for (let i = 0; i < DIRECTORY_SECTORS; i++) {
+		accounting.mark(block + i, true);
+	}
+	const entry = directory.slotIn(entryIndex);
+	entry[0] = FLAG_DELETED;
+	directory.flushSlot(writeSector, entryIndex);
+	accounting.flush(writeSector);
 }
 
 function writeAtariFile(

@@ -7,6 +7,7 @@ test("parses image, files, and options", () => {
 		files: ["a.xex"],
 		fs: undefined,
 		variant: undefined,
+		targetDir: undefined,
 		force: false,
 	});
 	expect(parseAddArgs(["disk.atr", "a.xex", "b.dat", "-f"])).toEqual({
@@ -14,6 +15,7 @@ test("parses image, files, and options", () => {
 		files: ["a.xex", "b.dat"],
 		fs: undefined,
 		variant: undefined,
+		targetDir: undefined,
 		force: true,
 	});
 });

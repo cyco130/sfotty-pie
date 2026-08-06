@@ -16,6 +16,8 @@ spift extract dos25.atr -o out/  # extract everything into out/
 spift extract dos25.atr '*.com'  # extract matching files here
 spift add dos25.atr game.xex     # add host files to the image
 spift rm dos25.atr '*.tmp'       # remove matching files
+spift mkdir mydos.atr -p 'games>arcade'          # MyDOS subdirectories
+spift ls mydos.atr -lR                          # walk the whole tree
 spift write-boot-sectors blank.atr boot.bin
 spift extract-boot-sectors dos25.atr boot.bin
 spift install-dos blank.atr --from dos20s.atr   # make it bootable
@@ -25,15 +27,17 @@ spift install-dos blank.atr --from dos20s.atr   # make it bootable
 
 `mkfs` writes an empty filesystem: `dos10`, `dos20s`, `dos20d`, `dos25`, or `mydos`, chosen with `--fs atari/VARIANT` (or `--variant`). Without one, a standard single-density image gets `dos20s`, enhanced density is refused as ambiguous (DOS 2.5 and MyDOS both fit), and anything else gets `mydos`. `--boot-sectors FILE` fills the boot area, which must be exactly the variant's size - one sector for DOS 1.0, three otherwise; use `write-boot-sectors` for anything else. The structures match disks formatted by the real DOSes byte for byte, quirks included: only MyDOS reclaims sector 720, DOS 1.0 reserves a single boot sector, DOS 2.5 splits its accounting across both VTOCs, and MyDOS spills its bitmap into extra sectors below the VTOC on disks over 943 sectors.
 
-`ls` lists the root directory of the filesystem on an image (Atari DOS 1.0/2.0s/2.0d/2.5 and MyDOS so far; SpartaDOS is detected but not yet readable). Specs use the native wildcard rules (`*` and `?`, name and extension matched separately) - quote them to keep the shell out of it.
+`ls` lists a directory of the filesystem on an image (Atari DOS 1.0/2.0s/2.0d/2.5 and MyDOS so far; SpartaDOS is detected but not yet readable). A spec is a path whose last part may be a native wildcard pattern (`*` and `?`, name and extension matched separately) - quote it to keep the shell out of it; naming a directory lists its contents, and `--recursive`/`-R` walks the tree showing full paths.
 
 `--long`/`-l` leads with two status lines - the physical image (format, sector count, sector size) and the filesystem (id, capacity, free space, volume label where the family has one) - then adds sector counts, start sectors, and attributes per file. On DOS 2.5 the free figure is the honest total across both VTOCs, with a note giving the smaller number its own DIR reports. `--verbose`/`-v` additionally lists what a directory listing passes over, marked `deleted` or `open-output`; like the DOSes, the scan still stops at the first never-used slot, so entries beyond it stay invisible.
 
 On a terminal, names are colored: directories blue, deleted entries red, open-for-output ones magenta. Names themselves are never decorated - `-l` is where the same facts appear as words, `dir` included, for anything reading the output rather than looking at it.
 
-`extract` copies matching files (default: all) out of an image into `-o DIR` (default: here). Host names are lowercased and made filesystem-safe; nothing is overwritten without `--force`/`-f`, checked before any file is written. Damaged files still extract whatever is recoverable, with warnings and exit code 1.
+`extract` copies matching files (default: all) out of an image into `-o DIR` (default: here); `--recursive`/`-R` descends into subdirectories and mirrors the tree below whatever directory the spec picked. Host names are lowercased and made filesystem-safe, per path component; nothing is overwritten without `--force`/`-f`, checked before any file is written. Damaged files still extract whatever is recoverable, with warnings and exit code 1.
 
-`rm` removes files matching its specs. Locked files need `--force`/`-f` (which also quiets specs that match nothing); directories cannot be removed yet. Deleted entries keep their name under the deleted flag, the way the DOSes leave them for undelete tools.
+`mkdir` and `rmdir` manage MyDOS subdirectories, with `-p` for parents. A directory is a contiguous eight-sector extent holding 64 entries, so `mkdir` can fail for want of a _run_ of free sectors on a disk with plenty of room - the same refusal MyDOS gives. `rmdir` takes only empty directories; `rm -r` clears a tree, deepest first. Paths accept `/`, `>` and `:` as separators, plus SpartaDOS's `<`, which separates and steps up a level at once (`games>arcade<other` means `games/other`); quote them, since shells read `<` and `>` as redirection.
+
+`rm` removes files matching its specs. Locked files need `--force`/`-f` (which also quiets specs that match nothing), and directories need `--recursive`/`-r`. Deleted entries keep their name under the deleted flag, the way the DOSes leave them for undelete tools.
 
 `write-boot-sectors` lays a boot file over an image's first sectors - a container-level operation that works on blank images too, so `create` + `write-boot-sectors` builds a boot disk from scratch. The file must span a whole number of sectors (the three 128-byte boot sectors of 256-bps images are accounted for; `--pad` zero-fills the tail) and its second byte - the boot record's sector count - must match, unless `--force`/`-f`.
 

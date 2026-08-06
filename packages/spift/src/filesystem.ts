@@ -85,12 +85,29 @@ export interface Filesystem {
 	 */
 	entries(
 		spec?: string,
-		options?: { includeUnlisted?: boolean; recursive?: boolean },
+		options?: {
+			includeUnlisted?: boolean;
+			recursive?: boolean;
+			/** Off makes a spec naming a directory match it, not its contents. */
+			listContents?: boolean;
+		},
 	): IterableIterator<DirEntry>;
 	/**
-	 * Reads a file by its decoded name (as entries() reports it). Returns
-	 * null when no such file exists; never throws on a damaged file - the
-	 * recoverable bytes come back with diagnostics.
+	 * Reads a file by path (as entries() reports it). Returns null when no
+	 * such file exists; never throws on a damaged file - the recoverable
+	 * bytes come back with diagnostics.
 	 */
-	readFile(name: string): FileContents | null;
+	readFile(path: string): FileContents | null;
+	/**
+	 * Creates a directory. `parents` makes the missing ones along the way
+	 * and turns an existing target into a no-op, as `mkdir -p` does.
+	 * Mutations stay in the medium's memory.
+	 */
+	makeDirectory(path: string, options?: { parents?: boolean }): void;
+	/**
+	 * Removes an empty directory and frees what it occupied. Throws when the
+	 * path is missing, is not a directory, or still holds anything - the
+	 * same rule the DOSes enforce.
+	 */
+	removeDirectory(path: string): void;
 }

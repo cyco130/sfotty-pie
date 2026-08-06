@@ -7,8 +7,10 @@ import { extractCommand } from "./commands/extract.ts";
 import { installDosCommand } from "./commands/install-dos.ts";
 import { lsCommand } from "./commands/ls.ts";
 import { setDosFileCommand } from "./commands/set-dos-file.ts";
+import { mkdirCommand } from "./commands/mkdir.ts";
 import { mkfsCommand } from "./commands/mkfs.ts";
 import { rmCommand } from "./commands/rm.ts";
+import { rmdirCommand } from "./commands/rmdir.ts";
 import { writeBootSectorsCommand } from "./commands/write-boot-sectors.ts";
 
 const USAGE = `usage: spift <command> [options]
@@ -60,10 +62,21 @@ commands:
     --fs atari/dos10 writes DOS 1.0 format files instead (readable only
     by DOS 1.0); --fs also accepts a bare family to skip detection.
 
-  rm IMAGE_FILE SPEC... [--fs atari|sparta] [-f]
-    Remove files matching the SPECs (native wildcards, quoted) from the
-    root directory. Locked files need --force (-f), which also quiets
-    specs that match nothing. Directories cannot be removed yet.
+  rm IMAGE_FILE SPEC... [--fs FILESYSTEM] [-f] [-r]
+    Remove files matching the SPECs (native wildcards, quoted). Locked
+    files need --force (-f), which also quiets specs that match nothing.
+    --recursive (-r) descends into subdirectories and removes them too,
+    deepest first.
+
+  mkdir IMAGE_FILE DIRECTORY... [--fs FILESYSTEM] [-p]
+    Create directories. --parents (-p) makes missing parents on the way
+    and accepts one that already exists. A directory needs eight
+    contiguous free sectors, so this can fail on a fragmented disk with
+    plenty of room.
+
+  rmdir IMAGE_FILE DIRECTORY... [--fs FILESYSTEM]
+    Remove empty directories, freeing what they occupied. A directory
+    holding anything is refused, as the DOSes refuse it.
 
   write-boot-sectors IMAGE_FILE BOOT_FILE [--pad] [-f]
     Write a boot file over the image's first sectors (128-byte boot
@@ -108,6 +121,12 @@ async function main(): Promise<void> {
 			break;
 		case "rm":
 			await rmCommand(args);
+			break;
+		case "mkdir":
+			await mkdirCommand(args);
+			break;
+		case "rmdir":
+			await rmdirCommand(args);
 			break;
 		case "write-boot-sectors":
 			await writeBootSectorsCommand(args);

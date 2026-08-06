@@ -9,6 +9,7 @@ import type {
 	DirEntryAttribute,
 	FileContents,
 	Filesystem,
+	VolumeInfo,
 } from "./filesystem.ts";
 
 export const ATARI_DOS_VARIANTS = [
@@ -199,9 +200,9 @@ export function openAtariDos(
 		detectAtariDos(medium) ??
 		(medium.sectorSize === 256 ? "dos20d" : "dos20s");
 
-	// Yields every present entry (in use, MyDOS subdirectory, or a DOS 2.5
-	// extended file hidden behind the output bit with in-use clear), stopping
-	// at the first never-used slot.
+	// Yields every used slot, deleted ones included, stopping at the first
+	// never-used slot the way the DOSes' own directory scan does. Callers
+	// decide what to show (see listable below).
 	function* scanDirectory(): IterableIterator<RawEntry> {
 		let index = -1;
 		for (
@@ -220,15 +221,6 @@ export function openAtariDos(
 				if (flags === 0) {
 					return; // a never-used entry ends the directory
 				}
-				if ((flags & FLAG_DELETED) !== 0) {
-					continue;
-				}
-				const isDir = (flags & FLAG_DIRECTORY) !== 0;
-				const inUse = (flags & FLAG_IN_USE) !== 0;
-				const dos25Extended = !inUse && !isDir && (flags & FLAG_OUTPUT) !== 0;
-				if (!inUse && !isDir && !dos25Extended) {
-					continue;
-				}
 				const name = decodeField(sector.subarray(at + 5, at + 13));
 				const ext = decodeField(sector.subarray(at + 13, at + 16));
 				yield {
@@ -238,24 +230,73 @@ export function openAtariDos(
 					ext,
 					sectors: (sector[at + 1] ?? 0) | ((sector[at + 2] ?? 0) << 8),
 					startSector: (sector[at + 3] ?? 0) | ((sector[at + 4] ?? 0) << 8),
-					isDir,
+					isDir: (flags & FLAG_DIRECTORY) !== 0,
 					displayName: ext === "" ? name : `${name}.${ext}`,
 				};
 			}
 		}
 	}
 
+	// What a directory listing shows: entries in use, MyDOS subdirectories,
+	// and DOS 2.5 extended files (output bit with in-use clear). Deleted
+	// entries, files left open for output, and slots with none of those bits
+	// are passed over, as the DOSes pass over them.
+	function listable(raw: RawEntry): boolean {
+		if ((raw.flags & FLAG_DELETED) !== 0) {
+			return false;
+		}
+		const inUse = (raw.flags & FLAG_IN_USE) !== 0;
+		const output = (raw.flags & FLAG_OUTPUT) !== 0;
+		if (inUse) {
+			return !output;
+		}
+		return raw.isDir || output;
+	}
+
 	return {
 		family: "atari",
 		variant: resolved,
-		*entries(spec?: string): IterableIterator<DirEntry> {
+		volume(): VolumeInfo {
+			const vtoc = medium.readSector(VTOC_SECTOR);
+			const total = (vtoc?.[1] ?? 0) | ((vtoc?.[2] ?? 0) << 8);
+			const mainFree = (vtoc?.[3] ?? 0) | ((vtoc?.[4] ?? 0) << 8);
+			const layout = vtocLayout(
+				resolved,
+				medium.sectorSize,
+				medium.sectorCount,
+			);
+			const details: string[] = [];
+			let free = mainFree;
+			if (layout.hasVtoc2) {
+				// DOS 2.5 keeps the sectors past 719 in the second VTOC, and
+				// its own DIR only ever reports the main count.
+				const vtoc2 = medium.readSector(DOS25_VTOC2_SECTOR);
+				free += (vtoc2?.[122] ?? 0) | ((vtoc2?.[123] ?? 0) << 8);
+				details.push(
+					`${mainFree} below sector 720, which is all DOS 2.5 itself reports`,
+				);
+			}
+			return { totalSectors: total, freeSectors: free, details };
+		},
+		*entries(
+			spec?: string,
+			options?: { includeUnlisted?: boolean },
+		): IterableIterator<DirEntry> {
 			const matches = spec === undefined ? undefined : compileSpec(spec);
 			for (const raw of scanDirectory()) {
+				const shown = listable(raw);
+				if (!shown && options?.includeUnlisted !== true) {
+					continue;
+				}
 				if (matches !== undefined && !matches(raw.name, raw.ext)) {
 					continue;
 				}
+				const deleted = (raw.flags & FLAG_DELETED) !== 0;
 				const inUse = (raw.flags & FLAG_IN_USE) !== 0;
 				const attributes: DirEntryAttribute[] = [];
+				if (deleted) {
+					attributes.push("Deleted");
+				}
 				if ((raw.flags & FLAG_LOCKED) !== 0) {
 					attributes.push("ReadOnly");
 				}
@@ -265,7 +306,7 @@ export function openAtariDos(
 				if (inUse && (raw.flags & FLAG_DOS2) === 0) {
 					attributes.push("AtariDos10");
 				}
-				if (!inUse && !raw.isDir) {
+				if (!deleted && !inUse && !raw.isDir) {
 					attributes.push("AtariDos25");
 				}
 				if ((raw.flags & FLAG_NO_LINK) !== 0) {
@@ -283,7 +324,11 @@ export function openAtariDos(
 		readFile(name: string): FileContents | null {
 			// First match wins; duplicate names only occur on damaged disks.
 			for (const raw of scanDirectory()) {
-				if (!raw.isDir && raw.displayName === name.toLowerCase()) {
+				if (
+					listable(raw) &&
+					!raw.isDir &&
+					raw.displayName === name.toLowerCase()
+				) {
 					return walkChain(medium, raw).contents;
 				}
 			}

@@ -11,6 +11,7 @@ spift create hd.atr --sector-size 512 --sector-count 65535
 spift mkfs blank.atr             # put an empty filesystem on it
 spift ls dos25.atr               # list the root directory
 spift ls dos25.atr '*.com' -l    # filtered, with sizes and attributes
+spift ls dos25.atr -lv           # ... including deleted and half-written files
 spift extract dos25.atr -o out/  # extract everything into out/
 spift extract dos25.atr '*.com'  # extract matching files here
 spift add dos25.atr game.xex     # add host files to the image
@@ -24,6 +25,8 @@ spift extract-boot-sectors dos25.atr boot.bin
 `mkfs` writes an empty filesystem: `dos10`, `dos20s`, `dos20d`, `dos25`, or `mydos`, chosen with `--fs atari/VARIANT` (or `--variant`). Without one, a standard single-density image gets `dos20s`, enhanced density is refused as ambiguous (DOS 2.5 and MyDOS both fit), and anything else gets `mydos`. `--boot-sectors FILE` fills the boot area, which must be exactly the variant's size - one sector for DOS 1.0, three otherwise; use `write-boot-sectors` for anything else. The structures match disks formatted by the real DOSes byte for byte, quirks included: only MyDOS reclaims sector 720, DOS 1.0 reserves a single boot sector, DOS 2.5 splits its accounting across both VTOCs, and MyDOS spills its bitmap into extra sectors below the VTOC on disks over 943 sectors.
 
 `ls` lists the root directory of the filesystem on an image (Atari DOS 1.0/2.0s/2.0d/2.5 and MyDOS so far; SpartaDOS is detected but not yet readable). Specs use the native wildcard rules (`*` and `?`, name and extension matched separately) - quote them to keep the shell out of it.
+
+`--long`/`-l` leads with two status lines - the physical image (format, sector count, sector size) and the filesystem (id, capacity, free space, volume label where the family has one) - then adds sector counts, start sectors, and attributes per file. On DOS 2.5 the free figure is the honest total across both VTOCs, with a note giving the smaller number its own DIR reports. `--verbose`/`-v` additionally lists what a directory listing passes over, marked `deleted` or `open-output`; like the DOSes, the scan still stops at the first never-used slot, so entries beyond it stay invisible.
 
 `extract` copies matching files (default: all) out of an image into `-o DIR` (default: here). Host names are lowercased and made filesystem-safe; nothing is overwritten without `--force`/`-f`, checked before any file is written. Damaged files still extract whatever is recoverable, with warnings and exit code 1.
 

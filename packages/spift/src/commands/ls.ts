@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import type { AtariDosVariant } from "../atari-dos.ts";
-import type { DirEntry, DirEntryAttribute } from "../filesystem.ts";
+import type { DirEntry, DirEntryAttribute, VolumeInfo } from "../filesystem.ts";
 import { UsageError } from "../cli-error.ts";
 import { parseFsOption } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
@@ -11,6 +11,7 @@ export interface LsArgs {
 	fs: "atari" | "sparta" | undefined;
 	variant: AtariDosVariant | undefined;
 	long: boolean;
+	verbose: boolean;
 }
 
 export function parseLsArgs(args: string[]): LsArgs {
@@ -21,6 +22,7 @@ export function parseLsArgs(args: string[]): LsArgs {
 			options: {
 				fs: { type: "string" },
 				long: { type: "boolean", short: "l" },
+				verbose: { type: "boolean", short: "v" },
 			},
 			allowPositionals: true,
 		});
@@ -48,25 +50,83 @@ export function parseLsArgs(args: string[]): LsArgs {
 		fs: selection?.family,
 		variant: selection?.variant,
 		long: values.long ?? false,
+		verbose: values.verbose ?? false,
 	};
 }
 
 export async function lsCommand(args: string[]): Promise<void> {
 	const parsed = parseLsArgs(args);
-	const { filesystem } = await openImageFilesystem(
+	const { filesystem, medium } = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
 		parsed.variant,
 	);
-	const entries = [...filesystem.entries(parsed.spec)];
+	const entries = [
+		...filesystem.entries(parsed.spec, { includeUnlisted: parsed.verbose }),
+	];
 	const color = process.stdout.isTTY === true && !process.env.NO_COLOR;
+	if (parsed.long) {
+		process.stdout.write(
+			renderStatus(
+				// One container so far; the format name comes from the sniffer
+				// registry once there are more.
+				{
+					format: "atr",
+					sectorCount: medium.sectorCount,
+					sectorSize: medium.sectorSize,
+				},
+				{
+					id: `${filesystem.family}/${filesystem.variant}`,
+					volume: filesystem.volume(),
+				},
+				color,
+			),
+		);
+	}
 	process.stdout.write(
 		parsed.long ? renderLong(entries, color) : renderShort(entries),
 	);
 }
 
+export interface ContainerStatus {
+	format: string;
+	sectorCount: number;
+	sectorSize: number;
+}
+
+/**
+ * The two lines -l leads with: the physical image, then the filesystem
+ * living on it.
+ */
+export function renderStatus(
+	container: ContainerStatus,
+	filesystem: { id: string; volume: VolumeInfo },
+	color: boolean,
+): string {
+	const paint = (text: string, codes: string): string =>
+		color ? `\x1b[${codes}m${text}\x1b[0m` : text;
+	const { volume } = filesystem;
+	const physical =
+		paint(container.format, "1") +
+		"  " +
+		`${container.sectorCount} sectors x ${container.sectorSize} bytes`;
+	const parts = [
+		paint(filesystem.id, "1"),
+		`${volume.totalSectors} sectors, ${volume.freeSectors} free`,
+	];
+	if (volume.label !== undefined) {
+		parts.splice(1, 0, `"${volume.label}"`);
+	}
+	let logical = parts.join("  ");
+	for (const detail of volume.details) {
+		logical += paint(`  (${detail})`, "2");
+	}
+	return `${physical}\n${logical}\n`;
+}
+
 const ATTRIBUTE_LABELS: Record<DirEntryAttribute, string> = {
 	ReadOnly: "read-only",
+	Deleted: "deleted",
 	OpenForOutput: "open-output",
 	AtariDos10: "dos1",
 	AtariDos25: "dos2.5",
@@ -98,7 +158,12 @@ export function renderLong(
 	let out = "";
 	for (const row of rows) {
 		const attributes = row.attributes
-			.map((label) => paint(label, label === "read-only" ? "33" : "36"))
+			.map((label) =>
+				paint(
+					label,
+					label === "deleted" ? "31" : label === "read-only" ? "33" : "36",
+				),
+			)
 			.join(" ");
 		out +=
 			[

@@ -380,28 +380,75 @@ test("skips deleted entries and stops at a never-used entry", () => {
 });
 
 test("maps flags to attributes", () => {
-	const entries = list(
-		makeDisk({
-			entries: [
-				{ flags: 0x62, name: "LOCKED.FIL" },
-				{ flags: 0x43, name: "OPEN.FIL" },
-				{ flags: 0x40, name: "OLD.FIL" },
-				{ flags: 0x46, name: "MY.FIL" },
-				{ flags: 0x03, name: "HIDDEN.FIL" },
-				{ flags: 0x10, name: "SUBDIR" },
-			],
-		}),
-	);
+	const disk = makeDisk({
+		entries: [
+			{ flags: 0x62, name: "LOCKED.FIL" },
+			{ flags: 0x43, name: "OPEN.FIL" },
+			{ flags: 0x40, name: "OLD.FIL" },
+			{ flags: 0x46, name: "MY.FIL" },
+			{ flags: 0x03, name: "HIDDEN.FIL" },
+			{ flags: 0x10, name: "SUBDIR" },
+		],
+	});
+	// A file left open for output is skipped in a plain listing, as the
+	// DOSes skip it.
 	expect(
-		entries.map((entry) => [entry.name, entry.kind, ...entry.attributes]),
+		list(disk).map((entry) => [entry.name, entry.kind, ...entry.attributes]),
 	).toEqual([
 		["locked.fil", "file", "ReadOnly"],
-		["open.fil", "file", "OpenForOutput"],
 		["old.fil", "file", "AtariDos10"],
 		["my.fil", "file", "AtariMyDos"],
 		["hidden.fil", "file", "AtariDos25"],
 		["subdir", "dir"],
 	]);
+	const all = [
+		...openAtariDos(openAtr(disk)).entries(undefined, {
+			includeUnlisted: true,
+		}),
+	];
+	expect(all.map((entry) => [entry.name, ...entry.attributes])).toContainEqual([
+		"open.fil",
+		"OpenForOutput",
+	]);
+});
+
+test("verbose listing adds deleted entries, still stopping at slot zero", () => {
+	const disk = makeDisk({
+		entries: [
+			{ flags: 0x42, name: "KEEP.ME", sectors: 3, start: 100 },
+			{ flags: 0x80, name: "GONE.OLD", sectors: 7, start: 200 },
+			{ flags: 0x00, name: "END" },
+			{ flags: 0x42, name: "ORPHAN.ED" },
+		],
+	});
+	const fs = openAtariDos(openAtr(disk));
+	expect([...fs.entries()].map((e) => e.name)).toEqual(["keep.me"]);
+	const all = [...fs.entries(undefined, { includeUnlisted: true })];
+	expect(all.map((e) => [e.name, ...e.attributes])).toEqual([
+		["keep.me"],
+		["gone.old", "Deleted"],
+	]);
+	// The deleted entry keeps the rest of its directory record.
+	expect(all[1]).toMatchObject({ sectors: 7, startSector: 200 });
+	// Specs still filter, and readFile still refuses what listing hides.
+	expect([...fs.entries("*.old", { includeUnlisted: true })]).toHaveLength(1);
+	expect(fs.readFile("gone.old")).toBeNull();
+});
+
+test("volume reports the filesystem's own capacity numbers", () => {
+	const sd = makeDisk({ formatted: true });
+	expect(openAtariDos(openAtr(sd)).volume()).toEqual({
+		totalSectors: 707,
+		freeSectors: 707,
+		details: [],
+	});
+	// DOS 2.5 splits its accounting, and its own DIR only reports the low
+	// half - so the total gets the honest sum plus a note.
+	const ed = makeDisk({ sectorCount: 1040, total: 1010, formatted: true });
+	const volume = openAtariDos(openAtr(ed), "dos25").volume();
+	expect(volume.totalSectors).toBe(1010);
+	expect(volume.freeSectors).toBe(707 + 304);
+	expect(volume.details[0]).toMatch(/707 below sector 720/);
 });
 
 test("fills all eight directory sectors, double density included", () => {

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { DirEntry } from "../filesystem.ts";
-import { parseLsArgs, renderLong, renderShort } from "./ls.ts";
+import { parseLsArgs, renderLong, renderShort, renderStatus } from "./ls.ts";
 
 test("parses image, spec, and flags", () => {
 	expect(parseLsArgs(["disk.atr"])).toEqual({
@@ -9,13 +9,17 @@ test("parses image, spec, and flags", () => {
 		fs: undefined,
 		variant: undefined,
 		long: false,
+		verbose: false,
 	});
-	expect(parseLsArgs(["disk.atr", "*.sys", "-l", "--fs", "ATARI"])).toEqual({
+	expect(
+		parseLsArgs(["disk.atr", "*.sys", "-l", "-v", "--fs", "ATARI"]),
+	).toEqual({
 		image: "disk.atr",
 		spec: "*.sys",
 		fs: "atari",
 		variant: undefined,
 		long: true,
+		verbose: true,
 	});
 });
 
@@ -61,6 +65,37 @@ test("long listing justifies columns and shows attributes", () => {
 			"locked.fil   5  141  read-only dos2.5\n" +
 			"games/       8  400\n",
 	);
+});
+
+test("status leads with the container, then the filesystem", () => {
+	expect(
+		renderStatus(
+			{ format: "atr", sectorCount: 720, sectorSize: 128 },
+			{
+				id: "atari/dos20s",
+				volume: { totalSectors: 707, freeSectors: 227, details: [] },
+			},
+			false,
+		),
+	).toBe("atr  720 sectors x 128 bytes\natari/dos20s  707 sectors, 227 free\n");
+});
+
+test("status shows volume labels and family details", () => {
+	const status = renderStatus(
+		{ format: "atr", sectorCount: 1040, sectorSize: 128 },
+		{
+			id: "atari/dos25",
+			volume: {
+				totalSectors: 1010,
+				freeSectors: 1011,
+				label: "GAMES",
+				details: ["707 below sector 720"],
+			},
+		},
+		false,
+	);
+	expect(status).toContain('atari/dos25  "GAMES"  1010 sectors, 1011 free');
+	expect(status).toContain("(707 below sector 720)");
 });
 
 test("long listing colors are gated and reset", () => {

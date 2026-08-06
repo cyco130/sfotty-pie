@@ -27,12 +27,14 @@ commands:
     mydos both fit), and anything else gets mydos. --boot-sectors fills
     the boot area from a file sized exactly for the variant.
 
-  ls IMAGE_FILE [SPEC] [--fs atari|sparta] [-l]
+  ls IMAGE_FILE [SPEC] [--fs FILESYSTEM] [-l] [-v]
     List the root directory of the filesystem on an image. SPEC filters
     with native wildcards (* and ?; name and extension match separately;
     quote it to keep the shell from expanding it). The filesystem is
-    autodetected; --fs overrides. --long (-l) adds sector counts, start
-    sectors, and attributes.
+    autodetected; --fs overrides. --long (-l) leads with a status line
+    (filesystem, geometry, capacity) and adds sector counts, start
+    sectors, and attributes. --verbose (-v) also lists what a directory
+    listing passes over: deleted files and ones left open for output.
 
   extract IMAGE_FILE [SPEC] [-o DIR] [--fs atari|sparta] [-f]
     Extract files matching SPEC (default: all) from the root directory

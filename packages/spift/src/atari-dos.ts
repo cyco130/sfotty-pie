@@ -497,6 +497,27 @@ export function openAtariDos(
 				first = lookup(first, component)?.startSector ?? first;
 			}
 		},
+		moveFile(
+			from: string,
+			to: string,
+			options?: { force?: boolean },
+		): string[] {
+			const fromParts = splitAtariPath(from);
+			const fromLeaf = fromParts.pop();
+			const toParts = splitAtariPath(to);
+			const toLeaf = toParts.pop();
+			if (fromLeaf === undefined || toLeaf === undefined) {
+				throw new Error("both a source and a destination name are needed");
+			}
+			return moveAtariFile(
+				medium,
+				resolveDirectory(fromParts),
+				fromLeaf,
+				resolveDirectory(toParts),
+				toLeaf,
+				options?.force === true,
+			);
+		},
 		removeDirectory(path: string): void {
 			const parts = splitAtariPath(path);
 			const leaf = parts.pop();
@@ -871,6 +892,178 @@ function removeAtariDirectory(
 	entry[0] = FLAG_DELETED;
 	directory.flushSlot(writeSector, entryIndex);
 	accounting.flush(writeSector);
+}
+
+/**
+ * Builds a new name from a source name and a rename template, the way the
+ * DOSes' own RENAME does with `*.LST,*.TXT`. Positional over the
+ * space-padded 8 and 3 character fields, measured against DOS 2.0S:
+ * "*" copies the source from that position to the end of the field
+ * (AB.TXT with Q*.BAK gives QB.BAK), "?" copies the character at that
+ * position, anything else replaces it, and once the template runs out the
+ * rest of the field is blank (ABCDEFGH.TXT with ??Z.BAK gives ABZ.BAK).
+ */
+export function applyAtariNameTemplate(name: string, template: string): string {
+	const split = (text: string): [string, string] => {
+		const dot = text.indexOf(".");
+		return dot === -1 ? [text, ""] : [text.slice(0, dot), text.slice(dot + 1)];
+	};
+	const [sourceName, sourceExt] = split(name.toUpperCase());
+	const [templateName, templateExt] = split(template.toUpperCase());
+	const field = (source: string, pattern: string, width: number): string => {
+		const from = source.padEnd(width);
+		let out = "";
+		for (let i = 0; i < width; i++) {
+			const char = pattern[i];
+			if (char === "*") {
+				out += from.slice(i, width);
+				break;
+			}
+			out += char ?? " ";
+			if (char === "?") {
+				out = out.slice(0, -1) + (from[i] ?? " ");
+			}
+		}
+		return out.padEnd(width).slice(0, width).trimEnd();
+	};
+	const newName = field(sourceName, templateName, 8);
+	const newExt = field(sourceExt, templateExt, 3);
+	return (newExt === "" ? newName : `${newName}.${newExt}`).toLowerCase();
+}
+
+function moveAtariFile(
+	medium: SectorMedium,
+	fromFirst: number,
+	fromLeaf: string,
+	toFirst: number,
+	toLeaf: string,
+	force: boolean,
+): string[] {
+	const writeSector = medium.writeSector?.bind(medium);
+	if (writeSector === undefined) {
+		throw new Error("the medium is read-only");
+	}
+	const target = encodeAtariName(toLeaf);
+	const source = loadDirectory(medium, fromFirst);
+
+	let index = -1;
+	for (let slot = 0; slot < DIRECTORY_SECTORS * ENTRIES_PER_SECTOR; slot++) {
+		const entry = source.slotIn(slot);
+		const flags = entry[0] ?? 0;
+		if (flags === 0) {
+			break;
+		}
+		if ((flags & FLAG_DELETED) !== 0) {
+			continue;
+		}
+		const name = decodeField(entry.subarray(5, 13));
+		const ext = decodeField(entry.subarray(13, 16));
+		if ((ext === "" ? name : `${name}.${ext}`) === fromLeaf) {
+			index = slot;
+			break;
+		}
+	}
+	if (index === -1) {
+		throw new Error(`${fromLeaf} does not exist`);
+	}
+	const raw = rawEntryFromSlot(source.slotIn(index), index);
+	if ((raw.flags & FLAG_LOCKED) !== 0 && !force) {
+		throw new Error(`${fromLeaf} is locked`);
+	}
+
+	// Renaming inside one directory keeps the slot, and the slot index is
+	// what a data sector's file number holds - so the chain is untouched.
+	if (fromFirst === toFirst) {
+		if (fromLeaf !== toLeaf) {
+			const clash = lookupSlot(source, target);
+			if (clash !== -1) {
+				throw new Error(`${toLeaf} already exists`);
+			}
+		}
+		const entry = source.slotIn(index);
+		for (let i = 0; i < 8; i++) {
+			entry[5 + i] = target.name.charCodeAt(i) || 0x20;
+		}
+		for (let i = 0; i < 3; i++) {
+			entry[13 + i] = target.ext.charCodeAt(i) || 0x20;
+		}
+		source.flushSlot(writeSector, index);
+		return [];
+	}
+
+	const destination = loadDirectory(medium, toFirst);
+	if (lookupSlot(destination, target) !== -1) {
+		throw new Error(`${toLeaf} already exists in the destination`);
+	}
+	let free = -1;
+	for (let slot = 0; slot < DIRECTORY_SECTORS * ENTRIES_PER_SECTOR; slot++) {
+		const flags = destination.slotIn(slot)[0] ?? 0;
+		if (flags === 0 || (flags & FLAG_DELETED) !== 0) {
+			free = slot;
+			break;
+		}
+	}
+	if (free === -1) {
+		throw new Error("the destination directory is full");
+	}
+
+	// Moving to a different slot invalidates the file number every data
+	// sector carries - unless there is none to carry: directory blocks have
+	// no link trailer, and MyDOS's full-link files store no file number.
+	const diagnostics: string[] = [];
+	const numbered =
+		!raw.isDir && (raw.flags & FLAG_NO_LINK) === 0 && free !== index;
+	if (numbered) {
+		const walk = walkChain(medium, raw);
+		diagnostics.push(...walk.contents.diagnostics);
+		for (const sector of walk.visited) {
+			const data = medium.readSector(sector);
+			if (data === null || data.length < 3) {
+				continue;
+			}
+			const at = data.length - 3;
+			data[at] = ((free << 2) | ((data[at] ?? 0) & 0x03)) & 0xff;
+			if (!writeSector(sector, data)) {
+				throw new Error(`sector ${sector}: write failed`);
+			}
+		}
+	}
+
+	const entry = destination.slotIn(free);
+	entry.set(source.slotIn(index));
+	for (let i = 0; i < 8; i++) {
+		entry[5 + i] = target.name.charCodeAt(i) || 0x20;
+	}
+	for (let i = 0; i < 3; i++) {
+		entry[13 + i] = target.ext.charCodeAt(i) || 0x20;
+	}
+	destination.flushSlot(writeSector, free);
+	source.slotIn(index)[0] = FLAG_DELETED;
+	source.flushSlot(writeSector, index);
+	return diagnostics;
+}
+
+function lookupSlot(
+	directory: LoadedDirectory,
+	wanted: { name: string; ext: string },
+): number {
+	for (let slot = 0; slot < DIRECTORY_SECTORS * ENTRIES_PER_SECTOR; slot++) {
+		const entry = directory.slotIn(slot);
+		const flags = entry[0] ?? 0;
+		if (flags === 0) {
+			return -1;
+		}
+		if ((flags & FLAG_DELETED) !== 0) {
+			continue;
+		}
+		if (
+			decodeField(entry.subarray(5, 13)).toUpperCase() === wanted.name &&
+			decodeField(entry.subarray(13, 16)).toUpperCase() === wanted.ext
+		) {
+			return slot;
+		}
+	}
+	return -1;
 }
 
 function writeAtariFile(
@@ -1448,7 +1641,14 @@ function encodeAtariName(display: string): { name: string; ext: string } {
 	const dot = display.indexOf(".");
 	const name = (dot === -1 ? display : display.slice(0, dot)).toUpperCase();
 	const ext = (dot === -1 ? "" : display.slice(dot + 1)).toUpperCase();
-	if (!/^[A-Z0-9_@]{1,8}$/.test(name) || !/^[A-Z0-9_@]{0,3}$/.test(ext)) {
+	// Spaces are allowed inside a name, just not to start one: the field is
+	// space-padded, and the DOSes' own RENAME templates produce such names
+	// (X.TXT with ??Z.BAK gives "X Z" on DOS 2.0S, measured). Host names
+	// never arrive this way - toAtariName turns anything odd into "_".
+	if (
+		!/^[A-Z0-9_@][A-Z0-9_@ ]{0,7}$/.test(name) ||
+		!/^[A-Z0-9_@ ]{0,3}$/.test(ext)
+	) {
 		throw new Error(`invalid Atari file name "${display}"`);
 	}
 	return { name, ext };

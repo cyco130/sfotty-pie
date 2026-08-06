@@ -99,6 +99,14 @@ export interface Filesystem {
 	 */
 	readFile(path: string): FileContents | null;
 	/**
+	 * Renames or moves an entry. Staying in one directory keeps its slot,
+	 * so nothing but the name changes; moving elsewhere may have to rewrite
+	 * per-sector bookkeeping, and returns any diagnostics from walking the
+	 * file to do so. Throws when the source is missing or locked (unless
+	 * force), or the destination name is taken.
+	 */
+	moveFile(from: string, to: string, options?: { force?: boolean }): string[];
+	/**
 	 * Creates a directory. `parents` makes the missing ones along the way
 	 * and turns an existing target into a no-op, as `mkdir -p` does.
 	 * Mutations stay in the medium's memory.

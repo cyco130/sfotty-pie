@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import {
+	applyAtariNameTemplate,
 	checkAtariDosGeometry,
 	defaultAtariDosVariant,
 	detectAtariDos,
@@ -309,6 +310,83 @@ test("mkdir needs a contiguous run, not just free sectors", () => {
 	expect(() => openAtariDos(image, "mydos").makeDirectory("nope")).toThrow(
 		/no run of 8 free sectors/,
 	);
+});
+
+test("renaming in place leaves the chain alone", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "mydos");
+	const fs = openAtariDos(image, "mydos");
+	fs.writeFile("first.dat", new Uint8Array(300));
+	fs.writeFile("second.dat", new Uint8Array(300));
+	const before = [...fs.entries("second.dat")][0];
+	const chainByte = image.readSector(before?.startSector ?? 0)![125];
+
+	expect(fs.moveFile("second.dat", "renamed.txt")).toEqual([]);
+	const after = [...fs.entries("renamed.txt")][0];
+	// Same slot, same sectors, same file number - only the name moved.
+	expect(after?.startSector).toBe(before?.startSector);
+	expect(image.readSector(after?.startSector ?? 0)![125]).toBe(chainByte);
+	expect(fs.readFile("renamed.txt")?.diagnostics).toEqual([]);
+	expect(fs.readFile("second.dat")).toBeNull();
+	expect(() => fs.moveFile("first.dat", "renamed.txt")).toThrow(
+		/already exists/,
+	);
+});
+
+test("moving between directories renumbers the file's sectors", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "mydos");
+	const fs = openAtariDos(image, "mydos");
+	fs.makeDirectory("games");
+	fs.makeDirectory("tools");
+	fs.writeFile("tools/keep.dat", new Uint8Array(10)); // takes slot 0 there
+	fs.writeFile("games/move.dat", new Uint8Array(400)); // slot 0 of games
+	const before = [...fs.entries("games/move.dat")][0];
+	expect(image.readSector(before?.startSector ?? 0)![125]! >> 2).toBe(0);
+
+	fs.moveFile("games/move.dat", "tools/move.dat");
+	const after = [...fs.entries("tools/move.dat")][0];
+	expect(after?.startSector).toBe(before?.startSector); // data never moves
+	// Slot 1 of tools now, so every sector of the chain says 1.
+	let sector = after?.startSector ?? 0;
+	let sectors = 0;
+	while (sector !== 0) {
+		const data = image.readSector(sector)!;
+		expect(data[125]! >> 2).toBe(1);
+		sector = ((data[125]! & 3) << 8) | data[126]!;
+		sectors++;
+	}
+	expect(sectors).toBe(4);
+	expect(fs.readFile("tools/move.dat")?.diagnostics).toEqual([]);
+	expect([...fs.entries("games")]).toHaveLength(0);
+});
+
+test("directories move without any chain to renumber", () => {
+	const image = fresh(128, 720);
+	formatAtariDos(image, "mydos");
+	const fs = openAtariDos(image, "mydos");
+	fs.makeDirectory("a");
+	fs.makeDirectory("b");
+	fs.writeFile("b/inside.dat", new Uint8Array(10));
+	const block = [...fs.entries("b", { listContents: false })][0]?.startSector;
+	expect(fs.moveFile("b", "a/b")).toEqual([]);
+	const moved = [...fs.entries("a/b", { listContents: false })][0];
+	expect(moved?.startSector).toBe(block);
+	// Its contents came along, since the block is what holds them.
+	expect([...fs.entries("a/b")].map((e) => e.name)).toEqual(["inside.dat"]);
+});
+
+test("rename templates follow the DOSes' positional rules", () => {
+	// Measured against DOS 2.0S: "*" copies to the end of the field, "?"
+	// copies one character, a short template blanks the rest.
+	expect(applyAtariNameTemplate("ab.lst", "*.txt")).toBe("ab.txt");
+	expect(applyAtariNameTemplate("abcdefgh.lst", "*.txt")).toBe("abcdefgh.txt");
+	expect(applyAtariNameTemplate("ab.txt", "q*.bak")).toBe("qb.bak");
+	expect(applyAtariNameTemplate("abcdefgh.txt", "??z.bak")).toBe("abz.bak");
+	// A short source pulls in the field's padding, spaces and all - which
+	// is exactly what DOS 2.0S writes for this case.
+	expect(applyAtariNameTemplate("x.txt", "??z.bak")).toBe("x z.bak");
+	expect(applyAtariNameTemplate("a.b", "*.*")).toBe("a.b");
 });
 
 test("a formatted disk accepts files immediately", () => {

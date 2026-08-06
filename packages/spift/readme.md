@@ -17,6 +17,8 @@ spift extract dos25.atr '*.com'  # extract matching files here
 spift add dos25.atr game.xex     # add host files to the image
 spift rm dos25.atr '*.tmp'       # remove matching files
 spift mkdir mydos.atr -p 'games>arcade'          # MyDOS subdirectories
+spift mv dos25.atr '*.lst' '*.txt'              # batch rename by template
+spift mv mydos.atr '*.com' 'games/'             # move a batch into a directory
 spift ls mydos.atr -lR                          # walk the whole tree
 spift write-boot-sectors blank.atr boot.bin
 spift extract-boot-sectors dos25.atr boot.bin
@@ -36,6 +38,8 @@ On a terminal, names are colored: directories blue, deleted entries red, open-fo
 `extract` copies matching files (default: all) out of an image into `-o DIR` (default: here); `--recursive`/`-R` descends into subdirectories and mirrors the tree below whatever directory the spec picked. Host names are lowercased and made filesystem-safe, per path component; nothing is overwritten without `--force`/`-f`, checked before any file is written. Damaged files still extract whatever is recoverable, with warnings and exit code 1.
 
 `mkdir` and `rmdir` manage MyDOS subdirectories, with `-p` for parents. A directory is a contiguous eight-sector extent holding 64 entries, so `mkdir` can fail for want of a _run_ of free sectors on a disk with plenty of room - the same refusal MyDOS gives. `rmdir` takes only empty directories; `rm -r` clears a tree, deepest first. Paths accept `/`, `>` and `:` as separators, plus SpartaDOS's `<`, which separates and steps up a level at once (`games>arcade<other` means `games/other`); quote them, since shells read `<` and `>` as redirection.
+
+`mv` renames and moves. The destination is a directory when it ends in a separator or names one, and otherwise a name template applied per match, following the DOSes' own RENAME rules exactly (measured against DOS 2.0S): `*` copies the source from that position to the end of the field, `?` copies one character, anything else replaces, and a template shorter than the field blanks the rest - so `'*.lst' '*.txt'` re-extensions a batch, `ab.txt` with `q*.bak` gives `qb.bak`, and `abcdefgh.txt` with `??z.bak` gives `abz.bak`. Renaming inside a directory touches only the directory entry; moving between directories has to rewrite the file number every data sector carries, unless the entry is a directory or a MyDOS full-link file, which store none. File contents never move either way.
 
 `rm` removes files matching its specs. Locked files need `--force`/`-f` (which also quiets specs that match nothing), and directories need `--recursive`/`-r`. Deleted entries keep their name under the deleted flag, the way the DOSes leave them for undelete tools.
 

@@ -9,6 +9,7 @@ import { lsCommand } from "./commands/ls.ts";
 import { setDosFileCommand } from "./commands/set-dos-file.ts";
 import { mkdirCommand } from "./commands/mkdir.ts";
 import { mkfsCommand } from "./commands/mkfs.ts";
+import { mvCommand } from "./commands/mv.ts";
 import { rmCommand } from "./commands/rm.ts";
 import { rmdirCommand } from "./commands/rmdir.ts";
 import { writeBootSectorsCommand } from "./commands/write-boot-sectors.ts";
@@ -74,6 +75,15 @@ commands:
     contiguous free sectors, so this can fail on a fragmented disk with
     plenty of room.
 
+  mv IMAGE_FILE SOURCE DESTINATION [--fs FILESYSTEM] [-f]
+    Rename or move entries. DESTINATION is a directory when it ends in a
+    separator or names one, and otherwise a name template applied to each
+    match: * copies the source from that position to the end of the
+    field, ? copies one character, anything else replaces (so '*.lst'
+    '*.txt' re-extensions a batch, as the DOSes' own RENAME does).
+    Renaming inside a directory only rewrites the entry; moving between
+    directories may renumber the file's sectors.
+
   rmdir IMAGE_FILE DIRECTORY... [--fs FILESYSTEM]
     Remove empty directories, freeing what they occupied. A directory
     holding anything is refused, as the DOSes refuse it.
@@ -124,6 +134,9 @@ async function main(): Promise<void> {
 			break;
 		case "mkdir":
 			await mkdirCommand(args);
+			break;
+		case "mv":
+			await mvCommand(args);
 			break;
 		case "rmdir":
 			await rmdirCommand(args);

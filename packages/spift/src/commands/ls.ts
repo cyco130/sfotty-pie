@@ -1,12 +1,15 @@
 import { parseArgs } from "node:util";
+import type { AtariDosVariant } from "../atari-dos.ts";
 import type { DirEntry, DirEntryAttribute } from "../filesystem.ts";
 import { UsageError } from "../cli-error.ts";
+import { parseFsOption } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
 
 export interface LsArgs {
 	image: string;
 	spec: string | undefined;
 	fs: "atari" | "sparta" | undefined;
+	variant: AtariDosVariant | undefined;
 	long: boolean;
 }
 
@@ -36,23 +39,25 @@ export function parseLsArgs(args: string[]): LsArgs {
 		throw new UsageError(`unexpected argument "${extra[0]}"`);
 	}
 
-	let fs: "atari" | "sparta" | undefined;
-	if (values.fs !== undefined) {
-		const lowered = values.fs.toLowerCase();
-		if (lowered !== "atari" && lowered !== "sparta") {
-			throw new UsageError(
-				`invalid --fs "${values.fs}" (valid: atari, sparta)`,
-			);
-		}
-		fs = lowered;
-	}
+	const selection =
+		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
 
-	return { image, spec, fs, long: values.long ?? false };
+	return {
+		image,
+		spec,
+		fs: selection?.family,
+		variant: selection?.variant,
+		long: values.long ?? false,
+	};
 }
 
 export async function lsCommand(args: string[]): Promise<void> {
 	const parsed = parseLsArgs(args);
-	const { filesystem } = await openImageFilesystem(parsed.image, parsed.fs);
+	const { filesystem } = await openImageFilesystem(
+		parsed.image,
+		parsed.fs,
+		parsed.variant,
+	);
 	const entries = [...filesystem.entries(parsed.spec)];
 	const color = process.stdout.isTTY === true && !process.env.NO_COLOR;
 	process.stdout.write(

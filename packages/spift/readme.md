@@ -33,7 +33,9 @@ spift extract-boot-sectors dos25.atr boot.bin
 
 `extract-boot-sectors` is the counterpart: it pulls the boot sectors into a file, sized by the boot record's own count byte. When that byte claims zero or more sectors than the image holds, pass `--sector-count` explicitly. Existing output files are not overwritten without `--force`/`-f`.
 
-`add` copies host files into an image (DOS 2.0/2.5/MyDOS disks; DOS 1.0 refuses, since a DOS 2 chain would corrupt it). Names convert to uppercase 8.3 - letters, digits, `_` and `@`, everything else becomes `_`. Overwriting a file already on the image needs `--force`/`-f`; two sources mangling to the same name is always an error. On DOS 2.5, files reaching past sector 719 get the extended marking, and the VTOC2 shared bitmap is silently repaired from the main VTOC (which DOS 2.0 keeps current). The image is only written back after the whole batch succeeds. Run `spift help` for details.
+`add` copies host files into an image. Names convert to uppercase 8.3 - letters, digits, `_` and `@`, everything else becomes `_`. Overwriting a file already on the image needs `--force`/`-f`; two sources mangling to the same name is always an error. On DOS 2.5, files reaching past sector 719 get the extended marking, and the VTOC2 shared bitmap is silently repaired from the main VTOC (which DOS 2.0 keeps current). The image is only written back after the whole batch succeeds.
+
+Files are written in DOS 2 format whatever the disk was formatted with, and allocation follows the bitmap rather than any DOS's habits - so a sector the format left free (720 on a MyDOS disk) gets used, which real DOS 2.0 never does but reads back fine. `--fs atari/dos10` writes DOS 1.0 format chains instead, which only DOS 1.0 can read; `--fs` takes a family (`atari`), a variant (`dos25`), or both (`atari/dos25`), and the same syntax works on `ls`, `extract`, and `rm` to force how a disk is interpreted. Run `spift help` for details.
 
 ## License and credits
 

@@ -1,13 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import {
-	ATARI_DOS_VARIANTS,
 	defaultAtariDosVariant,
 	formatAtariDos,
 	type AtariDosVariant,
 } from "../atari-dos.ts";
 import { openAtr } from "../atr.ts";
 import { CliError, UsageError } from "../cli-error.ts";
+import { parseFsOption } from "./fs-option.ts";
 
 export interface MkfsArgs {
 	image: string;
@@ -16,23 +16,19 @@ export interface MkfsArgs {
 }
 
 function parseVariant(text: string, flag: string): AtariDosVariant {
-	const lowered = text.toLowerCase();
-	// "atari/dos25" and a bare "dos25" both work; only one family so far.
-	const slash = lowered.indexOf("/");
-	const family = slash === -1 ? "atari" : lowered.slice(0, slash);
-	const variant = slash === -1 ? lowered : lowered.slice(slash + 1);
-	if (family !== "atari") {
+	const selection = parseFsOption(text, flag);
+	if (selection.family !== "atari") {
 		throw new UsageError(
-			`unsupported filesystem family "${family}" in ${flag} (valid: atari)`,
+			`only atari filesystems can be created so far, not "${text}"`,
 		);
 	}
-	if (!(ATARI_DOS_VARIANTS as readonly string[]).includes(variant)) {
+	if (selection.variant === undefined) {
 		throw new UsageError(
-			`unknown filesystem "${text}" in ${flag} ` +
-				`(valid: ${ATARI_DOS_VARIANTS.join(", ")})`,
+			`${flag} needs a variant to create (for example atari/dos20s); ` +
+				`omit ${flag} entirely to pick one from the geometry`,
 		);
 	}
-	return variant as AtariDosVariant;
+	return selection.variant;
 }
 
 export function parseMkfsArgs(args: string[]): MkfsArgs {

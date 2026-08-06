@@ -28,7 +28,10 @@ test("validates the argument list", () => {
 		parseMkfsArgs(["a.atr", "--fs", "atari/dos25", "--variant", "mydos"]),
 	).toThrow(/mutually exclusive/);
 	expect(() => parseMkfsArgs(["a.atr", "--fs", "sparta"])).toThrow(
-		/unknown filesystem/,
+		/only atari filesystems/,
+	);
+	expect(() => parseMkfsArgs(["a.atr", "--fs", "atari"])).toThrow(
+		/needs a variant/,
 	);
 	expect(() => parseMkfsArgs(["a.atr", "--fs", "c64/1541"])).toThrow(
 		/unsupported filesystem family "c64"/,

@@ -479,11 +479,38 @@ test("writeFile reports full disks and directories", () => {
 	).toThrow(/directory is full/);
 });
 
-test("writeFile refuses DOS 1.0 disks", () => {
+test("writeFile puts DOS 2 files on DOS 1.0 disks by default", () => {
 	const dos1 = makeDisk({ code: 1, total: 709, formatted: true });
-	expect(() =>
-		openAtariDos(openAtr(dos1)).writeFile("a.dat", new Uint8Array(1)),
-	).toThrow(/DOS 1.0/);
+	const fs = openAtariDos(openAtr(dos1));
+	fs.writeFile("a.dat", new Uint8Array(300));
+	const entry = [...fs.entries("a.dat")][0];
+	expect(entry?.attributes).not.toContain("AtariDos10");
+	expect(fs.readFile("a.dat")?.bytes).toHaveLength(300);
+});
+
+test("writeFile can write DOS 1.0 format chains", () => {
+	const disk = makeDisk({ code: 1, total: 709, formatted: true });
+	const image = openAtr(disk);
+	const fs = openAtariDos(image, "dos10");
+	const payload = Uint8Array.from({ length: 300 }, (_, i) => i & 0xff);
+	fs.writeFile("old.dat", payload, { format: "dos1" });
+
+	const entry = [...fs.entries("old.dat")][0];
+	expect(entry?.attributes).toContain("AtariDos10");
+	expect(entry?.sectors).toBe(3);
+	// Real DOS 1.0 leaves the DOS 2 flag clear, flags the last sector with
+	// bit 7 plus its byte count, and numbers earlier sectors 0, 1, 2, ...
+	const start = entry?.startSector ?? 0;
+	const first = image.readSector(start)!;
+	const second = image.readSector((first[125]! & 3) * 256 + first[126]!)!;
+	expect(first[127]).toBe(0);
+	expect(second[127]).toBe(1);
+	const third = image.readSector((second[125]! & 3) * 256 + second[126]!)!;
+	expect(third[127]).toBe(0x80 | 50); // 300 - 2 * 125
+	// ... and it round-trips through the DOS 1 reader.
+	const back = fs.readFile("old.dat");
+	expect(back?.diagnostics).toEqual([]);
+	expect([...(back?.bytes ?? [])]).toEqual([...payload]);
 });
 
 test("writeFile marks DOS 2.5 files reaching past sector 719", () => {

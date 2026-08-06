@@ -1,14 +1,16 @@
 import { stat, readFile, writeFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { parseArgs } from "node:util";
-import { toAtariName } from "../atari-dos.ts";
+import { toAtariName, type AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
+import { parseFsOption } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
 
 export interface AddArgs {
 	image: string;
 	files: string[];
 	fs: "atari" | "sparta" | undefined;
+	variant: AtariDosVariant | undefined;
 	force: boolean;
 }
 
@@ -38,18 +40,16 @@ export function parseAddArgs(args: string[]): AddArgs {
 		throw new UsageError("missing FILE to add");
 	}
 
-	let fs: "atari" | "sparta" | undefined;
-	if (values.fs !== undefined) {
-		const lowered = values.fs.toLowerCase();
-		if (lowered !== "atari" && lowered !== "sparta") {
-			throw new UsageError(
-				`invalid --fs "${values.fs}" (valid: atari, sparta)`,
-			);
-		}
-		fs = lowered;
-	}
+	const selection =
+		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
 
-	return { image, files, fs, force: values.force ?? false };
+	return {
+		image,
+		files,
+		fs: selection?.family,
+		variant: selection?.variant,
+		force: values.force ?? false,
+	};
 }
 
 export async function addCommand(args: string[]): Promise<void> {
@@ -98,7 +98,14 @@ export async function addCommand(args: string[]): Promise<void> {
 	const { filesystem, medium } = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
+		parsed.variant,
 	);
+	// Without an explicit variant every disk gets DOS 2 files, MyDOS-style:
+	// they read everywhere from DOS 2.0 on, and allocation follows the
+	// bitmap, so a sector the format left free (720 on a MyDOS disk) is
+	// fair game. Asking for dos10 specifically is the way to get DOS 1.0
+	// chains, which nothing later can read.
+	const format = parsed.variant === "dos10" ? "dos1" : "dos2";
 
 	// Existing-name conflicts are collected up front too; -f is only about
 	// files already on the image, never about the same batch.
@@ -122,6 +129,7 @@ export async function addCommand(args: string[]): Promise<void> {
 		try {
 			diagnostics = filesystem.writeFile(source.native, source.bytes, {
 				overwrite: parsed.force,
+				format,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

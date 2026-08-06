@@ -41,11 +41,15 @@ commands:
     existing files unless --force (-f) is given; damaged files extract
     what is recoverable, with warnings, and exit 1.
 
-  add IMAGE_FILE FILE... [--fs atari|sparta] [-f]
+  add IMAGE_FILE FILE... [--fs FILESYSTEM] [-f]
     Add host files to the root directory of the filesystem on an image.
     Names convert to uppercase 8.3 (letters, digits, _ and @; anything
     else becomes _). Two sources mangling to the same name is an error;
     overwriting a file already on the image requires --force (-f).
+    Files are written in DOS 2 format by default, whatever the disk was
+    formatted with, and may use any sector the bitmap says is free.
+    --fs atari/dos10 writes DOS 1.0 format files instead (readable only
+    by DOS 1.0); --fs also accepts a bare family to skip detection.
 
   rm IMAGE_FILE SPEC... [--fs atari|sparta] [-f]
     Remove files matching the SPECs (native wildcards, quoted) from the

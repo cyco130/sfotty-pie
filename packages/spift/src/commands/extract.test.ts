@@ -7,6 +7,7 @@ test("parses image, spec, and options", () => {
 		spec: undefined,
 		out: ".",
 		fs: undefined,
+		variant: undefined,
 		force: false,
 	});
 	expect(
@@ -16,6 +17,7 @@ test("parses image, spec, and options", () => {
 		spec: "*.com",
 		out: "out",
 		fs: "atari",
+		variant: undefined,
 		force: true,
 	});
 });
@@ -26,6 +28,6 @@ test("validates the argument list", () => {
 		/unexpected argument/,
 	);
 	expect(() => parseExtractArgs(["a.atr", "--fs", "fat"])).toThrow(
-		/invalid --fs/,
+		/unknown filesystem/,
 	);
 });

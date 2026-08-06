@@ -7,12 +7,14 @@ test("parses image, spec, and flags", () => {
 		image: "disk.atr",
 		spec: undefined,
 		fs: undefined,
+		variant: undefined,
 		long: false,
 	});
 	expect(parseLsArgs(["disk.atr", "*.sys", "-l", "--fs", "ATARI"])).toEqual({
 		image: "disk.atr",
 		spec: "*.sys",
 		fs: "atari",
+		variant: undefined,
 		long: true,
 	});
 });
@@ -20,7 +22,9 @@ test("parses image, spec, and flags", () => {
 test("validates the argument list", () => {
 	expect(() => parseLsArgs([])).toThrow(/missing IMAGE_FILE/);
 	expect(() => parseLsArgs(["a.atr", "b", "c"])).toThrow(/unexpected argument/);
-	expect(() => parseLsArgs(["a.atr", "--fs", "cpm"])).toThrow(/invalid --fs/);
+	expect(() => parseLsArgs(["a.atr", "--fs", "cpm"])).toThrow(
+		/unknown filesystem/,
+	);
 });
 
 const ENTRIES: DirEntry[] = [

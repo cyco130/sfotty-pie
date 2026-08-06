@@ -1,6 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import type { AtariDosVariant } from "../atari-dos.ts";
 import type { DirEntry } from "../filesystem.ts";
+import { parseFsOption } from "./fs-option.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { openImageFilesystem } from "./open-image.ts";
 
@@ -8,6 +10,7 @@ export interface RmArgs {
 	image: string;
 	specs: string[];
 	fs: "atari" | "sparta" | undefined;
+	variant: AtariDosVariant | undefined;
 	force: boolean;
 }
 
@@ -37,18 +40,16 @@ export function parseRmArgs(args: string[]): RmArgs {
 		throw new UsageError("missing SPEC to remove");
 	}
 
-	let fs: "atari" | "sparta" | undefined;
-	if (values.fs !== undefined) {
-		const lowered = values.fs.toLowerCase();
-		if (lowered !== "atari" && lowered !== "sparta") {
-			throw new UsageError(
-				`invalid --fs "${values.fs}" (valid: atari, sparta)`,
-			);
-		}
-		fs = lowered;
-	}
+	const selection =
+		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
 
-	return { image, specs, fs, force: values.force ?? false };
+	return {
+		image,
+		specs,
+		fs: selection?.family,
+		variant: selection?.variant,
+		force: values.force ?? false,
+	};
 }
 
 export async function rmCommand(args: string[]): Promise<void> {
@@ -56,6 +57,7 @@ export async function rmCommand(args: string[]): Promise<void> {
 	const { filesystem, medium } = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
+		parsed.variant,
 	);
 
 	// Resolve every spec up front; the whole batch either goes or nothing

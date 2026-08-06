@@ -15,12 +15,14 @@ export interface OpenedImage {
 
 /**
  * Shared front half of the filesystem commands: load the image, open the
- * container, and resolve the filesystem family (autodetected, or forced via
- * --fs).
+ * container, and resolve the filesystem (autodetected, or forced via --fs).
+ * A forced variant also decides how the disk's layout is read, so pass it
+ * only when the caller means it.
  */
 export async function openImageFilesystem(
 	image: string,
 	fs: "atari" | "sparta" | undefined,
+	variantOverride?: AtariDosVariant,
 ): Promise<OpenedImage> {
 	let bytes: Uint8Array;
 	try {
@@ -43,8 +45,8 @@ export async function openImageFilesystem(
 	if (fs === "sparta") {
 		throw new CliError("SpartaDOS filesystem support is not implemented yet");
 	}
-	let variant: AtariDosVariant | undefined;
-	if (fs === undefined) {
+	let variant: AtariDosVariant | undefined = variantOverride;
+	if (fs === undefined && variantOverride === undefined) {
 		const detected = detectFilesystem(medium);
 		if (detected === undefined) {
 			throw new CliError(

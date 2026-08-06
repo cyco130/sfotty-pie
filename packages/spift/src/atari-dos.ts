@@ -24,19 +24,23 @@ export interface AtariDosFilesystem extends Filesystem {
 	readonly family: "atari";
 	readonly variant: AtariDosVariant;
 	/**
-	 * Writes a file into the root directory, always in DOS 2 chain format.
-	 * The name is a decoded display name ("game.com") whose fields must fit
-	 * 8.3 in [A-Z0-9_@] (see toAtariName). Throws on DOS 1.0 disks (a DOS 2
-	 * chain would corrupt them), a full directory or disk, or an existing
-	 * name unless overwrite is set. Mutations stay in the medium's memory.
+	 * Writes a file into the root directory. The name is a decoded display
+	 * name ("game.com") whose fields must fit 8.3 in [A-Z0-9_@] (see
+	 * toAtariName). Throws on a full directory or disk, or an existing name
+	 * unless overwrite is set. Mutations stay in the medium's memory.
 	 * Returns the traversal diagnostics from freeing an overwritten file's
 	 * chain - non-empty means that chain was damaged (loop, bad link) and
 	 * only its reachable sectors were freed.
+	 *
+	 * `format` picks the data-sector encoding: "dos2" (the default, read by
+	 * everything from DOS 2.0 on) or "dos1", which DOS 1.0 needs and no
+	 * later DOS understands. Either can go on any disk - readers key off
+	 * the directory entry's own flag, not the VTOC.
 	 */
 	writeFile(
 		name: string,
 		bytes: Uint8Array,
-		options?: { overwrite?: boolean },
+		options?: { overwrite?: boolean; format?: "dos1" | "dos2" },
 	): string[];
 	/**
 	 * Deletes a file: frees its chain in the bitmap and sets the deleted
@@ -288,7 +292,7 @@ export function openAtariDos(
 		writeFile(
 			name: string,
 			bytes: Uint8Array,
-			options?: { overwrite?: boolean },
+			options?: { overwrite?: boolean; format?: "dos1" | "dos2" },
 		): string[] {
 			return writeAtariFile(
 				medium,
@@ -296,6 +300,7 @@ export function openAtariDos(
 				name,
 				bytes,
 				options?.overwrite === true,
+				options?.format ?? "dos2",
 			);
 		},
 		deleteFile(name: string, options?: { force?: boolean }): string[] {
@@ -482,15 +487,11 @@ function writeAtariFile(
 	name: string,
 	fileBytes: Uint8Array,
 	overwrite: boolean,
+	format: "dos1" | "dos2",
 ): string[] {
 	const writeSector = medium.writeSector?.bind(medium);
 	if (writeSector === undefined) {
 		throw new Error("the medium is read-only");
-	}
-	if (variant === "dos10") {
-		// OneDOS precedent: DOS 1.0 files are read, never created - a DOS 2
-		// format chain would corrupt the disk for DOS 1.0 itself.
-		throw new Error("adding files to DOS 1.0 disks is not supported");
 	}
 	const native = encodeAtariName(name);
 
@@ -571,11 +572,17 @@ function writeAtariFile(
 		mark(s, false);
 	}
 
-	// The chain, always in DOS 2 format (never DOS 1). Sector numbers past
-	// 1023 do not fit the 10-bit link field, so those files use the whole
-	// two bytes as MyDOS does and carry the no-file-number flag that tells
-	// every reader (ours included) to skip the cross-check.
+	// Sector numbers past 1023 do not fit the 10-bit link field, so those
+	// files use the whole two bytes as MyDOS does and carry the
+	// no-file-number flag that tells every reader (ours included) to skip
+	// the cross-check. DOS 1.0's addressing never reaches that far.
 	const fullLinks = allocated.some((sector) => sector > 1023);
+	if (format === "dos1" && fullLinks) {
+		throw new Error(
+			`${name.toLowerCase()} would reach past sector 1023, which DOS 1.0 ` +
+				`chains cannot address`,
+		);
+	}
 	for (let i = 0; i < allocated.length; i++) {
 		const sector = allocated[i] ?? 0;
 		const next = allocated[i + 1] ?? 0;
@@ -589,7 +596,18 @@ function writeAtariFile(
 			? (next >> 8) & 0xff
 			: (slot << 2) | ((next >> 8) & 0x03);
 		buffer[capacity + 1] = next & 0xff;
-		buffer[capacity + 2] = chunk.length;
+		// DOS 2 stores the byte count outright. DOS 1.0 instead flags the
+		// last sector with bit 7 and puts the count in the low 7 bits;
+		// earlier sectors are always full and carry the file's own sector
+		// sequence number there (0, 1, 2, ... mod 128) - measured from a
+		// 21-sector file written by real DOS 1.0, which is NOT the "low 7
+		// bits of the sector number" the OneDOS notes describe.
+		buffer[capacity + 2] =
+			format === "dos2"
+				? chunk.length
+				: i === allocated.length - 1
+					? 0x80 | chunk.length
+					: i & 0x7f;
 		if (!writeSector(sector, buffer)) {
 			throw new Error(`sector ${sector}: write failed`);
 		}
@@ -599,9 +617,10 @@ function writeAtariFile(
 	// the extended marking (output bit, in-use clear) that hides it from
 	// DOS 2.0.
 	const extended = layout.hasVtoc2 && allocated.some((s) => s > 719);
+	const dos2Bit = format === "dos2" ? FLAG_DOS2 : 0;
 	const entry = slotIn(slot);
 	entry[0] =
-		(extended ? FLAG_OUTPUT | FLAG_DOS2 : FLAG_IN_USE | FLAG_DOS2) |
+		(extended ? FLAG_OUTPUT | dos2Bit : FLAG_IN_USE | dos2Bit) |
 		(fullLinks ? FLAG_NO_LINK : 0);
 	entry[1] = allocated.length & 0xff;
 	entry[2] = allocated.length >> 8;

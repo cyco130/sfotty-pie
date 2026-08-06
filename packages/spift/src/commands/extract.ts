@@ -2,7 +2,9 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import type { AtariDosVariant } from "../atari-dos.ts";
 import type { DirEntry } from "../filesystem.ts";
+import { parseFsOption } from "./fs-option.ts";
 import { toHostName, uniqueHostNames } from "../host-names.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { openImageFilesystem } from "./open-image.ts";
@@ -12,6 +14,7 @@ export interface ExtractArgs {
 	spec: string | undefined;
 	out: string;
 	fs: "atari" | "sparta" | undefined;
+	variant: AtariDosVariant | undefined;
 	force: boolean;
 }
 
@@ -42,29 +45,26 @@ export function parseExtractArgs(args: string[]): ExtractArgs {
 		throw new UsageError(`unexpected argument "${extra[0]}"`);
 	}
 
-	let fs: "atari" | "sparta" | undefined;
-	if (values.fs !== undefined) {
-		const lowered = values.fs.toLowerCase();
-		if (lowered !== "atari" && lowered !== "sparta") {
-			throw new UsageError(
-				`invalid --fs "${values.fs}" (valid: atari, sparta)`,
-			);
-		}
-		fs = lowered;
-	}
+	const selection =
+		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
 
 	return {
 		image,
 		spec,
 		out: values.out ?? ".",
-		fs,
+		fs: selection?.family,
+		variant: selection?.variant,
 		force: values.force ?? false,
 	};
 }
 
 export async function extractCommand(args: string[]): Promise<void> {
 	const parsed = parseExtractArgs(args);
-	const { filesystem } = await openImageFilesystem(parsed.image, parsed.fs);
+	const { filesystem } = await openImageFilesystem(
+		parsed.image,
+		parsed.fs,
+		parsed.variant,
+	);
 
 	const matched = [...filesystem.entries(parsed.spec)];
 	const files: DirEntry[] = [];

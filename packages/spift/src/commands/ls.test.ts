@@ -59,7 +59,7 @@ test("short listing is names only, dirs slashed", () => {
 	expect(renderShort(ENTRIES, false)).toBe("dos.sys\nlocked.fil\ngames/\n");
 });
 
-test("short listing paints deleted and half-written names red", () => {
+test("short listing gives each kind of ghost its own color", () => {
 	const ghosts: DirEntry[] = [
 		{
 			name: "gone.bin",
@@ -76,13 +76,11 @@ test("short listing paints deleted and half-written names red", () => {
 			attributes: ["OpenForOutput"],
 		},
 	];
-	expect(renderShort([...ENTRIES, ...ghosts], true)).toContain(
-		"\x1b[31mgone.bin\x1b[0m",
-	);
-	expect(renderShort(ghosts, true)).toContain("\x1b[31mhalf.bin\x1b[0m");
-	// Ordinary entries stay unpainted, and nothing is painted without color.
-	expect(renderShort(ENTRIES, true)).not.toContain("\x1b[");
+	expect(renderShort(ghosts, true)).toContain("\x1b[31mgone.bin\x1b[0m");
+	expect(renderShort(ghosts, true)).toContain("\x1b[35mhalf.bin\x1b[0m");
+	// Nothing is painted without color, and plain files stay unpainted.
 	expect(renderShort(ghosts, false)).toBe("gone.bin\nhalf.bin\n");
+	expect(renderShort([ENTRIES[0]!], true)).toBe("dos.sys\n");
 });
 
 test("long listing justifies columns and shows attributes", () => {
@@ -126,7 +124,11 @@ test("status shows volume labels and family details", () => {
 
 test("long listing colors are gated and reset", () => {
 	const colored = renderLong(ENTRIES, true);
-	expect(colored).toContain("\x1b[1;34mgames/");
+	// Colored output identifies directories by color, so the trailing slash
+	// only appears when there is no color to carry it.
+	expect(colored).toContain("\x1b[1;34mgames");
+	expect(colored).not.toContain("games/");
+	expect(renderLong(ENTRIES, false)).toContain("games/");
 	expect(colored).toContain("\x1b[33mread-only\x1b[0m");
 	expect(renderLong(ENTRIES, false)).not.toContain("\x1b[");
 });

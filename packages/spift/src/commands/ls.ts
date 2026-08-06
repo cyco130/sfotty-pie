@@ -133,14 +133,32 @@ const ATTRIBUTE_LABELS: Record<DirEntryAttribute, string> = {
 	AtariMyDos: "mydos",
 };
 
-// Entries a directory listing would pass over: deleted, or left open for
-// output, which the DOSes treat as just as absent. Only -v shows them, and
-// then in red so they don't read as ordinary files.
-function isGhost(entry: DirEntry): boolean {
-	return (
-		entry.attributes.includes("Deleted") ||
-		entry.attributes.includes("OpenForOutput")
-	);
+const ATTRIBUTE_COLORS: Record<DirEntryAttribute, string> = {
+	Deleted: "31",
+	OpenForOutput: "35",
+	ReadOnly: "33",
+	AtariDos10: "36",
+	AtariDos25: "36",
+	AtariMyDos: "36",
+};
+
+const DIRECTORY_COLOR = "1;34";
+
+/**
+ * How a name is painted: directories stand out, and so do the entries a
+ * listing would normally pass over - deleted ones and those left open for
+ * output, each in its own color.
+ */
+function nameColor(entry: DirEntry): string {
+	if (entry.kind === "dir") {
+		return DIRECTORY_COLOR;
+	}
+	for (const attribute of ["Deleted", "OpenForOutput"] as const) {
+		if (entry.attributes.includes(attribute)) {
+			return ATTRIBUTE_COLORS[attribute];
+		}
+	}
+	return "";
 }
 
 export function renderShort(
@@ -149,8 +167,11 @@ export function renderShort(
 ): string {
 	return entries
 		.map((entry) => {
-			const name = displayName(entry);
-			return (color && isGhost(entry) ? `\x1b[31m${name}\x1b[0m` : name) + "\n";
+			const codes = nameColor(entry);
+			const name = displayName(entry, color);
+			return (
+				(color && codes !== "" ? `\x1b[${codes}m${name}\x1b[0m` : name) + "\n"
+			);
 		})
 		.join("");
 }
@@ -162,11 +183,14 @@ export function renderLong(
 	const paint = (text: string, codes: string): string =>
 		color && codes !== "" ? `\x1b[${codes}m${text}\x1b[0m` : text;
 	const rows = entries.map((entry) => ({
-		name: displayName(entry),
-		dir: entry.kind === "dir",
+		name: displayName(entry, color),
+		nameCodes: nameColor(entry),
 		sectors: String(entry.sectors),
 		start: String(entry.startSector),
-		attributes: entry.attributes.map((a) => ATTRIBUTE_LABELS[a]),
+		attributes: entry.attributes.map((a) => ({
+			label: ATTRIBUTE_LABELS[a],
+			codes: ATTRIBUTE_COLORS[a],
+		})),
 	}));
 	const width = (texts: string[]): number =>
 		texts.reduce((max, text) => Math.max(max, text.length), 0);
@@ -176,20 +200,11 @@ export function renderLong(
 	let out = "";
 	for (const row of rows) {
 		const attributes = row.attributes
-			.map((label) =>
-				paint(
-					label,
-					label === "deleted" || label === "open-output"
-						? "31"
-						: label === "read-only"
-							? "33"
-							: "36",
-				),
-			)
+			.map(({ label, codes }) => paint(label, codes))
 			.join(" ");
 		out +=
 			[
-				paint(row.name.padEnd(nameWidth), row.dir ? "1;34" : ""),
+				paint(row.name.padEnd(nameWidth), row.nameCodes),
 				row.sectors.padStart(sectorsWidth),
 				paint(row.start.padStart(startWidth), "2"),
 			].join("  ") + (attributes === "" ? "" : "  " + attributes);
@@ -198,6 +213,9 @@ export function renderLong(
 	return out;
 }
 
-function displayName(entry: DirEntry): string {
-	return entry.kind === "dir" ? `${entry.name}/` : entry.name;
+// Directories are shown by color where there is one, and fall back to a
+// trailing slash when output is piped - so the distinction survives either
+// way, the way ls and ls -F split it.
+function displayName(entry: DirEntry, color: boolean): string {
+	return entry.kind === "dir" && !color ? `${entry.name}/` : entry.name;
 }

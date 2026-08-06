@@ -69,7 +69,7 @@ export async function rmCommand(args: string[]): Promise<void> {
 			throw new CliError(`no files match "${spec}"`);
 		}
 		for (const entry of matched) {
-			targets.set(entry.name, entry);
+			targets.set(entry.path, entry);
 		}
 	}
 	const entries = [...targets.values()];
@@ -78,7 +78,7 @@ export async function rmCommand(args: string[]): Promise<void> {
 	if (directories.length > 0) {
 		throw new CliError(
 			`cannot remove directories: ${directories
-				.map((entry) => `${entry.name}/`)
+				.map((entry) => `${entry.path}/`)
 				.join(", ")} (not supported yet)`,
 		);
 	}
@@ -88,7 +88,7 @@ export async function rmCommand(args: string[]): Promise<void> {
 		);
 		if (locked.length > 0) {
 			throw new CliError(
-				`locked: ${locked.map((entry) => entry.name).join(", ")} (use --force)`,
+				`locked: ${locked.map((entry) => entry.path).join(", ")} (use --force)`,
 			);
 		}
 	}
@@ -97,12 +97,12 @@ export async function rmCommand(args: string[]): Promise<void> {
 	for (const entry of entries) {
 		let diagnostics: string[];
 		try {
-			diagnostics = filesystem.deleteFile(entry.name, {
+			diagnostics = filesystem.deleteFile(entry.path, {
 				force: parsed.force,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			throw new CliError(`${entry.name}: ${message}`);
+			throw new CliError(`${entry.path}: ${message}`);
 		}
 		for (const diagnostic of diagnostics) {
 			process.stderr.write(`spift: ${entry.name}: ${diagnostic}\n`);

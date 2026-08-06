@@ -33,6 +33,12 @@ export type DirEntryAttributes = readonly DirEntryAttribute[];
 export interface DirEntry {
 	/** Decoded via the family text conventions and lowercased, "name.ext". */
 	name: string;
+	/**
+	 * Where it lives, from the volume root, "/"-separated - the same string
+	 * the read and write calls accept back. Equal to the name for entries in
+	 * the root.
+	 */
+	path: string;
 	kind: DirEntryKind;
 	/** Size in sectors as the directory entry states it. */
 	sectors: number;
@@ -66,16 +72,20 @@ export interface Filesystem {
 	/** Capacity, free space, and whatever else the family volume carries. */
 	volume(): VolumeInfo;
 	/**
-	 * Iterates the root directory in directory order. The spec filters with
-	 * the family's native wildcard semantics. By default this yields what a
-	 * directory listing shows; `includeUnlisted` adds the entries the DOSes
-	 * pass over - deleted files and ones left open for output - each marked
-	 * with the matching attribute. Either way the scan stops at the first
-	 * never-used slot, as the DOSes do.
+	 * Iterates a directory in directory order. The spec is a path whose last
+	 * component is a name pattern in the family's native wildcard semantics
+	 * ("games/*.com"); the path part picks the directory to list, defaulting
+	 * to the root. `recursive` descends into subdirectories, applying the
+	 * pattern at every level. By default this yields what a directory
+	 * listing shows; `includeUnlisted` adds the entries the DOSes pass over -
+	 * deleted files and ones left open for output - each marked with the
+	 * matching attribute. Either way the scan stops at the first never-used
+	 * slot, as the DOSes do. Throws when the path names something that is
+	 * not a directory.
 	 */
 	entries(
 		spec?: string,
-		options?: { includeUnlisted?: boolean },
+		options?: { includeUnlisted?: boolean; recursive?: boolean },
 	): IterableIterator<DirEntry>;
 	/**
 	 * Reads a file by its decoded name (as entries() reports it). Returns

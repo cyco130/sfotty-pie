@@ -57,6 +57,11 @@ export interface AtariDosFilesystem extends Filesystem {
 const VTOC_SECTOR = 360;
 const DIRECTORY_FIRST = 361;
 const DIRECTORY_LAST = 368;
+// Every directory - the root and each MyDOS subdirectory - is exactly eight
+// sectors holding eight 16-byte entries each, so 64 entries, at either
+// density (the second half of a 256-byte directory sector goes unused).
+// Subdirectory blocks are contiguous extents, not chains.
+const DIRECTORY_SECTORS = 8;
 // The VTOC's bitmap (bytes 10..127) addresses sectors 0..943 at either
 // density. MyDOS covers bigger disks with extra whole-sector bitmap pages
 // allocated backwards from sector 359, each holding sectorSize * 8 bits and
@@ -200,14 +205,19 @@ export function openAtariDos(
 		detectAtariDos(medium) ??
 		(medium.sectorSize === 256 ? "dos20d" : "dos20s");
 
-	// Yields every used slot, deleted ones included, stopping at the first
-	// never-used slot the way the DOSes' own directory scan does. Callers
-	// decide what to show (see listable below).
-	function* scanDirectory(): IterableIterator<RawEntry> {
+	// Yields every used slot of one directory - the root, or a MyDOS
+	// subdirectory's 8-sector block - deleted ones included, stopping at the
+	// first never-used slot the way the DOSes' own scan does. Callers decide
+	// what to show (see listable below). The index is the slot within THIS
+	// directory, which is what a data sector's file number holds (measured
+	// on MyDOS 4.53).
+	function* scanDirectory(
+		first: number = DIRECTORY_FIRST,
+	): IterableIterator<RawEntry> {
 		let index = -1;
 		for (
-			let sectorNumber = DIRECTORY_FIRST;
-			sectorNumber <= DIRECTORY_LAST;
+			let sectorNumber = first;
+			sectorNumber < first + DIRECTORY_SECTORS;
 			sectorNumber++
 		) {
 			const sector = medium.readSector(sectorNumber);
@@ -235,6 +245,50 @@ export function openAtariDos(
 				};
 			}
 		}
+	}
+
+	/**
+	 * Resolves a path to the first sector of the directory holding it.
+	 * Throws when a component is missing or is not a directory. There are no
+	 * "." or ".." entries on disk - MyDOS directories carry no parent
+	 * pointer - so paths only ever resolve downward from the root, and the
+	 * visited set catches a corrupt disk whose directory points at an
+	 * ancestor.
+	 */
+	function lookup(first: number, name: string): RawEntry | undefined {
+		for (const raw of scanDirectory(first)) {
+			if (listable(raw) && raw.displayName === name) {
+				return raw;
+			}
+		}
+		return undefined;
+	}
+
+	function resolveDirectory(components: readonly string[]): number {
+		let first = DIRECTORY_FIRST;
+		const visited = new Set<number>([first]);
+		const walked: string[] = [];
+		for (const component of components) {
+			const wanted = component.toLowerCase();
+			const found = lookup(first, wanted);
+			const where = walked.length === 0 ? "the root" : walked.join("/");
+			if (found === undefined) {
+				throw new Error(`${wanted} does not exist in ${where}`);
+			}
+			if (!found.isDir) {
+				throw new Error(`${wanted} in ${where} is a file, not a directory`);
+			}
+			if (visited.has(found.startSector)) {
+				throw new Error(
+					`${wanted} points back at a directory already on the path ` +
+						`(sector ${found.startSector}); the disk is damaged`,
+				);
+			}
+			visited.add(found.startSector);
+			first = found.startSector;
+			walked.push(wanted);
+		}
+		return first;
 	}
 
 	// What a directory listing shows: entries in use, MyDOS subdirectories,
@@ -278,84 +332,147 @@ export function openAtariDos(
 		},
 		*entries(
 			spec?: string,
-			options?: { includeUnlisted?: boolean },
+			options?: { includeUnlisted?: boolean; recursive?: boolean },
 		): IterableIterator<DirEntry> {
-			const matches = spec === undefined ? undefined : compileSpec(spec);
-			const dosFileSector = readAtariDosFilePointer(medium, resolved);
-			for (const raw of scanDirectory()) {
-				const shown = listable(raw);
-				if (!shown && options?.includeUnlisted !== true) {
-					continue;
+			// A spec is a path plus a leaf pattern: the path picks the
+			// directory to start from, the pattern filters names there (and,
+			// when recursing, at every level below).
+			const parts = spec === undefined ? [] : splitAtariPath(spec);
+			let pattern =
+				spec === undefined || parts.length === 0
+					? undefined
+					: (parts.pop() as string);
+			// A spec that names a directory outright lists that directory,
+			// the way "ls games" does; only a pattern filters.
+			if (pattern !== undefined && !/[*?]/.test(pattern)) {
+				const parent = resolveDirectory(parts);
+				if (lookup(parent, pattern)?.isDir === true) {
+					parts.push(pattern);
+					pattern = undefined;
 				}
-				if (matches !== undefined && !matches(raw.name, raw.ext)) {
-					continue;
-				}
-				const deleted = (raw.flags & FLAG_DELETED) !== 0;
-				const inUse = (raw.flags & FLAG_IN_USE) !== 0;
-				const attributes: DirEntryAttribute[] = [];
-				if (deleted) {
-					attributes.push("Deleted");
-				}
-				if ((raw.flags & FLAG_LOCKED) !== 0) {
-					attributes.push("ReadOnly");
-				}
-				if (inUse && (raw.flags & FLAG_OUTPUT) !== 0) {
-					attributes.push("OpenForOutput");
-				}
-				if (inUse && (raw.flags & FLAG_DOS2) === 0) {
-					attributes.push("AtariDos10");
-				}
-				if (!deleted && !inUse && !raw.isDir) {
-					attributes.push("AtariDos25");
-				}
-				if ((raw.flags & FLAG_NO_LINK) !== 0) {
-					attributes.push("AtariMyDos");
-				}
-				if (
-					!raw.isDir &&
-					dosFileSector !== 0 &&
-					raw.startSector === dosFileSector
-				) {
-					attributes.push("BootFile");
-				}
-				yield {
-					name: raw.displayName,
-					kind: raw.isDir ? "dir" : "file",
-					sectors: raw.sectors,
-					startSector: raw.startSector,
-					attributes,
-				};
 			}
+			const start = resolveDirectory(parts);
+			const matches = pattern === undefined ? undefined : compileSpec(pattern);
+			const dosFileSector = readAtariDosFilePointer(medium, resolved);
+
+			function* walk(
+				first: number,
+				prefix: string,
+				visited: ReadonlySet<number>,
+			): IterableIterator<DirEntry> {
+				for (const raw of scanDirectory(first)) {
+					const shown = listable(raw);
+					if (!shown && options?.includeUnlisted !== true) {
+						continue;
+					}
+					const path =
+						prefix === "" ? raw.displayName : `${prefix}/${raw.displayName}`;
+					if (matches === undefined || matches(raw.name, raw.ext)) {
+						const deleted = (raw.flags & FLAG_DELETED) !== 0;
+						const inUse = (raw.flags & FLAG_IN_USE) !== 0;
+						const attributes: DirEntryAttribute[] = [];
+						if (deleted) {
+							attributes.push("Deleted");
+						}
+						if ((raw.flags & FLAG_LOCKED) !== 0) {
+							attributes.push("ReadOnly");
+						}
+						if (inUse && (raw.flags & FLAG_OUTPUT) !== 0) {
+							attributes.push("OpenForOutput");
+						}
+						if (inUse && (raw.flags & FLAG_DOS2) === 0) {
+							attributes.push("AtariDos10");
+						}
+						if (!deleted && !inUse && !raw.isDir) {
+							attributes.push("AtariDos25");
+						}
+						if ((raw.flags & FLAG_NO_LINK) !== 0) {
+							attributes.push("AtariMyDos");
+						}
+						if (
+							!raw.isDir &&
+							dosFileSector !== 0 &&
+							raw.startSector === dosFileSector
+						) {
+							attributes.push("BootFile");
+						}
+						yield {
+							name: raw.displayName,
+							path,
+							kind: raw.isDir ? "dir" : "file",
+							sectors: raw.sectors,
+							startSector: raw.startSector,
+							attributes,
+						};
+					}
+					// Recursion stops at a directory already on the path: a
+					// well-formed disk cannot nest one inside itself, so this
+					// only ever fires on a damaged one.
+					if (
+						options?.recursive === true &&
+						raw.isDir &&
+						shown &&
+						!visited.has(raw.startSector)
+					) {
+						yield* walk(
+							raw.startSector,
+							path,
+							new Set(visited).add(raw.startSector),
+						);
+					}
+				}
+			}
+
+			yield* walk(start, parts.join("/"), new Set([start]));
 		},
-		readFile(name: string): FileContents | null {
+		readFile(path: string): FileContents | null {
+			const parts = splitAtariPath(path);
+			const leaf = parts.pop();
+			if (leaf === undefined) {
+				return null;
+			}
+			const first = resolveDirectory(parts);
 			// First match wins; duplicate names only occur on damaged disks.
-			for (const raw of scanDirectory()) {
-				if (
-					listable(raw) &&
-					!raw.isDir &&
-					raw.displayName === name.toLowerCase()
-				) {
+			for (const raw of scanDirectory(first)) {
+				if (listable(raw) && !raw.isDir && raw.displayName === leaf) {
 					return walkChain(medium, raw).contents;
 				}
 			}
 			return null;
 		},
 		writeFile(
-			name: string,
+			path: string,
 			bytes: Uint8Array,
 			options?: { overwrite?: boolean; format?: "dos1" | "dos2" },
 		): string[] {
+			const parts = splitAtariPath(path);
+			const leaf = parts.pop();
+			if (leaf === undefined) {
+				throw new Error("no file name given");
+			}
 			return writeAtariFile(
 				medium,
 				resolved,
-				name,
+				resolveDirectory(parts),
+				leaf,
 				bytes,
 				options?.overwrite === true,
 				options?.format ?? "dos2",
 			);
 		},
-		deleteFile(name: string, options?: { force?: boolean }): string[] {
-			return deleteAtariFile(medium, resolved, name, options?.force === true);
+		deleteFile(path: string, options?: { force?: boolean }): string[] {
+			const parts = splitAtariPath(path);
+			const leaf = parts.pop();
+			if (leaf === undefined) {
+				throw new Error("no file name given");
+			}
+			return deleteAtariFile(
+				medium,
+				resolved,
+				resolveDirectory(parts),
+				leaf,
+				options?.force === true,
+			);
 		},
 	};
 }
@@ -369,9 +486,12 @@ interface LoadedDirectory {
 	): void;
 }
 
-function loadDirectory(medium: SectorMedium): LoadedDirectory {
+function loadDirectory(
+	medium: SectorMedium,
+	first: number = DIRECTORY_FIRST,
+): LoadedDirectory {
 	const dirSectors: Uint8Array[] = [];
-	for (let s = DIRECTORY_FIRST; s <= DIRECTORY_LAST; s++) {
+	for (let s = first; s < first + DIRECTORY_SECTORS; s++) {
 		const sector = medium.readSector(s);
 		if (sector === null) {
 			throw new Error("the directory is outside the image");
@@ -390,14 +510,37 @@ function loadDirectory(medium: SectorMedium): LoadedDirectory {
 		},
 		flushSlot(writeSector, slot): void {
 			const sector = dirSectors[slot >> 3];
-			if (
-				sector === undefined ||
-				!writeSector(DIRECTORY_FIRST + (slot >> 3), sector)
-			) {
+			if (sector === undefined || !writeSector(first + (slot >> 3), sector)) {
 				throw new Error("directory write failed");
 			}
 		},
 	};
+}
+
+/**
+ * Splits a path into components. The core spells paths with "/", and the
+ * Atari families' own separators - MyDOS's ">" and the ":" of drive specs -
+ * are accepted alongside it. "." and ".." resolve textually, since no
+ * directory on disk records its parent.
+ *
+ * SpartaDOS's "<" is a separator that also steps up a level, so
+ * "foo>bar>qux<file.txt" means "foo>bar>file.txt" and each further "<"
+ * climbs one more. It desugars to "/../", which the same pass then
+ * resolves. (Quote it in a shell, which reads "<" as redirection.)
+ */
+export function splitAtariPath(path: string): string[] {
+	const parts: string[] = [];
+	for (const part of path.replaceAll("<", "/../").split(/[/>:]/)) {
+		if (part === "" || part === ".") {
+			continue;
+		}
+		if (part === "..") {
+			parts.pop();
+			continue;
+		}
+		parts.push(part.toLowerCase());
+	}
+	return parts;
 }
 
 function rawEntryFromSlot(entry: Uint8Array, index: number): RawEntry {
@@ -535,6 +678,7 @@ function vtocAccounting(
 function writeAtariFile(
 	medium: SectorMedium,
 	variant: AtariDosVariant,
+	directoryFirst: number,
 	name: string,
 	fileBytes: Uint8Array,
 	overwrite: boolean,
@@ -547,7 +691,7 @@ function writeAtariFile(
 	const native = encodeAtariName(name);
 
 	// Find both a slot to use and any existing file of the same name.
-	const directory = loadDirectory(medium);
+	const directory = loadDirectory(medium, directoryFirst);
 	const { slotIn } = directory;
 	let freeSlot = -1;
 	let existing = -1;
@@ -710,6 +854,7 @@ function writeAtariFile(
 function deleteAtariFile(
 	medium: SectorMedium,
 	variant: AtariDosVariant,
+	directoryFirst: number,
 	name: string,
 	force: boolean,
 ): string[] {
@@ -719,7 +864,7 @@ function deleteAtariFile(
 	}
 	const native = encodeAtariName(name);
 
-	const directory = loadDirectory(medium);
+	const directory = loadDirectory(medium, directoryFirst);
 	let found = -1;
 	for (let index = 0; index < 8 * ENTRIES_PER_SECTOR; index++) {
 		const entry = directory.slotIn(index);

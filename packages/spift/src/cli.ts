@@ -29,19 +29,24 @@ commands:
     mydos both fit), and anything else gets mydos. --boot-sectors fills
     the boot area from a file sized exactly for the variant.
 
-  ls IMAGE_FILE [SPEC] [--fs FILESYSTEM] [-l] [-v]
-    List the root directory of the filesystem on an image. SPEC filters
-    with native wildcards (* and ?; name and extension match separately;
-    quote it to keep the shell from expanding it). The filesystem is
-    autodetected; --fs overrides. --long (-l) leads with a status line
-    (filesystem, geometry, capacity) and adds sector counts, start
+  ls IMAGE_FILE [SPEC] [--fs FILESYSTEM] [-l] [-v] [-R]
+    List a directory of the filesystem on an image. SPEC is a path whose
+    last part may be a native wildcard pattern (* and ?; name and
+    extension match separately; quote it to keep the shell out of it);
+    naming a directory lists its contents. Separators: / > or :, plus
+    SpartaDOS's < which also steps up a level. The
+    filesystem is autodetected; --fs overrides. --long (-l) leads with
+    status lines (image, then filesystem) and adds sector counts, start
     sectors, and attributes. --verbose (-v) also lists what a directory
     listing passes over: deleted files and ones left open for output.
+    --recursive (-R) descends into subdirectories, showing full paths.
 
-  extract IMAGE_FILE [SPEC] [-o DIR] [--fs atari|sparta] [-f]
-    Extract files matching SPEC (default: all) from the root directory
-    into DIR (default: the current directory, created if missing). Host
-    names are lowercased and made filesystem-safe. Refuses to overwrite
+  extract IMAGE_FILE [SPEC] [-o DIR] [-R] [--fs FILESYSTEM] [-f]
+    Extract files matching SPEC (default: all) into DIR (default: the
+    current directory, created if missing); --recursive (-R) descends
+    into subdirectories and mirrors the tree below whatever directory
+    SPEC picked. Host names are lowercased and made filesystem-safe,
+    per path component. Refuses to overwrite
     existing files unless --force (-f) is given; damaged files extract
     what is recoverable, with warnings, and exit 1.
 

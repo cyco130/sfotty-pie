@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import type { AtariDosVariant } from "../atari-dos.ts";
 import type { DirEntry, DirEntryAttribute, VolumeInfo } from "../filesystem.ts";
-import { UsageError } from "../cli-error.ts";
+import { CliError, UsageError } from "../cli-error.ts";
 import { parseFsOption } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
 
@@ -12,6 +12,7 @@ export interface LsArgs {
 	variant: AtariDosVariant | undefined;
 	long: boolean;
 	verbose: boolean;
+	recursive: boolean;
 }
 
 export function parseLsArgs(args: string[]): LsArgs {
@@ -23,6 +24,7 @@ export function parseLsArgs(args: string[]): LsArgs {
 				fs: { type: "string" },
 				long: { type: "boolean", short: "l" },
 				verbose: { type: "boolean", short: "v" },
+				recursive: { type: "boolean", short: "R" },
 			},
 			allowPositionals: true,
 		});
@@ -51,6 +53,7 @@ export function parseLsArgs(args: string[]): LsArgs {
 		variant: selection?.variant,
 		long: values.long ?? false,
 		verbose: values.verbose ?? false,
+		recursive: values.recursive ?? false,
 	};
 }
 
@@ -61,9 +64,18 @@ export async function lsCommand(args: string[]): Promise<void> {
 		parsed.fs,
 		parsed.variant,
 	);
-	const entries = [
-		...filesystem.entries(parsed.spec, { includeUnlisted: parsed.verbose }),
-	];
+	let entries;
+	try {
+		entries = [
+			...filesystem.entries(parsed.spec, {
+				includeUnlisted: parsed.verbose,
+				recursive: parsed.recursive,
+			}),
+		];
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new CliError(`${parsed.image}: ${message}`);
+	}
 	const color = process.stdout.isTTY === true && !process.env.NO_COLOR;
 	if (parsed.long) {
 		process.stdout.write(
@@ -83,8 +95,13 @@ export async function lsCommand(args: string[]): Promise<void> {
 			),
 		);
 	}
+	// Recursing makes bare leaf names ambiguous, so show where each entry
+	// lives once more than one directory is in play.
+	const named = parsed.recursive
+		? entries.map((entry) => ({ ...entry, name: entry.path }))
+		: entries;
 	process.stdout.write(
-		parsed.long ? renderLong(entries, color) : renderShort(entries, color),
+		parsed.long ? renderLong(named, color) : renderShort(named, color),
 	);
 }
 

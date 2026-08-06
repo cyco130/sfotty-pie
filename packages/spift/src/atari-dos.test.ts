@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
-import { detectAtariDos, openAtariDos, toAtariName } from "./atari-dos.ts";
+import {
+	detectAtariDos,
+	openAtariDos,
+	splitAtariPath,
+	toAtariName,
+} from "./atari-dos.ts";
 import { ATR_HEADER_SIZE, createBlankAtr, openAtr } from "./atr.ts";
 import { detectFilesystem } from "./detect.ts";
 
@@ -357,6 +362,7 @@ test("lists files in directory order, lowercased", () => {
 	]);
 	expect(entries[0]).toEqual({
 		name: "dos.sys",
+		path: "dos.sys",
 		kind: "file",
 		sectors: 37,
 		startSector: 4,
@@ -667,6 +673,143 @@ test("delete and overwrite report damaged chains and free what they can", () => 
 	expect(fs.writeFile("a.dat", new Uint8Array(1), { overwrite: true })).toEqual(
 		["sector 4: sector chain loops"],
 	);
+});
+
+test("splitAtariPath takes every family separator", () => {
+	expect(splitAtariPath("games/deep/a.sys")).toEqual([
+		"games",
+		"deep",
+		"a.sys",
+	]);
+	expect(splitAtariPath("GAMES>DEEP>A.SYS")).toEqual([
+		"games",
+		"deep",
+		"a.sys",
+	]);
+	expect(splitAtariPath("games:a.sys")).toEqual(["games", "a.sys"]);
+	// "." and ".." resolve textually, since no directory records its parent.
+	expect(splitAtariPath("/games/./deep/../a.sys")).toEqual(["games", "a.sys"]);
+	expect(splitAtariPath("")).toEqual([]);
+});
+
+test("SpartaDOS's < separates and steps up at once", () => {
+	// foo>bar>qux<file.txt means foo>bar>file.txt.
+	expect(splitAtariPath("FOO>BAR>QUX<FILE.TXT")).toEqual([
+		"foo",
+		"bar",
+		"file.txt",
+	]);
+	// Each further "<" climbs another level.
+	expect(splitAtariPath("foo>bar>qux<<file.txt")).toEqual(["foo", "file.txt"]);
+	// Climbing past the root just stays there.
+	expect(splitAtariPath("foo<<<<file.txt")).toEqual(["file.txt"]);
+	// It mixes with the other separators and with "..".
+	expect(splitAtariPath("games/deep<../a.sys")).toEqual(["a.sys"]);
+});
+
+// A disk with GAMES (holding one file and a nested DEEP) beside a root file.
+function makeTree(): Uint8Array {
+	const disk = makeDisk({
+		formatted: true,
+		entries: [
+			{ flags: 0x42, name: "ROOT.DAT", start: 100, sectors: 1 },
+			{ flags: 0x10, name: "GAMES", start: 300, sectors: 8 },
+		],
+	});
+	writeDataSector(disk, { sector: 100, next: 0, length: 5, fill: 9 });
+	const put = (block: number, slot: number, entry: FixtureEntry) => {
+		const at = ATR_HEADER_SIZE + (block - 1) * 128 + slot * 16;
+		disk[at] = entry.flags;
+		disk[at + 1] = entry.sectors ?? 1;
+		disk[at + 3] = (entry.start ?? 0) & 0xff;
+		disk[at + 4] = (entry.start ?? 0) >> 8;
+		const dot = entry.name.indexOf(".");
+		const name = dot === -1 ? entry.name : entry.name.slice(0, dot);
+		const ext = dot === -1 ? "" : entry.name.slice(dot + 1);
+		for (let i = 0; i < 8; i++) {
+			disk[at + 5 + i] = name.charCodeAt(i) || 0x20;
+		}
+		for (let i = 0; i < 3; i++) {
+			disk[at + 13 + i] = ext.charCodeAt(i) || 0x20;
+		}
+	};
+	// GAMES at 300: slot 0 a file, slot 1 a nested directory at 310.
+	put(300, 0, { flags: 0x42, name: "IN.DAT", start: 200, sectors: 1 });
+	put(300, 1, { flags: 0x10, name: "DEEP", start: 310, sectors: 8 });
+	put(310, 0, { flags: 0x42, name: "DOWN.DAT", start: 210, sectors: 1 });
+	// The file numbers are slot indices within their own directory.
+	writeDataSector(disk, { sector: 200, next: 0, length: 7, fill: 1 });
+	writeDataSector(disk, { sector: 210, next: 0, length: 3, fill: 2 });
+	return disk;
+}
+
+test("paths select a directory, and -R walks the tree", () => {
+	const fs = openAtariDos(openAtr(makeTree()));
+	expect([...fs.entries()].map((e) => e.path)).toEqual(["root.dat", "games"]);
+	// Naming a directory lists its contents, like ls does.
+	expect([...fs.entries("games")].map((e) => e.path)).toEqual([
+		"games/in.dat",
+		"games/deep",
+	]);
+	expect([...fs.entries("games>deep")].map((e) => e.name)).toEqual([
+		"down.dat",
+	]);
+	expect([...fs.entries(undefined, { recursive: true })].map((e) => e.path)) //
+		.toEqual([
+			"root.dat",
+			"games",
+			"games/in.dat",
+			"games/deep",
+			"games/deep/down.dat",
+		]);
+	// A pattern applies at every level it visits.
+	expect(
+		[...fs.entries("*.dat", { recursive: true })].map((e) => e.path),
+	).toEqual(["root.dat", "games/in.dat", "games/deep/down.dat"]);
+});
+
+test("reads and writes reach into subdirectories", () => {
+	const disk = makeTree();
+	const fs = openAtariDos(openAtr(disk));
+	expect(fs.readFile("games/deep/down.dat")?.bytes).toHaveLength(3);
+	expect(fs.readFile("games/in.dat")?.diagnostics).toEqual([]);
+	expect(fs.readFile("in.dat")).toBeNull(); // not in the root
+
+	// A file written into a subdirectory gets that directory's slot index as
+	// its chain file number, which is what MyDOS expects.
+	fs.writeFile("games/new.dat", Uint8Array.from([1, 2, 3]));
+	const entry = [...fs.entries("games/new.dat")][0];
+	expect(entry?.path).toBe("games/new.dat");
+	const data = openAtr(disk).readSector(entry?.startSector ?? 0)!;
+	expect(data[125]! >> 2).toBe(2); // slot 2 of GAMES, not of the root
+	expect(fs.readFile("games/new.dat")?.diagnostics).toEqual([]);
+
+	fs.deleteFile("games/in.dat");
+	expect([...fs.entries("games")].map((e) => e.name)).toEqual([
+		"deep",
+		"new.dat",
+	]);
+});
+
+test("bad paths say what went wrong", () => {
+	const fs = openAtariDos(openAtr(makeTree()));
+	expect(() => [...fs.entries("nope/x")]).toThrow(/nope does not exist/);
+	expect(() => [...fs.entries("root.dat/x")]).toThrow(/is a file/);
+});
+
+test("a directory pointing at itself is caught, not followed", () => {
+	const disk = makeTree();
+	// Point GAMES's nested DEEP back at GAMES's own block.
+	const at = ATR_HEADER_SIZE + 299 * 128 + 16;
+	disk[at + 3] = 300 & 0xff;
+	disk[at + 4] = 300 >> 8;
+	const fs = openAtariDos(openAtr(disk));
+	const paths = [...fs.entries(undefined, { recursive: true })].map(
+		(e) => e.path,
+	);
+	expect(paths).toContain("games/deep");
+	expect(paths.filter((p) => p.startsWith("games/deep/"))).toEqual([]);
+	expect(() => [...fs.entries("games/deep/deep")]).toThrow(/damaged/);
 });
 
 test("specs use native wildcard semantics", () => {

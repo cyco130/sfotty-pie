@@ -10,6 +10,7 @@ test("parses image, spec, and flags", () => {
 		variant: undefined,
 		long: false,
 		verbose: false,
+		recursive: false,
 	});
 	expect(
 		parseLsArgs(["disk.atr", "*.sys", "-l", "-v", "--fs", "ATARI"]),
@@ -20,6 +21,7 @@ test("parses image, spec, and flags", () => {
 		variant: undefined,
 		long: true,
 		verbose: true,
+		recursive: false,
 	});
 });
 
@@ -34,6 +36,7 @@ test("validates the argument list", () => {
 const ENTRIES: DirEntry[] = [
 	{
 		name: "dos.sys",
+		path: "dos.sys",
 		kind: "file",
 		sectors: 37,
 		startSector: 4,
@@ -41,6 +44,7 @@ const ENTRIES: DirEntry[] = [
 	},
 	{
 		name: "locked.fil",
+		path: "locked.fil",
 		kind: "file",
 		sectors: 5,
 		startSector: 141,
@@ -48,6 +52,7 @@ const ENTRIES: DirEntry[] = [
 	},
 	{
 		name: "games",
+		path: "games",
 		kind: "dir",
 		sectors: 8,
 		startSector: 400,
@@ -63,6 +68,7 @@ test("short listing gives each kind of ghost its own color", () => {
 	const ghosts: DirEntry[] = [
 		{
 			name: "gone.bin",
+			path: "gone.bin",
 			kind: "file",
 			sectors: 1,
 			startSector: 9,
@@ -70,6 +76,7 @@ test("short listing gives each kind of ghost its own color", () => {
 		},
 		{
 			name: "half.bin",
+			path: "half.bin",
 			kind: "file",
 			sectors: 1,
 			startSector: 10,

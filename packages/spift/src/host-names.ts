@@ -10,12 +10,31 @@
  * mangles a name to make it fit, and a name that does not fit is refused. It
  * exists because a damaged directory decodes to whatever bytes are in it, so
  * a native name can hold a path separator or control characters, which would
- * write outside the destination or produce something unopenable. On any
- * well-formed name it does nothing.
+ * write outside the destination or produce something unopenable.
+ *
+ * The rules are the portable intersection, applied on every platform rather
+ * than the host's own - the allowed set already excludes characters Linux
+ * would take (":" among them), and a directory unpacked on one system gets
+ * read on another, so the same disk has to give the same names everywhere.
+ * On any well-formed name it does nothing.
  */
 export function toHostName(name: string): string {
-	const safe = name.replace(/[^a-z0-9._-]/gi, "_");
-	return safe === "" || safe.startsWith(".") || safe.startsWith("-")
+	const safe = name
+		.replace(/[^a-z0-9._-]/gi, "_")
+		// Windows drops trailing dots silently, which would fold "abc." onto
+		// "abc" without anyone being told.
+		.replace(/\.+$/, (dots) => "_".repeat(dots.length));
+	return safe === "" ||
+		safe.startsWith(".") ||
+		safe.startsWith("-") ||
+		RESERVED.test(safe)
 		? `_${safe}`
 		: safe;
 }
+
+/**
+ * The DOS device names Windows still reserves, which it resolves before it
+ * ever looks at the directory - and for any extension, so "CON.TXT" opens
+ * the console rather than a file. Any of them is a legal Atari name.
+ */
+const RESERVED = /^(con|prn|aux|nul|(com|lpt)[0-9])(\.|$)/i;

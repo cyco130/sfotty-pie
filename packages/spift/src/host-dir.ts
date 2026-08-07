@@ -167,6 +167,14 @@ export function openHostDirectory(
 		recursive: boolean,
 	): IterableIterator<DirEntry> {
 		for (const name of namesIn(directory)) {
+			// Dot-prefixed names are never listed, the way a shell glob passes
+			// over them: they are the host's own business (.DS_Store, .git,
+			// and spift's own .boot.bin), and none of them can be a native
+			// name on any family we write to anyway. Reading one by name
+			// still works, which is how pack picks up .boot.bin.
+			if (name.startsWith(".")) {
+				continue;
+			}
 			const path = joinPath(directory, name);
 			const found = peek(path);
 			if (found === null) {

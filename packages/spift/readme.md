@@ -26,6 +26,8 @@ spift cp --from disk.atr -R 'games' out/      # whole subtrees, either way
 spift write-boot-sectors -i blank.atr boot.bin
 spift extract-boot-sectors -i dos25.atr boot.bin
 spift install-dos -i blank.atr --from dos20s.atr   # make it bootable
+spift unpack -i dos25.atr tree/ --extract-boot-sectors   # disk -> directory
+spift pack -i rebuilt.atr tree/ --write-boot-sectors      # and back again
 ```
 
 `create` writes a blank image - a valid header over all-zero sector data, no filesystem installed. The image type is inferred from the file name, or given with `--type`/`-t`; only `atr` exists so far. Existing files are not overwritten unless `--force`/`-f` is given.
@@ -57,6 +59,10 @@ Moving _off_ the host needs `--remove-source`, because the two directions are no
 `write-boot-sectors` lays a boot file over an image's first sectors - a container-level operation that works on blank images too, so `create` + `write-boot-sectors` builds a boot disk from scratch. The file must span a whole number of sectors (the three 128-byte boot sectors of 256-bps images are accounted for; `--pad` zero-fills the tail) and its second byte - the boot record's sector count - must match, unless `--force`/`-f`.
 
 `install-dos` makes a disk bootable the way a DOS's own "write DOS files" does: it copies a master's boot sectors, the file that master's boot record loads, and `DUP.SYS` beside it, then points the new disk's boot record at the copy. It refuses masters whose boot area or density disagrees with the target's filesystem, since the installed DOS would then read the disk wrongly. `set-dos-file` is the low-level half - it points the boot record at a file already on the image (default `dos.sys`), or unsets it with `--clear`. Neither needs the file contiguous or in any particular place; the boot code follows the sector chain. In `ls -l` the file the boot record points at is marked `dos-file`, which is derived from the boot record rather than any directory flag. The pointer is maintained from then on: rewriting that file follows it to wherever it lands, and deleting it marks the disk non-bootable rather than leaving the boot record aimed at freed sectors.
+
+`unpack` explodes an image into a host directory (made if missing, defaulting to the current one) and `pack` builds one back from a directory - `pack` creates the image, formats it, and copies the tree in, so it takes `create`'s geometry options and `mkfs`'s `--fs`. Dot-prefixed host files are passed over on the way in, the way a shell glob passes over them, which is what keeps `.DS_Store` and the like off the disk.
+
+The boot record is not a file on the disk, so it travels beside the files as `.boot.bin`: `unpack --extract-boot-sectors` writes it, `pack --write-boot-sectors` reads it back, and being dot-prefixed it is never mistaken for content. `pack --set-dos-file NAME` then points the rebuilt boot record at a file that was packed, which requires `--write-boot-sectors` - with no boot code on the image there would be nothing to follow the pointer. A disk with no boot record to begin with says so and unpacks its files anyway. A MyDOS disk taken apart and rebuilt this way boots MyDOS 4.53 and lists its own files, subdirectories included.
 
 `extract-boot-sectors` is the counterpart: it pulls the boot sectors into a file, sized by the boot record's own count byte. When that byte claims zero or more sectors than the image holds, pass `--sector-count` explicitly. Existing output files are not overwritten without `--force`/`-f`.
 

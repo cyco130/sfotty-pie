@@ -7,6 +7,8 @@ import { lsCommand } from "./commands/ls.ts";
 import { setDosFileCommand } from "./commands/set-dos-file.ts";
 import { mkdirCommand } from "./commands/mkdir.ts";
 import { mkfsCommand } from "./commands/mkfs.ts";
+import { packCommand } from "./commands/pack.ts";
+import { unpackCommand } from "./commands/unpack.ts";
 import { cpCommand } from "./commands/cp.ts";
 import { mvCommand } from "./commands/mv.ts";
 import { rmCommand } from "./commands/rm.ts";
@@ -91,6 +93,24 @@ commands:
     directory. With the host on one side this puts files onto an image or
     takes them off; with images on both it copies between them.
 
+  pack -i IMAGE [DIR] [--fs atari/VARIANT] [--sd | --ed | --dd]
+       [--sector-size N] [--sector-count N] [--write-boot-sectors]
+       [--set-dos-file NAME] [-f]
+    Build an image from a host directory (default: the current one):
+    create it, put a filesystem on it, and copy the tree in. Geometry and
+    filesystem options are create's and mkfs's. --write-boot-sectors
+    takes the boot record from .boot.bin in the directory, and
+    --set-dos-file then points it at a file that was packed - which needs
+    --write-boot-sectors, since otherwise there is no boot code to follow
+    the pointer. Refuses to overwrite an existing image without -f.
+
+  unpack -i IMAGE [DIR] [--fs FILESYSTEM] [--extract-boot-sectors] [-f]
+    Explode an image into a host directory (default: the current one),
+    made if missing, mirroring the whole tree.
+    --extract-boot-sectors also writes the boot record to .boot.bin
+    there, which is what lets pack rebuild a bootable disk. Refuses to
+    overwrite existing files without -f.
+
   rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
     Remove empty directories, freeing what they occupied. A directory
     holding anything is refused, as the DOSes refuse it.
@@ -141,6 +161,12 @@ async function main(): Promise<void> {
 			break;
 		case "cp":
 			await cpCommand(args);
+			break;
+		case "pack":
+			await packCommand(args);
+			break;
+		case "unpack":
+			await unpackCommand(args);
 			break;
 		case "rmdir":
 			await rmdirCommand(args);

@@ -177,3 +177,23 @@ test("host rename templates follow the DOS rule over stem and extension", () => 
 	// A template with no extension drops the source's, as on the DOSes.
 	expect(apply("notes.txt", "readme")).toBe("readme");
 });
+
+test("dot-prefixed names are not listed, but can still be read", () => {
+	const root = scratch();
+	writeFileSync(join(root, ".boot.bin"), "boot");
+	writeFileSync(join(root, ".DS_Store"), "junk");
+	const store = openHostDirectory(root);
+
+	// As a shell glob passes over them - which is what keeps pack from
+	// mistaking its own .boot.bin, or the host's metadata, for content.
+	expect([...store.entries()].map((entry) => entry.name)).toEqual([
+		"a.txt",
+		"b.bin",
+		"sub",
+	]);
+	expect(
+		[...store.entries("*", { recursive: true })].map((e) => e.name),
+	).not.toContain(".boot.bin");
+	// Naming one outright still works, which is how pack picks it up.
+	expect(text(store.readFile(".boot.bin")?.bytes)).toBe("boot");
+});

@@ -133,7 +133,7 @@ test("files reach into the extra VTOC region with full links", () => {
 	expect([...(back?.bytes ?? [])]).toEqual([...spill]);
 	expect(vtocOf(image).free).toBe(0);
 	// Deleting gives the extra-region sectors back.
-	fs.deleteFile("spill.dat");
+	fs.removeFile("spill.dat");
 	expect(vtocOf(image).free).toBe(97);
 });
 
@@ -215,7 +215,7 @@ test("the boot pointer follows the DOS file, and dies with it", () => {
 	// Free the sectors ahead of it, then rewrite it: first-free allocation
 	// now puts it earlier on the disk, and the pointer has to follow or the
 	// disk quietly stops booting.
-	fs.deleteFile("filler.dat");
+	fs.removeFile("filler.dat");
 	fs.writeFile("dos.sys", new Uint8Array(300), { overwrite: true });
 	const moved = [...fs.entries("dos.sys")][0]?.startSector ?? 0;
 	expect(moved).toBe(4);
@@ -229,7 +229,7 @@ test("the boot pointer follows the DOS file, and dies with it", () => {
 	expect(readAtariDosFilePointer(image, "dos20s")).toBe(moved);
 
 	// Deleting it unsets the pointer rather than leaving it dangling.
-	fs.deleteFile("dos.sys");
+	fs.removeFile("dos.sys");
 	expect(readAtariDosFilePointer(image, "dos20s")).toBe(0);
 });
 
@@ -241,11 +241,11 @@ test("deleting an ordinary file leaves the boot pointer alone", () => {
 	fs.writeFile("other.dat", new Uint8Array(10), { format: "dos1" });
 	const dos = [...fs.entries("dos.sys")][0]?.startSector ?? 0;
 	writeAtariDosFilePointer(image, "dos10", dos);
-	fs.deleteFile("other.dat");
+	fs.removeFile("other.dat");
 	expect(readAtariDosFilePointer(image, "dos10")).toBe(dos);
 	// ... and DOS 1.0's present flag survives too.
 	expect(image.readSector(1)?.[14]).toBe(0xff);
-	fs.deleteFile("dos.sys");
+	fs.removeFile("dos.sys");
 	expect(image.readSector(1)?.[14]).toBe(0);
 });
 
@@ -285,7 +285,7 @@ test("directories nest, hold files, and go away again", () => {
 	expect(() => fs.removeDirectory("a/b/c")).toThrow(/not empty/);
 	expect(() => fs.removeDirectory("a/b/c/deep.dat")).toThrow(/is a file/);
 
-	fs.deleteFile("a/b/c/deep.dat");
+	fs.removeFile("a/b/c/deep.dat");
 	const free = vtocOf(image).free;
 	fs.removeDirectory("a/b/c");
 	expect(vtocOf(image).free).toBe(free + 8); // the block comes back

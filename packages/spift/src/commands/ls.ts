@@ -206,8 +206,8 @@ export function renderLong(
 	const rows = entries.map((entry) => ({
 		name: displayName(entry),
 		nameCodes: nameColor(entry),
-		sectors: String(entry.sectors),
-		start: String(entry.startSector),
+		sectors: entry.sectors === undefined ? "" : String(entry.sectors),
+		start: entry.startSector === undefined ? "" : String(entry.startSector),
 		// Names carry no marker, so this column is where a directory is
 		// spelled out for anything that cannot see color.
 		attributes: [

@@ -3,7 +3,7 @@ import {
 	detectAtariDos,
 	openAtariDos,
 	splitAtariPath,
-	toAtariName,
+	checkAtariName,
 } from "./atari-dos.ts";
 import { ATR_HEADER_SIZE, createBlankAtr, openAtr } from "./atr.ts";
 import { detectFilesystem } from "./detect.ts";
@@ -467,13 +467,15 @@ test("fills all eight directory sectors, double density included", () => {
 	expect(list(disk).at(-1)?.name).toBe("f63.dat");
 });
 
-test("toAtariName mangles host names into the native policy", () => {
-	expect(toAtariName("game.xex")).toBe("game.xex");
-	expect(toAtariName("Some File!.data")).toBe("some_fil.dat");
-	expect(toAtariName("a.tar.gz")).toBe("a_tar.gz");
-	expect(toAtariName(".profile")).toBe("profile");
-	expect(toAtariName("ok@_1.x")).toBe("ok@_1.x");
-	expect(toAtariName("café.txt")).toBe("caf_.txt");
+test("checkAtariName says why a name will not fit, rather than mangling", () => {
+	expect(checkAtariName("game.xex")).toBe(null);
+	expect(checkAtariName("ok@_1.x")).toBe(null);
+	expect(checkAtariName("x y.txt")).toBe(null);
+	expect(checkAtariName("toolonganame.txt")).toMatch(/at most 8 fit/);
+	expect(checkAtariName("name.data")).toMatch(/at most 3 fit/);
+	expect(checkAtariName("Some File!.dat")).toMatch(/"!" cannot be used/);
+	expect(checkAtariName("a.tar.gz")).toMatch(/only one dot/);
+	expect(checkAtariName("café.txt")).toMatch(/"é" cannot be used/);
 });
 
 function freeCount(bytes: Uint8Array): number {
@@ -603,7 +605,7 @@ test("deleteFile frees the chain and reuses the slot", () => {
 	const disk = makeDisk({ formatted: true });
 	const fs = openAtariDos(openAtr(disk));
 	fs.writeFile("a.dat", new Uint8Array(300));
-	fs.deleteFile("a.dat");
+	fs.removeFile("a.dat");
 	expect([...fs.entries()]).toHaveLength(0);
 	expect(fs.readFile("a.dat")).toBeNull();
 	expect(freeCount(disk)).toBe(707);
@@ -620,13 +622,13 @@ test("deleteFile validates the target", () => {
 		entries: [{ flags: 0x10, name: "SUBDIR" }],
 	});
 	const fs = openAtariDos(openAtr(disk));
-	expect(() => fs.deleteFile("nope.dat")).toThrow(/not found/);
-	expect(() => fs.deleteFile("subdir")).toThrow(/is a directory/);
+	expect(() => fs.removeFile("nope.dat")).toThrow(/not found/);
+	expect(() => fs.removeFile("subdir")).toThrow(/is a directory/);
 	fs.writeFile("lock.dat", new Uint8Array(10));
 	const slotFlags = ATR_HEADER_SIZE + 360 * 128 + 16; // slot 1, sector 361
 	disk[slotFlags] = (disk[slotFlags] ?? 0) | 0x20;
-	expect(() => fs.deleteFile("lock.dat")).toThrow(/is locked/);
-	fs.deleteFile("lock.dat", { force: true });
+	expect(() => fs.removeFile("lock.dat")).toThrow(/is locked/);
+	fs.removeFile("lock.dat", { force: true });
 	expect([...fs.entries("lock.dat")]).toHaveLength(0);
 	expect(freeCount(disk)).toBe(707);
 });
@@ -635,7 +637,7 @@ test("deleteFile restores both DOS 2.5 counters for extended files", () => {
 	const disk = makeDisk({ sectorCount: 1040, total: 1010, formatted: true });
 	const fs = openAtariDos(openAtr(disk));
 	fs.writeFile("big.dat", new Uint8Array(708 * 125));
-	fs.deleteFile("big.dat");
+	fs.removeFile("big.dat");
 	expect(freeCount(disk)).toBe(707);
 	const vtoc2 = openAtr(disk).readSector(1024);
 	expect((vtoc2?.[122] ?? 0) | ((vtoc2?.[123] ?? 0) << 8)).toBe(304);
@@ -651,7 +653,7 @@ test("deleteFile works on DOS 1.0 disks", () => {
 	writeDataSector(dos1, { sector: 100, next: 0, length: 0x80 | 5, fill: 1 });
 	const fs = openAtariDos(openAtr(dos1));
 	expect(fs.variant).toBe("dos10");
-	fs.deleteFile("old.dat");
+	fs.removeFile("old.dat");
 	expect([...fs.entries()]).toHaveLength(0);
 });
 
@@ -663,7 +665,7 @@ test("delete and overwrite report damaged chains and free what they can", () => 
 	const sector4 = ATR_HEADER_SIZE + 3 * 128;
 	disk[sector4 + 125] = 0;
 	disk[sector4 + 126] = 4;
-	expect(fs.deleteFile("loop.dat")).toEqual(["sector 4: sector chain loops"]);
+	expect(fs.removeFile("loop.dat")).toEqual(["sector 4: sector chain loops"]);
 	// Only the reachable sector came back; 5 and 6 stay leaked.
 	expect(freeCount(disk)).toBe(707 - 2);
 	// Overwrite path: a clean write, then the same corruption.
@@ -784,7 +786,7 @@ test("reads and writes reach into subdirectories", () => {
 	expect(data[125]! >> 2).toBe(2); // slot 2 of GAMES, not of the root
 	expect(fs.readFile("games/new.dat")?.diagnostics).toEqual([]);
 
-	fs.deleteFile("games/in.dat");
+	fs.removeFile("games/in.dat");
 	expect([...fs.entries("games")].map((e) => e.name)).toEqual([
 		"deep",
 		"new.dat",

@@ -14,14 +14,15 @@ spift mkfs -i blank.atr               # put an empty filesystem on it
 spift ls -i dos25.atr                 # list the root directory
 spift ls -i dos25.atr '*.com' -l      # filtered, with sizes and attributes
 spift ls -i dos25.atr -lv             # ... plus deleted and half-written files
-spift extract -i dos25.atr -o out/    # extract everything into out/
-spift extract -i dos25.atr '*.com'    # extract matching files here
-spift add -i dos25.atr game.xex       # add host files to the image
+spift cp --from dos25.atr '*.*' out/  # copy everything off, into out/
+spift cp --to dos25.atr game.xex /    # ... and host files onto an image
 spift rm -i dos25.atr '*.tmp'         # remove matching files
 spift mkdir -i mydos.atr -p 'games>arcade'    # MyDOS subdirectories
 spift mv -i dos25.atr '*.lst' '*.txt'         # batch rename by template
 spift mv -i mydos.atr '*.com' 'games/'        # move a batch into a directory
 spift ls -i mydos.atr -lR                     # walk the whole tree
+spift cp --from a.atr --to b.atr '*.*' /      # copy between two images
+spift cp --from disk.atr -R 'games' out/      # whole subtrees, either way
 spift write-boot-sectors -i blank.atr boot.bin
 spift extract-boot-sectors -i dos25.atr boot.bin
 spift install-dos -i blank.atr --from dos20s.atr   # make it bootable
@@ -37,11 +38,19 @@ spift install-dos -i blank.atr --from dos20s.atr   # make it bootable
 
 On a terminal, names are colored: directories blue, deleted entries red, open-for-output ones magenta. Names themselves are never decorated - `-l` is where the same facts appear as words, `dir` included, for anything reading the output rather than looking at it.
 
-`extract` copies matching files (default: all) out of an image into `-o DIR` (default: here); `--recursive`/`-R` descends into subdirectories and mirrors the tree below whatever directory the spec picked. Host names are lowercased and made filesystem-safe, per path component; nothing is overwritten without `--force`/`-f`, checked before any file is written. Damaged files still extract whatever is recoverable, with warnings and exit code 1.
-
 `mkdir` and `rmdir` manage MyDOS subdirectories, with `-p` for parents. A directory is a contiguous eight-sector extent holding 64 entries, so `mkdir` can fail for want of a _run_ of free sectors on a disk with plenty of room - the same refusal MyDOS gives. `rmdir` takes only empty directories; `rm -r` clears a tree, deepest first. Paths accept `/`, `>` and `:` as separators, plus SpartaDOS's `<`, which separates and steps up a level at once (`games>arcade<other` means `games/other`); quote them, since shells read `<` and `>` as redirection.
 
-`mv` renames and moves. The destination is a directory when it ends in a separator or names one, and otherwise a name template applied per match, following the DOSes' own RENAME rules exactly (measured against DOS 2.0S): `*` copies the source from that position to the end of the field, `?` copies one character, anything else replaces, and a template shorter than the field blanks the rest - so `'*.lst' '*.txt'` re-extensions a batch, `ab.txt` with `q*.bak` gives `qb.bak`, and `abcdefgh.txt` with `??z.bak` gives `abz.bak`. Renaming inside a directory touches only the directory entry; moving between directories has to rewrite the file number every data sector carries, unless the entry is a directory or a MyDOS full-link file, which store none. File contents never move either way.
+`cp` and `mv` work on two sides at once. `--from` and `--to` name them, `--image`/`-i` says both sides are the same image, and a side with no flag is the host - so `--from` alone copies out of an image, `--to` alone copies into one, and both together copy image to image. At least one side has to be an image, since host-to-host copying is what `cp(1)` is for.
+
+The two ways a host side gets named mean different things. A directory named outright (`--to out/`) is a container: paths are relative to it and confined to it, so a rename template can never write outside the directory you pointed at. The side that falls back to the host when no flag names one is not a container - paths there mean what they mean in the shell, relative to the working directory and absolute when they say so, which is how `spift cp --to disk.atr ~/games/blast.xex /` reaches a file that lives nowhere near you. `--fs` forces how a container is read, with `--from-fs` and `--to-fs` to override one side; `--recursive`/`-R` is needed to copy a directory (a `mv` implies it). Positional arguments are `SOURCE... DESTINATION`, following the same rule as Unix `cp`: the last one is a destination directory when it names or ends in one, and otherwise there may be only two, the second being a name template.
+
+The template is the target's own rename rule, so `spift cp --from img.atr '*.ttt' '*.txt'` re-extensions a batch on the way out just as it does on the way in. The host rule is the DOSes' rule with the two things that only mean something for fixed-width fields taken out: the split is at the _last_ dot, so `archive.tar.gz` has the extension `gz` and `.gitignore` is all stem, and there is no padding to copy from, so a `?` reaching past the end of the source adds nothing where an 8.3 field would have handed back a space.
+
+Attributes travel as far as both sides can carry them. What a target cannot represent is dropped rather than faked, so copying a locked DOS 1.0 file to another Atari image keeps both properties, copying it to a host directory keeps only the read-only bit, and `--no-attributes` drops even what would have travelled - which is how a DOS 1.0 file becomes an ordinary one, since writing it without the marking writes DOS 2 chains. The DOS 2.5 and MyDOS markings never travel: they say where a file landed on a particular disk rather than anything anyone asked for. Neither does the boot-file pointer, which belongs to the image (a `mv` within one image keeps it, because that move never rewrites the file at all).
+
+`mv` renames and moves. The destination is a directory when it ends in a separator or names one, and otherwise a name template applied per match, following the DOSes' own RENAME rules exactly (measured against DOS 2.0S): `*` copies the source from that position to the end of the field, `?` copies one character, anything else replaces, and a template shorter than the field blanks the rest - so `'*.lst' '*.txt'` re-extensions a batch, `ab.txt` with `q*.bak` gives `qb.bak`, and `abcdefgh.txt` with `??z.bak` gives `abz.bak`. Renaming inside a directory touches only the directory entry; moving between directories has to rewrite the file number every data sector carries, unless the entry is a directory or a MyDOS full-link file, which store none. File contents never move either way - a move within one image is bookkeeping, so it also keeps the sectors a file occupies and the boot record pointing at it. Crossing containers is the other thing entirely: there the file is copied and then removed, target written first, so an interruption leaves a duplicate rather than a hole.
+
+Moving _off_ the host needs `--remove-source`, because the two directions are not equally reversible. Removing from an image leaves the entry with its name under the deleted flag, the way the DOSes leave it, so it is still there to recover; removing from the host is a real unlink. Everywhere else spift treats the host as where its inputs and outputs live rather than as something it deletes, so the irreversible half is opt-in.
 
 `rm` removes files matching its specs. Locked files need `--force`/`-f` (which also quiets specs that match nothing), and directories need `--recursive`/`-r`. Deleted entries keep their name under the deleted flag, the way the DOSes leave them for undelete tools.
 
@@ -51,9 +60,9 @@ On a terminal, names are colored: directories blue, deleted entries red, open-fo
 
 `extract-boot-sectors` is the counterpart: it pulls the boot sectors into a file, sized by the boot record's own count byte. When that byte claims zero or more sectors than the image holds, pass `--sector-count` explicitly. Existing output files are not overwritten without `--force`/`-f`.
 
-`add` copies host files into an image. Names convert to uppercase 8.3 - letters, digits, `_` and `@`, everything else becomes `_`. Overwriting a file already on the image needs `--force`/`-f`; two sources mangling to the same name is always an error. On DOS 2.5, files reaching past sector 719 get the extended marking, and the VTOC2 shared bitmap is silently repaired from the main VTOC (which DOS 2.0 keeps current). The image is only written back after the whole batch succeeds.
+Copying host files onto an image is `cp --to`, and taking them off is `cp --from`. A name that does not fit 8.3 in `[A-Z0-9_@]` is refused, with the reason, rather than mangled to fit: truncating to eight characters throws away the part that tells related files apart and then collides with its neighbours, so naming the file is your call - give an explicit name, or a template for a batch. Coming the other way, a decoded name is made safe for the host - characters outside a portable set become `_` - which is a guard against a damaged directory holding a path separator, not a way of fitting names to a shape.
 
-Files are written in DOS 2 format whatever the disk was formatted with, and allocation follows the bitmap rather than any DOS's habits - so a sector the format left free (720 on a MyDOS disk) gets used, which real DOS 2.0 never does but reads back fine. `--fs atari/dos10` writes DOS 1.0 format chains instead, which only DOS 1.0 can read; `--fs` takes a family (`atari`), a variant (`dos25`), or both (`atari/dos25`), and the same syntax works on `ls`, `extract`, and `rm` to force how a disk is interpreted. Run `spift help` for details.
+Files land in DOS 2 format whatever the disk was formatted with, and allocation follows the bitmap rather than any DOS's habits - so a sector the format left free (720 on a MyDOS disk) gets used, which real DOS 2.0 never does but reads back fine. `--to-fs atari/dos10` writes DOS 1.0 format chains instead, which only DOS 1.0 can read. On DOS 2.5, files reaching past sector 719 get the extended marking, and the VTOC2 shared bitmap is silently repaired from the main VTOC (which DOS 2.0 keeps current). Damaged files still copy whatever is recoverable, with warnings and exit code 1. Run `spift help` for details.
 
 ## License and credits
 

@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 import { CliError, UsageError } from "./cli-error.ts";
-import { addCommand } from "./commands/add.ts";
 import { createCommand } from "./commands/create.ts";
 import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
-import { extractCommand } from "./commands/extract.ts";
 import { installDosCommand } from "./commands/install-dos.ts";
 import { lsCommand } from "./commands/ls.ts";
 import { setDosFileCommand } from "./commands/set-dos-file.ts";
 import { mkdirCommand } from "./commands/mkdir.ts";
 import { mkfsCommand } from "./commands/mkfs.ts";
+import { cpCommand } from "./commands/cp.ts";
 import { mvCommand } from "./commands/mv.ts";
 import { rmCommand } from "./commands/rm.ts";
 import { rmdirCommand } from "./commands/rmdir.ts";
@@ -18,6 +17,19 @@ const USAGE = `usage: spift <command> -i IMAGE [paths...] [options]
 
 Every command names the image it works on with --image (-i); positional
 arguments are paths inside that image unless a command says otherwise.
+
+cp and mv work on two containers at once, written [CONTAINERS] below:
+
+  -i, --image IMAGE     both sides are this image
+  --from CONTAINER      read from here (an image, or a host directory)
+  --to CONTAINER        write to here
+  --fs FILESYSTEM       force how a container is read; --from-fs and
+                        --to-fs override one side
+
+A side with no flag is the host, where paths mean what they mean in the
+shell - so --from alone copies out and --to alone copies in. A host
+directory named outright is a container instead, and paths stay inside
+it. At least one side must be an image.
 
 commands:
   create -i FILE [-t TYPE] [-f] [--sd | --ed | --dd]
@@ -47,25 +59,6 @@ commands:
     listing passes over: deleted files and ones left open for output.
     --recursive (-R) descends into subdirectories, showing full paths.
 
-  extract -i IMAGE [SPEC] [-o DIR] [-R] [--fs FILESYSTEM] [-f]
-    Extract files matching SPEC (default: all) into DIR (default: the
-    current directory, created if missing); --recursive (-R) descends
-    into subdirectories and mirrors the tree below whatever directory
-    SPEC picked. Host names are lowercased and made filesystem-safe,
-    per path component. Refuses to overwrite
-    existing files unless --force (-f) is given; damaged files extract
-    what is recoverable, with warnings, and exit 1.
-
-  add -i IMAGE FILE... [-C DIR] [--fs FILESYSTEM] [-f]
-    Add host files to the root directory of the filesystem on an image.
-    Names convert to uppercase 8.3 (letters, digits, _ and @; anything
-    else becomes _). Two sources mangling to the same name is an error;
-    overwriting a file already on the image requires --force (-f).
-    Files are written in DOS 2 format by default, whatever the disk was
-    formatted with, and may use any sector the bitmap says is free.
-    --fs atari/dos10 writes DOS 1.0 format files instead (readable only
-    by DOS 1.0); --fs also accepts a bare family to skip detection.
-
   rm -i IMAGE SPEC... [--fs FILESYSTEM] [-f] [-r]
     Remove files matching the SPECs (native wildcards, quoted). Locked
     files need --force (-f), which also quiets specs that match nothing.
@@ -78,14 +71,25 @@ commands:
     contiguous free sectors, so this can fail on a fragmented disk with
     plenty of room.
 
-  mv -i IMAGE SOURCE DESTINATION [--fs FILESYSTEM] [-f]
+  mv [CONTAINERS] SOURCE... DESTINATION [-f] [--no-attributes]
+     [--remove-source]
     Rename or move entries. DESTINATION is a directory when it ends in a
     separator or names one, and otherwise a name template applied to each
     match: * copies the source from that position to the end of the
     field, ? copies one character, anything else replaces (so '*.lst'
     '*.txt' re-extensions a batch, as the DOSes' own RENAME does).
     Renaming inside a directory only rewrites the entry; moving between
-    directories may renumber the file's sectors.
+    directories may renumber the file's sectors. A move across containers
+    copies and then removes, target written first. Moving off the host
+    needs --remove-source: an image's entries survive deletion under the
+    deleted flag, host files do not.
+
+  cp [CONTAINERS] SOURCE... DESTINATION [-R] [-f] [--no-attributes]
+    Copy entries, with the same DESTINATION rules as mv - a template is
+    the target's own rename rule, so '*.ttt' '*.txt' works copying out to
+    the host as well as in. --recursive (-R) is needed to copy a
+    directory. With the host on one side this puts files onto an image or
+    takes them off; with images on both it copies between them.
 
   rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
     Remove empty directories, freeing what they occupied. A directory
@@ -126,12 +130,6 @@ async function main(): Promise<void> {
 		case "ls":
 			await lsCommand(args);
 			break;
-		case "extract":
-			await extractCommand(args);
-			break;
-		case "add":
-			await addCommand(args);
-			break;
 		case "rm":
 			await rmCommand(args);
 			break;
@@ -140,6 +138,9 @@ async function main(): Promise<void> {
 			break;
 		case "mv":
 			await mvCommand(args);
+			break;
+		case "cp":
+			await cpCommand(args);
 			break;
 		case "rmdir":
 			await rmdirCommand(args);

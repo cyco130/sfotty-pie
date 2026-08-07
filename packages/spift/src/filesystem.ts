@@ -34,15 +34,19 @@ export interface DirEntry {
 	/** Decoded via the family text conventions and lowercased, "name.ext". */
 	name: string;
 	/**
-	 * Where it lives, from the volume root, "/"-separated - the same string
+	 * Where it lives, from the store root, "/"-separated - the same string
 	 * the read and write calls accept back. Equal to the name for entries in
 	 * the root.
 	 */
 	path: string;
 	kind: DirEntryKind;
-	/** Size in sectors as the directory entry states it. */
-	sectors: number;
-	startSector: number;
+	/**
+	 * Size in sectors as the directory entry states it, where the store has
+	 * sectors at all - absent on a host directory, which has no allocation
+	 * for us to report.
+	 */
+	sectors?: number;
+	startSector?: number;
 	attributes: DirEntryAttributes;
 }
 
@@ -66,11 +70,48 @@ export interface FileContents {
 	diagnostics: string[];
 }
 
-export interface Filesystem {
+/**
+ * What copying needs from either end: a tree of named entries that can be
+ * read, written, and removed. A disk image satisfies it through a family
+ * driver (see Filesystem below); so does a host directory, which is how one
+ * copy operation serves add, extract, and image-to-image alike.
+ */
+export interface FileStore {
 	readonly family: string;
-	readonly variant: string;
-	/** Capacity, free space, and whatever else the family volume carries. */
-	volume(): VolumeInfo;
+	/**
+	 * The characters this store accepts between path components. Used to
+	 * recognize a destination that names a directory by trailing separator;
+	 * "/" always works, whatever else the family allows.
+	 */
+	readonly pathSeparators: string;
+	/**
+	 * Attributes this store can put on a file it writes. Copying intersects
+	 * the source entry's attributes with this, so what a target cannot
+	 * represent is dropped rather than faked. Allocation-specific markings
+	 * (AtariDos25, AtariMyDos) are never in here - they describe where a file
+	 * landed, not anything anyone asked for - and neither is BootFile, which
+	 * lives in the boot record.
+	 */
+	readonly writableAttributes: DirEntryAttributes;
+	/** Splits a path into components, applying family separator rules. */
+	splitPath(path: string): string[];
+	/**
+	 * Makes a name from elsewhere safe to write here. This is for safety, not
+	 * convenience: nothing mangles a name to fit a family's shape - a name
+	 * that does not fit is refused, since truncating one throws away the part
+	 * that tells related files apart. What this is for is a name that would
+	 * be actively dangerous, which on the host means a decoded name from a
+	 * damaged directory holding a path separator or control characters.
+	 * Absent when the family has nothing to guard against, and a no-op on any
+	 * well-formed name where it exists.
+	 */
+	safeName?(name: string): string;
+	/**
+	 * Applies the family's own rename-template rule (Atari DOS RENAME's "*"
+	 * and "?" over the 8.3 fields). Absent when the family has no such rule,
+	 * which makes a template destination an error rather than a literal name.
+	 */
+	applyNameTemplate?(name: string, template: string): string;
 	/**
 	 * Iterates a directory in directory order. The spec is a path whose last
 	 * component is a name pattern in the family's native wildcard semantics
@@ -99,6 +140,25 @@ export interface Filesystem {
 	 */
 	readFile(path: string): FileContents | null;
 	/**
+	 * Writes a file, making no directories along the way. `attributes` asks
+	 * for what the entry should carry; anything outside writableAttributes is
+	 * ignored, so a caller can hand over a source entry's set as-is. Throws on
+	 * a full store or an existing name unless overwrite is set. Returns the
+	 * diagnostics from freeing an overwritten file - non-empty means that file
+	 * was damaged and only its reachable parts were reclaimed.
+	 */
+	writeFile(
+		path: string,
+		bytes: Uint8Array,
+		options?: { overwrite?: boolean; attributes?: DirEntryAttributes },
+	): string[];
+	/**
+	 * Removes a file. Throws when the path is missing, names a directory, or
+	 * is read-only (unless force). Returns traversal diagnostics as writeFile
+	 * does.
+	 */
+	removeFile(path: string, options?: { force?: boolean }): string[];
+	/**
 	 * Renames or moves an entry. Staying in one directory keeps its slot,
 	 * so nothing but the name changes; moving elsewhere may have to rewrite
 	 * per-sector bookkeeping, and returns any diagnostics from walking the
@@ -118,4 +178,14 @@ export interface Filesystem {
 	 * same rule the DOSes enforce.
 	 */
 	removeDirectory(path: string): void;
+}
+
+/**
+ * A store backed by a volume - a disk image with a family filesystem on it,
+ * as opposed to a host directory.
+ */
+export interface Filesystem extends FileStore {
+	readonly variant: string;
+	/** Capacity, free space, and whatever else the family volume carries. */
+	volume(): VolumeInfo;
 }

@@ -80,21 +80,23 @@ export async function setDosFileCommand(args: string[]): Promise<void> {
 	const entry = [...filesystem.entries()].find(
 		(candidate) => candidate.name === wanted && candidate.kind === "file",
 	);
-	if (entry === undefined) {
+	// startSector is what the boot record points at, so an entry without one
+	// (a store with no sectors) could never be booted from anyway.
+	if (entry?.startSector === undefined) {
 		throw new CliError(`${parsed.image}: no file named ${wanted} to boot from`);
 	}
+	const start = entry.startSector;
 
 	const previous = readAtariDosFilePointer(medium, variant);
-	writeAtariDosFilePointer(medium, variant, entry.startSector);
+	writeAtariDosFilePointer(medium, variant, start);
 	await writeFile(parsed.image, medium.bytes);
 	const change =
-		previous === entry.startSector
+		previous === start
 			? " (unchanged)"
 			: previous === 0
 				? ""
 				: ` (was sector ${previous})`;
 	process.stdout.write(
-		`${parsed.image} boots ${entry.name} from sector ` +
-			`${entry.startSector}${change}\n`,
+		`${parsed.image} boots ${entry.name} from sector ` + `${start}${change}\n`,
 	);
 }

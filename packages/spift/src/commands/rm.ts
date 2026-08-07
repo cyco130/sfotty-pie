@@ -130,7 +130,7 @@ export async function rmCommand(args: string[]): Promise<void> {
 				process.stdout.write(`removed ${entry.path}\n`);
 				continue;
 			}
-			diagnostics = filesystem.deleteFile(entry.path, {
+			diagnostics = filesystem.removeFile(entry.path, {
 				force: parsed.force,
 			});
 		} catch (error) {

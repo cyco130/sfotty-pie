@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { toHostName, uniqueHostNames } from "./host-names.ts";
+import { toHostName } from "./host-names.ts";
 
 test("passes portable names through", () => {
 	expect(toHostName("game.com")).toBe("game.com");
@@ -15,14 +15,4 @@ test("guards hidden-file and option-lookalike names", () => {
 	expect(toHostName(".hidden")).toBe("_.hidden");
 	expect(toHostName("-dash")).toBe("_-dash");
 	expect(toHostName("")).toBe("_");
-});
-
-test("suffixes duplicate names before the extension", () => {
-	expect(uniqueHostNames(["a.dat", "a.dat", "a.dat", "b"])).toEqual([
-		"a.dat",
-		"a~2.dat",
-		"a~3.dat",
-		"b",
-	]);
-	expect(uniqueHostNames(["a", "a"])).toEqual(["a", "a~2"]);
 });

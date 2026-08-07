@@ -1,12 +1,14 @@
-// Atari DOS family filesystem driver, read-only, root directory only.
-// Covers DOS 1.0, DOS 2.0S/2.0D, DOS 2.5 (ED), and MyDOS formats. Layout and
-// detection follow the OneDOS notes: VTOC at sector 360 (code byte, then
-// total and free sector counts), root directory at sectors 361-368.
+// Atari DOS family filesystem driver, read and write, with MyDOS
+// subdirectories. Covers DOS 1.0, DOS 2.0S/2.0D, DOS 2.5 (ED), and MyDOS
+// formats. Layout and detection follow the OneDOS notes: VTOC at sector 360
+// (code byte, then total and free sector counts), root directory at sectors
+// 361-368.
 
 import type { SectorMedium } from "./sector-medium.ts";
 import type {
 	DirEntry,
 	DirEntryAttribute,
+	DirEntryAttributes,
 	FileContents,
 	Filesystem,
 	VolumeInfo,
@@ -25,33 +27,27 @@ export interface AtariDosFilesystem extends Filesystem {
 	readonly family: "atari";
 	readonly variant: AtariDosVariant;
 	/**
-	 * Writes a file into the root directory. The name is a decoded display
-	 * name ("game.com") whose fields must fit 8.3 in [A-Z0-9_@] (see
-	 * toAtariName). Throws on a full directory or disk, or an existing name
-	 * unless overwrite is set. Mutations stay in the medium's memory.
-	 * Returns the traversal diagnostics from freeing an overwritten file's
-	 * chain - non-empty means that chain was damaged (loop, bad link) and
-	 * only its reachable sectors were freed.
+	 * As Filesystem.writeFile, with the family specifics: each path component
+	 * must fit 8.3 in [A-Z0-9_@] - nothing is mangled to fit - the file
+	 * lands in the directory the path names, and mutations stay in the
+	 * medium's memory until the caller writes it back.
 	 *
 	 * `format` picks the data-sector encoding: "dos2" (the default, read by
 	 * everything from DOS 2.0 on) or "dos1", which DOS 1.0 needs and no
 	 * later DOS understands. Either can go on any disk - readers key off
-	 * the directory entry's own flag, not the VTOC.
+	 * the directory entry's own flag, not the VTOC. Passing the AtariDos10
+	 * attribute is the same request by another name, which is how a copy
+	 * from a DOS 1.0 disk keeps its format.
 	 */
 	writeFile(
-		name: string,
+		path: string,
 		bytes: Uint8Array,
-		options?: { overwrite?: boolean; format?: "dos1" | "dos2" },
+		options?: {
+			overwrite?: boolean;
+			format?: "dos1" | "dos2";
+			attributes?: DirEntryAttributes;
+		},
 	): string[];
-	/**
-	 * Deletes a file: frees its chain in the bitmap and sets the deleted
-	 * flag (the rest of the entry stays, like the DOSes leave it). Throws
-	 * when the name is missing, a directory, or locked (unless force).
-	 * Mutations stay in the medium's memory. Returns
-	 * the traversal diagnostics from freeing the chain - non-empty means it
-	 * was damaged and only its reachable sectors were freed.
-	 */
-	deleteFile(name: string, options?: { force?: boolean }): string[];
 }
 
 const VTOC_SECTOR = 360;
@@ -310,6 +306,17 @@ export function openAtariDos(
 	return {
 		family: "atari",
 		variant: resolved,
+		// ">" and ":" are the DOSes' own separators; "<" is SpartaDOS's
+		// step-up-a-level and so is not one of these, which are the ones a
+		// trailing character can use to say "this names a directory".
+		pathSeparators: "/>:",
+		// Locked is a flag someone sets; DOS 1.0-ness is a real property of
+		// the file's chain encoding, and both travel with a copy. The DOS 2.5
+		// and MyDOS markings do not - they say where the file landed on this
+		// particular disk.
+		writableAttributes: ["ReadOnly", "AtariDos10"],
+		splitPath: splitAtariPath,
+		applyNameTemplate: applyAtariNameTemplate,
 		volume(): VolumeInfo {
 			const vtoc = medium.readSector(VTOC_SECTOR);
 			const total = (vtoc?.[1] ?? 0) | ((vtoc?.[2] ?? 0) << 8);
@@ -453,13 +460,18 @@ export function openAtariDos(
 		writeFile(
 			path: string,
 			bytes: Uint8Array,
-			options?: { overwrite?: boolean; format?: "dos1" | "dos2" },
+			options?: {
+				overwrite?: boolean;
+				format?: "dos1" | "dos2";
+				attributes?: DirEntryAttributes;
+			},
 		): string[] {
 			const parts = splitAtariPath(path);
 			const leaf = parts.pop();
 			if (leaf === undefined) {
 				throw new Error("no file name given");
 			}
+			const attributes = options?.attributes ?? [];
 			return writeAtariFile(
 				medium,
 				resolved,
@@ -467,7 +479,9 @@ export function openAtariDos(
 				leaf,
 				bytes,
 				options?.overwrite === true,
-				options?.format ?? "dos2",
+				options?.format ??
+					(attributes.includes("AtariDos10") ? "dos1" : "dos2"),
+				attributes.includes("ReadOnly"),
 			);
 		},
 		makeDirectory(path: string, options?: { parents?: boolean }): void {
@@ -553,7 +567,7 @@ export function openAtariDos(
 				found.startSector,
 			);
 		},
-		deleteFile(path: string, options?: { force?: boolean }): string[] {
+		removeFile(path: string, options?: { force?: boolean }): string[] {
 			const parts = splitAtariPath(path);
 			const leaf = parts.pop();
 			if (leaf === undefined) {
@@ -1074,6 +1088,7 @@ function writeAtariFile(
 	fileBytes: Uint8Array,
 	overwrite: boolean,
 	format: "dos1" | "dos2",
+	locked = false,
 ): string[] {
 	const writeSector = medium.writeSector?.bind(medium);
 	if (writeSector === undefined) {
@@ -1217,7 +1232,8 @@ function writeAtariFile(
 	const entry = slotIn(slot);
 	entry[0] =
 		(extended ? FLAG_OUTPUT | dos2Bit : FLAG_IN_USE | dos2Bit) |
-		(fullLinks ? FLAG_NO_LINK : 0);
+		(fullLinks ? FLAG_NO_LINK : 0) |
+		(locked ? FLAG_LOCKED : 0);
 	entry[1] = allocated.length & 0xff;
 	entry[2] = allocated.length >> 8;
 	entry[3] = (allocated[0] ?? 0) & 0xff;
@@ -1637,41 +1653,58 @@ export function formatAtariDos(
 	};
 }
 
+/**
+ * Says why a name will not fit the native policy, or null when it does.
+ * Callers that want to refuse before touching anything use this; writeFile
+ * throws the same wording on its own.
+ */
+export function checkAtariName(display: string): string | null {
+	try {
+		encodeAtariName(display);
+		return null;
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
+	}
+}
+
 function encodeAtariName(display: string): { name: string; ext: string } {
 	const dot = display.indexOf(".");
 	const name = (dot === -1 ? display : display.slice(0, dot)).toUpperCase();
 	const ext = (dot === -1 ? "" : display.slice(dot + 1)).toUpperCase();
 	// Spaces are allowed inside a name, just not to start one: the field is
 	// space-padded, and the DOSes' own RENAME templates produce such names
-	// (X.TXT with ??Z.BAK gives "X Z" on DOS 2.0S, measured). Host names
-	// never arrive this way - toAtariName turns anything odd into "_".
+	// (X.TXT with ??Z.BAK gives "X Z" on DOS 2.0S, measured).
 	if (
 		!/^[A-Z0-9_@][A-Z0-9_@ ]{0,7}$/.test(name) ||
 		!/^[A-Z0-9_@ ]{0,3}$/.test(ext)
 	) {
-		throw new Error(`invalid Atari file name "${display}"`);
+		// Nothing mangles a name to fit on the way in - truncating to eight
+		// characters throws away the part that tells files apart, and then
+		// collides - so the reason has to be specific enough to act on.
+		const why: string[] = [];
+		if (name.length > 8) {
+			why.push(`the name is ${name.length} characters, at most 8 fit`);
+		}
+		if (ext.length > 3) {
+			why.push(`the extension is ${ext.length} characters, at most 3 fit`);
+		}
+		const bad = [
+			...new Set([...display].filter((c) => !/[A-Za-z0-9_@ .]/.test(c))),
+		];
+		if (bad.length > 0) {
+			why.push(`${bad.map((c) => `"${c}"`).join(", ")} cannot be used`);
+		}
+		if (display.includes(".") && dot !== display.lastIndexOf(".")) {
+			why.push("only one dot is allowed");
+		}
+		if (why.length === 0) {
+			why.push("names are letters, digits, _ and @, as 8.3");
+		}
+		throw new Error(
+			`"${display}" is not a valid Atari file name: ${why.join("; ")}`,
+		);
 	}
 	return { name, ext };
-}
-
-/**
- * Mangles a host file name into the native policy: uppercase 8.3 with
- * [A-Z0-9_@] (other characters become "_", overlong fields truncate).
- * Returns the decoded display form (lowercase) that ls/readFile/writeFile
- * speak.
- */
-export function toAtariName(hostName: string): string {
-	const stripped = hostName.replace(/^\.+/, "");
-	const dot = stripped.lastIndexOf(".");
-	const mangleField = (text: string, max: number): string =>
-		text
-			.toUpperCase()
-			.replace(/[^A-Z0-9_@]/g, "_")
-			.slice(0, max);
-	const name = mangleField(dot <= 0 ? stripped : stripped.slice(0, dot), 8);
-	const ext = mangleField(dot <= 0 ? "" : stripped.slice(dot + 1), 3);
-	const safeName = name === "" ? "_" : name;
-	return (ext === "" ? safeName : `${safeName}.${ext}`).toLowerCase();
 }
 
 function walkChain(

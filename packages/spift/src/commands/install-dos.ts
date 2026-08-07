@@ -145,7 +145,7 @@ export async function installDosCommand(args: string[]): Promise<void> {
 	const installed = [...target.filesystem.entries()].find(
 		(entry) => entry.name === dosEntry.name,
 	);
-	if (installed === undefined) {
+	if (installed?.startSector === undefined) {
 		throw new CliError(`${dosEntry.name} did not land on the image`);
 	}
 	writeAtariDosFilePointer(target.medium, variant, installed.startSector);

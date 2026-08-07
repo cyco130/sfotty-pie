@@ -47,6 +47,7 @@ export interface HostDirectory extends FileStore {
 type PendingEntry =
 	| { kind: "file"; bytes: Uint8Array; readOnly: boolean }
 	| { kind: "dir" }
+	| { kind: "attrs"; readOnly: boolean }
 	| { kind: "removed" };
 
 /**
@@ -124,6 +125,12 @@ export function openHostDirectory(
 		const found = statSync(path, { throwIfNoEntry: false });
 		if (found === undefined) {
 			return null;
+		}
+		if (staged?.kind === "attrs") {
+			return {
+				kind: found.isDirectory() ? "dir" : "file",
+				readOnly: staged.readOnly,
+			};
 		}
 		return {
 			kind: found.isDirectory() ? "dir" : "file",
@@ -271,6 +278,23 @@ export function openHostDirectory(
 			});
 			return [];
 		},
+		setAttributes(path: string, attributes: DirEntryAttributes): string[] {
+			const where = absolute(path);
+			const found = peek(where);
+			if (found === null) {
+				throw new Error(`${path} does not exist`);
+			}
+			const readOnly = attributes.includes("ReadOnly");
+			const staged = overlay.get(where);
+			// A file this batch is already writing keeps its pending contents;
+			// anything else only needs the mode changed at commit.
+			if (staged?.kind === "file") {
+				overlay.set(where, { ...staged, readOnly });
+			} else {
+				overlay.set(where, { kind: "attrs", readOnly });
+			}
+			return [];
+		},
 		removeFile(path: string, options?: { force?: boolean }): string[] {
 			const where = absolute(path);
 			const found = peek(where);
@@ -379,6 +403,11 @@ export function openHostDirectory(
 					if (staged.readOnly) {
 						await chmod(path, 0o444);
 					}
+				}
+			}
+			for (const [path, staged] of overlay) {
+				if (staged.kind === "attrs") {
+					await chmod(path, staged.readOnly ? 0o444 : 0o644);
 				}
 			}
 			for (const [path, staged] of overlay) {

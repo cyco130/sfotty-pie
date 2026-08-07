@@ -1,9 +1,10 @@
 import { expect, test } from "vitest";
 import {
+	checkAtariName,
 	detectAtariDos,
+	formatAtariDos,
 	openAtariDos,
 	splitAtariPath,
-	checkAtariName,
 } from "./atari-dos.ts";
 import { ATR_HEADER_SIZE, createBlankAtr, openAtr } from "./atr.ts";
 import { detectFilesystem } from "./detect.ts";
@@ -842,4 +843,49 @@ test("specs use native wildcard semantics", () => {
 	expect(names("*")).toEqual(["readme", "games"]);
 	expect(names("dos")).toEqual([]);
 	expect(names("readme")).toEqual(["readme"]);
+});
+
+test("setAttributes flips locked in place but rewrites for DOS 1.0", () => {
+	const image = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
+	formatAtariDos(image, "dos20s");
+	const fs = openAtariDos(image, "dos20s");
+	fs.writeFile("note.txt", new TextEncoder().encode("keep me"));
+	const before = [...fs.entries("note.txt")][0];
+
+	// Locked is one bit: the file stays exactly where it was.
+	fs.setAttributes("note.txt", ["ReadOnly"]);
+	const locked = [...fs.entries("note.txt")][0];
+	expect(locked?.attributes).toContain("ReadOnly");
+	expect(locked?.startSector).toBe(before?.startSector);
+
+	// DOS 1.0-ness is the data sector encoding, so it costs a rewrite - the
+	// contents have to survive it, and locked has to come through too.
+	fs.setAttributes("note.txt", ["ReadOnly", "AtariDos10"]);
+	const converted = [...fs.entries("note.txt")][0];
+	expect(converted?.attributes).toContain("AtariDos10");
+	expect(converted?.attributes).toContain("ReadOnly");
+	expect(new TextDecoder().decode(fs.readFile("note.txt")?.bytes)).toBe(
+		"keep me",
+	);
+
+	// And back again, losing the marking but not the bytes.
+	fs.setAttributes("note.txt", []);
+	expect([...fs.entries("note.txt")][0]?.attributes).toEqual([]);
+	expect(new TextDecoder().decode(fs.readFile("note.txt")?.bytes)).toBe(
+		"keep me",
+	);
+});
+
+test("a directory has no data sectors to re-encode", () => {
+	const image = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
+	formatAtariDos(image, "mydos");
+	const fs = openAtariDos(image, "mydos");
+	fs.makeDirectory("games");
+	fs.setAttributes("games", ["ReadOnly"]);
+	expect(
+		[...fs.entries("games", { listContents: false })][0]?.attributes,
+	).toContain("ReadOnly");
+	expect(() => fs.setAttributes("games", ["AtariDos10"])).toThrow(
+		/no data sectors/,
+	);
 });

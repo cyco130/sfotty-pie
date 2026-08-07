@@ -159,6 +159,16 @@ export interface FileStore {
 	 */
 	removeFile(path: string, options?: { force?: boolean }): string[];
 	/**
+	 * Makes an existing entry's attributes be exactly this set, as far as
+	 * writableAttributes reaches - anything outside it is ignored, so what
+	 * the store cannot represent is simply not its business. What that costs
+	 * is the family's affair: a flag in the directory entry is one write,
+	 * while an attribute that describes how the data itself is encoded means
+	 * rewriting the file, and the driver does whichever applies. Returns
+	 * traversal diagnostics as writeFile does.
+	 */
+	setAttributes(path: string, attributes: DirEntryAttributes): string[];
+	/**
 	 * Renames or moves an entry. Staying in one directory keeps its slot,
 	 * so nothing but the name changes; moving elsewhere may have to rewrite
 	 * per-sector bookkeeping, and returns any diagnostics from walking the

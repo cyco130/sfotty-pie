@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { CliError, UsageError } from "./cli-error.ts";
+import { chattrCommand } from "./commands/chattr.ts";
 import { createCommand } from "./commands/create.ts";
 import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
 import { installDosCommand } from "./commands/install-dos.ts";
@@ -93,6 +94,17 @@ commands:
     directory. With the host on one side this puts files onto an image or
     takes them off; with images on both it copies between them.
 
+  chattr -i IMAGE SETTING... SPEC... [--fs FILESYSTEM] [-R] [-f]
+    Change what an entry carries. A SETTING is name=on or name=off, and
+    the leading positionals that hold an "=" are the settings; the rest
+    are specs. Names are the ones ls -l prints: read-only (also spelled
+    locked or protected) and dos1. The others it prints are not flags to
+    set - dos2.5 and mydos say where a file's sectors are, dos-file lives
+    in the boot record, deleted is rm's business - and each says so.
+    read-only is one bit in the directory entry; dos1 is the data sector
+    encoding, so changing it rewrites the file and reallocates its chain,
+    which needs --force (-f) on a read-only one.
+
   pack -i IMAGE [DIR] [--fs atari/VARIANT] [--sd | --ed | --dd]
        [--sector-size N] [--sector-count N] [--write-boot-sectors]
        [--set-dos-file NAME] [-f]
@@ -161,6 +173,9 @@ async function main(): Promise<void> {
 			break;
 		case "cp":
 			await cpCommand(args);
+			break;
+		case "chattr":
+			await chattrCommand(args);
 			break;
 		case "pack":
 			await packCommand(args);

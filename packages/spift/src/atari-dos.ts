@@ -567,6 +567,20 @@ export function openAtariDos(
 				found.startSector,
 			);
 		},
+		setAttributes(path: string, attributes: DirEntryAttributes): string[] {
+			const parts = splitAtariPath(path);
+			const leaf = parts.pop();
+			if (leaf === undefined) {
+				throw new Error("no file name given");
+			}
+			return setAtariAttributes(
+				medium,
+				resolved,
+				resolveDirectory(parts),
+				leaf,
+				attributes,
+			);
+		},
 		removeFile(path: string, options?: { force?: boolean }): string[] {
 			const parts = splitAtariPath(path);
 			const leaf = parts.pop();
@@ -1256,6 +1270,95 @@ function writeAtariFile(
 		writeAtariDosFilePointer(medium, variant, allocated[0] ?? 0);
 	}
 	return diagnostics;
+}
+
+/**
+ * Makes an entry's attributes be exactly the set given, at whatever it
+ * costs. Locked is one bit in the directory entry. DOS 1.0-ness is not: the
+ * two formats differ in how each data sector states its length, so changing
+ * it means reading the file and writing it again, which reallocates the
+ * chain. Directories have no data chain to re-encode, so only locked
+ * applies to them.
+ */
+function setAtariAttributes(
+	medium: SectorMedium,
+	variant: AtariDosVariant,
+	directoryFirst: number,
+	name: string,
+	attributes: DirEntryAttributes,
+): string[] {
+	const writeSector = medium.writeSector?.bind(medium);
+	if (writeSector === undefined) {
+		throw new Error("the medium is read-only");
+	}
+	const native = encodeAtariName(name);
+	const directory = loadDirectory(medium, directoryFirst);
+
+	let slot = -1;
+	let raw: RawEntry | undefined;
+	for (let index = 0; index < 8 * ENTRIES_PER_SECTOR; index++) {
+		const entry = directory.slotIn(index);
+		const flags = entry[0] ?? 0;
+		if (flags === 0) {
+			break;
+		}
+		if ((flags & FLAG_DELETED) !== 0) {
+			continue;
+		}
+		const found = rawEntryFromSlot(entry, index);
+		if (
+			found.name.toUpperCase() === native.name &&
+			found.ext.toUpperCase() === native.ext
+		) {
+			slot = index;
+			raw = found;
+			break;
+		}
+	}
+	if (raw === undefined) {
+		throw new Error(`${name.toLowerCase()} does not exist`);
+	}
+
+	const locked = attributes.includes("ReadOnly");
+	const wantDos1 = attributes.includes("AtariDos10");
+	const isDos1 =
+		(raw.flags & FLAG_IN_USE) !== 0 && (raw.flags & FLAG_DOS2) === 0;
+
+	if (raw.isDir) {
+		if (wantDos1) {
+			throw new Error(
+				`${name.toLowerCase()} is a directory, which has no data sectors ` +
+					`to encode either way`,
+			);
+		}
+	} else if (wantDos1 !== isDos1) {
+		// The format lives in the data sectors, so this is a rewrite. Reading
+		// first means a damaged chain reports what it found rather than
+		// silently losing the unreachable part.
+		const walk = walkChain(medium, raw);
+		const bytes = walk.contents.bytes;
+		const diagnostics = [...walk.contents.diagnostics];
+		diagnostics.push(
+			...writeAtariFile(
+				medium,
+				variant,
+				directoryFirst,
+				name,
+				bytes,
+				true,
+				wantDos1 ? "dos1" : "dos2",
+				locked,
+			),
+		);
+		return diagnostics;
+	}
+
+	const entry = directory.slotIn(slot);
+	entry[0] = locked
+		? (entry[0] ?? 0) | FLAG_LOCKED
+		: (entry[0] ?? 0) & ~FLAG_LOCKED;
+	directory.flushSlot(writeSector, slot);
+	return [];
 }
 
 function deleteAtariFile(

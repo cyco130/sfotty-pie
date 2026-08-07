@@ -17,6 +17,7 @@ spift ls -i dos25.atr -lv             # ... plus deleted and half-written files
 spift cp --from dos25.atr '*.*' out/  # copy everything off, into out/
 spift cp --to dos25.atr game.xex /    # ... and host files onto an image
 spift rm -i dos25.atr '*.tmp'         # remove matching files
+spift chattr -i dos25.atr read-only=on '*.com'   # lock a batch
 spift mkdir -i mydos.atr -p 'games>arcade'    # MyDOS subdirectories
 spift mv -i dos25.atr '*.lst' '*.txt'         # batch rename by template
 spift mv -i mydos.atr '*.com' 'games/'        # move a batch into a directory
@@ -59,6 +60,12 @@ Moving _off_ the host needs `--remove-source`, because the two directions are no
 `write-boot-sectors` lays a boot file over an image's first sectors - a container-level operation that works on blank images too, so `create` + `write-boot-sectors` builds a boot disk from scratch. The file must span a whole number of sectors (the three 128-byte boot sectors of 256-bps images are accounted for; `--pad` zero-fills the tail) and its second byte - the boot record's sector count - must match, unless `--force`/`-f`.
 
 `install-dos` makes a disk bootable the way a DOS's own "write DOS files" does: it copies a master's boot sectors, the file that master's boot record loads, and `DUP.SYS` beside it, then points the new disk's boot record at the copy. It refuses masters whose boot area or density disagrees with the target's filesystem, since the installed DOS would then read the disk wrongly. `set-dos-file` is the low-level half - it points the boot record at a file already on the image (default `dos.sys`), or unsets it with `--clear`. Neither needs the file contiguous or in any particular place; the boot code follows the sector chain. In `ls -l` the file the boot record points at is marked `dos-file`, which is derived from the boot record rather than any directory flag. The pointer is maintained from then on: rewriting that file follows it to wherever it lands, and deleting it marks the disk non-bootable rather than leaving the boot record aimed at freed sectors.
+
+`chattr` changes what an entry carries. A setting is `name=on` or `name=off`, and the leading positionals holding an `=` are the settings while the rest are specs - the way `env FOO=1 cmd` splits them, and unambiguous because no native name can contain an `=`. Names are the ones `ls -l` prints, so a listing reads back as something `chattr` accepts: `read-only` (spelled `locked` or `protected` if you prefer) and `dos1`.
+
+The other names `ls -l` prints are deliberately not settable, and each says why rather than coming back as "unknown": `dos2.5` and `mydos` record where a file's sectors landed, `dos-file` lives in the boot record (`set-dos-file` points it at a file), `deleted` is what `rm` leaves behind, and `open-output` marks a half-written file, which is damage to repair rather than a flag to clear.
+
+The two settable ones cost very different things. `read-only` is one bit in the directory entry. `dos1` is the data sector encoding, so changing it reads the file and writes it back, which reallocates the chain - `--force`/`-f` is required to do that to a read-only file, and a directory has no data sectors to re-encode either way. Verified in the emulator: a file written as DOS 2 and converted with `chattr -i disk.atr dos1=on` is read back by real Atari DOS 1.0.
 
 `unpack` explodes an image into a host directory (made if missing, defaulting to the current one) and `pack` builds one back from a directory - `pack` creates the image, formats it, and copies the tree in, so it takes `create`'s geometry options and `mkfs`'s `--fs`. Dot-prefixed host files are passed over on the way in, the way a shell glob passes over them, which is what keeps `.DS_Store` and the like off the disk.
 

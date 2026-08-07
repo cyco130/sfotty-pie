@@ -17,7 +17,10 @@ export function parseRmdirArgs(args: string[]): RmdirArgs {
 	try {
 		parsed = parseArgs({
 			args,
-			options: { fs: { type: "string" } },
+			options: {
+				image: { type: "string", short: "i" },
+				fs: { type: "string" },
+			},
 			allowPositionals: true,
 		});
 	} catch (error) {
@@ -27,9 +30,10 @@ export function parseRmdirArgs(args: string[]): RmdirArgs {
 	}
 	const { values, positionals } = parsed;
 
-	const [image, ...paths] = positionals;
+	const paths = positionals;
+	const image = values.image;
 	if (image === undefined) {
-		throw new UsageError("missing IMAGE_FILE");
+		throw new UsageError("missing --image (-i)");
 	}
 	if (paths.length === 0) {
 		throw new UsageError("missing DIRECTORY to remove");

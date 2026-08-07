@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { parseAddArgs } from "./add.ts";
 
 test("parses image, files, and options", () => {
-	expect(parseAddArgs(["disk.atr", "a.xex"])).toEqual({
+	expect(parseAddArgs(["-i", "disk.atr", "a.xex"])).toEqual({
 		image: "disk.atr",
 		files: ["a.xex"],
 		fs: undefined,
@@ -10,7 +10,7 @@ test("parses image, files, and options", () => {
 		targetDir: undefined,
 		force: false,
 	});
-	expect(parseAddArgs(["disk.atr", "a.xex", "b.dat", "-f"])).toEqual({
+	expect(parseAddArgs(["-i", "disk.atr", "a.xex", "b.dat", "-f"])).toEqual({
 		image: "disk.atr",
 		files: ["a.xex", "b.dat"],
 		fs: undefined,
@@ -21,27 +21,29 @@ test("parses image, files, and options", () => {
 });
 
 test("--fs takes a family, a variant, or both", () => {
-	expect(parseAddArgs(["d.atr", "a", "--fs", "atari"])).toMatchObject({
+	expect(parseAddArgs(["-i", "d.atr", "a", "--fs", "atari"])).toMatchObject({
 		fs: "atari",
 		variant: undefined,
 	});
-	expect(parseAddArgs(["d.atr", "a", "--fs", "atari/dos10"])).toMatchObject({
+	expect(
+		parseAddArgs(["-i", "d.atr", "a", "--fs", "atari/dos10"]),
+	).toMatchObject({
 		fs: "atari",
 		variant: "dos10",
 	});
-	expect(parseAddArgs(["d.atr", "a", "--fs", "DOS10"])).toMatchObject({
+	expect(parseAddArgs(["-i", "d.atr", "a", "--fs", "DOS10"])).toMatchObject({
 		fs: "atari",
 		variant: "dos10",
 	});
 });
 
 test("validates the argument list", () => {
-	expect(() => parseAddArgs([])).toThrow(/missing IMAGE_FILE/);
-	expect(() => parseAddArgs(["disk.atr"])).toThrow(/missing FILE/);
-	expect(() => parseAddArgs(["disk.atr", "a", "--fs", "hfs"])).toThrow(
+	expect(() => parseAddArgs([])).toThrow(/missing --image/);
+	expect(() => parseAddArgs(["-i", "disk.atr"])).toThrow(/missing FILE/);
+	expect(() => parseAddArgs(["-i", "disk.atr", "a", "--fs", "hfs"])).toThrow(
 		/unknown filesystem/,
 	);
-	expect(() => parseAddArgs(["disk.atr", "a", "--fs", "c64/1541"])).toThrow(
-		/unsupported filesystem family/,
-	);
+	expect(() =>
+		parseAddArgs(["-i", "disk.atr", "a", "--fs", "c64/1541"]),
+	).toThrow(/unsupported filesystem family/);
 });

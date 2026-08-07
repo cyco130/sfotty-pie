@@ -3,7 +3,7 @@ import type { DirEntry } from "../filesystem.ts";
 import { parseLsArgs, renderLong, renderShort, renderStatus } from "./ls.ts";
 
 test("parses image, spec, and flags", () => {
-	expect(parseLsArgs(["disk.atr"])).toEqual({
+	expect(parseLsArgs(["-i", "disk.atr"])).toEqual({
 		image: "disk.atr",
 		spec: undefined,
 		fs: undefined,
@@ -13,7 +13,7 @@ test("parses image, spec, and flags", () => {
 		recursive: false,
 	});
 	expect(
-		parseLsArgs(["disk.atr", "*.sys", "-l", "-v", "--fs", "ATARI"]),
+		parseLsArgs(["-i", "disk.atr", "*.sys", "-l", "-v", "--fs", "ATARI"]),
 	).toEqual({
 		image: "disk.atr",
 		spec: "*.sys",
@@ -26,9 +26,11 @@ test("parses image, spec, and flags", () => {
 });
 
 test("validates the argument list", () => {
-	expect(() => parseLsArgs([])).toThrow(/missing IMAGE_FILE/);
-	expect(() => parseLsArgs(["a.atr", "b", "c"])).toThrow(/unexpected argument/);
-	expect(() => parseLsArgs(["a.atr", "--fs", "cpm"])).toThrow(
+	expect(() => parseLsArgs([])).toThrow(/missing --image/);
+	expect(() => parseLsArgs(["-i", "a.atr", "b", "c"])).toThrow(
+		/unexpected argument/,
+	);
+	expect(() => parseLsArgs(["-i", "a.atr", "--fs", "cpm"])).toThrow(
 		/unknown filesystem/,
 	);
 });

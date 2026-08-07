@@ -21,6 +21,7 @@ export function parseRmArgs(args: string[]): RmArgs {
 		parsed = parseArgs({
 			args,
 			options: {
+				image: { type: "string", short: "i" },
 				fs: { type: "string" },
 				force: { type: "boolean", short: "f" },
 				recursive: { type: "boolean", short: "r" },
@@ -34,9 +35,10 @@ export function parseRmArgs(args: string[]): RmArgs {
 	}
 	const { values, positionals } = parsed;
 
-	const [image, ...specs] = positionals;
+	const specs = positionals;
+	const image = values.image;
 	if (image === undefined) {
-		throw new UsageError("missing IMAGE_FILE");
+		throw new UsageError("missing --image (-i)");
 	}
 	if (specs.length === 0) {
 		throw new UsageError("missing SPEC to remove");

@@ -21,6 +21,7 @@ export function parseAddArgs(args: string[]): AddArgs {
 		parsed = parseArgs({
 			args,
 			options: {
+				image: { type: "string", short: "i" },
 				fs: { type: "string" },
 				"target-dir": { type: "string", short: "C" },
 				force: { type: "boolean", short: "f" },
@@ -34,9 +35,10 @@ export function parseAddArgs(args: string[]): AddArgs {
 	}
 	const { values, positionals } = parsed;
 
-	const [image, ...files] = positionals;
+	const files = positionals;
+	const image = values.image;
 	if (image === undefined) {
-		throw new UsageError("missing IMAGE_FILE");
+		throw new UsageError("missing --image (-i)");
 	}
 	if (files.length === 0) {
 		throw new UsageError("missing FILE to add");

@@ -21,6 +21,7 @@ export function parseLsArgs(args: string[]): LsArgs {
 		parsed = parseArgs({
 			args,
 			options: {
+				image: { type: "string", short: "i" },
 				fs: { type: "string" },
 				long: { type: "boolean", short: "l" },
 				verbose: { type: "boolean", short: "v" },
@@ -35,9 +36,10 @@ export function parseLsArgs(args: string[]): LsArgs {
 	}
 	const { values, positionals } = parsed;
 
-	const [image, spec, ...extra] = positionals;
+	const [spec, ...extra] = positionals;
+	const image = values.image;
 	if (image === undefined) {
-		throw new UsageError("missing IMAGE_FILE");
+		throw new UsageError("missing --image (-i)");
 	}
 	if (extra.length > 0) {
 		throw new UsageError(`unexpected argument "${extra[0]}"`);

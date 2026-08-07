@@ -4,25 +4,27 @@
 
 ## Usage
 
+Every command names the image it works on with `--image`/`-i`; positional arguments are paths inside that image.
+
 ```sh
-spift create blank.atr           # blank 720 x 128-byte sector image (--sd)
-spift create big.atr --dd        # 720 x 256; --ed is 1040 x 128
-spift create hd.atr --sector-size 512 --sector-count 65535
-spift mkfs blank.atr             # put an empty filesystem on it
-spift ls dos25.atr               # list the root directory
-spift ls dos25.atr '*.com' -l    # filtered, with sizes and attributes
-spift ls dos25.atr -lv           # ... including deleted and half-written files
-spift extract dos25.atr -o out/  # extract everything into out/
-spift extract dos25.atr '*.com'  # extract matching files here
-spift add dos25.atr game.xex     # add host files to the image
-spift rm dos25.atr '*.tmp'       # remove matching files
-spift mkdir mydos.atr -p 'games>arcade'          # MyDOS subdirectories
-spift mv dos25.atr '*.lst' '*.txt'              # batch rename by template
-spift mv mydos.atr '*.com' 'games/'             # move a batch into a directory
-spift ls mydos.atr -lR                          # walk the whole tree
-spift write-boot-sectors blank.atr boot.bin
-spift extract-boot-sectors dos25.atr boot.bin
-spift install-dos blank.atr --from dos20s.atr   # make it bootable
+spift create -i blank.atr             # blank 720 x 128-byte sector image (--sd)
+spift create -i big.atr --dd          # 720 x 256; --ed is 1040 x 128
+spift create -i hd.atr --sector-size 512 --sector-count 65535
+spift mkfs -i blank.atr               # put an empty filesystem on it
+spift ls -i dos25.atr                 # list the root directory
+spift ls -i dos25.atr '*.com' -l      # filtered, with sizes and attributes
+spift ls -i dos25.atr -lv             # ... plus deleted and half-written files
+spift extract -i dos25.atr -o out/    # extract everything into out/
+spift extract -i dos25.atr '*.com'    # extract matching files here
+spift add -i dos25.atr game.xex       # add host files to the image
+spift rm -i dos25.atr '*.tmp'         # remove matching files
+spift mkdir -i mydos.atr -p 'games>arcade'    # MyDOS subdirectories
+spift mv -i dos25.atr '*.lst' '*.txt'         # batch rename by template
+spift mv -i mydos.atr '*.com' 'games/'        # move a batch into a directory
+spift ls -i mydos.atr -lR                     # walk the whole tree
+spift write-boot-sectors -i blank.atr boot.bin
+spift extract-boot-sectors -i dos25.atr boot.bin
+spift install-dos -i blank.atr --from dos20s.atr   # make it bootable
 ```
 
 `create` writes a blank image - a valid header over all-zero sector data, no filesystem installed. The image type is inferred from the file name, or given with `--type`/`-t`; only `atr` exists so far. Existing files are not overwritten unless `--force`/`-f` is given.

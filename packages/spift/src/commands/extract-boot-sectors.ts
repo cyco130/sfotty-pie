@@ -19,6 +19,7 @@ export function parseExtractBootSectorsArgs(
 		parsed = parseArgs({
 			args,
 			options: {
+				image: { type: "string", short: "i" },
 				"sector-count": { type: "string" },
 				force: { type: "boolean", short: "f" },
 			},
@@ -31,9 +32,10 @@ export function parseExtractBootSectorsArgs(
 	}
 	const { values, positionals } = parsed;
 
-	const [image, file, ...extra] = positionals;
+	const [file, ...extra] = positionals;
+	const image = values.image;
 	if (image === undefined) {
-		throw new UsageError("missing IMAGE_FILE");
+		throw new UsageError("missing --image (-i)");
 	}
 	if (file === undefined) {
 		throw new UsageError("missing OUTPUT_FILE");

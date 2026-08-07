@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { parseExtractArgs } from "./extract.ts";
 
 test("parses image, spec, and options", () => {
-	expect(parseExtractArgs(["disk.atr"])).toEqual({
+	expect(parseExtractArgs(["-i", "disk.atr"])).toEqual({
 		image: "disk.atr",
 		spec: undefined,
 		out: ".",
@@ -12,7 +12,16 @@ test("parses image, spec, and options", () => {
 		force: false,
 	});
 	expect(
-		parseExtractArgs(["disk.atr", "*.com", "-o", "out", "-f", "--fs", "atari"]),
+		parseExtractArgs([
+			"-i",
+			"disk.atr",
+			"*.com",
+			"-o",
+			"out",
+			"-f",
+			"--fs",
+			"atari",
+		]),
 	).toEqual({
 		image: "disk.atr",
 		spec: "*.com",
@@ -25,11 +34,11 @@ test("parses image, spec, and options", () => {
 });
 
 test("validates the argument list", () => {
-	expect(() => parseExtractArgs([])).toThrow(/missing IMAGE_FILE/);
-	expect(() => parseExtractArgs(["a.atr", "b", "c"])).toThrow(
+	expect(() => parseExtractArgs([])).toThrow(/missing --image/);
+	expect(() => parseExtractArgs(["-i", "a.atr", "b", "c"])).toThrow(
 		/unexpected argument/,
 	);
-	expect(() => parseExtractArgs(["a.atr", "--fs", "fat"])).toThrow(
+	expect(() => parseExtractArgs(["-i", "a.atr", "--fs", "fat"])).toThrow(
 		/unknown filesystem/,
 	);
 });

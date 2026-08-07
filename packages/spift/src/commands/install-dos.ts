@@ -25,6 +25,7 @@ export function parseInstallDosArgs(args: string[]): InstallDosArgs {
 		parsed = parseArgs({
 			args,
 			options: {
+				image: { type: "string", short: "i" },
 				from: { type: "string" },
 				fs: { type: "string" },
 				force: { type: "boolean", short: "f" },
@@ -38,9 +39,10 @@ export function parseInstallDosArgs(args: string[]): InstallDosArgs {
 	}
 	const { values, positionals } = parsed;
 
-	const [image, ...extra] = positionals;
+	const extra = positionals;
+	const image = values.image;
 	if (image === undefined) {
-		throw new UsageError("missing IMAGE_FILE");
+		throw new UsageError("missing --image (-i)");
 	}
 	if (extra.length > 0) {
 		throw new UsageError(`unexpected argument "${extra[0]}"`);

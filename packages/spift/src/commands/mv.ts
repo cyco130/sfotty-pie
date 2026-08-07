@@ -24,6 +24,7 @@ export function parseMvArgs(args: string[]): MvArgs {
 		parsed = parseArgs({
 			args,
 			options: {
+				image: { type: "string", short: "i" },
 				fs: { type: "string" },
 				force: { type: "boolean", short: "f" },
 			},
@@ -36,9 +37,10 @@ export function parseMvArgs(args: string[]): MvArgs {
 	}
 	const { values, positionals } = parsed;
 
-	const [image, source, destination, ...extra] = positionals;
+	const [source, destination, ...extra] = positionals;
+	const image = values.image;
 	if (image === undefined) {
-		throw new UsageError("missing IMAGE_FILE");
+		throw new UsageError("missing --image (-i)");
 	}
 	if (source === undefined || destination === undefined) {
 		throw new UsageError("missing SOURCE and DESTINATION");

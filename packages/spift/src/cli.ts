@@ -14,25 +14,28 @@ import { rmCommand } from "./commands/rm.ts";
 import { rmdirCommand } from "./commands/rmdir.ts";
 import { writeBootSectorsCommand } from "./commands/write-boot-sectors.ts";
 
-const USAGE = `usage: spift <command> [options]
+const USAGE = `usage: spift <command> -i IMAGE [paths...] [options]
+
+Every command names the image it works on with --image (-i); positional
+arguments are paths inside that image unless a command says otherwise.
 
 commands:
-  create FILENAME [-t TYPE] [-f] [--sd | --ed | --dd]
-                  [--sector-size N] [--sector-count N]
+  create -i FILE [-t TYPE] [-f] [--sd | --ed | --dd]
+                 [--sector-size N] [--sector-count N]
     Create a blank image (all zeroes, no filesystem). TYPE is inferred from
     the file name when omitted; supported types: atr. Defaults to --sd
     (720 x 128-byte sectors); --ed is 1040 x 128 and --dd is 720 x 256.
     Refuses to overwrite an existing file unless --force (-f) is given.
 
-  mkfs IMAGE_FILE [--fs atari/VARIANT | --variant VARIANT]
-                  [--boot-sectors FILE]
+  mkfs -i IMAGE [--fs atari/VARIANT | --variant VARIANT]
+               [--boot-sectors FILE]
     Write an empty filesystem onto an image. Variants: dos10, dos20s,
     dos20d, dos25, mydos. Without one, a standard single-density image
     gets dos20s, enhanced density is refused as ambiguous (dos25 and
     mydos both fit), and anything else gets mydos. --boot-sectors fills
     the boot area from a file sized exactly for the variant.
 
-  ls IMAGE_FILE [SPEC] [--fs FILESYSTEM] [-l] [-v] [-R]
+  ls -i IMAGE [SPEC] [--fs FILESYSTEM] [-l] [-v] [-R]
     List a directory of the filesystem on an image. SPEC is a path whose
     last part may be a native wildcard pattern (* and ?; name and
     extension match separately; quote it to keep the shell out of it);
@@ -44,7 +47,7 @@ commands:
     listing passes over: deleted files and ones left open for output.
     --recursive (-R) descends into subdirectories, showing full paths.
 
-  extract IMAGE_FILE [SPEC] [-o DIR] [-R] [--fs FILESYSTEM] [-f]
+  extract -i IMAGE [SPEC] [-o DIR] [-R] [--fs FILESYSTEM] [-f]
     Extract files matching SPEC (default: all) into DIR (default: the
     current directory, created if missing); --recursive (-R) descends
     into subdirectories and mirrors the tree below whatever directory
@@ -53,7 +56,7 @@ commands:
     existing files unless --force (-f) is given; damaged files extract
     what is recoverable, with warnings, and exit 1.
 
-  add IMAGE_FILE FILE... [--fs FILESYSTEM] [-f]
+  add -i IMAGE FILE... [-C DIR] [--fs FILESYSTEM] [-f]
     Add host files to the root directory of the filesystem on an image.
     Names convert to uppercase 8.3 (letters, digits, _ and @; anything
     else becomes _). Two sources mangling to the same name is an error;
@@ -63,19 +66,19 @@ commands:
     --fs atari/dos10 writes DOS 1.0 format files instead (readable only
     by DOS 1.0); --fs also accepts a bare family to skip detection.
 
-  rm IMAGE_FILE SPEC... [--fs FILESYSTEM] [-f] [-r]
+  rm -i IMAGE SPEC... [--fs FILESYSTEM] [-f] [-r]
     Remove files matching the SPECs (native wildcards, quoted). Locked
     files need --force (-f), which also quiets specs that match nothing.
     --recursive (-r) descends into subdirectories and removes them too,
     deepest first.
 
-  mkdir IMAGE_FILE DIRECTORY... [--fs FILESYSTEM] [-p]
+  mkdir -i IMAGE DIRECTORY... [--fs FILESYSTEM] [-p]
     Create directories. --parents (-p) makes missing parents on the way
     and accepts one that already exists. A directory needs eight
     contiguous free sectors, so this can fail on a fragmented disk with
     plenty of room.
 
-  mv IMAGE_FILE SOURCE DESTINATION [--fs FILESYSTEM] [-f]
+  mv -i IMAGE SOURCE DESTINATION [--fs FILESYSTEM] [-f]
     Rename or move entries. DESTINATION is a directory when it ends in a
     separator or names one, and otherwise a name template applied to each
     match: * copies the source from that position to the end of the
@@ -84,27 +87,27 @@ commands:
     Renaming inside a directory only rewrites the entry; moving between
     directories may renumber the file's sectors.
 
-  rmdir IMAGE_FILE DIRECTORY... [--fs FILESYSTEM]
+  rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
     Remove empty directories, freeing what they occupied. A directory
     holding anything is refused, as the DOSes refuse it.
 
-  write-boot-sectors IMAGE_FILE BOOT_FILE [--pad] [-f]
+  write-boot-sectors -i IMAGE BOOT_FILE [--pad] [-f]
     Write a boot file over the image's first sectors (128-byte boot
     sectors on 256-bps images are handled). The file must span a whole
     number of sectors - --pad zero-fills the tail - and its second byte
     must claim that count; --force (-f) writes despite a mismatch.
 
-  set-dos-file IMAGE_FILE [NAME] [--fs FILESYSTEM] [--clear]
+  set-dos-file -i IMAGE [NAME] [--fs FILESYSTEM] [--clear]
     Point the image's boot record at the file it should load (default:
     dos.sys), which is what makes a disk bootable. --clear unsets it.
 
-  install-dos IMAGE_FILE --from MASTER_IMAGE [--fs FILESYSTEM] [-f]
+  install-dos -i IMAGE --from MASTER_IMAGE [--fs FILESYSTEM] [-f]
     Copy a DOS from a master disk: its boot sectors, the file its boot
     record loads, and DUP.SYS beside it, then point the boot record at
     the copy. Refuses masters whose boot area or density does not match
     the target's filesystem. --force (-f) overwrites existing files.
 
-  extract-boot-sectors IMAGE_FILE OUTPUT_FILE [--sector-count N] [-f]
+  extract-boot-sectors -i IMAGE OUTPUT_FILE [--sector-count N] [-f]
     Extract the boot sectors into a file. The count comes from the boot
     record's second byte; when that claims zero or more sectors than the
     image holds, --sector-count is required. Refuses to overwrite an

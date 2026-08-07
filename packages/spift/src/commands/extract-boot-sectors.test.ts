@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { parseExtractBootSectorsArgs } from "./extract-boot-sectors.ts";
 
 test("parses image, output file, and options", () => {
-	expect(parseExtractBootSectorsArgs(["disk.atr", "boot.bin"])).toEqual({
+	expect(parseExtractBootSectorsArgs(["-i", "disk.atr", "boot.bin"])).toEqual({
 		image: "disk.atr",
 		file: "boot.bin",
 		sectorCount: undefined,
@@ -10,6 +10,7 @@ test("parses image, output file, and options", () => {
 	});
 	expect(
 		parseExtractBootSectorsArgs([
+			"-i",
 			"disk.atr",
 			"boot.bin",
 			"--sector-count",
@@ -25,11 +26,11 @@ test("parses image, output file, and options", () => {
 });
 
 test("validates the argument list", () => {
-	expect(() => parseExtractBootSectorsArgs([])).toThrow(/missing IMAGE_FILE/);
-	expect(() => parseExtractBootSectorsArgs(["disk.atr"])).toThrow(
+	expect(() => parseExtractBootSectorsArgs([])).toThrow(/missing --image/);
+	expect(() => parseExtractBootSectorsArgs(["-i", "disk.atr"])).toThrow(
 		/missing OUTPUT_FILE/,
 	);
 	expect(() =>
-		parseExtractBootSectorsArgs(["a.atr", "b", "--sector-count", "0"]),
+		parseExtractBootSectorsArgs(["-i", "a.atr", "b", "--sector-count", "0"]),
 	).toThrow(/positive integer/);
 });

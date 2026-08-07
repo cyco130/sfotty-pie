@@ -9,7 +9,7 @@ import {
 import { CliError, UsageError } from "../cli-error.ts";
 
 export interface CreateSpec {
-	filename: string;
+	image: string;
 	type: "atr";
 	sectorSize: AtrSectorSize;
 	sectorCount: number;
@@ -28,6 +28,7 @@ export function parseCreateArgs(args: string[]): CreateSpec {
 		parsed = parseArgs({
 			args,
 			options: {
+				image: { type: "string", short: "i" },
 				type: { type: "string", short: "t" },
 				force: { type: "boolean", short: "f" },
 				"sector-size": { type: "string" },
@@ -45,20 +46,20 @@ export function parseCreateArgs(args: string[]): CreateSpec {
 	}
 	const { values, positionals } = parsed;
 
-	const [filename, ...extra] = positionals;
-	if (!filename) {
-		throw new UsageError("missing FILENAME");
+	const extra = positionals;
+	const image = values.image;
+	if (image === undefined) {
+		throw new UsageError("missing --image (-i)");
 	}
 	if (extra.length > 0) {
 		throw new UsageError(`unexpected argument "${extra[0]}"`);
 	}
 
 	const type =
-		values.type?.toLowerCase() ??
-		/\.([^.]+)$/.exec(filename)?.[1]?.toLowerCase();
+		values.type?.toLowerCase() ?? /\.([^.]+)$/.exec(image)?.[1]?.toLowerCase();
 	if (type === undefined) {
 		throw new UsageError(
-			`cannot infer the image type from "${filename}"; specify --type`,
+			`cannot infer the image type from "${image}"; specify --type`,
 		);
 	}
 	if (type !== "atr") {
@@ -106,7 +107,7 @@ export function parseCreateArgs(args: string[]): CreateSpec {
 	}
 
 	return {
-		filename,
+		image,
 		type,
 		sectorSize,
 		sectorCount,
@@ -128,17 +129,17 @@ export async function createCommand(args: string[]): Promise<void> {
 		sectorCount: spec.sectorCount,
 	});
 	try {
-		await writeFile(spec.filename, bytes, { flag: spec.force ? "w" : "wx" });
+		await writeFile(spec.image, bytes, { flag: spec.force ? "w" : "wx" });
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "EEXIST") {
 			throw new CliError(
-				`${spec.filename} already exists, not overwriting (use --force)`,
+				`${spec.image} already exists, not overwriting (use --force)`,
 			);
 		}
 		throw error;
 	}
 	process.stdout.write(
-		`created ${spec.filename}: ${spec.sectorCount} x ` +
+		`created ${spec.image}: ${spec.sectorCount} x ` +
 			`${spec.sectorSize}-byte sectors, ${bytes.length} bytes\n`,
 	);
 }

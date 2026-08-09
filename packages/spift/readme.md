@@ -18,6 +18,8 @@ spift cp --from dos25.atr '*.*' out/  # copy everything off, into out/
 spift cp --to dos25.atr game.xex /    # ... and host files onto an image
 spift rm -i dos25.atr '*.tmp'         # remove matching files
 spift chattr -i dos25.atr read-only=on '*.com'   # lock a batch
+spift recode -f atascii notes.txt                # ATASCII text as Unicode
+spift recode -t atascii notes.md > notes.atascii # and the other way
 spift mkdir -i mydos.atr -p 'games>arcade'    # MyDOS subdirectories
 spift mv -i dos25.atr '*.lst' '*.txt'         # batch rename by template
 spift mv -i mydos.atr '*.com' 'games/'        # move a batch into a directory
@@ -60,6 +62,14 @@ Moving _off_ the host needs `--remove-source`, because the two directions are no
 `write-boot-sectors` lays a boot file over an image's first sectors - a container-level operation that works on blank images too, so `create` + `write-boot-sectors` builds a boot disk from scratch. The file must span a whole number of sectors (the three 128-byte boot sectors of 256-bps images are accounted for; `--pad` zero-fills the tail) and its second byte - the boot record's sector count - must match, unless `--force`/`-f`.
 
 `install-dos` makes a disk bootable the way a DOS's own "write DOS files" does: it copies a master's boot sectors, the file that master's boot record loads, and `DUP.SYS` beside it, then points the new disk's boot record at the copy. It refuses masters whose boot area or density disagrees with the target's filesystem, since the installed DOS would then read the disk wrongly. `set-dos-file` is the low-level half - it points the boot record at a file already on the image (default `dos.sys`), or unsets it with `--clear`. Neither needs the file contiguous or in any particular place; the boot code follows the sector chain. In `ls -l` the file the boot record points at is marked `dos-file`, which is derived from the boot record rather than any directory flag. The pointer is maintained from then on: rewriting that file follows it to wherever it lands, and deleting it marks the disk non-bootable rather than leaving the boot record aimed at freed sectors.
+
+`recode` converts text between a family's own character set and Unicode, writing to stdout (or reading stdin with no file). The codes are `atascii`, `unicode` and `escaped-unicode`, and whichever of `--from`/`-f` and `--to`/`-t` you leave out is `unicode`, so a single flag usually says it. `--in-place` converts the files named instead, for a batch.
+
+Inverse video is bracketed by `~`, a line ending is EOL (`$9B`), and `{ddd}` or `{$hh}` is a byte outright - `{!ddd}` too, so text written for the emulator's paste convention is accepted as-is. That makes both Unicode flavours round-trip every one of the 256 codes exactly; `escaped-unicode` differs only in writing the Atari graphics as escapes rather than glyphs, for terminals and fonts that cannot show them.
+
+Going the other way, anything with no ATASCII character - a backtick, a brace that is not an escape, an accented letter, an emoji - becomes `?` with a warning and exit code 1, so a batch is never stopped by one stray character. `--strict` refuses instead, and also catches a `~` that opens inverse video and lets the line ending close it, which is exactly what ordinary host text holding a tilde looks like. `--eol` picks what EOL becomes and defaults to `lf` on every platform, so the same disk gives the same bytes everywhere; encoding accepts LF, CR and CRLF alike, so nothing is lost feeding it back.
+
+The Atari's international character set is deliberately not folded in: its 27 accented letters sit on codes `$00`-`$1A` and `$7B`, which the standard character ROM shows as graphics, so writing `é` as `$14` would produce a file that reads as a graphics glyph on any machine not running that ROM. It belongs in its own encoding, alongside screen codes, when those land.
 
 `chattr` changes what an entry carries. A setting is `name=on` or `name=off`, and the leading positionals holding an `=` are the settings while the rest are specs - the way `env FOO=1 cmd` splits them, and unambiguous because no native name can contain an `=`. Names are the ones `ls -l` prints, so a listing reads back as something `chattr` accepts: `read-only` (spelled `locked` or `protected` if you prefer) and `dos1`.
 

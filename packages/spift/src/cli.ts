@@ -9,6 +9,7 @@ import { setDosFileCommand } from "./commands/set-dos-file.ts";
 import { mkdirCommand } from "./commands/mkdir.ts";
 import { mkfsCommand } from "./commands/mkfs.ts";
 import { packCommand } from "./commands/pack.ts";
+import { recodeCommand } from "./commands/recode.ts";
 import { unpackCommand } from "./commands/unpack.ts";
 import { cpCommand } from "./commands/cp.ts";
 import { mvCommand } from "./commands/mv.ts";
@@ -105,6 +106,21 @@ commands:
     encoding, so changing it rewrites the file and reallocates its chain,
     which needs --force (-f) on a read-only one.
 
+  recode [-f CODE] [-t CODE] [FILE...] [--in-place] [--strict]
+         [--eol lf | crlf | native]
+    Convert text between a family character set and Unicode, writing to
+    stdout (or reading stdin with no FILE). Codes: atascii, unicode,
+    escaped-unicode; whichever of --from (-f) and --to (-t) you leave out
+    is unicode. Inverse video is bracketed by "~", a line ending is EOL,
+    and {ddd} or {$hh} is a byte outright - so both Unicode flavours
+    round-trip, escaped-unicode writing the Atari graphics as escapes
+    rather than glyphs. Anything with no ATASCII character becomes "?";
+    --strict refuses instead, and also catches a "~" that opens inverse
+    video and never closes it, which is what ordinary text holding a
+    tilde looks like. --eol picks what EOL becomes (decoding only;
+    encoding takes LF, CR, and CRLF alike). --in-place converts the files
+    named rather than writing to stdout.
+
   pack -i IMAGE [DIR] [--fs atari/VARIANT] [--sd | --ed | --dd]
        [--sector-size N] [--sector-count N] [--write-boot-sectors]
        [--set-dos-file NAME] [-f]
@@ -176,6 +192,9 @@ async function main(): Promise<void> {
 			break;
 		case "chattr":
 			await chattrCommand(args);
+			break;
+		case "recode":
+			await recodeCommand(args);
 			break;
 		case "pack":
 			await packCommand(args);

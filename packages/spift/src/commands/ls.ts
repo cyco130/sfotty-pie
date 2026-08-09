@@ -61,11 +61,12 @@ export function parseLsArgs(args: string[]): LsArgs {
 
 export async function lsCommand(args: string[]): Promise<void> {
 	const parsed = parseLsArgs(args);
-	const { filesystem, medium } = await openImageFilesystem(
+	const opened = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
 		parsed.variant,
 	);
+	const { filesystem, medium } = opened;
 	let entries;
 	try {
 		entries = [
@@ -82,10 +83,8 @@ export async function lsCommand(args: string[]): Promise<void> {
 	if (parsed.long) {
 		process.stdout.write(
 			renderStatus(
-				// One container so far; the format name comes from the sniffer
-				// registry once there are more.
 				{
-					format: "atr",
+					format: opened.format.name,
 					sectorCount: medium.sectorCount,
 					sectorSize: medium.sectorSize,
 				},

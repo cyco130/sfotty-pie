@@ -5,14 +5,17 @@
 // "both sides are this image". That leaves one rule to enforce: at least one
 // side has to be an image, since host-to-host copying is what cp(1) is for.
 
-import { writeFile } from "node:fs/promises";
 import { statSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type { AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "./../cli-error.ts";
 import type { FileStore } from "../filesystem.ts";
 import { openHostDirectory } from "../host-dir.ts";
-import { openImageFilesystem, type OpenedImage } from "./open-image.ts";
+import {
+	openImageFilesystem,
+	saveImage,
+	type OpenedImage,
+} from "./open-image.ts";
 
 export interface ContainerOptions {
 	image: string | undefined;
@@ -136,7 +139,7 @@ export async function resolveContainers(
 		const image: OpenedImage = await openImageFilesystem(name, fs, variant);
 		return {
 			store: image.filesystem,
-			write: () => writeFile(name, image.medium.bytes),
+			write: () => saveImage(name, image),
 		};
 	};
 	// A directory named outright is a container and confines what goes in it;

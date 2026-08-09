@@ -1,10 +1,9 @@
-import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import type { AtariDosVariant } from "../atari-dos.ts";
 import type { DirEntry } from "../filesystem.ts";
 import { parseFsOption } from "./fs-option.ts";
 import { CliError, UsageError } from "../cli-error.ts";
-import { openImageFilesystem } from "./open-image.ts";
+import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 export interface RmArgs {
 	image: string;
@@ -59,11 +58,12 @@ export function parseRmArgs(args: string[]): RmArgs {
 
 export async function rmCommand(args: string[]): Promise<void> {
 	const parsed = parseRmArgs(args);
-	const { filesystem, medium } = await openImageFilesystem(
+	const opened = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
 		parsed.variant,
 	);
+	const { filesystem } = opened;
 
 	// Resolve every spec up front; the whole batch either goes or nothing
 	// does. -f follows rm: a spec matching nothing stops being an error.
@@ -152,7 +152,7 @@ export async function rmCommand(args: string[]): Promise<void> {
 
 	// Nothing touched the disk until here.
 	if (entries.length > 0) {
-		await writeFile(parsed.image, medium.bytes);
+		await saveImage(parsed.image, opened);
 	}
 	if (damaged) {
 		process.exitCode = 1;

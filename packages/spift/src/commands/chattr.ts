@@ -1,10 +1,9 @@
-import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import type { AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import type { DirEntry, DirEntryAttribute, FileStore } from "../filesystem.ts";
 import { parseFsOption } from "./fs-option.ts";
-import { openImageFilesystem } from "./open-image.ts";
+import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 /**
  * What each attribute is called on the command line. These are the labels
@@ -175,11 +174,12 @@ function wanted(
 
 export async function chattrCommand(args: string[]): Promise<void> {
 	const parsed = parseChattrArgs(args);
-	const { filesystem, medium } = await openImageFilesystem(
+	const opened = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
 		parsed.variant,
 	);
+	const { filesystem } = opened;
 
 	const fail = (error: unknown): never => {
 		if (error instanceof CliError) {
@@ -259,7 +259,7 @@ export async function chattrCommand(args: string[]): Promise<void> {
 	}
 
 	// Nothing touched the disk until here.
-	await writeFile(parsed.image, medium.bytes);
+	await saveImage(parsed.image, opened);
 	if (damaged) {
 		process.exitCode = 1;
 	}

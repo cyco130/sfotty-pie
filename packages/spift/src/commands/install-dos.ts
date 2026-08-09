@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import {
 	ATARI_DOS_BOOT_SECTORS,
@@ -9,7 +8,7 @@ import {
 import { extractBootSectors, writeBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { parseFsOption } from "./fs-option.ts";
-import { openImageFilesystem } from "./open-image.ts";
+import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 export interface InstallDosArgs {
 	image: string;
@@ -149,7 +148,7 @@ export async function installDosCommand(args: string[]): Promise<void> {
 		throw new CliError(`${dosEntry.name} did not land on the image`);
 	}
 	writeAtariDosFilePointer(target.medium, variant, installed.startSector);
-	await writeFile(parsed.image, target.medium.bytes);
+	await saveImage(parsed.image, target);
 
 	process.stdout.write(
 		`installed ${payload.map((file) => file.name).join(" and ")} ` +

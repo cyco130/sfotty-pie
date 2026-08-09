@@ -1,9 +1,8 @@
-import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import type { AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { parseFsOption } from "./fs-option.ts";
-import { openImageFilesystem } from "./open-image.ts";
+import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 export interface MkdirArgs {
 	image: string;
@@ -55,11 +54,12 @@ export function parseMkdirArgs(args: string[]): MkdirArgs {
 
 export async function mkdirCommand(args: string[]): Promise<void> {
 	const parsed = parseMkdirArgs(args);
-	const { filesystem, medium } = await openImageFilesystem(
+	const opened = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
 		parsed.variant,
 	);
+	const { filesystem } = opened;
 
 	// Nothing reaches the disk until every path has been made, so a failure
 	// part way through leaves the image as it was - stricter than mkdir -p,
@@ -73,5 +73,5 @@ export async function mkdirCommand(args: string[]): Promise<void> {
 		}
 		process.stdout.write(`created ${path}\n`);
 	}
-	await writeFile(parsed.image, medium.bytes);
+	await saveImage(parsed.image, opened);
 }

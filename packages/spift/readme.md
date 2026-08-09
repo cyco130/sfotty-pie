@@ -7,6 +7,8 @@
 Every command names the image it works on with `--image`/`-i`; positional arguments are paths inside that image.
 
 ```sh
+spift ls -i game.dcm                  # read a DiskComm image directly
+spift convert -i game.dcm game.atr    # or rewrite it as an ATR
 spift create -i blank.atr             # blank 720 x 128-byte sector image (--sd)
 spift create -i big.atr --dd          # 720 x 256; --ed is 1040 x 128
 spift create -i hd.atr --sector-size 512 --sector-count 65535
@@ -32,6 +34,10 @@ spift install-dos -i blank.atr --from dos20s.atr   # make it bootable
 spift unpack -i dos25.atr tree/ --extract-boot-sectors   # disk -> directory
 spift pack -i rebuilt.atr tree/ --write-boot-sectors      # and back again
 ```
+
+spift reads two container formats and writes one. **ATR** is the plain one - a 16-byte header over the sectors - and **DCM**, Bob Puff's Disk Communicator format (also seen as `.dc3`), holds exactly the same sectors compressed, so a DCM opens for reading anywhere an ATR does and `convert` rewrites it losslessly. Writing to a DCM is refused with a pointer at `convert`, since an encoder would be work nobody needs to read a collection. Content decides which format a file is, not its name; `convert --type`/`-t` forces the output.
+
+Two points where the published descriptions of DCM disagree were settled by decoding a 203-file corpus both ways. A double-density image carries **full 256-byte sectors even for the boot sectors**, though an ATR stores 128 of them - reading those as 128 puts the stream out of step, and every DD file failed that way before it was fixed. And a change-begin block **keeps the previous sector's tail** rather than painting the sector with a fill byte first: the two differ in exactly one file of the 203, and there the fill reading resurrects stale directory entries whose own recorded file numbers show they belong to slots they no longer occupy. Keeping the tail is also the only reading that squares with how the reference encoder chooses to emit the block.
 
 `create` writes a blank image - a valid header over all-zero sector data, no filesystem installed. The image type is inferred from the file name, or given with `--type`/`-t`; only `atr` exists so far. Existing files are not overwritten unless `--force`/`-f` is given.
 

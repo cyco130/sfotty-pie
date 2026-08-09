@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { CliError, UsageError } from "./cli-error.ts";
 import { chattrCommand } from "./commands/chattr.ts";
+import { convertCommand } from "./commands/convert.ts";
 import { createCommand } from "./commands/create.ts";
 import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
 import { installDosCommand } from "./commands/install-dos.ts";
@@ -107,6 +108,13 @@ commands:
     encoding, so changing it rewrites the file and reallocates its chain,
     which needs --force (-f) on a read-only one.
 
+  convert -i IMAGE OUTPUT [-t TYPE] [-f]
+    Rewrite an image in another container format. The output type comes
+    from its file name, or --type (-t). spift reads atr and dcm (Disk
+    Communicator, also seen as .dc3) and writes atr - a DCM holds exactly
+    the sectors an ATR does, so nothing is lost either way. Refuses to
+    overwrite an existing file unless --force (-f) is given.
+
   recode [-f CODE] [-t CODE] [FILE...] [--in-place] [--strict]
          [--eol lf | crlf | native]
     Convert text between a family character set and Unicode, writing to
@@ -200,6 +208,9 @@ async function main(): Promise<void> {
 			break;
 		case "chattr":
 			await chattrCommand(args);
+			break;
+		case "convert":
+			await convertCommand(args);
 			break;
 		case "recode":
 			await recodeCommand(args);

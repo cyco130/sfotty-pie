@@ -1,9 +1,8 @@
-import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import type { AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { parseFsOption } from "./fs-option.ts";
-import { openImageFilesystem } from "./open-image.ts";
+import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 export interface RmdirArgs {
 	image: string;
@@ -52,11 +51,12 @@ export function parseRmdirArgs(args: string[]): RmdirArgs {
 
 export async function rmdirCommand(args: string[]): Promise<void> {
 	const parsed = parseRmdirArgs(args);
-	const { filesystem, medium } = await openImageFilesystem(
+	const opened = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
 		parsed.variant,
 	);
+	const { filesystem } = opened;
 
 	for (const path of parsed.paths) {
 		try {
@@ -67,5 +67,5 @@ export async function rmdirCommand(args: string[]): Promise<void> {
 		}
 		process.stdout.write(`removed ${path}\n`);
 	}
-	await writeFile(parsed.image, medium.bytes);
+	await saveImage(parsed.image, opened);
 }

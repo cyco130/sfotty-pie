@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import {
 	readAtariDosFilePointer,
@@ -7,7 +6,7 @@ import {
 } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { parseFsOption } from "./fs-option.ts";
-import { openImageFilesystem } from "./open-image.ts";
+import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 export interface SetDosFileArgs {
 	image: string;
@@ -62,16 +61,17 @@ export function parseSetDosFileArgs(args: string[]): SetDosFileArgs {
 
 export async function setDosFileCommand(args: string[]): Promise<void> {
 	const parsed = parseSetDosFileArgs(args);
-	const { filesystem, medium } = await openImageFilesystem(
+	const opened = await openImageFilesystem(
 		parsed.image,
 		parsed.fs,
 		parsed.variant,
 	);
+	const { filesystem, medium } = opened;
 	const variant = filesystem.variant;
 
 	if (parsed.clear) {
 		writeAtariDosFilePointer(medium, variant, 0);
-		await writeFile(parsed.image, medium.bytes);
+		await saveImage(parsed.image, opened);
 		process.stdout.write(`${parsed.image} will no longer boot\n`);
 		return;
 	}
@@ -89,7 +89,7 @@ export async function setDosFileCommand(args: string[]): Promise<void> {
 
 	const previous = readAtariDosFilePointer(medium, variant);
 	writeAtariDosFilePointer(medium, variant, start);
-	await writeFile(parsed.image, medium.bytes);
+	await saveImage(parsed.image, opened);
 	const change =
 		previous === start
 			? " (unchanged)"

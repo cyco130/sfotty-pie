@@ -9,6 +9,8 @@ test("parses the image, the directory, and the flags", () => {
 		variant: undefined,
 		extractBootSectors: false,
 		force: false,
+		text: [],
+		eol: "lf",
 	});
 	expect(
 		parseUnpackArgs([
@@ -36,4 +38,18 @@ test("validates the argument list", () => {
 	expect(() => parseUnpackArgs(["-i", "d.atr", "--fs", "fat"])).toThrow(
 		/unknown filesystem/,
 	);
+});
+
+test("--text takes the pattern, since unpack has no spec of its own", () => {
+	expect(parseUnpackArgs(["-i", "d.atr", "--text", "*.txt"]).text).toEqual([
+		"*.txt",
+	]);
+	// Repeatable: a disk holds more than one kind of text file, and keeping
+	// only the last would leave the rest as bytes without saying so.
+	expect(
+		parseUnpackArgs(["-i", "d.atr", "--text", "*.txt", "--text", "*.lst"]).text,
+	).toEqual(["*.txt", "*.lst"]);
+	// A value is required: a bare --text over a whole disk would recode the
+	// binaries on it too.
+	expect(() => parseUnpackArgs(["-i", "d.atr", "--text"])).toThrow();
 });

@@ -18,7 +18,7 @@ import {
 import { writeBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { copyEntries } from "../copy.ts";
-import { openHostDirectory } from "../host-dir.ts";
+import { compileHostPattern, openHostDirectory } from "../host-dir.ts";
 import { parseFsOption } from "./fs-option.ts";
 
 /** The boot record, kept beside the files as an ordinary host file. */
@@ -33,6 +33,8 @@ export interface PackArgs {
 	writeBootSectors: boolean;
 	setDosFile: string | undefined;
 	force: boolean;
+	text: string[];
+	strict: boolean;
 }
 
 const GEOMETRY_SHORTHANDS = {
@@ -56,6 +58,8 @@ export function parsePackArgs(args: string[]): PackArgs {
 				dd: { type: "boolean" },
 				"write-boot-sectors": { type: "boolean" },
 				"set-dos-file": { type: "string" },
+				text: { type: "string", multiple: true },
+				strict: { type: "boolean" },
 				force: { type: "boolean", short: "f" },
 			},
 			allowPositionals: true,
@@ -156,6 +160,8 @@ export function parsePackArgs(args: string[]): PackArgs {
 		writeBootSectors: values["write-boot-sectors"] ?? false,
 		setDosFile: values["set-dos-file"],
 		force: values.force ?? false,
+		text: values.text ?? [],
+		strict: values.strict ?? false,
 	};
 }
 
@@ -226,6 +232,13 @@ export async function packCommand(args: string[]): Promise<void> {
 		}
 	}
 
+	// Repeatable, since a directory holds more than one kind of text file
+	// and keeping only the last pattern would quietly leave the rest as
+	// bytes.
+	const textPatterns = parsed.text.map((pattern) =>
+		compileHostPattern(pattern),
+	);
+
 	const filesystem = openAtariDos(medium, variant);
 	let result;
 	try {
@@ -236,6 +249,14 @@ export async function packCommand(args: string[]): Promise<void> {
 			force: true,
 			noAttributes: false,
 			attributes: variant === "dos10" ? ["AtariDos10"] : undefined,
+			// As unpack: pack takes the whole directory, so the text files
+			// have to be named rather than assumed.
+			text: textPatterns.length > 0,
+			textMatch:
+				textPatterns.length === 0
+					? undefined
+					: (entry) => textPatterns.some((matches) => matches(entry.name)),
+			strict: parsed.strict,
 			move: false,
 		});
 	} catch (error) {

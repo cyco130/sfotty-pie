@@ -2,6 +2,8 @@
 // SectorMedium; family-specific meaning lives in the attribute vocabulary,
 // not in extra DirEntry fields.
 
+import type { TextEncoding } from "./text.ts";
+
 export type DirEntryKind = "file" | "dir";
 
 export type DirEntryAttribute =
@@ -93,6 +95,14 @@ export interface FileStore {
 	 * lives in the boot record.
 	 */
 	readonly writableAttributes: DirEntryAttributes;
+	/**
+	 * The character set this store's text files are written in, when it is
+	 * not the host's. Copying with the text option recodes between the two
+	 * ends, pivoting through Unicode - which is what makes an Atari .txt
+	 * readable on the way out and writes proper EOLs on the way in. Absent
+	 * means Unicode, so a host directory needs no entry here.
+	 */
+	readonly textEncoding?: TextEncoding;
 	/** Splits a path into components, applying family separator rules. */
 	splitPath(path: string): string[];
 	/**

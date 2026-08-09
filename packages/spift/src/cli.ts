@@ -76,7 +76,7 @@ commands:
     plenty of room.
 
   mv [CONTAINERS] SOURCE... DESTINATION [-f] [--no-attributes]
-     [--remove-source]
+     [--remove-source] [--text] [--strict] [--eol lf | crlf | native]
     Rename or move entries. DESTINATION is a directory when it ends in a
     separator or names one, and otherwise a name template applied to each
     match: * copies the source from that position to the end of the
@@ -89,6 +89,7 @@ commands:
     deleted flag, host files do not.
 
   cp [CONTAINERS] SOURCE... DESTINATION [-R] [-f] [--no-attributes]
+     [--text] [--strict] [--eol lf | crlf | native]
     Copy entries, with the same DESTINATION rules as mv - a template is
     the target's own rename rule, so '*.ttt' '*.txt' works copying out to
     the host as well as in. --recursive (-R) is needed to copy a
@@ -123,21 +124,28 @@ commands:
 
   pack -i IMAGE [DIR] [--fs atari/VARIANT] [--sd | --ed | --dd]
        [--sector-size N] [--sector-count N] [--write-boot-sectors]
-       [--set-dos-file NAME] [-f]
+       [--set-dos-file NAME] [--text SPEC]... [--strict] [-f]
     Build an image from a host directory (default: the current one):
     create it, put a filesystem on it, and copy the tree in. Geometry and
     filesystem options are create's and mkfs's. --write-boot-sectors
     takes the boot record from .boot.bin in the directory, and
     --set-dos-file then points it at a file that was packed - which needs
     --write-boot-sectors, since otherwise there is no boot code to follow
-    the pointer. Refuses to overwrite an existing image without -f.
+    the pointer. --text SPEC recodes the files it names into the family
+    character set - a whole directory holds binaries too, so they have to
+    be named - with --strict to refuse what will not survive.
+    Refuses to overwrite an existing image without -f.
 
-  unpack -i IMAGE [DIR] [--fs FILESYSTEM] [--extract-boot-sectors] [-f]
+  unpack -i IMAGE [DIR] [--fs FILESYSTEM] [--extract-boot-sectors]
+         [--text SPEC]... [--eol lf | crlf | native] [-f]
     Explode an image into a host directory (default: the current one),
     made if missing, mirroring the whole tree.
     --extract-boot-sectors also writes the boot record to .boot.bin
-    there, which is what lets pack rebuild a bootable disk. Refuses to
-    overwrite existing files without -f.
+    there, which is what lets pack rebuild a bootable disk. --text SPEC
+    recodes the files it names out of the family character set (a whole
+    disk holds binaries too) and repeats for more than one pattern, with
+    --eol picking what EOL becomes. Refuses to overwrite existing files
+    without -f.
 
   rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
     Remove empty directories, freeing what they occupied. A directory

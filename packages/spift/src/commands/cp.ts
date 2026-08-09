@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { CliError, UsageError } from "../cli-error.ts";
+import type { EolStyle } from "../text.ts";
 import { copyEntries } from "../copy.ts";
 import {
 	CONTAINER_ARG_OPTIONS,
@@ -7,6 +8,7 @@ import {
 	resolveContainers,
 	type ContainerOptions,
 } from "./containers.ts";
+import { parseEol } from "./eol-option.ts";
 import { parseFsOption } from "./fs-option.ts";
 
 export interface CpArgs {
@@ -16,6 +18,9 @@ export interface CpArgs {
 	recursive: boolean;
 	force: boolean;
 	noAttributes: boolean;
+	text: boolean;
+	strict: boolean;
+	eol: EolStyle;
 }
 
 export function parseCpArgs(args: string[]): CpArgs {
@@ -29,6 +34,9 @@ export function parseCpArgs(args: string[]): CpArgs {
 				r: { type: "boolean" },
 				force: { type: "boolean", short: "f" },
 				"no-attributes": { type: "boolean" },
+				text: { type: "boolean" },
+				strict: { type: "boolean" },
+				eol: { type: "string" },
 			},
 			allowPositionals: true,
 		});
@@ -52,6 +60,9 @@ export function parseCpArgs(args: string[]): CpArgs {
 		recursive: values.recursive === true || values.r === true,
 		force: values.force ?? false,
 		noAttributes: values["no-attributes"] ?? false,
+		text: values.text ?? false,
+		strict: values.strict ?? false,
+		eol: parseEol(values.eol),
 	};
 }
 
@@ -82,6 +93,9 @@ export async function runCopy(parsed: CpArgs, move: boolean): Promise<void> {
 			// with, since that reads everywhere from DOS 2.0 on.
 			attributes:
 				parsed.containers.toVariant === "dos10" ? ["AtariDos10"] : undefined,
+			text: parsed.text,
+			strict: parsed.strict,
+			eol: parsed.eol,
 			move,
 		});
 	} catch (error) {

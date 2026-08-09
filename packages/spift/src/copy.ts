@@ -9,6 +9,7 @@ import type {
 	DirEntryAttributes,
 	FileStore,
 } from "./filesystem.ts";
+import { recodeText, type EolStyle } from "./text.ts";
 
 export interface CopyRequest {
 	sources: readonly string[];
@@ -27,6 +28,19 @@ export interface CopyRequest {
 	attributes?: DirEntryAttributes;
 	/** Remove each source once its copy has landed. */
 	move: boolean;
+	/**
+	 * Recode file contents between the two ends' character sets - FTP's
+	 * ascii transfer mode. Recoding a binary mangles it, so something has to
+	 * say which files are text: for cp that is the source spec, and a
+	 * command that copies everything supplies `textMatch` instead.
+	 */
+	text?: boolean;
+	/** Which of the matched files are text. All of them when absent. */
+	textMatch?: (entry: DirEntry) => boolean;
+	/** With text: refuse what will not survive rather than substituting "?". */
+	strict?: boolean;
+	/** With text: what EOL becomes on the way out of a family encoding. */
+	eol?: EolStyle;
 }
 
 export interface CopiedFile {
@@ -219,9 +233,25 @@ export function copyEntries(
 		if (contents === null) {
 			throw new Error(`${from.path} could not be read`);
 		}
+		// Between reading and writing, since it is the one thing that depends
+		// on both ends. Same encoding at both is a no-op, so image-to-image
+		// passes through untouched.
+		let payload = contents.bytes;
+		const recoded: string[] = [];
+		if (request.text === true && (request.textMatch?.(from) ?? true)) {
+			const result = recodeText(
+				payload,
+				source.textEncoding ?? "unicode",
+				target.textEncoding ?? "unicode",
+				{ strict: request.strict, eol: request.eol },
+			);
+			payload = result.bytes;
+			recoded.push(...result.diagnostics);
+		}
 		const diagnostics = [
 			...contents.diagnostics,
-			...target.writeFile(to, contents.bytes, {
+			...recoded,
+			...target.writeFile(to, payload, {
 				overwrite: request.force,
 				attributes: [
 					...portableAttributes(target, from.attributes, request.noAttributes),

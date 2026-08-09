@@ -11,6 +11,8 @@ test("parses the image, the directory, and the geometry", () => {
 		writeBootSectors: false,
 		setDosFile: undefined,
 		force: false,
+		text: [],
+		strict: false,
 	});
 	expect(parsePackArgs(["-i", "d.atr", "stuff", "--dd"])).toMatchObject({
 		directory: "stuff",
@@ -51,4 +53,14 @@ test("validates the argument list", () => {
 	expect(() => parsePackArgs(["-i", "d.atr", "--sector-size", "100"])).toThrow(
 		/invalid --sector-size/,
 	);
+});
+
+test("--text takes the pattern, since pack has no spec of its own", () => {
+	expect(parsePackArgs(["-i", "d.atr", "--text", "*.txt"]).text).toEqual([
+		"*.txt",
+	]);
+	expect(
+		parsePackArgs(["-i", "d.atr", "--text", "*.txt", "--text", "*.md"]).text,
+	).toEqual(["*.txt", "*.md"]);
+	expect(() => parsePackArgs(["-i", "d.atr", "--text"])).toThrow();
 });

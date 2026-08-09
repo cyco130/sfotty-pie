@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { CliError, UsageError } from "../cli-error.ts";
 import { destinationIsDirectory } from "../copy.ts";
 import type { DirEntry, FileStore } from "../filesystem.ts";
+import type { EolStyle } from "../text.ts";
 import {
 	CONTAINER_ARG_OPTIONS,
 	parseContainerOptions,
@@ -9,6 +10,7 @@ import {
 	type ContainerOptions,
 } from "./containers.ts";
 import { runCopy } from "./cp.ts";
+import { parseEol } from "./eol-option.ts";
 import { parseFsOption } from "./fs-option.ts";
 
 export interface MvArgs {
@@ -18,6 +20,9 @@ export interface MvArgs {
 	force: boolean;
 	noAttributes: boolean;
 	removeSource: boolean;
+	text: boolean;
+	strict: boolean;
+	eol: EolStyle;
 }
 
 export function parseMvArgs(args: string[]): MvArgs {
@@ -30,6 +35,9 @@ export function parseMvArgs(args: string[]): MvArgs {
 				force: { type: "boolean", short: "f" },
 				"no-attributes": { type: "boolean" },
 				"remove-source": { type: "boolean" },
+				text: { type: "boolean" },
+				strict: { type: "boolean" },
+				eol: { type: "string" },
 			},
 			allowPositionals: true,
 		});
@@ -53,6 +61,9 @@ export function parseMvArgs(args: string[]): MvArgs {
 		force: values.force ?? false,
 		noAttributes: values["no-attributes"] ?? false,
 		removeSource: values["remove-source"] ?? false,
+		text: values.text ?? false,
+		strict: values.strict ?? false,
+		eol: parseEol(values.eol),
 	};
 }
 

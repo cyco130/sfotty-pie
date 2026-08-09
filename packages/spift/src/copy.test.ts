@@ -292,3 +292,75 @@ test("what counts as a directory destination", () => {
 	expect(destinationIsDirectory(store, "*.txt")).toBe(false);
 	expect(destinationIsDirectory(store, "nothing.yet")).toBe(false);
 });
+
+test("--text recodes between the two ends, in whichever direction", async () => {
+	const from = image();
+	// An ATASCII file, as a real Atari would have written it: EOL, and a run
+	// of inverse video.
+	from.writeFile(
+		"notes.txt",
+		Uint8Array.from([0x48, 0x49, 0x9b, 0xc1, 0xc2, 0x9b]),
+	);
+	const to = host();
+
+	copyEntries(from, to, {
+		sources: ["notes.txt"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		text: true,
+		move: false,
+	});
+	await to.commit();
+	expect(readFileSync(join(to.root, "notes.txt"), "utf8")).toBe("HI\n~AB~\n");
+
+	// And back, to the same bytes.
+	const back = image();
+	copyEntries(to, back, {
+		sources: ["notes.txt"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		text: true,
+		move: false,
+	});
+	expect(back.readFile("notes.txt")?.bytes).toEqual(
+		Uint8Array.from([0x48, 0x49, 0x9b, 0xc1, 0xc2, 0x9b]),
+	);
+});
+
+test("without --text the bytes go across untouched", async () => {
+	const from = image();
+	const raw = Uint8Array.from([0x48, 0x9b, 0xc1]);
+	from.writeFile("notes.txt", raw);
+	const to = host();
+	copyEntries(from, to, {
+		sources: ["notes.txt"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		move: false,
+	});
+	await to.commit();
+	expect(new Uint8Array(readFileSync(join(to.root, "notes.txt")))).toEqual(raw);
+});
+
+test("image to image is a no-op, both ends speaking the same set", () => {
+	const from = image();
+	const raw = Uint8Array.from([0x48, 0x9b, 0xc1, 0x00]);
+	from.writeFile("a.txt", raw);
+	const to = image();
+	copyEntries(from, to, {
+		sources: ["a.txt"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		text: true,
+		move: false,
+	});
+	expect(to.readFile("a.txt")?.bytes).toEqual(raw);
+});

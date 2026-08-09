@@ -315,6 +315,7 @@ export function openAtariDos(
 		// and MyDOS markings do not - they say where the file landed on this
 		// particular disk.
 		writableAttributes: ["ReadOnly", "AtariDos10"],
+		textEncoding: "atascii",
 		splitPath: splitAtariPath,
 		applyNameTemplate: applyAtariNameTemplate,
 		volume(): VolumeInfo {

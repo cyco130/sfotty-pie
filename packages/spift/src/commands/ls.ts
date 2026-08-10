@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import type { AtariDosVariant } from "../atari-dos.ts";
+import { atariDosLabel, type AtariDosVariant } from "../atari-dos.ts";
 import type { DirEntry, DirEntryAttribute, VolumeInfo } from "../filesystem.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { parseFsOption } from "./fs-option.ts";
@@ -89,7 +89,7 @@ export async function lsCommand(args: string[]): Promise<void> {
 					sectorSize: medium.sectorSize,
 				},
 				{
-					id: `${filesystem.family}/${filesystem.variant}`,
+					id: atariDosLabel(filesystem.variant),
 					volume: filesystem.volume(),
 				},
 				color,

@@ -12,8 +12,19 @@ export interface FsSelection {
  * ("atari/dos25"), or a bare variant ("dos25") since only one family has
  * any. Case-insensitive.
  */
+/**
+ * The names people type that are not variants of their own. DOS 2.0S and
+ * DOS 2.0D are one filesystem at two sector sizes - their VTOCs are
+ * identical - so both spell the same variant.
+ */
+const ALIASES: Record<string, string> = {
+	dos20s: "dos20",
+	dos20d: "dos20",
+	dos2: "dos20",
+};
+
 export function parseFsOption(text: string, flag: string): FsSelection {
-	const lowered = text.toLowerCase();
+	const lowered = ALIASES[text.toLowerCase()] ?? text.toLowerCase();
 	const slash = lowered.indexOf("/");
 	if (slash === -1) {
 		if (lowered === "atari" || lowered === "sparta") {

@@ -105,12 +105,12 @@ test("status leads with the container, then the filesystem", () => {
 		renderStatus(
 			{ format: "atr", sectorCount: 720, sectorSize: 128 },
 			{
-				id: "atari/dos20s",
+				id: "atari/dos20",
 				volume: { totalSectors: 707, freeSectors: 227, details: [] },
 			},
 			false,
 		),
-	).toBe("atr  720 sectors x 128 bytes\natari/dos20s  707 sectors, 227 free\n");
+	).toBe("atr  720 sectors x 128 bytes\natari/dos20  707 sectors, 227 free\n");
 });
 
 test("status shows volume labels and family details", () => {

@@ -59,7 +59,7 @@ test("copies off an image into a host directory, which is what extract does", as
 });
 
 test("copies between two images, keeping what both sides can represent", () => {
-	const from = image("dos20s");
+	const from = image("dos20");
 	// A DOS 1.0 format file that is also locked: both are real attributes the
 	// Atari family can write, so both make the trip.
 	from.writeFile("old.dat", bytes("one"), {

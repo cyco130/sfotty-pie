@@ -262,12 +262,12 @@ test("readFile returns null for missing names and directories", () => {
 });
 
 test("detects DOS 2.0S and 2.0D", () => {
-	expect(detectAtariDos(openAtr(makeDisk()))).toBe("dos20s");
-	expect(detectAtariDos(openAtr(makeDisk({ sectorSize: 256 })))).toBe("dos20d");
+	expect(detectAtariDos(openAtr(makeDisk()))).toBe("dos20");
+	expect(detectAtariDos(openAtr(makeDisk({ sectorSize: 256 })))).toBe("dos20");
 });
 
 test("detects a freshly formatted disk (free == total)", () => {
-	expect(detectAtariDos(openAtr(makeDisk({ free: 707 })))).toBe("dos20s");
+	expect(detectAtariDos(openAtr(makeDisk({ free: 707 })))).toBe("dos20");
 });
 
 test("detects DOS 1.0", () => {
@@ -293,7 +293,7 @@ test("detects extended DOS 2.0 on nonstandard geometry", () => {
 		detectAtariDos(
 			openAtr(makeDisk({ sectorCount: 800, total: 800, free: 700 })),
 		),
-	).toBe("dos20s");
+	).toBe("dos20");
 });
 
 test("detects MyDOS via the VTOC sector count code", () => {
@@ -342,7 +342,7 @@ test("detects a SpartaDOS boot sector", () => {
 	expect(detectFilesystem(openAtr(createBlankAtr()))).toBeUndefined();
 	expect(detectFilesystem(openAtr(makeDisk()))).toEqual({
 		family: "atari",
-		variant: "dos20s",
+		variant: "dos20",
 	});
 });
 
@@ -847,8 +847,8 @@ test("specs use native wildcard semantics", () => {
 
 test("setAttributes flips locked in place but rewrites for DOS 1.0", () => {
 	const image = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
-	formatAtariDos(image, "dos20s");
-	const fs = openAtariDos(image, "dos20s");
+	formatAtariDos(image, "dos20");
+	const fs = openAtariDos(image, "dos20");
 	fs.writeFile("note.txt", new TextEncoder().encode("keep me"));
 	const before = [...fs.entries("note.txt")][0];
 

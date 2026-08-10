@@ -14,13 +14,7 @@ import type {
 	VolumeInfo,
 } from "./filesystem.ts";
 
-export const ATARI_DOS_VARIANTS = [
-	"dos10",
-	"dos20s",
-	"dos20d",
-	"dos25",
-	"mydos",
-] as const;
+export const ATARI_DOS_VARIANTS = ["dos10", "dos20", "dos25", "mydos"] as const;
 export type AtariDosVariant = (typeof ATARI_DOS_VARIANTS)[number];
 
 export interface AtariDosFilesystem extends Filesystem {
@@ -112,14 +106,14 @@ export function detectAtariDos(
 	}
 	if (code === 2) {
 		if ((sd || dd) && total === 707) {
-			return dd ? "dos20d" : "dos20s";
+			return "dos20";
 		}
 		if (ed && total === 1010) {
 			return "dos25";
 		}
 		// Extended DOS 2.0: nonstandard geometry, DOS 2 addressing.
 		if (total < 945 && medium.sectorCount >= total) {
-			return medium.sectorSize === 256 ? "dos20d" : "dos20s";
+			return "dos20";
 		}
 	}
 	// MyDOS encodes its VTOC sector count in the code byte; check it against
@@ -158,13 +152,8 @@ function vtocLayout(
 	if (variant === "dos25") {
 		return { extraPages: 0, limit: DOS25_LIMIT, code: 2, hasVtoc2: true };
 	}
-	if (variant !== "mydos") {
-		return {
-			extraPages: 0,
-			limit: MAIN_VTOC_LIMIT,
-			code: variant === "dos10" ? 1 : 2,
-			hasVtoc2: false,
-		};
+	if (variant === "dos10") {
+		return { extraPages: 0, limit: MAIN_VTOC_LIMIT, code: 1, hasVtoc2: false };
 	}
 	const extraPages = extraVtocPages(sectorSize, sectorCount);
 	return {
@@ -196,10 +185,7 @@ export function openAtariDos(
 	medium: SectorMedium,
 	variant?: AtariDosVariant,
 ): AtariDosFilesystem {
-	const resolved =
-		variant ??
-		detectAtariDos(medium) ??
-		(medium.sectorSize === 256 ? "dos20d" : "dos20s");
+	const resolved = variant ?? detectAtariDos(medium) ?? "dos20";
 
 	// Yields every used slot of one directory - the root, or a MyDOS
 	// subdirectory's 8-sector block - deleted ones included, stopping at the
@@ -1432,8 +1418,7 @@ function deleteAtariFile(
  */
 export const ATARI_DOS_BOOT_SECTORS: Record<AtariDosVariant, number> = {
 	dos10: 1,
-	dos20s: 3,
-	dos20d: 3,
+	dos20: 3,
 	dos25: 3,
 	mydos: 3,
 };
@@ -1506,11 +1491,18 @@ export function writeAtariDosFilePointer(
 
 const VARIANT_LABELS: Record<AtariDosVariant, string> = {
 	dos10: "DOS 1.0",
-	dos20s: "DOS 2.0S",
-	dos20d: "DOS 2.0D",
+	// One filesystem: the two formatters differ only in whether they
+	// reserve sector 720 on a 720-sector disk, and nothing downstream can
+	// tell them apart, so a disk is never labelled as one or the other.
+	dos20: "DOS 2.0/MyDOS",
+	mydos: "DOS 2.0/MyDOS",
 	dos25: "DOS 2.5",
-	mydos: "MyDOS",
 };
+
+/** How a variant is named to a reader. */
+export function atariDosLabel(variant: AtariDosVariant): string {
+	return VARIANT_LABELS[variant];
+}
 
 /**
  * The variant to format a geometry with when the caller doesn't say:
@@ -1522,13 +1514,11 @@ export function defaultAtariDosVariant(
 	sectorSize: number,
 	sectorCount: number,
 ): AtariDosVariant | undefined {
-	if (sectorSize === 128 && sectorCount === 720) {
-		return "dos20s";
-	}
 	if (sectorSize === 128 && sectorCount === 1040) {
+		// DOS 2.5 and MyDOS both fit; only the caller knows which is meant.
 		return undefined;
 	}
-	return "mydos";
+	return "dos20";
 }
 
 /**
@@ -1636,9 +1626,17 @@ export function formatAtariDos(
 	const hasVtoc2 = layout.hasVtoc2;
 	// The extra MyDOS bitmap pages sit just below the VTOC and are not data.
 	const firstExtraVtoc = EXTRA_VTOC_FIRST - layout.extraPages + 1;
-	// Sector 720 is unusable to every DOS 2 family member - only MyDOS
+	// The single difference between the two DOS 2 formatters, and only at
+	// the one size where both of them exist to be copied: DOS 2.0's FORMAT
+	// reserves sector 720 on a 720-sector disk, MyDOS's hands it out. Above
+	// that neither DOS can format at all, so there is nothing to imitate
+	// and the sector is simply free.
 	// reclaims it (both verified against real formats).
-	const wastes720 = variant !== "mydos";
+	// DOS 1.0 and DOS 2.5 reserve it unconditionally, as their own formats
+	// do. For the merged DOS 2.0/MyDOS variant it is the one place the two
+	// formatters disagree, and only at the one size where both exist.
+	const wastes720 =
+		variant === "dos20" ? medium.sectorCount === 720 : variant !== "mydos";
 	const usable = (sector: number): boolean => {
 		if (sector < 1 || sector > limit) {
 			return false;

@@ -6,6 +6,9 @@ test("parses the image and filesystem selection", () => {
 		image: "disk.atr",
 		variant: undefined,
 		bootSectors: undefined,
+		master: undefined,
+		installDos: false,
+		force: false,
 	});
 	expect(parseMkfsArgs(["-i", "disk.atr", "--fs", "atari/dos25"]).variant).toBe(
 		"dos25",
@@ -13,8 +16,15 @@ test("parses the image and filesystem selection", () => {
 	expect(parseMkfsArgs(["-i", "disk.atr", "--fs", "MyDOS"]).variant).toBe(
 		"mydos",
 	);
-	expect(parseMkfsArgs(["-i", "disk.atr", "--variant", "dos20d"]).variant).toBe(
-		"dos20d",
+	// The familiar spellings are one filesystem at two sector sizes.
+	expect(parseMkfsArgs(["-i", "d.atr", "--fs", "dos20s"]).variant).toBe(
+		"dos20",
+	);
+	expect(parseMkfsArgs(["-i", "d.atr", "--fs", "dos20d"]).variant).toBe(
+		"dos20",
+	);
+	expect(parseMkfsArgs(["-i", "disk.atr", "--variant", "dos20"]).variant).toBe(
+		"dos20",
 	);
 	expect(
 		parseMkfsArgs(["-i", "disk.atr", "--boot-sectors", "boot.bin"]).bootSectors,

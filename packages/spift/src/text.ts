@@ -69,6 +69,15 @@ export interface RecodeResult {
 	diagnostics: string[];
 }
 
+/**
+ * The glyph an ATASCII code shows, ignoring inverse video (the high bit).
+ * Every one of the 128 has one, which is why decoding never fails - and why
+ * no test can tell an Atari text file from a binary.
+ */
+export function atasciiGlyph(code: number): string {
+	return GLYPHS[code & 0x7f] as string;
+}
+
 export function isTextEncoding(name: string): name is TextEncoding {
 	return (TEXT_ENCODINGS as readonly string[]).includes(name);
 }

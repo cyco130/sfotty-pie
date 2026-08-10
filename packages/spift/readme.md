@@ -16,6 +16,8 @@ spift mkfs -i blank.atr               # put an empty filesystem on it
 spift ls -i dos25.atr                 # list the root directory
 spift ls -i dos25.atr '*.com' -l      # filtered, with sizes and attributes
 spift ls -i dos25.atr -lv             # ... plus deleted and half-written files
+spift cat -i dos25.atr 'readme.txt'   # read a file as text
+spift hexdump -i dos25.atr -s 361     # or look at raw sectors
 spift cp --from dos25.atr '*.*' out/  # copy everything off, into out/
 spift cp --to dos25.atr game.xex /    # ... and host files onto an image
 spift rm -i dos25.atr '*.tmp'         # remove matching files
@@ -48,6 +50,12 @@ Two points where the published descriptions of DCM disagree were settled by deco
 `--long`/`-l` leads with two status lines - the physical image (format, sector count, sector size) and the filesystem (id, capacity, free space, volume label where the family has one) - then adds sector counts, start sectors, and attributes per file. On DOS 2.5 the free figure is the honest total across both VTOCs, with a note giving the smaller number its own DIR reports. `--verbose`/`-v` additionally lists what a directory listing passes over, marked `deleted` or `open-output`; like the DOSes, the scan still stops at the first never-used slot, so entries beyond it stay invisible.
 
 On a terminal, names are colored: directories blue, deleted entries red, open-for-output ones magenta. Names themselves are never decorated - `-l` is where the same facts appear as words, `dir` included, for anything reading the output rather than looking at it.
+
+`cat` writes files to stdout as text, reading them in the family character set - the same conversion `recode` does. It is always text, with no raw mode, because that is what an image holds: an Atari disk carries ATASCII, and a Unicode file on one would be the strange case. It is the safe default too, since recoding turns control codes into glyphs and so a file cannot paint your terminal with escape sequences. The host already has `cat(1)`, so this one only reads images.
+
+`hexdump` is the other half: offset, hex, and the glyphs an Atari would show for those bytes, with inverse video in reverse video where the terminal allows. That last column is why it exists rather than piping to `xxd`, which renders EOL and every graphics character as a dot - a directory sector dumped this way reads as `A       TXT` where `xxd` shows nothing. `--sectors`/`-s` takes a sector or a range and reaches the parts no file occupies: the boot record, the VTOC, the directory.
+
+There is deliberately no "is this a text file" test anywhere in spift. Decoding is total - every one of the 256 codes has a glyph - so a binary reads as displayable garbage rather than an error, and nothing tells it apart from text. Which of the two commands to reach for is yours to judge; the file will not tell you.
 
 `mkdir` and `rmdir` manage MyDOS subdirectories, with `-p` for parents. A directory is a contiguous eight-sector extent holding 64 entries, so `mkdir` can fail for want of a _run_ of free sectors on a disk with plenty of room - the same refusal MyDOS gives. `rmdir` takes only empty directories; `rm -r` clears a tree, deepest first. Paths accept `/`, `>` and `:` as separators, plus SpartaDOS's `<`, which separates and steps up a level at once (`games>arcade<other` means `games/other`); quote them, since shells read `<` and `>` as redirection.
 

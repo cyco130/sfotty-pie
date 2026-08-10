@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { CliError, UsageError } from "./cli-error.ts";
+import { catCommand } from "./commands/cat.ts";
 import { chattrCommand } from "./commands/chattr.ts";
 import { convertCommand } from "./commands/convert.ts";
 import { createCommand } from "./commands/create.ts";
 import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
+import { hexdumpCommand } from "./commands/hexdump.ts";
 import { installDosCommand } from "./commands/install-dos.ts";
 import { lsCommand } from "./commands/ls.ts";
 import { setDosFileCommand } from "./commands/set-dos-file.ts";
@@ -175,6 +177,23 @@ commands:
     the copy. Refuses masters whose boot area or density does not match
     the target's filesystem. --force (-f) overwrites existing files.
 
+  cat -i IMAGE SPEC... [--fs FILESYSTEM] [--eol lf | crlf | native]
+    Write files from an image to stdout as text, reading them in the
+    family character set - see recode, whose conversion this is. SPECs
+    are matched as ls matches them, so wildcards work and several files
+    concatenate. Always text, because that is what an image holds: the
+    raw bytes of a binary belong in hexdump, and recoding also means a
+    file cannot paint your terminal with escape codes. The host has
+    cat(1), so this one only reads images.
+
+  hexdump -i IMAGE SPEC... | -s SECTOR[-SECTOR] [--fs FILESYSTEM]
+    Dump bytes: offset, hex, and the glyphs an Atari would show for them,
+    with inverse video shown in reverse video. That last column is why
+    this exists rather than piping to xxd, which renders EOL and every
+    graphics character as a dot. --sectors (-s) dumps sectors instead of
+    files, which reaches the parts no file occupies - boot record, VTOC,
+    directory.
+
   extract-boot-sectors -i IMAGE OUTPUT_FILE [--sector-count N] [-f]
     Extract the boot sectors into a file. The count comes from the boot
     record's second byte; when that claims zero or more sectors than the
@@ -208,6 +227,12 @@ async function main(): Promise<void> {
 			break;
 		case "chattr":
 			await chattrCommand(args);
+			break;
+		case "cat":
+			await catCommand(args);
+			break;
+		case "hexdump":
+			await hexdumpCommand(args);
 			break;
 		case "convert":
 			await convertCommand(args);

@@ -127,6 +127,23 @@ export async function installDosCommand(args: string[]): Promise<void> {
 		);
 	}
 
+	// Name every collision at once rather than failing on the first: fixing
+	// them one command at a time is the same work spread out, and cp and
+	// add already pre-check a whole batch.
+	if (!parsed.force) {
+		const present = new Set(
+			[...target.filesystem.entries()].map((entry) => entry.name),
+		);
+		const clashes = payload
+			.map((file) => file.name)
+			.filter((name) => present.has(name));
+		if (clashes.length > 0) {
+			throw new CliError(
+				`already on ${parsed.image}: ${clashes.join(", ")} (use --force)`,
+			);
+		}
+	}
+
 	// Everything is in memory until the last write, as ever.
 	writeBootSectors(target.medium, boot.bytes, { force: true });
 	const format = variant === "dos10" ? "dos1" : "dos2";

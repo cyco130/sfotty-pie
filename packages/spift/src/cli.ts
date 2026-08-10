@@ -48,13 +48,22 @@ const HELP: Record<string, string> = {
     the file name when omitted; supported types: atr. Defaults to --sd
     (720 x 128-byte sectors); --ed is 1040 x 128 and --dd is 720 x 256.
     Refuses to overwrite an existing file unless --force (-f) is given.`,
-	mkfs: `  mkfs -i IMAGE [--fs atari/VARIANT | --variant VARIANT]
-               [--boot-sectors FILE]
-    Write an empty filesystem onto an image. Variants: dos10, dos20s,
-    dos20d, dos25, mydos. Without one, a standard single-density image
-    gets dos20s, enhanced density is refused as ambiguous (dos25 and
-    mydos both fit), and anything else gets mydos. --boot-sectors fills
-    the boot area from a file sized exactly for the variant.`,
+	mkfs: `  mkfs -i IMAGE [--fs atari/VARIANT] [--master IMAGE|DIR]
+               [--install-dos] [--boot-sectors FILE]
+    Write an empty filesystem onto an image. Variants: dos10, dos20 (also
+    spelled dos20s, dos20d or mydos) and dos25. DOS 2.0 and MyDOS are one
+    filesystem - their VTOCs differ in a single bit, whether sector 720 is
+    reserved, and only on a 720-sector disk - so the two names part company
+    there and nowhere else. Without a variant the geometry decides, except
+    at enhanced density, where DOS 2.5 and the DOS 2.0 layout both fit and
+    you have to say which.
+
+    The boot area gets spift's own record by default: it says the disk has
+    no DOS and waits for RESET. --master takes the record from a disk (or
+    an unpacked directory with .boot.bin) and fits it to this geometry -
+    two bytes, measured - and --install-dos then copies DOS.SYS, and
+    DUP.SYS unless DOS 1.0, and marks the disk bootable. --boot-sectors
+    writes a file verbatim instead, and cannot be combined with --master.`,
 	ls: `  ls -i IMAGE [SPEC] [--fs FILESYSTEM] [-l] [-v] [-R]
     List a directory of the filesystem on an image. SPEC is a path whose
     last part may be a native wildcard pattern (* and ?; name and

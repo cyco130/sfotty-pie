@@ -1406,8 +1406,16 @@ function deleteAtariFile(
 
 	// A disk whose boot record points at a file that is gone would fail at
 	// boot time with no explanation; say so in the boot record instead.
+	// Clearing the pointer is not enough on its own: every DOS 2 boot code
+	// checks byte 14 first and only then follows the pointer, and a real
+	// FORMAT leaves that byte zero for exactly this reason.
 	if (readAtariDosFilePointer(medium, variant) === raw.startSector) {
 		writeAtariDosFilePointer(medium, variant, 0);
+		const boot = medium.readSector(1);
+		if (boot !== null && variant !== "dos10") {
+			boot[SECTOR_SIZE_CODE] = 0;
+			writeSector(1, boot);
+		}
 	}
 	return walk.contents.diagnostics;
 }
@@ -1429,6 +1437,8 @@ export const ATARI_DOS_BOOT_SECTORS: Record<AtariDosVariant, number> = {
 // code) or it refuses to boot. Measured across the DOS 1.0, 2.0S, 2.0D,
 // 2.5, MyDOS 4.53 and 4.55 masters.
 const DOS_FILE_POINTER = 15;
+/** Byte 14: the sector size code, and zero means "this disk will not boot". */
+const SECTOR_SIZE_CODE = 14;
 const DOS10_FILE_POINTER = 16;
 const DOS10_PRESENT_FLAG = 14;
 

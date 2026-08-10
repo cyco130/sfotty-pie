@@ -29,7 +29,6 @@ export interface MkfsArgs {
 	master: string | undefined;
 	/** Copy the master's DOS files too, and mark the disk bootable. */
 	installDos: boolean;
-	force: boolean;
 }
 
 function parseVariant(text: string, flag: string): AtariDosVariant {
@@ -60,7 +59,6 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 				"boot-sectors": { type: "string" },
 				master: { type: "string" },
 				"install-dos": { type: "boolean" },
-				force: { type: "boolean", short: "f" },
 			},
 			allowPositionals: true,
 		});
@@ -106,7 +104,6 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 		bootSectors: values["boot-sectors"],
 		master: values.master,
 		installDos: values["install-dos"] ?? false,
-		force: values.force ?? false,
 	};
 }
 
@@ -175,6 +172,17 @@ export async function mkfsCommand(args: string[]): Promise<void> {
 		setBootable(record, false, medium.sectorSize);
 	} else if (record === undefined) {
 		record = notBootableRecord(variant, medium.sectorSize);
+	}
+
+	// Measured: stock DOS 1.0 and DOS 2.0 refuse to allocate at or above
+	// sector 720 however big the disk is, so anything past that is ours and
+	// MyDOS's to use but invisible to them. They read it back fine.
+	if (variant !== "dos25" && medium.sectorCount > 720) {
+		process.stderr.write(
+			`spift: ${parsed.image}: ${medium.sectorCount} sectors, but stock ` +
+				`Atari DOS never allocates at or above sector 720 - it will read ` +
+				`what is up there and never write there itself\n`,
+		);
 	}
 
 	let result;

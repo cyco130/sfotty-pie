@@ -8,7 +8,6 @@ test("parses the image and filesystem selection", () => {
 		bootSectors: undefined,
 		master: undefined,
 		installDos: false,
-		force: false,
 	});
 	expect(parseMkfsArgs(["-i", "disk.atr", "--fs", "atari/dos25"]).variant).toBe(
 		"dos25",

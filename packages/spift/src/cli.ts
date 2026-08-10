@@ -8,7 +8,6 @@ import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
 import { hexdumpCommand } from "./commands/hexdump.ts";
 import { installDosCommand } from "./commands/install-dos.ts";
 import { lsCommand } from "./commands/ls.ts";
-import { setDosFileCommand } from "./commands/set-dos-file.ts";
 import { mkdirCommand } from "./commands/mkdir.ts";
 import { mkfsCommand } from "./commands/mkfs.ts";
 import { packCommand } from "./commands/pack.ts";
@@ -41,6 +40,12 @@ shell - so --from alone copies out and --to alone copies in. A host
 directory named outright is a container instead, and paths stay inside
 it. At least one side must be an image.`;
 
+// set-dos-file is deliberately not wired up. Pointing an Atari DOS boot
+// record at a file is not something to do by hand: mkfs --install-dos sets
+// it when it installs a DOS, and removing that file clears it again. The
+// command comes back for SpartaDOS, where the boot file is arbitrary and
+// naming it really is the user's business - src/commands/set-dos-file.ts
+// stays for that.
 const HELP: Record<string, string> = {
 	create: `  create -i FILE [-t TYPE] [-f] [--sd | --ed | --dd]
                  [--sector-size N] [--sector-count N]
@@ -165,9 +170,6 @@ const HELP: Record<string, string> = {
     sectors on 256-bps images are handled). The file must span a whole
     number of sectors - --pad zero-fills the tail - and its second byte
     must claim that count; --force (-f) writes despite a mismatch.`,
-	"set-dos-file": `  set-dos-file -i IMAGE [NAME] [--fs FILESYSTEM] [--clear]
-    Point the image's boot record at the file it should load (default:
-    dos.sys), which is what makes a disk bootable. --clear unsets it.`,
 	"install-dos": `  install-dos -i IMAGE --from MASTER_IMAGE [--fs FILESYSTEM] [-f]
     Copy a DOS from a master disk: its boot sectors, the file its boot
     record loads, and DUP.SYS beside it, then point the boot record at
@@ -310,9 +312,6 @@ async function main(): Promise<void> {
 			break;
 		case "extract-boot-sectors":
 			await extractBootSectorsCommand(args);
-			break;
-		case "set-dos-file":
-			await setDosFileCommand(args);
 			break;
 		case "install-dos":
 			await installDosCommand(args);

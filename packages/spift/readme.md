@@ -4,7 +4,7 @@
 
 ## Usage
 
-Every command names the image it works on with `--image`/`-i`; positional arguments are paths inside that image.
+Every command names the image it works on with `--image`/`-i`; positional arguments are paths inside that image. `spift help` lists the commands, and `spift help COMMAND` or `spift COMMAND --help` shows one of them - which works even when the rest of the line is wrong, so asking what a command wants never means first satisfying it.
 
 ```sh
 spift ls -i game.dcm                  # read a DiskComm image directly

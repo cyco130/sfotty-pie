@@ -20,12 +20,15 @@ import { rmCommand } from "./commands/rm.ts";
 import { rmdirCommand } from "./commands/rmdir.ts";
 import { writeBootSectorsCommand } from "./commands/write-boot-sectors.ts";
 
-const USAGE = `usage: spift <command> -i IMAGE [paths...] [options]
+// The help text, split per command so `spift help CMD` and `spift CMD
+// --help` can show one without the other eighteen.
+const GENERAL = `usage: spift <command> -i IMAGE [paths...] [options]
 
 Every command names the image it works on with --image (-i); positional
-arguments are paths inside that image unless a command says otherwise.
+arguments are paths inside that image unless a command says otherwise.`;
 
-cp and mv work on two containers at once, written [CONTAINERS] below:
+/** Shown with cp and mv, whose synopses say [CONTAINERS]. */
+const CONTAINERS = `cp and mv work on two containers at once, written [CONTAINERS] below:
 
   -i, --image IMAGE     both sides are this image
   --from CONTAINER      read from here (an image, or a host directory)
@@ -36,25 +39,23 @@ cp and mv work on two containers at once, written [CONTAINERS] below:
 A side with no flag is the host, where paths mean what they mean in the
 shell - so --from alone copies out and --to alone copies in. A host
 directory named outright is a container instead, and paths stay inside
-it. At least one side must be an image.
+it. At least one side must be an image.`;
 
-commands:
-  create -i FILE [-t TYPE] [-f] [--sd | --ed | --dd]
+const HELP: Record<string, string> = {
+	create: `  create -i FILE [-t TYPE] [-f] [--sd | --ed | --dd]
                  [--sector-size N] [--sector-count N]
     Create a blank image (all zeroes, no filesystem). TYPE is inferred from
     the file name when omitted; supported types: atr. Defaults to --sd
     (720 x 128-byte sectors); --ed is 1040 x 128 and --dd is 720 x 256.
-    Refuses to overwrite an existing file unless --force (-f) is given.
-
-  mkfs -i IMAGE [--fs atari/VARIANT | --variant VARIANT]
+    Refuses to overwrite an existing file unless --force (-f) is given.`,
+	mkfs: `  mkfs -i IMAGE [--fs atari/VARIANT | --variant VARIANT]
                [--boot-sectors FILE]
     Write an empty filesystem onto an image. Variants: dos10, dos20s,
     dos20d, dos25, mydos. Without one, a standard single-density image
     gets dos20s, enhanced density is refused as ambiguous (dos25 and
     mydos both fit), and anything else gets mydos. --boot-sectors fills
-    the boot area from a file sized exactly for the variant.
-
-  ls -i IMAGE [SPEC] [--fs FILESYSTEM] [-l] [-v] [-R]
+    the boot area from a file sized exactly for the variant.`,
+	ls: `  ls -i IMAGE [SPEC] [--fs FILESYSTEM] [-l] [-v] [-R]
     List a directory of the filesystem on an image. SPEC is a path whose
     last part may be a native wildcard pattern (* and ?; name and
     extension match separately; quote it to keep the shell out of it);
@@ -64,21 +65,18 @@ commands:
     status lines (image, then filesystem) and adds sector counts, start
     sectors, and attributes. --verbose (-v) also lists what a directory
     listing passes over: deleted files and ones left open for output.
-    --recursive (-R) descends into subdirectories, showing full paths.
-
-  rm -i IMAGE SPEC... [--fs FILESYSTEM] [-f] [-r]
+    --recursive (-R) descends into subdirectories, showing full paths.`,
+	rm: `  rm -i IMAGE SPEC... [--fs FILESYSTEM] [-f] [-r]
     Remove files matching the SPECs (native wildcards, quoted). Locked
     files need --force (-f), which also quiets specs that match nothing.
     --recursive (-r) descends into subdirectories and removes them too,
-    deepest first.
-
-  mkdir -i IMAGE DIRECTORY... [--fs FILESYSTEM] [-p]
+    deepest first.`,
+	mkdir: `  mkdir -i IMAGE DIRECTORY... [--fs FILESYSTEM] [-p]
     Create directories. --parents (-p) makes missing parents on the way
     and accepts one that already exists. A directory needs eight
     contiguous free sectors, so this can fail on a fragmented disk with
-    plenty of room.
-
-  mv [CONTAINERS] SOURCE... DESTINATION [-f] [--no-attributes]
+    plenty of room.`,
+	mv: `  mv [CONTAINERS] SOURCE... DESTINATION [-f] [--no-attributes]
      [--remove-source] [--text] [--strict] [--eol lf | crlf | native]
     Rename or move entries. DESTINATION is a directory when it ends in a
     separator or names one, and otherwise a name template applied to each
@@ -89,17 +87,15 @@ commands:
     directories may renumber the file's sectors. A move across containers
     copies and then removes, target written first. Moving off the host
     needs --remove-source: an image's entries survive deletion under the
-    deleted flag, host files do not.
-
-  cp [CONTAINERS] SOURCE... DESTINATION [-R] [-f] [--no-attributes]
+    deleted flag, host files do not.`,
+	cp: `  cp [CONTAINERS] SOURCE... DESTINATION [-R] [-f] [--no-attributes]
      [--text] [--strict] [--eol lf | crlf | native]
     Copy entries, with the same DESTINATION rules as mv - a template is
     the target's own rename rule, so '*.ttt' '*.txt' works copying out to
     the host as well as in. --recursive (-R) is needed to copy a
     directory. With the host on one side this puts files onto an image or
-    takes them off; with images on both it copies between them.
-
-  chattr -i IMAGE SETTING... SPEC... [--fs FILESYSTEM] [-R] [-f]
+    takes them off; with images on both it copies between them.`,
+	chattr: `  chattr -i IMAGE SETTING... SPEC... [--fs FILESYSTEM] [-R] [-f]
     Change what an entry carries. A SETTING is name=on or name=off, and
     the leading positionals that hold an "=" are the settings; the rest
     are specs. Names are the ones ls -l prints: read-only (also spelled
@@ -108,16 +104,14 @@ commands:
     in the boot record, deleted is rm's business - and each says so.
     read-only is one bit in the directory entry; dos1 is the data sector
     encoding, so changing it rewrites the file and reallocates its chain,
-    which needs --force (-f) on a read-only one.
-
-  convert -i IMAGE OUTPUT [-t TYPE] [-f]
+    which needs --force (-f) on a read-only one.`,
+	convert: `  convert -i IMAGE OUTPUT [-t TYPE] [-f]
     Rewrite an image in another container format. The output type comes
     from its file name, or --type (-t). spift reads atr and dcm (Disk
     Communicator, also seen as .dc3) and writes atr - a DCM holds exactly
     the sectors an ATR does, so nothing is lost either way. Refuses to
-    overwrite an existing file unless --force (-f) is given.
-
-  recode [-f CODE] [-t CODE] [FILE...] [--in-place] [--strict]
+    overwrite an existing file unless --force (-f) is given.`,
+	recode: `  recode [-f CODE] [-t CODE] [FILE...] [--in-place] [--strict]
          [--eol lf | crlf | native]
     Convert text between a family character set and Unicode, writing to
     stdout (or reading stdin with no FILE). Codes: atascii, unicode,
@@ -130,9 +124,8 @@ commands:
     video and never closes it, which is what ordinary text holding a
     tilde looks like. --eol picks what EOL becomes (decoding only;
     encoding takes LF, CR, and CRLF alike). --in-place converts the files
-    named rather than writing to stdout.
-
-  pack -i IMAGE [DIR] [--fs atari/VARIANT] [--sd | --ed | --dd]
+    named rather than writing to stdout.`,
+	pack: `  pack -i IMAGE [DIR] [--fs atari/VARIANT] [--sd | --ed | --dd]
        [--sector-size N] [--sector-count N] [--write-boot-sectors]
        [--set-dos-file NAME] [--text SPEC]... [--strict] [-f]
     Build an image from a host directory (default: the current one):
@@ -144,9 +137,8 @@ commands:
     the pointer. --text SPEC recodes the files it names into the family
     character set - a whole directory holds binaries too, so they have to
     be named - with --strict to refuse what will not survive.
-    Refuses to overwrite an existing image without -f.
-
-  unpack -i IMAGE [DIR] [--fs FILESYSTEM] [--extract-boot-sectors]
+    Refuses to overwrite an existing image without -f.`,
+	unpack: `  unpack -i IMAGE [DIR] [--fs FILESYSTEM] [--extract-boot-sectors]
          [--text SPEC]... [--eol lf | crlf | native] [-f]
     Explode an image into a host directory (default: the current one),
     made if missing, mirroring the whole tree.
@@ -155,54 +147,109 @@ commands:
     recodes the files it names out of the family character set (a whole
     disk holds binaries too) and repeats for more than one pattern, with
     --eol picking what EOL becomes. Refuses to overwrite existing files
-    without -f.
-
-  rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
+    without -f.`,
+	rmdir: `  rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
     Remove empty directories, freeing what they occupied. A directory
-    holding anything is refused, as the DOSes refuse it.
-
-  write-boot-sectors -i IMAGE BOOT_FILE [--pad] [-f]
+    holding anything is refused, as the DOSes refuse it.`,
+	"write-boot-sectors": `  write-boot-sectors -i IMAGE BOOT_FILE [--pad] [-f]
     Write a boot file over the image's first sectors (128-byte boot
     sectors on 256-bps images are handled). The file must span a whole
     number of sectors - --pad zero-fills the tail - and its second byte
-    must claim that count; --force (-f) writes despite a mismatch.
-
-  set-dos-file -i IMAGE [NAME] [--fs FILESYSTEM] [--clear]
+    must claim that count; --force (-f) writes despite a mismatch.`,
+	"set-dos-file": `  set-dos-file -i IMAGE [NAME] [--fs FILESYSTEM] [--clear]
     Point the image's boot record at the file it should load (default:
-    dos.sys), which is what makes a disk bootable. --clear unsets it.
-
-  install-dos -i IMAGE --from MASTER_IMAGE [--fs FILESYSTEM] [-f]
+    dos.sys), which is what makes a disk bootable. --clear unsets it.`,
+	"install-dos": `  install-dos -i IMAGE --from MASTER_IMAGE [--fs FILESYSTEM] [-f]
     Copy a DOS from a master disk: its boot sectors, the file its boot
     record loads, and DUP.SYS beside it, then point the boot record at
     the copy. Refuses masters whose boot area or density does not match
-    the target's filesystem. --force (-f) overwrites existing files.
-
-  cat -i IMAGE SPEC... [--fs FILESYSTEM] [--eol lf | crlf | native]
+    the target's filesystem. --force (-f) overwrites existing files.`,
+	cat: `  cat -i IMAGE SPEC... [--fs FILESYSTEM] [--eol lf | crlf | native]
     Write files from an image to stdout as text, reading them in the
     family character set - see recode, whose conversion this is. SPECs
     are matched as ls matches them, so wildcards work and several files
     concatenate. Always text, because that is what an image holds: the
     raw bytes of a binary belong in hexdump, and recoding also means a
     file cannot paint your terminal with escape codes. The host has
-    cat(1), so this one only reads images.
-
-  hexdump -i IMAGE SPEC... | -s SECTOR[-SECTOR] [--fs FILESYSTEM]
+    cat(1), so this one only reads images.`,
+	hexdump: `  hexdump -i IMAGE SPEC... | -s SECTOR[-SECTOR] [--fs FILESYSTEM]
     Dump bytes: offset, hex, and the glyphs an Atari would show for them,
     with inverse video shown in reverse video. That last column is why
     this exists rather than piping to xxd, which renders EOL and every
     graphics character as a dot. --sectors (-s) dumps sectors instead of
     files, which reaches the parts no file occupies - boot record, VTOC,
-    directory.
-
-  extract-boot-sectors -i IMAGE OUTPUT_FILE [--sector-count N] [-f]
+    directory.`,
+	"extract-boot-sectors": `  extract-boot-sectors -i IMAGE OUTPUT_FILE [--sector-count N] [-f]
     Extract the boot sectors into a file. The count comes from the boot
     record's second byte; when that claims zero or more sectors than the
     image holds, --sector-count is required. Refuses to overwrite an
-    existing file unless --force (-f) is given.
+    existing file unless --force (-f) is given.`,
+};
+
+/** Every command's block, which is what `spift help` alone prints. */
+function usage(): string {
+	return (
+		`${GENERAL}
+
+${CONTAINERS}
+
+commands:
+` +
+		Object.values(HELP).join("\n\n") +
+		"\n"
+	);
+}
+
+/**
+ * One command's block. cp and mv get the container flags with it, since
+ * their synopses are written in terms of them.
+ */
+function commandHelp(name: string): string | undefined {
+	const block = HELP[name];
+	if (block === undefined) {
+		return undefined;
+	}
+	return name === "cp" || name === "mv"
+		? `${block}
+
+${CONTAINERS}
+`
+		: `${block}
 `;
+}
+
+const COMMAND_NAMES = Object.keys(HELP).sort();
 
 async function main(): Promise<void> {
 	const [command, ...args] = process.argv.slice(2);
+
+	// `spift help CMD` and `spift CMD --help` show one command's block. The
+	// second is caught here rather than in each parser, so asking for help
+	// works even when the rest of the line is wrong or missing.
+	if (command === "help" || command === "--help" || command === "-h") {
+		const wanted = args[0];
+		if (wanted === undefined) {
+			process.stdout.write(usage());
+			return;
+		}
+		const help = commandHelp(wanted);
+		if (help === undefined) {
+			throw new UsageError(
+				`unknown command "${wanted}" ` +
+					`(commands: ${COMMAND_NAMES.join(", ")})`,
+			);
+		}
+		process.stdout.write(help);
+		return;
+	}
+	if (command !== undefined && args.some((a) => a === "-h" || a === "--help")) {
+		const help = commandHelp(command);
+		if (help !== undefined) {
+			process.stdout.write(help);
+			return;
+		}
+	}
+
 	switch (command) {
 		case "create":
 			await createCommand(args);
@@ -262,16 +309,14 @@ async function main(): Promise<void> {
 			await installDosCommand(args);
 			break;
 		case undefined:
-		case "help":
-		case "--help":
-		case "-h":
-			process.stdout.write(USAGE);
-			if (command === undefined) {
-				process.exit(2);
-			}
+			process.stdout.write(usage());
+			process.exit(2);
 			break;
 		default:
-			throw new UsageError(`unknown command "${command}"`);
+			throw new UsageError(
+				`unknown command "${command}" ` +
+					`(commands: ${COMMAND_NAMES.join(", ")})`,
+			);
 	}
 }
 

@@ -145,10 +145,12 @@ const HELP: Record<string, string> = {
     Build an image from a host directory (default: the current one):
     create it, put a filesystem on it, and copy the tree in. Geometry and
     filesystem options are create's and mkfs's. --write-boot-sectors
-    takes the boot record from .boot.bin in the directory, and
-    --set-dos-file then points it at a file that was packed - which needs
-    --write-boot-sectors, since otherwise there is no boot code to follow
-    the pointer. --text SPEC recodes the files it names into the family
+    takes the boot record from .boot.bin in the directory and points it at
+    dos.sys wherever packing put it - the record carries its old disk's
+    sector, which repacking rarely reuses - or marks the disk not bootable
+    when no dos.sys was packed. --set-dos-file NAME overrides that name,
+    and needs --write-boot-sectors, since otherwise there is no boot code
+    to follow the pointer. --text SPEC recodes the files it names into the family
     character set - a whole directory holds binaries too, so they have to
     be named - with --strict to refuse what will not survive.
     Refuses to overwrite an existing image without -f.`,

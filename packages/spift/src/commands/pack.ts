@@ -15,6 +15,7 @@ import {
 	openAtr,
 	type AtrSectorSize,
 } from "../atr.ts";
+import { setBootable } from "../boot-record.ts";
 import { writeBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { copyEntries } from "../copy.ts";
@@ -239,6 +240,7 @@ export async function packCommand(args: string[]): Promise<void> {
 		compileHostPattern(pattern),
 	);
 
+	let bootFile: string | undefined;
 	const filesystem = openAtariDos(medium, variant);
 	let result;
 	try {
@@ -264,15 +266,31 @@ export async function packCommand(args: string[]): Promise<void> {
 		return;
 	}
 
-	if (parsed.setDosFile !== undefined) {
-		const wanted = parsed.setDosFile.toLowerCase();
+	// A boot record from .boot.bin carries the sector its old disk kept the
+	// DOS at, and repacking almost never puts it back there - so the pointer
+	// is stale by construction and has to be dealt with either way. Left
+	// alone it points at whatever landed on that sector, and the disk claims
+	// to boot from it.
+	if (parsed.writeBootSectors) {
+		const wanted = (parsed.setDosFile ?? "dos.sys").toLowerCase();
 		const entry = [...filesystem.entries()].find(
 			(candidate) => candidate.name === wanted && candidate.kind === "file",
 		);
-		if (entry?.startSector === undefined) {
+		if (entry?.startSector !== undefined) {
+			writeAtariDosFilePointer(medium, variant, entry.startSector);
+			bootFile = wanted;
+		} else if (parsed.setDosFile !== undefined) {
 			throw new CliError(`no file named ${wanted} to boot from`);
+		} else {
+			// Nothing to boot: say so in the record rather than leave it
+			// aimed at a sector that now holds something else.
+			writeAtariDosFilePointer(medium, variant, 0);
+			const record = medium.readSector(1);
+			if (record !== null) {
+				setBootable(record, false, medium.sectorSize);
+				medium.writeSector(1, record);
+			}
 		}
-		writeAtariDosFilePointer(medium, variant, entry.startSector);
 	}
 
 	await writeFile(parsed.image, medium.bytes, {
@@ -293,7 +311,12 @@ export async function packCommand(args: string[]): Promise<void> {
 			damaged = true;
 		}
 	}
-	const boot = parsed.writeBootSectors ? `, boot record from ${BOOT_FILE}` : "";
+	const boot = !parsed.writeBootSectors
+		? ""
+		: `, boot record from ${BOOT_FILE}` +
+			(bootFile === undefined
+				? " (no dos.sys packed, so not bootable)"
+				: `, booting ${bootFile}`);
 	process.stdout.write(
 		`packed ${result.files.length} file(s) from ${parsed.directory} into ` +
 			`${parsed.image} as atari/${variant}${boot}\n`,

@@ -472,6 +472,40 @@ test("a symlink copied between SpartaDOS disks stays a symlink", () => {
 	const landed = [...to.entries()][0];
 	expect(landed?.attributes).toEqual(["Symlink"]);
 	expect(text(to.readFile("print.dev")?.bytes)).toBe("PRN:\x9b");
+	// A faithful copy says nothing: the driver's "this is a symbolic link"
+	// note is informational, not damage, and must not read as a warning.
+	const result = copyEntries(from, sparta21(), {
+		sources: ["print.dev"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		move: false,
+	});
+	expect(result.files[0]?.diagnostics).toEqual([]);
+});
+
+test("a symlink degrading to a plain file warns once, with the target text", () => {
+	const medium = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
+	formatSpartaDos(medium, "sdfs21", { random: 1 });
+	const from = openSpartaDos(medium);
+	from.writeFile("link.txt", bytes("D1:REAL.TXT\x9b"), {
+		attributes: ["Symlink"],
+	});
+	// The host cannot carry a symlink, so the link becomes a plain file
+	// holding its target path - one warning, and the payload lands verbatim.
+	const out = host();
+	const result = copyEntries(from, out, {
+		sources: ["link.txt"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		move: false,
+	});
+	expect(result.files[0]?.diagnostics).toHaveLength(1);
+	expect(result.files[0]?.diagnostics[0]).toMatch(/was a symbolic link/);
+	expect(text(out.readFile("link.txt")?.bytes)).toBe("D1:REAL.TXT\x9b");
 });
 
 test("the archived flag never travels with a copy", () => {

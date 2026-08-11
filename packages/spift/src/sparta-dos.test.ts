@@ -631,14 +631,30 @@ test("sets and clears the flag attributes", () => {
 	expect([...filesystem.entries()][0]?.attributes).toEqual([]);
 });
 
-test("hidden and archived stay atari-invisible on revision 2.0", () => {
+test("every flag rides any revision, symlink included, silently", () => {
+	// The flag byte is the same at every revision, so hidden, archived, and
+	// the symlink bit all ride a 2.0 or 1.1 disk and a 2.1 reader honours
+	// them - no warning, the way a MyDOS subdirectory is simply invisible to
+	// plain DOS 2.0.
 	const bytes = makeSparta({
+		revision: 0x20,
 		files: [{ name: "f.txt", bytes: text("x") }],
 	});
 	const filesystem = open(bytes);
-	expect(filesystem.writableAttributes).toEqual(["ReadOnly"]);
-	filesystem.setAttributes("f.txt", ["ReadOnly", "Hidden"]);
-	expect([...filesystem.entries()][0]?.attributes).toEqual(["ReadOnly"]);
+	expect(filesystem.writableAttributes).toEqual([
+		"ReadOnly",
+		"Hidden",
+		"Archived",
+		"Symlink",
+	]);
+	expect(
+		filesystem.setAttributes("f.txt", ["Hidden", "Archived", "Symlink"]),
+	).toEqual([]);
+	expect([...filesystem.entries()][0]?.attributes).toEqual([
+		"Hidden",
+		"Archived",
+		"Symlink",
+	]);
 });
 
 test("the sequence bumps once per session; hints follow allocation", () => {

@@ -613,13 +613,15 @@ export function openSpartaDos(
 		// DOSes' own, "<" (SpartaDOS's step-up) desugars inside
 		// splitAtariPath and is not a plain separator.
 		pathSeparators: "/>:",
-		// Symlink is writable so a SpartaDOS-to-SpartaDOS copy keeps a link
-		// a link - the period tools lose the bit in transit, which is the
-		// whole reason SDX ships FIXLINK - and chattr can be the repair.
-		writableAttributes:
-			resolved === "sdfs21"
-				? ["ReadOnly", "Hidden", "Archived", "Symlink"]
-				: ["ReadOnly"],
+		// The directory entry's flag byte is the same at every revision, so
+		// every flag bit rides along the way one does on Atari DOS: an older
+		// DOS ignores what it does not know, exactly as plain DOS 2.0 passes
+		// over a MyDOS subdirectory, and a newer reader honours it. So hidden,
+		// archived, and the symlink bit all carry to any SpartaDOS disk - a
+		// link keeps its bit across a copy (only SDFS 2.1 follows one, but the
+		// bit is harmless elsewhere and lossless where it is meant to work,
+		// which is also how chattr stands in for SDX's FIXLINK).
+		writableAttributes: ["ReadOnly", "Hidden", "Archived", "Symlink"],
 		textEncoding: "atascii",
 		splitPath: splitAtariPath,
 		applyNameTemplate: applyAtariNameTemplate,
@@ -1224,15 +1226,9 @@ export function openSpartaDos(
 			entry[0] =
 				FLAG_IN_USE |
 				(attributes.includes("ReadOnly") ? FLAG_PROTECTED : 0) |
-				(resolved === "sdfs21" && attributes.includes("Hidden")
-					? FLAG_HIDDEN
-					: 0) |
-				(resolved === "sdfs21" && attributes.includes("Archived")
-					? FLAG_ARCHIVED
-					: 0) |
-				(resolved === "sdfs21" && attributes.includes("Symlink")
-					? FLAG_SYMLINK
-					: 0);
+				(attributes.includes("Hidden") ? FLAG_HIDDEN : 0) |
+				(attributes.includes("Archived") ? FLAG_ARCHIVED : 0) |
+				(attributes.includes("Symlink") ? FLAG_SYMLINK : 0);
 			entry[1] = (maps[0] as number) & 0xff;
 			entry[2] = ((maps[0] as number) >> 8) & 0xff;
 			entry[3] = bytes.length & 0xff;
@@ -1301,13 +1297,13 @@ export function openSpartaDos(
 				flags = on ? flags | mask : flags & ~mask;
 			};
 			set(FLAG_PROTECTED, attributes.includes("ReadOnly"));
-			if (resolved === "sdfs21") {
-				set(FLAG_HIDDEN, attributes.includes("Hidden"));
-				set(FLAG_ARCHIVED, attributes.includes("Archived"));
-				// Settable for the same reason SDX ships FIXLINK: a link
-				// that crossed a symlink-blind medium needs its bit back.
-				set(FLAG_SYMLINK, attributes.includes("Symlink"));
-			}
+			// Every bit rides at any revision - an older DOS ignores what it
+			// does not know, the way a MyDOS subdirectory is invisible to
+			// plain DOS 2.0. Setting the link flag is also how chattr does
+			// FIXLINK's job: restoring the bit a symlink-blind copy stripped.
+			set(FLAG_HIDDEN, attributes.includes("Hidden"));
+			set(FLAG_ARCHIVED, attributes.includes("Archived"));
+			set(FLAG_SYMLINK, attributes.includes("Symlink"));
 			entry[0] = flags;
 		});
 		return [];

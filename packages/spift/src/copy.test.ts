@@ -485,15 +485,16 @@ test("a symlink copied between SpartaDOS disks stays a symlink", () => {
 	expect(result.files[0]?.diagnostics).toEqual([]);
 });
 
-test("a symlink degrading to a plain file warns once, with the target text", () => {
+test("a symlink to the host silently becomes its target-path text", () => {
 	const medium = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
 	formatSpartaDos(medium, "sdfs21", { random: 1 });
 	const from = openSpartaDos(medium);
 	from.writeFile("link.txt", bytes("D1:REAL.TXT\x9b"), {
 		attributes: ["Symlink"],
 	});
-	// The host cannot carry a symlink, so the link becomes a plain file
-	// holding its target path - one warning, and the payload lands verbatim.
+	// The host has no symlink flag, so the bit drops the way any attribute
+	// drops on a store that cannot hold it - silently - and the file lands as
+	// its target-path text.
 	const out = host();
 	const result = copyEntries(from, out, {
 		sources: ["link.txt"],
@@ -503,9 +504,32 @@ test("a symlink degrading to a plain file warns once, with the target text", () 
 		noAttributes: false,
 		move: false,
 	});
-	expect(result.files[0]?.diagnostics).toHaveLength(1);
-	expect(result.files[0]?.diagnostics[0]).toMatch(/was a symbolic link/);
+	expect(result.files[0]?.diagnostics).toEqual([]);
 	expect(text(out.readFile("link.txt")?.bytes)).toBe("D1:REAL.TXT\x9b");
+});
+
+test("a symlink copied to an older SpartaDOS keeps its bit, silently", () => {
+	const medium = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
+	formatSpartaDos(medium, "sdfs21", { random: 1 });
+	const from = openSpartaDos(medium);
+	from.writeFile("link.txt", bytes("D1:REAL.TXT\x9b"), {
+		attributes: ["Symlink"],
+	});
+	// A 2.0 disk carries the symlink flag - harmless to its own DOS, honoured
+	// by a 2.1 reader - with nothing to report.
+	const to20 = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
+	formatSpartaDos(to20, "sdfs20", { random: 1, volumeName: "v" });
+	const target = openSpartaDos(to20);
+	const result = copyEntries(from, target, {
+		sources: ["link.txt"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		move: false,
+	});
+	expect([...target.entries()][0]?.attributes).toEqual(["Symlink"]);
+	expect(result.files[0]?.diagnostics).toEqual([]);
 });
 
 test("the archived flag never travels with a copy", () => {

@@ -121,9 +121,11 @@ const HELP: Record<string, string> = {
     Change what an entry carries. A SETTING is name=on or name=off, and
     the leading positionals that hold an "=" are the settings; the rest
     are specs. Names are the ones ls -l prints: read-only (also spelled
-    locked or protected) and dos1. The others it prints are not flags to
-    set - dos2.5 and mydos say where a file's sectors are, dos-file lives
-    in the boot record, deleted is rm's business - and each says so.
+    locked or protected), dos1, and on SpartaDOS hidden, archived and
+    symlink (each one bit, set on any revision). The others it prints are
+    not flags to set - dos2.5 and mydos say where a file's sectors are,
+    dos-file lives in the boot record, deleted is rm's business - each says
+    so.
     read-only is one bit in the directory entry; dos1 is the data sector
     encoding, so changing it rewrites the file and reallocates its chain,
     which needs --force (-f) on a read-only one.`,

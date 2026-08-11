@@ -274,37 +274,27 @@ export function copyEntries(
 			payload = result.bytes;
 			recoded.push(...result.diagnostics);
 		}
-		const targetAttributes = [
-			...portableAttributes(target, from.attributes, request.noAttributes),
-			// After the drop, so "--to-fs atari/dos10 --no-attributes" still
-			// means a plain DOS 1.0 file rather than cancelling out.
-			...portableAttributes(target, request.attributes ?? [], false),
-		];
-		// A symlink's readFile note ("this is a symbolic link ...") is
-		// informational, not damage. When the target can carry a link the copy
-		// is faithful, so stay quiet; when it cannot - a host directory, or an
-		// older SpartaDOS revision - the link degrades to a plain file holding
-		// its target path, which is worth one warning (the FIXLINK case). Either
-		// way the driver's own note is dropped rather than flagged as damage.
+		// A symlink is a file whose contents are its target path, so it copies
+		// like one: the symlink flag rides along wherever the target can hold
+		// it (every SpartaDOS revision) and drops silently where it cannot (a
+		// host directory), the way any attribute does. The driver's readFile
+		// note ("this is a symbolic link ...") is informational, not damage, so
+		// it is dropped here rather than flagged - a faithful copy says nothing.
 		const symlink = from.attributes.includes("Symlink");
-		const symlinkNotes =
-			symlink && !targetAttributes.includes("Symlink")
-				? [
-						`${from.path} was a symbolic link; ${target.family} cannot ` +
-							`carry one, so it becomes a plain file holding the link's ` +
-							`target path`,
-					]
-				: [];
 		const diagnostics = [
 			...(symlink ? [] : contents.diagnostics),
 			...recoded,
-			...symlinkNotes,
 			...target.writeFile(to, payload, {
 				overwrite: request.force,
 				...(request.preserveTimestamps === true && from.timestamp !== undefined
 					? { timestamp: from.timestamp }
 					: {}),
-				attributes: targetAttributes,
+				attributes: [
+					...portableAttributes(target, from.attributes, request.noAttributes),
+					// After the drop, so "--to-fs atari/dos10 --no-attributes"
+					// still means a plain DOS 1.0 file rather than cancelling out.
+					...portableAttributes(target, request.attributes ?? [], false),
+				],
 			}),
 		];
 		files.push({ from: from.path, to, diagnostics });

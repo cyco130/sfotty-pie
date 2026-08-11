@@ -1,7 +1,6 @@
 import { parseArgs } from "node:util";
-import type { AtariDosVariant } from "../atari-dos.ts";
 import type { DirEntry } from "../filesystem.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { parseFsOption, type FsVariant } from "./fs-option.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { openImageFilesystem, saveImage } from "./open-image.ts";
 
@@ -9,7 +8,7 @@ export interface RmArgs {
 	image: string;
 	specs: string[];
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 	force: boolean;
 	recursive: boolean;
 }

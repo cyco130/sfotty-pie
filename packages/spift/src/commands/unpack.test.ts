@@ -9,6 +9,7 @@ test("parses the image, the directory, and the flags", () => {
 		variant: undefined,
 		extractBootSectors: false,
 		force: false,
+		noTimestamps: false,
 		text: [],
 		eol: "lf",
 	});

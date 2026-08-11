@@ -1,16 +1,15 @@
 import { parseArgs } from "node:util";
-import type { AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { recodeText, type EolStyle } from "../text.ts";
 import { parseEol } from "./eol-option.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { parseFsOption, type FsVariant } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
 
 export interface CatArgs {
 	image: string;
 	specs: string[];
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 	eol: EolStyle;
 }
 

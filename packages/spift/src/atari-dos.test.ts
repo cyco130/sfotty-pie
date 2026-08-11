@@ -337,8 +337,21 @@ test("rejects garbage VTOCs", () => {
 
 test("detects a SpartaDOS boot sector", () => {
 	const bytes = createBlankAtr();
+	// The JMP signature plus a consistent parameter block: 720 sectors,
+	// bitmap at 4, main directory map at 5, 128-byte sectors, revision $20.
 	bytes.set([0x4c, 0x80, 0x30], ATR_HEADER_SIZE + 6);
-	expect(detectFilesystem(openAtr(bytes))).toEqual({ family: "sparta" });
+	bytes.set([5, 0, 0xd0, 2, 0xca, 2, 1, 4, 0], ATR_HEADER_SIZE + 0x09);
+	bytes[ATR_HEADER_SIZE + 0x1f] = 0x80;
+	bytes[ATR_HEADER_SIZE + 0x20] = 0x20;
+	expect(detectFilesystem(openAtr(bytes))).toEqual({
+		family: "sparta",
+		variant: "sdfs20",
+	});
+	// The signature alone is a boot-only game disk, not a filesystem - the
+	// corpus is full of them.
+	const bare = createBlankAtr();
+	bare.set([0x4c, 0x80, 0x30], ATR_HEADER_SIZE + 6);
+	expect(detectFilesystem(openAtr(bare))).toBeUndefined();
 	expect(detectFilesystem(openAtr(createBlankAtr()))).toBeUndefined();
 	expect(detectFilesystem(openAtr(makeDisk()))).toEqual({
 		family: "atari",

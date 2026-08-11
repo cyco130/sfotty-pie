@@ -23,6 +23,29 @@ export type DirEntryAttribute =
 	 * property of the image as a whole, not a flag someone set on the file.
 	 */
 	| "BootFile"
+	/**
+	 * The file is skipped by the DOS's own directory listing (SpartaDOS
+	 * SDFS 2.1). Unlike the DOSes, entries() still yields these by default:
+	 * a host-side tool that silently left files behind on extract would be
+	 * worse than one that shows a flag the guest hides.
+	 */
+	| "Hidden"
+	/**
+	 * The file has been backed up since it last changed (SDFS 2.1; the
+	 * inverse of the MS-DOS bit). Modifying a file clears it and archivers
+	 * set it back - so it never travels with a copy, which is a new file no
+	 * archiver has seen (both measured against SDX 4.50's own COPY).
+	 */
+	| "Archived"
+	/**
+	 * A SpartaDOS symbolic link (SDX 4.49e+, via the Toolkit's SYMLINK.SYS).
+	 * The file's contents are the target path in ATASCII, EOL-terminated,
+	 * 64 bytes at most; the flag is what makes the system dereference it.
+	 * Writable, so links survive a SpartaDOS-to-SpartaDOS copy - crossing a
+	 * symlink-blind store drops the bit and leaves a small text file, the
+	 * failure mode SDX ships FIXLINK to repair.
+	 */
+	| "Symlink"
 	/** Atari: DOS 1.0 format sector chain (different data-length encoding). */
 	| "AtariDos10"
 	/** Atari: DOS 2.5 extended file, hidden from DOS 2.0 (sectors past 719). */
@@ -48,7 +71,18 @@ export interface DirEntry {
 	 * for us to report.
 	 */
 	sectors?: number;
+	/**
+	 * Exact size in bytes, where the directory entry stores one (SpartaDOS
+	 * does; Atari DOS only counts sectors, so there it takes a chain walk -
+	 * readFile - to know).
+	 */
+	size?: number;
 	startSector?: number;
+	/**
+	 * Last-modified time, where the filesystem records one (SpartaDOS).
+	 * Wall-clock local time as the guest wrote it - the disk has no zone.
+	 */
+	timestamp?: Date;
 	attributes: DirEntryAttributes;
 }
 
@@ -152,15 +186,23 @@ export interface FileStore {
 	/**
 	 * Writes a file, making no directories along the way. `attributes` asks
 	 * for what the entry should carry; anything outside writableAttributes is
-	 * ignored, so a caller can hand over a source entry's set as-is. Throws on
-	 * a full store or an existing name unless overwrite is set. Returns the
-	 * diagnostics from freeing an overwritten file - non-empty means that file
-	 * was damaged and only its reachable parts were reclaimed.
+	 * ignored, so a caller can hand over a source entry's set as-is.
+	 * `timestamp` asks for a last-modified time where the store records one
+	 * (a SpartaDOS entry, a host file's mtime) - absent means now, and a
+	 * store without timestamps ignores it, like an attribute it cannot
+	 * carry. Throws on a full store or an existing name unless overwrite is
+	 * set. Returns the diagnostics from freeing an overwritten file -
+	 * non-empty means that file was damaged and only its reachable parts
+	 * were reclaimed.
 	 */
 	writeFile(
 		path: string,
 		bytes: Uint8Array,
-		options?: { overwrite?: boolean; attributes?: DirEntryAttributes },
+		options?: {
+			overwrite?: boolean;
+			attributes?: DirEntryAttributes;
+			timestamp?: Date;
+		},
 	): string[];
 	/**
 	 * Removes a file. Throws when the path is missing, names a directory, or
@@ -189,9 +231,13 @@ export interface FileStore {
 	/**
 	 * Creates a directory. `parents` makes the missing ones along the way
 	 * and turns an existing target into a no-op, as `mkdir -p` does.
-	 * Mutations stay in the medium's memory.
+	 * `timestamp` is the creation time to record, where the store records
+	 * one; absent means now. Mutations stay in the medium's memory.
 	 */
-	makeDirectory(path: string, options?: { parents?: boolean }): void;
+	makeDirectory(
+		path: string,
+		options?: { parents?: boolean; timestamp?: Date },
+	): void;
 	/**
 	 * Removes an empty directory and frees what it occupied. Throws when the
 	 * path is missing, is not a directory, or still holds anything - the

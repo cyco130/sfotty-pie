@@ -11,6 +11,7 @@ test("parses the image, the directory, and the geometry", () => {
 		writeBootSectors: false,
 		setDosFile: undefined,
 		force: false,
+		noTimestamps: false,
 		text: [],
 		strict: false,
 	});

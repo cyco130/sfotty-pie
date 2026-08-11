@@ -3,6 +3,7 @@ import {
 	ATARI_DOS_BOOT_SECTORS,
 	readAtariDosFilePointer,
 	writeAtariDosFilePointer,
+	type AtariDosFilesystem,
 	type AtariDosVariant,
 } from "../atari-dos.ts";
 import { extractBootSectors, writeBootSectors } from "../boot-sectors.ts";
@@ -52,6 +53,14 @@ export function parseInstallDosArgs(args: string[]): InstallDosArgs {
 
 	const selection =
 		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
+	// The DOS.SYS/DUP.SYS install dance is the Atari DOS family's; a
+	// SpartaDOS disk boots whatever file its boot record names instead.
+	if (selection?.family === "sparta") {
+		throw new UsageError(
+			"install-dos speaks the Atari DOS family only (SpartaDOS disks " +
+				"boot via their boot record's DOS file pointer)",
+		);
+	}
 
 	return {
 		image,
@@ -62,20 +71,35 @@ export function parseInstallDosArgs(args: string[]): InstallDosArgs {
 	};
 }
 
+/** The Atari DOS filesystem of an opened image, or a family mismatch error. */
+function atariFilesystemOf(
+	opened: Awaited<ReturnType<typeof openImageFilesystem>>,
+	image: string,
+): AtariDosFilesystem {
+	if (opened.filesystem.family !== "atari") {
+		throw new CliError(
+			`${image}: install-dos speaks the Atari DOS family only, and this ` +
+				`is a SpartaDOS disk`,
+		);
+	}
+	return opened.filesystem;
+}
+
 export async function installDosCommand(args: string[]): Promise<void> {
 	const parsed = parseInstallDosArgs(args);
 
 	// The master: its boot sectors, the file its boot record points at, and
 	// the menu program beside it.
 	const master = await openImageFilesystem(parsed.from, undefined, undefined);
+	const masterFilesystem = atariFilesystemOf(master, parsed.from);
 	const masterDosSector = readAtariDosFilePointer(
 		master.medium,
-		master.filesystem.variant,
+		masterFilesystem.variant,
 	);
 	if (masterDosSector === 0) {
 		throw new CliError(`${parsed.from} is not bootable, nothing to install`);
 	}
-	const masterEntries = [...master.filesystem.entries()];
+	const masterEntries = [...masterFilesystem.entries()];
 	const dosEntry = masterEntries.find(
 		(entry) => entry.startSector === masterDosSector && entry.kind === "file",
 	);
@@ -108,7 +132,8 @@ export async function installDosCommand(args: string[]): Promise<void> {
 		parsed.fs,
 		parsed.variant,
 	);
-	const variant = target.filesystem.variant;
+	const targetFilesystem = atariFilesystemOf(target, parsed.image);
+	const variant = targetFilesystem.variant;
 	const expectedBoot = ATARI_DOS_BOOT_SECTORS[variant];
 	if (boot.sectorCount !== expectedBoot) {
 		throw new CliError(
@@ -132,7 +157,7 @@ export async function installDosCommand(args: string[]): Promise<void> {
 	// add already pre-check a whole batch.
 	if (!parsed.force) {
 		const present = new Set(
-			[...target.filesystem.entries()].map((entry) => entry.name),
+			[...targetFilesystem.entries()].map((entry) => entry.name),
 		);
 		const clashes = payload
 			.map((file) => file.name)
@@ -149,7 +174,7 @@ export async function installDosCommand(args: string[]): Promise<void> {
 	const format = variant === "dos10" ? "dos1" : "dos2";
 	for (const file of payload) {
 		try {
-			target.filesystem.writeFile(file.name, file.bytes, {
+			targetFilesystem.writeFile(file.name, file.bytes, {
 				overwrite: parsed.force,
 				format,
 			});
@@ -158,7 +183,7 @@ export async function installDosCommand(args: string[]): Promise<void> {
 			throw new CliError(`${file.name}: ${message}`);
 		}
 	}
-	const installed = [...target.filesystem.entries()].find(
+	const installed = [...targetFilesystem.entries()].find(
 		(entry) => entry.name === dosEntry.name,
 	);
 	if (installed?.startSector === undefined) {

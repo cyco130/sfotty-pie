@@ -1779,7 +1779,15 @@ export function checkAtariName(display: string): string | null {
 	}
 }
 
-function encodeAtariName(display: string): { name: string; ext: string } {
+/**
+ * Uppercases and splits a display name into its 8 and 3 character fields,
+ * throwing a name-the-problem error when it does not fit. SpartaDOS shares
+ * the shape and the character set, so its driver uses this too.
+ */
+export function encodeAtariName(display: string): {
+	name: string;
+	ext: string;
+} {
 	const dot = display.indexOf(".");
 	const name = (dot === -1 ? display : display.slice(0, dot)).toUpperCase();
 	const ext = (dot === -1 ? "" : display.slice(dot + 1)).toUpperCase();

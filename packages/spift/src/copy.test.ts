@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import { formatAtariDos, openAtariDos } from "./atari-dos.ts";
+import { formatSpartaDos, openSpartaDos } from "./sparta-dos.ts";
 import { createBlankAtr, openAtr } from "./atr.ts";
 import { copyEntries, destinationIsDirectory } from "./copy.ts";
 import type { AtariDosVariant } from "./atari-dos.ts";
@@ -363,4 +364,140 @@ test("image to image is a no-op, both ends speaking the same set", () => {
 		move: false,
 	});
 	expect(to.readFile("a.txt")?.bytes).toEqual(raw);
+});
+
+test("timestamps travel only when preservation is asked for", () => {
+	const then = new Date(1995, 11, 17, 14, 57, 44);
+	const now = new Date(2026, 7, 11, 12, 0, 0);
+	const sparta = () => {
+		const medium = openAtr(
+			createBlankAtr({ sectorSize: 128, sectorCount: 720 }),
+		);
+		formatSpartaDos(medium, "sdfs21", { random: 1 });
+		return openSpartaDos(medium, undefined, { clock: () => now });
+	};
+	const from = sparta();
+	from.makeDirectory("old.dir", { timestamp: then });
+	from.writeFile("old.dir/dated.txt", bytes("x"), { timestamp: then });
+
+	// Without preservation the target stamps its own clock, like cp(1).
+	const fresh = sparta();
+	copyEntries(from, fresh, {
+		sources: ["*.*"],
+		destination: "/",
+		recursive: true,
+		force: false,
+		noAttributes: false,
+		move: false,
+	});
+	const freshStamps = [...fresh.entries(undefined, { recursive: true })].map(
+		(entry) => entry.timestamp,
+	);
+	expect(freshStamps).toEqual([now, now]);
+
+	// With it, entry and directory timestamps both survive, like cp -p.
+	const preserved = sparta();
+	copyEntries(from, preserved, {
+		sources: ["*.*"],
+		destination: "/",
+		recursive: true,
+		force: false,
+		noAttributes: false,
+		preserveTimestamps: true,
+		move: false,
+	});
+	const keptStamps = [...preserved.entries(undefined, { recursive: true })].map(
+		(entry) => entry.timestamp,
+	);
+	expect(keptStamps).toEqual([then, then]);
+});
+
+test("timestamps round-trip through a host directory", async () => {
+	const then = new Date(1995, 11, 17, 14, 57, 44);
+	const medium = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
+	formatSpartaDos(medium, "sdfs21", { random: 1 });
+	const from = openSpartaDos(medium);
+	from.writeFile("dated.txt", bytes("stamped"), { timestamp: then });
+
+	// Image to host: the extracted file's mtime is the entry's timestamp.
+	const out = host();
+	copyEntries(from, out, {
+		sources: ["dated.txt"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		preserveTimestamps: true,
+		move: false,
+	});
+	await out.commit();
+	const extracted = join(out.root, "dated.txt");
+	expect(statSync(extracted).mtime).toEqual(then);
+
+	// And back: the host mtime becomes the new entry's timestamp.
+	const target = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
+	formatSpartaDos(target, "sdfs21", { random: 1 });
+	const back = openSpartaDos(target);
+	copyEntries(openHostDirectory(out.root), back, {
+		sources: ["dated.txt"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		preserveTimestamps: true,
+		move: false,
+	});
+	expect([...back.entries()][0]?.timestamp).toEqual(then);
+});
+
+test("a symlink copied between SpartaDOS disks stays a symlink", () => {
+	const sparta21 = () => {
+		const medium = openAtr(
+			createBlankAtr({ sectorSize: 128, sectorCount: 720 }),
+		);
+		formatSpartaDos(medium, "sdfs21", { random: 1 });
+		return openSpartaDos(medium);
+	};
+	const from = sparta21();
+	from.writeFile("print.dev", bytes("PRN:\x9b"), { attributes: ["Symlink"] });
+	const to = sparta21();
+	copyEntries(from, to, {
+		sources: ["*.*"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		move: false,
+	});
+	const landed = [...to.entries()][0];
+	expect(landed?.attributes).toEqual(["Symlink"]);
+	expect(text(to.readFile("print.dev")?.bytes)).toBe("PRN:\x9b");
+});
+
+test("the archived flag never travels with a copy", () => {
+	// Archived is backup state relative to one disk; SDX's own COPY drops
+	// it, and so does spift's - however the copy is asked for.
+	const sparta21 = () => {
+		const medium = openAtr(
+			createBlankAtr({ sectorSize: 128, sectorCount: 720 }),
+		);
+		formatSpartaDos(medium, "sdfs21", { random: 1 });
+		return openSpartaDos(medium);
+	};
+	const from = sparta21();
+	from.writeFile("done.dat", bytes("x"), {
+		attributes: ["Archived", "ReadOnly"],
+	});
+	const to = sparta21();
+	copyEntries(from, to, {
+		sources: ["*.*"],
+		destination: "/",
+		recursive: false,
+		force: false,
+		noAttributes: false,
+		preserveTimestamps: true,
+		move: false,
+	});
+	// ReadOnly is the file's own property and travels; Archived does not.
+	expect([...to.entries()][0]?.attributes).toEqual(["ReadOnly"]);
 });

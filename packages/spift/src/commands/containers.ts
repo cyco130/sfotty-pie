@@ -7,7 +7,7 @@
 
 import { statSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import type { AtariDosVariant } from "../atari-dos.ts";
+import type { FsVariant } from "./fs-option.ts";
 import { CliError, UsageError } from "./../cli-error.ts";
 import type { FileStore } from "../filesystem.ts";
 import { openHostDirectory } from "../host-dir.ts";
@@ -22,11 +22,11 @@ export interface ContainerOptions {
 	from: string | undefined;
 	to: string | undefined;
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 	fromFs: "atari" | "sparta" | undefined;
-	fromVariant: AtariDosVariant | undefined;
+	fromVariant: FsVariant | undefined;
 	toFs: "atari" | "sparta" | undefined;
-	toVariant: AtariDosVariant | undefined;
+	toVariant: FsVariant | undefined;
 }
 
 export interface ResolvedContainers {
@@ -56,7 +56,7 @@ export function parseContainerOptions(
 		flag: string,
 	) => {
 		family: "atari" | "sparta" | undefined;
-		variant: AtariDosVariant | undefined;
+		variant: FsVariant | undefined;
 	},
 ): ContainerOptions {
 	const image = values["image"] as string | undefined;
@@ -134,7 +134,7 @@ export async function resolveContainers(
 	const openImageSide = async (
 		name: string,
 		fs: "atari" | "sparta" | undefined,
-		variant: AtariDosVariant | undefined,
+		variant: FsVariant | undefined,
 	): Promise<Side> => {
 		const image: OpenedImage = await openImageFilesystem(name, fs, variant);
 		return {

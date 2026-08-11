@@ -2,17 +2,20 @@ import { parseArgs } from "node:util";
 import {
 	readAtariDosFilePointer,
 	writeAtariDosFilePointer,
-	type AtariDosVariant,
 } from "../atari-dos.ts";
+import {
+	readSpartaDosFilePointer,
+	writeSpartaDosFilePointer,
+} from "../sparta-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { parseFsOption, type FsVariant } from "./fs-option.ts";
 import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 export interface SetDosFileArgs {
 	image: string;
 	name: string | undefined;
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 	clear: boolean;
 }
 
@@ -67,19 +70,45 @@ export async function setDosFileCommand(args: string[]): Promise<void> {
 		parsed.variant,
 	);
 	const { filesystem, medium } = opened;
-	const variant = filesystem.variant;
+
+	const readPointer = (): number =>
+		filesystem.family === "sparta"
+			? readSpartaDosFilePointer(medium)
+			: readAtariDosFilePointer(medium, filesystem.variant);
+	const writePointer = (sector: number): void => {
+		if (filesystem.family === "sparta") {
+			writeSpartaDosFilePointer(medium, sector);
+		} else {
+			writeAtariDosFilePointer(medium, filesystem.variant, sector);
+		}
+	};
 
 	if (parsed.clear) {
-		writeAtariDosFilePointer(medium, variant, 0);
+		writePointer(0);
 		await saveImage(parsed.image, opened);
 		process.stdout.write(`${parsed.image} will no longer boot\n`);
 		return;
 	}
 
+	// Atari DOS disks all boot a file called DOS.SYS; a SpartaDOS boot file
+	// can be named anything (X32G.DOS, XBW130.DOS, ...), so there is no
+	// default worth guessing.
+	if (parsed.name === undefined && filesystem.family === "sparta") {
+		throw new UsageError(
+			"name the file to boot: SpartaDOS has no conventional DOS file name",
+		);
+	}
+	// The boot loader follows the sector map wherever the file lives, so a
+	// path into a subdirectory (SpartaDOS) is as bootable as a root file.
 	const wanted = (parsed.name ?? "dos.sys").toLowerCase();
-	const entry = [...filesystem.entries()].find(
-		(candidate) => candidate.name === wanted && candidate.kind === "file",
-	);
+	let candidates;
+	try {
+		candidates = [...filesystem.entries(wanted, { listContents: false })];
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new CliError(`${parsed.image}: ${message}`);
+	}
+	const entry = candidates.find((candidate) => candidate.kind === "file");
 	// startSector is what the boot record points at, so an entry without one
 	// (a store with no sectors) could never be booted from anyway.
 	if (entry?.startSector === undefined) {
@@ -87,8 +116,8 @@ export async function setDosFileCommand(args: string[]): Promise<void> {
 	}
 	const start = entry.startSector;
 
-	const previous = readAtariDosFilePointer(medium, variant);
-	writeAtariDosFilePointer(medium, variant, start);
+	const previous = readPointer();
+	writePointer(start);
 	await saveImage(parsed.image, opened);
 	const change =
 		previous === start

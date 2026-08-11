@@ -1,8 +1,7 @@
 import { parseArgs } from "node:util";
-import type { AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import type { DirEntry, DirEntryAttribute, FileStore } from "../filesystem.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { parseFsOption, type FsVariant } from "./fs-option.ts";
 import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 /**
@@ -14,6 +13,9 @@ const ATTRIBUTE_NAMES: Record<string, DirEntryAttribute> = {
 	locked: "ReadOnly",
 	protected: "ReadOnly",
 	dos1: "AtariDos10",
+	hidden: "Hidden",
+	archived: "Archived",
+	symlink: "Symlink",
 };
 
 /**
@@ -37,7 +39,7 @@ export interface ChattrArgs {
 	settings: { attribute: DirEntryAttribute; on: boolean }[];
 	specs: string[];
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 	recursive: boolean;
 	force: boolean;
 }

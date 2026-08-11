@@ -92,7 +92,13 @@ export async function mvCommand(args: string[]): Promise<void> {
 	// (dropping DOS 1.0 format, say) and cannot be honoured by an entry
 	// rewrite that never touches the data sectors.
 	if (!containers.sameContainer || parsed.noAttributes) {
-		await runCopy({ ...parsed, recursive: true }, true);
+		// The preservation flag is runCopy's to force: a move carries its
+		// metadata with it, as mv(1) does (in-store moves below keep the
+		// entry bytes and never had anything to lose).
+		await runCopy(
+			{ ...parsed, recursive: true, preserveTimestamps: true },
+			true,
+		);
 		return;
 	}
 

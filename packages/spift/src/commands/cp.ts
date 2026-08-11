@@ -18,6 +18,8 @@ export interface CpArgs {
 	recursive: boolean;
 	force: boolean;
 	noAttributes: boolean;
+	/** Carry timestamps across, as cp -p does; a cross-container mv always does. */
+	preserveTimestamps: boolean;
 	text: boolean;
 	strict: boolean;
 	eol: EolStyle;
@@ -33,6 +35,7 @@ export function parseCpArgs(args: string[]): CpArgs {
 				recursive: { type: "boolean", short: "R" },
 				r: { type: "boolean" },
 				force: { type: "boolean", short: "f" },
+				preserve: { type: "boolean", short: "p" },
 				"no-attributes": { type: "boolean" },
 				text: { type: "boolean" },
 				strict: { type: "boolean" },
@@ -60,6 +63,7 @@ export function parseCpArgs(args: string[]): CpArgs {
 		recursive: values.recursive === true || values.r === true,
 		force: values.force ?? false,
 		noAttributes: values["no-attributes"] ?? false,
+		preserveTimestamps: values.preserve ?? false,
 		text: values.text ?? false,
 		strict: values.strict ?? false,
 		eol: parseEol(values.eol),
@@ -96,6 +100,8 @@ export async function runCopy(parsed: CpArgs, move: boolean): Promise<void> {
 			text: parsed.text,
 			strict: parsed.strict,
 			eol: parsed.eol,
+			// mv(1) always moves the metadata with the file; cp(1) needs -p.
+			preserveTimestamps: parsed.preserveTimestamps || move,
 			move,
 		});
 	} catch (error) {

@@ -8,6 +8,13 @@ import {
 	writeAtariDosFilePointer,
 	type AtariDosVariant,
 } from "../atari-dos.ts";
+import {
+	formatSpartaDos,
+	openSpartaDos,
+	readSpartaDosFilePointer,
+	writeSpartaDosFilePointer,
+	type SpartaDosVariant,
+} from "../sparta-dos.ts";
 import { openAtr, type AtrImage } from "../atr.ts";
 import {
 	adaptBootRecord,
@@ -17,34 +24,21 @@ import {
 import { extractBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { openHostDirectory } from "../host-dir.ts";
-import { parseFsOption } from "./fs-option.ts";
-import { openImageFilesystem } from "./open-image.ts";
+import { parseFsOption, type FsSelection } from "./fs-option.ts";
+import { openImageFilesystem, type OpenedImage } from "./open-image.ts";
 import { BOOT_FILE } from "./pack.ts";
 
 export interface MkfsArgs {
 	image: string;
-	variant: AtariDosVariant | undefined;
+	family: "atari" | "sparta" | undefined;
+	variant: AtariDosVariant | SpartaDosVariant | undefined;
 	bootSectors: string | undefined;
 	/** An image or unpacked directory to take the boot record from. */
 	master: string | undefined;
 	/** Copy the master's DOS files too, and mark the disk bootable. */
 	installDos: boolean;
-}
-
-function parseVariant(text: string, flag: string): AtariDosVariant {
-	const selection = parseFsOption(text, flag);
-	if (selection.family !== "atari") {
-		throw new UsageError(
-			`only atari filesystems can be created so far, not "${text}"`,
-		);
-	}
-	if (selection.variant === undefined) {
-		throw new UsageError(
-			`${flag} needs a variant to create (for example atari/dos20); ` +
-				`omit ${flag} entirely to pick one from the geometry`,
-		);
-	}
-	return selection.variant;
+	/** SpartaDOS volume name (the family with one). */
+	volumeName: string | undefined;
 }
 
 export function parseMkfsArgs(args: string[]): MkfsArgs {
@@ -59,6 +53,7 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 				"boot-sectors": { type: "string" },
 				master: { type: "string" },
 				"install-dos": { type: "boolean" },
+				"volume-name": { type: "string" },
 			},
 			allowPositionals: true,
 		});
@@ -91,19 +86,41 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 		throw new UsageError("--install-dos needs --master to copy the DOS from");
 	}
 
-	let variant: AtariDosVariant | undefined;
+	let selection: FsSelection | undefined;
 	if (values.fs !== undefined) {
-		variant = parseVariant(values.fs, "--fs");
+		selection = parseFsOption(values.fs, "--fs");
 	} else if (values.variant !== undefined) {
-		variant = parseVariant(values.variant, "--variant");
+		selection = parseFsOption(values.variant, "--variant");
+	}
+	if (values["volume-name"] !== undefined && selection?.family !== "sparta") {
+		throw new UsageError(
+			"--volume-name is SpartaDOS's (the Atari DOS family has no label); " +
+				"say --fs sparta to make one",
+		);
+	}
+	// SpartaDOS identifies a disk by its volume name (with the sequence and
+	// random numbers) for the guest's disk-change detection - and 1.1 by the
+	// name alone - so a blank one risks two disks reading as the same. The
+	// formatters require it; so does mkfs.
+	if (
+		selection?.family === "sparta" &&
+		(values["volume-name"] ?? "").trim() === ""
+	) {
+		throw new UsageError(
+			"a SpartaDOS filesystem needs a volume name (--volume-name NAME): " +
+				"it identifies the disk for change detection, and SpartaDOS 1.1 " +
+				"relies on it being unique",
+		);
 	}
 
 	return {
 		image,
-		variant,
+		family: selection?.family,
+		variant: selection?.variant,
 		bootSectors: values["boot-sectors"],
 		master: values.master,
 		installDos: values["install-dos"] ?? false,
+		volumeName: values["volume-name"],
 	};
 }
 
@@ -137,12 +154,25 @@ export async function mkfsCommand(args: string[]): Promise<void> {
 	const master =
 		parsed.master === undefined ? undefined : await openMaster(parsed.master);
 
+	if (parsed.family === "sparta") {
+		await mkfsSparta(parsed, medium, bootSectors, master);
+		return;
+	}
+	await mkfsAtari(parsed, medium, bootSectors, master);
+}
+
+async function mkfsAtari(
+	parsed: MkfsArgs,
+	medium: AtrImage,
+	bootSectors: Uint8Array | undefined,
+	master: MasterFiles | undefined,
+): Promise<void> {
 	// The master deliberately does NOT settle the variant. Its filesystem
 	// says how the master itself was formatted, not which DOS it carries:
 	// the DOS 2.5 distribution disk is 720 sectors of plain dos20s format,
 	// because 2.5 only differs at enhanced density. Inferring from it would
 	// quietly build a DOS 2.0 filesystem for a DOS 2.5 disk.
-	let variant = parsed.variant;
+	let variant = parsed.variant as AtariDosVariant | undefined;
 	if (variant === undefined) {
 		variant = defaultAtariDosVariant(medium.sectorSize, medium.sectorCount);
 		if (variant === undefined) {
@@ -195,7 +225,7 @@ export async function mkfsCommand(args: string[]): Promise<void> {
 
 	let installed: string[] = [];
 	if (parsed.installDos && master !== undefined) {
-		installed = await installFrom(master, medium, variant, parsed.image);
+		installed = installAtariFrom(master, medium, variant, parsed.image);
 	}
 
 	await writeFile(parsed.image, medium.bytes);
@@ -217,11 +247,65 @@ export async function mkfsCommand(args: string[]): Promise<void> {
 	);
 }
 
+async function mkfsSparta(
+	parsed: MkfsArgs,
+	medium: AtrImage,
+	bootSectors: Uint8Array | undefined,
+	master: MasterFiles | undefined,
+): Promise<void> {
+	// SDX 4.50 formats every geometry as SDFS 2.1, so that is the default;
+	// sdfs20 writes the same layout under the older revision byte.
+	const variant = (parsed.variant as SpartaDosVariant | undefined) ?? "sdfs21";
+
+	// A master's boot record travels verbatim: the parameter block inside
+	// it is overwritten by the formatter anyway, so unlike the Atari DOS
+	// family there is nothing to adapt.
+	const record = master !== undefined ? master.boot : bootSectors;
+
+	let result;
+	try {
+		result = formatSpartaDos(medium, variant, {
+			...(record === undefined ? {} : { bootSectors: record }),
+			...(parsed.volumeName === undefined
+				? {}
+				: { volumeName: parsed.volumeName }),
+		});
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new CliError(`${parsed.image}: ${message}`);
+	}
+
+	let installed: string | undefined;
+	if (parsed.installDos && master !== undefined) {
+		installed = installSpartaFrom(master, medium, parsed.image);
+	}
+
+	await writeFile(parsed.image, medium.bytes);
+	const wasted =
+		result.unusableSectors > 0
+			? `, ${result.unusableSectors} sector(s) beyond its reach`
+			: "";
+	const boot =
+		installed !== undefined
+			? `, boots ${installed}`
+			: parsed.master !== undefined
+				? `, boot record from ${parsed.master}, no DOS file`
+				: parsed.bootSectors !== undefined
+					? `, boot record from ${parsed.bootSectors}`
+					: "";
+	process.stdout.write(
+		`made a sparta/${result.variant} filesystem on ${parsed.image}: ` +
+			`${result.freeSectors} free sectors${wasted}${boot}\n`,
+	);
+}
+
 interface MasterFiles {
 	/** The boot record, ready to be fitted and written. */
 	boot: Uint8Array;
 	/** Reads a file the master holds, or null when it has none. */
 	read(name: string): Uint8Array | null;
+	/** The opened image, when the master is one (not an unpacked tree). */
+	opened: OpenedImage | undefined;
 	name: string;
 }
 
@@ -246,6 +330,7 @@ async function openMaster(path: string): Promise<MasterFiles> {
 		return {
 			boot: Uint8Array.from(boot.bytes),
 			read: (name) => store.readFile(name)?.bytes ?? null,
+			opened: undefined,
 			name: path,
 		};
 	}
@@ -260,6 +345,7 @@ async function openMaster(path: string): Promise<MasterFiles> {
 	return {
 		boot: Uint8Array.from(boot),
 		read: (name) => opened.filesystem.readFile(name)?.bytes ?? null,
+		opened,
 		name: path,
 	};
 }
@@ -269,12 +355,12 @@ async function openMaster(path: string): Promise<MasterFiles> {
  * own "write DOS files" does. DOS 1.0 has no DUP.SYS; every later one keeps
  * the menu in a second file beside DOS.SYS.
  */
-async function installFrom(
+function installAtariFrom(
 	master: MasterFiles,
 	medium: AtrImage,
 	variant: AtariDosVariant,
 	image: string,
-): Promise<string[]> {
+): string[] {
 	const wanted = variant === "dos10" ? ["dos.sys"] : ["dos.sys", "dup.sys"];
 	const filesystem = openAtariDos(medium, variant);
 	const written: string[] = [];
@@ -306,4 +392,75 @@ async function installFrom(
 		medium.writeSector(1, record);
 	}
 	return written;
+}
+
+/**
+ * Copies a SpartaDOS master's boot file across and points the boot record
+ * at the copy, the way XINIT and the BOOT command do. The file is found
+ * through the master's own boot pointer - its name is arbitrary
+ * (XBW130.DOS, X32G.DOS, ...), so only the pointer knows it.
+ */
+function installSpartaFrom(
+	master: MasterFiles,
+	medium: AtrImage,
+	image: string,
+): string {
+	if (master.opened === undefined) {
+		throw new CliError(
+			`${master.name}: installing a SpartaDOS boot file needs an image ` +
+				`master - only its boot record knows which file boots ` +
+				`(an unpacked tree keeps no such pointer)`,
+		);
+	}
+	const pointer = readSpartaDosFilePointer(master.opened.medium);
+	if (pointer === 0) {
+		throw new CliError(`${master.name} is not bootable, nothing to install`);
+	}
+	// The boot loader follows the pointer wherever the file lives - BW-DOS
+	// distribution disks keep XBW130.DOS in a subdirectory - so the whole
+	// tree is searched.
+	const entry = [
+		...master.opened.filesystem.entries(undefined, { recursive: true }),
+	].find(
+		(candidate) =>
+			candidate.startSector === pointer && candidate.kind === "file",
+	);
+	if (entry === undefined) {
+		throw new CliError(
+			`${master.name}: its boot record points at sector map ${pointer}, ` +
+				`which no file on the disk owns`,
+		);
+	}
+	if (entry.name === "") {
+		// Real disks exist whose boot file has an all-blank name (only the
+		// pointer knows it); a nameless copy could never be addressed.
+		throw new CliError(
+			`${master.name}: its boot file has a blank name; copy it by hand ` +
+				`and point set-dos-file at the copy`,
+		);
+	}
+	const contents = master.opened.filesystem.readFile(entry.path);
+	if (contents === null) {
+		throw new CliError(`${master.name}: ${entry.path} did not read`);
+	}
+	for (const diagnostic of contents.diagnostics) {
+		process.stderr.write(
+			`spift: ${master.name}: ${entry.name}: ${diagnostic}\n`,
+		);
+	}
+	const filesystem = openSpartaDos(medium);
+	try {
+		filesystem.writeFile(entry.name, contents.bytes);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new CliError(`${image}: ${entry.name}: ${message}`);
+	}
+	const landed = [...filesystem.entries()].find(
+		(candidate) => candidate.name === entry.name,
+	);
+	if (landed?.startSector === undefined) {
+		throw new CliError(`${image}: ${entry.name} did not land on the disk`);
+	}
+	writeSpartaDosFilePointer(medium, landed.startSector);
+	return entry.name;
 }

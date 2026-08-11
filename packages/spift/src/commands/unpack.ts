@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { compileSpec, type AtariDosVariant } from "../atari-dos.ts";
+import { compileSpec } from "../atari-dos.ts";
 import type { DirEntry } from "../filesystem.ts";
 import type { EolStyle } from "../text.ts";
 import { extractBootSectors } from "../boot-sectors.ts";
@@ -9,7 +9,7 @@ import { CliError, UsageError } from "../cli-error.ts";
 import { copyEntries } from "../copy.ts";
 import { openHostDirectory } from "../host-dir.ts";
 import { parseEol } from "./eol-option.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { parseFsOption, type FsVariant } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
 import { BOOT_FILE } from "./pack.ts";
 
@@ -17,9 +17,10 @@ export interface UnpackArgs {
 	image: string;
 	directory: string;
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 	extractBootSectors: boolean;
 	force: boolean;
+	noTimestamps: boolean;
 	text: string[];
 	eol: EolStyle;
 }
@@ -34,6 +35,7 @@ export function parseUnpackArgs(args: string[]): UnpackArgs {
 				fs: { type: "string" },
 				"extract-boot-sectors": { type: "boolean" },
 				text: { type: "string", multiple: true },
+				"no-timestamps": { type: "boolean" },
 				eol: { type: "string" },
 				force: { type: "boolean", short: "f" },
 			},
@@ -65,6 +67,7 @@ export function parseUnpackArgs(args: string[]): UnpackArgs {
 		variant: selection?.variant,
 		extractBootSectors: values["extract-boot-sectors"] ?? false,
 		force: values.force ?? false,
+		noTimestamps: values["no-timestamps"] ?? false,
 		text: values.text ?? [],
 		eol: parseEol(values.eol),
 	};
@@ -111,6 +114,8 @@ export async function unpackCommand(args: string[]): Promise<void> {
 			text: specs.length > 0,
 			textMatch: textMatcher,
 			eol: parsed.eol,
+			// An archiver carries timestamps unless told not to, like tar.
+			preserveTimestamps: !parsed.noTimestamps,
 			move: false,
 		});
 	} catch (error) {

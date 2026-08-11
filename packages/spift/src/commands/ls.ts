@@ -1,15 +1,16 @@
 import { parseArgs } from "node:util";
-import { atariDosLabel, type AtariDosVariant } from "../atari-dos.ts";
+import { atariDosLabel } from "../atari-dos.ts";
+import { spartaDosLabel } from "../sparta-dos.ts";
 import type { DirEntry, DirEntryAttribute, VolumeInfo } from "../filesystem.ts";
 import { CliError, UsageError } from "../cli-error.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { parseFsOption, type FsVariant } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
 
 export interface LsArgs {
 	image: string;
 	spec: string | undefined;
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 	long: boolean;
 	verbose: boolean;
 	recursive: boolean;
@@ -89,7 +90,10 @@ export async function lsCommand(args: string[]): Promise<void> {
 					sectorSize: medium.sectorSize,
 				},
 				{
-					id: atariDosLabel(filesystem.variant),
+					id:
+						filesystem.family === "sparta"
+							? spartaDosLabel(filesystem.variant)
+							: atariDosLabel(filesystem.variant),
 					volume: filesystem.volume(),
 				},
 				color,
@@ -147,6 +151,9 @@ const ATTRIBUTE_LABELS: Record<DirEntryAttribute, string> = {
 	Deleted: "deleted",
 	OpenForOutput: "open-output",
 	BootFile: "dos-file",
+	Hidden: "hidden",
+	Archived: "archived",
+	Symlink: "symlink",
 	AtariDos10: "dos1",
 	AtariDos25: "dos2.5",
 	AtariMyDos: "mydos",
@@ -157,6 +164,9 @@ const ATTRIBUTE_COLORS: Record<DirEntryAttribute, string> = {
 	OpenForOutput: "35",
 	ReadOnly: "33",
 	BootFile: "1;32",
+	Hidden: "2",
+	Archived: "2",
+	Symlink: "36",
 	AtariDos10: "36",
 	AtariDos25: "36",
 	AtariMyDos: "36",
@@ -206,6 +216,8 @@ export function renderLong(
 		name: displayName(entry),
 		nameCodes: nameColor(entry),
 		sectors: entry.sectors === undefined ? "" : String(entry.sectors),
+		size: entry.size === undefined ? "" : String(entry.size),
+		timestamp: renderTimestamp(entry.timestamp),
 		start: entry.startSector === undefined ? "" : String(entry.startSector),
 		// Names carry no marker, so this column is where a directory is
 		// spelled out for anything that cannot see color.
@@ -223,21 +235,43 @@ export function renderLong(
 		texts.reduce((max, text) => Math.max(max, text.length), 0);
 	const nameWidth = width(rows.map((row) => row.name));
 	const sectorsWidth = width(rows.map((row) => row.sectors));
+	const sizeWidth = width(rows.map((row) => row.size));
+	const timestampWidth = width(rows.map((row) => row.timestamp));
 	const startWidth = width(rows.map((row) => row.start));
 	let out = "";
 	for (const row of rows) {
 		const attributes = row.attributes
 			.map(({ label, codes }) => paint(label, codes))
 			.join(" ");
-		out +=
-			[
-				paint(row.name.padEnd(nameWidth), row.nameCodes),
-				row.sectors.padStart(sectorsWidth),
-				paint(row.start.padStart(startWidth), "2"),
-			].join("  ") + (attributes === "" ? "" : "  " + attributes);
+		// A family without a column - Atari DOS has no sizes or timestamps,
+		// SpartaDOS reports no sector counts - contributes zero width, and
+		// its column vanishes rather than printing as a rail of blanks.
+		const columns = [
+			paint(row.name.padEnd(nameWidth), row.nameCodes),
+			...(sectorsWidth === 0 ? [] : [row.sectors.padStart(sectorsWidth)]),
+			...(sizeWidth === 0 ? [] : [row.size.padStart(sizeWidth)]),
+			...(timestampWidth === 0
+				? []
+				: [paint(row.timestamp.padEnd(timestampWidth), "2")]),
+			...(startWidth === 0 ? [] : [paint(row.start.padStart(startWidth), "2")]),
+		];
+		out += columns.join("  ") + (attributes === "" ? "" : "  " + attributes);
 		out += "\n";
 	}
 	return out;
+}
+
+/** "1995-12-11 14:57:44", or nothing when the entry carries no time. */
+function renderTimestamp(timestamp: Date | undefined): string {
+	if (timestamp === undefined) {
+		return "";
+	}
+	const pad = (value: number): string => String(value).padStart(2, "0");
+	return (
+		`${timestamp.getFullYear()}-${pad(timestamp.getMonth() + 1)}-` +
+		`${pad(timestamp.getDate())} ${pad(timestamp.getHours())}:` +
+		`${pad(timestamp.getMinutes())}:${pad(timestamp.getSeconds())}`
+	);
 }
 
 // Names are the names; directories are shown by color, and -l spells out

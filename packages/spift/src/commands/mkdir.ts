@@ -1,14 +1,13 @@
 import { parseArgs } from "node:util";
-import type { AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { parseFsOption, type FsVariant } from "./fs-option.ts";
 import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 export interface MkdirArgs {
 	image: string;
 	paths: string[];
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 	parents: boolean;
 }
 

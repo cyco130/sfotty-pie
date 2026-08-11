@@ -1,35 +1,28 @@
 // Filesystem family detection, following the OneDOS ladder adapted for
 // images: geometry comes from the container instead of PERCOM/status.
+// SpartaDOS goes first - its boot signature plus a validated parameter
+// block outranks the Atari DOS VTOC heuristics - and the validation
+// matters: 38 of the 150 signature hits in the corpus are boot-only game
+// disks reusing the Sparta loader over garbage parameters.
 
 import type { SectorMedium } from "./sector-medium.ts";
 import { detectAtariDos, type AtariDosVariant } from "./atari-dos.ts";
+import { detectSpartaDos, type SpartaDosVariant } from "./sparta-dos.ts";
 
 export type DetectedFilesystem =
 	| { family: "atari"; variant: AtariDosVariant }
-	| { family: "sparta" };
+	| { family: "sparta"; variant: SpartaDosVariant };
 
 export function detectFilesystem(
 	medium: SectorMedium,
 ): DetectedFilesystem | undefined {
-	if (isSpartaBoot(medium)) {
-		return { family: "sparta" };
+	const sparta = detectSpartaDos(medium);
+	if (sparta !== undefined) {
+		return { family: "sparta", variant: sparta };
 	}
 	const variant = detectAtariDos(medium);
 	if (variant !== undefined) {
 		return { family: "atari", variant };
 	}
 	return undefined;
-}
-
-function isSpartaBoot(medium: SectorMedium): boolean {
-	const boot = medium.readSector(1);
-	if (boot === null) {
-		return false;
-	}
-	// JMP $xx80 at offset 6 ($30xx for SpartaDOS, $08xx for BW-DOS), or
-	// JMP $0440 for 512-byte-sector images.
-	return (
-		boot[6] === 0x4c &&
-		(boot[7] === 0x80 || (boot[7] === 0x40 && boot[8] === 0x04))
-	);
 }

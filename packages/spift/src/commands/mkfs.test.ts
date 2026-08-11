@@ -38,11 +38,31 @@ test("validates the argument list", () => {
 	expect(() =>
 		parseMkfsArgs(["-i", "a.atr", "--fs", "atari/dos25", "--variant", "mydos"]),
 	).toThrow(/mutually exclusive/);
+	// A bare family means "pick the variant for me": geometry decides for
+	// atari, and sparta defaults to what SDX itself formats (sdfs21).
+	expect(
+		parseMkfsArgs(["-i", "a.atr", "--fs", "sparta", "--volume-name", "vol"]),
+	).toMatchObject({ family: "sparta", variant: undefined, volumeName: "vol" });
+	expect(parseMkfsArgs(["-i", "a.atr", "--fs", "atari"])).toMatchObject({
+		family: "atari",
+		variant: undefined,
+	});
+	expect(
+		parseMkfsArgs([
+			"-i",
+			"a.atr",
+			"--fs",
+			"sparta/sdfs20",
+			"--volume-name",
+			"v",
+		]).variant,
+	).toBe("sdfs20");
+	// SpartaDOS needs a volume name.
 	expect(() => parseMkfsArgs(["-i", "a.atr", "--fs", "sparta"])).toThrow(
-		/only atari filesystems/,
+		/needs a volume name/,
 	);
-	expect(() => parseMkfsArgs(["-i", "a.atr", "--fs", "atari"])).toThrow(
-		/needs a variant/,
+	expect(() => parseMkfsArgs(["-i", "a.atr", "--volume-name", "work"])).toThrow(
+		/--volume-name is SpartaDOS's/,
 	);
 	expect(() => parseMkfsArgs(["-i", "a.atr", "--fs", "c64/1541"])).toThrow(
 		/unsupported filesystem family "c64"/,

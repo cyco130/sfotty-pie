@@ -17,7 +17,7 @@
 // it already wrote stays, exactly as a half-written image file would.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import {
 	dirname,
 	isAbsolute,
@@ -45,7 +45,7 @@ export interface HostDirectory extends FileStore {
 }
 
 type PendingEntry =
-	| { kind: "file"; bytes: Uint8Array; readOnly: boolean }
+	| { kind: "file"; bytes: Uint8Array; readOnly: boolean; timestamp?: Date }
 	| { kind: "dir" }
 	| { kind: "attrs"; readOnly: boolean }
 	| { kind: "removed" };
@@ -111,7 +111,7 @@ export function openHostDirectory(
 	/** What the store shows for a path, overlay first, then the disk. */
 	function peek(
 		path: string,
-	): { kind: "file" | "dir"; readOnly: boolean } | null {
+	): { kind: "file" | "dir"; readOnly: boolean; timestamp?: Date } | null {
 		const staged = overlay.get(path);
 		if (staged?.kind === "removed") {
 			return null;
@@ -120,7 +120,13 @@ export function openHostDirectory(
 			return { kind: "dir", readOnly: false };
 		}
 		if (staged?.kind === "file") {
-			return { kind: "file", readOnly: staged.readOnly };
+			return {
+				kind: "file",
+				readOnly: staged.readOnly,
+				...(staged.timestamp === undefined
+					? {}
+					: { timestamp: staged.timestamp }),
+			};
 		}
 		const found = statSync(path, { throwIfNoEntry: false });
 		if (found === undefined) {
@@ -130,6 +136,7 @@ export function openHostDirectory(
 			return {
 				kind: found.isDirectory() ? "dir" : "file",
 				readOnly: staged.readOnly,
+				timestamp: found.mtime,
 			};
 		}
 		return {
@@ -137,6 +144,7 @@ export function openHostDirectory(
 			// The owner-write bit is the closest thing the host has to the
 			// DOSes' locked flag.
 			readOnly: (found.mode & 0o200) === 0,
+			timestamp: found.mtime,
 		};
 	}
 
@@ -192,6 +200,9 @@ export function openHostDirectory(
 					name,
 					path: display(path),
 					kind: found.kind,
+					...(found.timestamp === undefined
+						? {}
+						: { timestamp: found.timestamp }),
 					attributes: attributesOf(found.readOnly),
 				};
 			}
@@ -261,7 +272,11 @@ export function openHostDirectory(
 		writeFile(
 			path: string,
 			bytes: Uint8Array,
-			options?: { overwrite?: boolean; attributes?: DirEntryAttributes },
+			options?: {
+				overwrite?: boolean;
+				attributes?: DirEntryAttributes;
+				timestamp?: Date;
+			},
 		): string[] {
 			const where = absolute(path);
 			const existing = peek(where);
@@ -275,6 +290,9 @@ export function openHostDirectory(
 				kind: "file",
 				bytes,
 				readOnly: options?.attributes?.includes("ReadOnly") === true,
+				...(options?.timestamp === undefined
+					? {}
+					: { timestamp: options.timestamp }),
 			});
 			return [];
 		},
@@ -323,6 +341,10 @@ export function openHostDirectory(
 			this.writeFile(to, contents.bytes, {
 				overwrite: options?.force,
 				attributes: attributesOf(source?.readOnly === true),
+				// A move carries its metadata, as mv(1) does.
+				...(source?.timestamp === undefined
+					? {}
+					: { timestamp: source.timestamp }),
 			});
 			overlay.set(absolute(from), { kind: "removed" });
 			return [];
@@ -400,6 +422,10 @@ export function openHostDirectory(
 					// eight-sector allocation the user has to ask for.
 					await mkdir(dirname(path), { recursive: true });
 					await writeFile(path, staged.bytes);
+					// Before the read-only chmod, which would forbid it.
+					if (staged.timestamp !== undefined) {
+						await utimes(path, staged.timestamp, staged.timestamp);
+					}
 					if (staged.readOnly) {
 						await chmod(path, 0o444);
 					}

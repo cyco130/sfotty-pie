@@ -1,8 +1,7 @@
 import { parseArgs } from "node:util";
-import type { AtariDosVariant } from "../atari-dos.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { atasciiGlyph } from "../text.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { parseFsOption, type FsVariant } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
 
 export interface HexdumpArgs {
@@ -10,7 +9,7 @@ export interface HexdumpArgs {
 	specs: string[];
 	sectors: { first: number; last: number } | undefined;
 	fs: "atari" | "sparta" | undefined;
-	variant: AtariDosVariant | undefined;
+	variant: FsVariant | undefined;
 }
 
 export function parseHexdumpArgs(args: string[]): HexdumpArgs {

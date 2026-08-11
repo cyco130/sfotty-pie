@@ -34,6 +34,7 @@ export interface PackArgs {
 	writeBootSectors: boolean;
 	setDosFile: string | undefined;
 	force: boolean;
+	noTimestamps: boolean;
 	text: string[];
 	strict: boolean;
 }
@@ -60,6 +61,7 @@ export function parsePackArgs(args: string[]): PackArgs {
 				"write-boot-sectors": { type: "boolean" },
 				"set-dos-file": { type: "string" },
 				text: { type: "string", multiple: true },
+				"no-timestamps": { type: "boolean" },
 				strict: { type: "boolean" },
 				force: { type: "boolean", short: "f" },
 			},
@@ -161,6 +163,7 @@ export function parsePackArgs(args: string[]): PackArgs {
 		writeBootSectors: values["write-boot-sectors"] ?? false,
 		setDosFile: values["set-dos-file"],
 		force: values.force ?? false,
+		noTimestamps: values["no-timestamps"] ?? false,
 		text: values.text ?? [],
 		strict: values.strict ?? false,
 	};
@@ -259,6 +262,8 @@ export async function packCommand(args: string[]): Promise<void> {
 					? undefined
 					: (entry) => textPatterns.some((matches) => matches(entry.name)),
 			strict: parsed.strict,
+			// An archiver carries timestamps unless told not to, like tar.
+			preserveTimestamps: !parsed.noTimestamps,
 			move: false,
 		});
 	} catch (error) {

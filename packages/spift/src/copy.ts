@@ -41,6 +41,12 @@ export interface CopyRequest {
 	strict?: boolean;
 	/** With text: what EOL becomes on the way out of a family encoding. */
 	eol?: EolStyle;
+	/**
+	 * Carry each entry's timestamp to the target instead of letting it
+	 * stamp "now". What cp -p and mv mean on Unix, and what an archiver
+	 * does by default - so cp leaves it off, mv and pack/unpack turn it on.
+	 */
+	preserveTimestamps?: boolean;
 }
 
 export interface CopiedFile {
@@ -80,10 +86,20 @@ export function destinationIsDirectory(
 }
 
 /**
+ * Attributes that never travel with a copy even though a target could write
+ * them. Archived is backup state relative to one particular disk: a copy is
+ * a new file no archiver has seen, so it arrives unarchived - measured on
+ * SDX 4.50, whose own COPY drops the bit (and whose writes clear it on
+ * modification).
+ */
+const NON_PORTABLE: readonly DirEntryAttribute[] = ["Archived"];
+
+/**
  * What of an entry's attributes survives the trip: the ones the target can
- * actually set. Allocation-specific markings and the boot-file derivation are
- * not in any store's writable set, so they drop out here rather than being
- * special-cased. --no-attributes drops the rest too.
+ * actually set, minus the ones that are not properties of the file at all
+ * (see NON_PORTABLE). Allocation-specific markings and the boot-file
+ * derivation are not in any store's writable set, so they drop out here
+ * rather than being special-cased. --no-attributes drops the rest too.
  */
 export function portableAttributes(
 	target: FileStore,
@@ -93,8 +109,10 @@ export function portableAttributes(
 	if (drop) {
 		return [];
 	}
-	return attributes.filter((attribute) =>
-		target.writableAttributes.includes(attribute),
+	return attributes.filter(
+		(attribute) =>
+			target.writableAttributes.includes(attribute) &&
+			!NON_PORTABLE.includes(attribute),
 	);
 }
 
@@ -151,7 +169,7 @@ export function copyEntries(
 		from: DirEntry;
 		to: string;
 	}
-	const plannedDirectories: string[] = [];
+	const plannedDirectories: { path: string; timestamp?: Date }[] = [];
 	const planned: Planned[] = [];
 	const nameFor = (entry: DirEntry): string => {
 		const rule = target.applyNameTemplate;
@@ -187,7 +205,7 @@ export function copyEntries(
 				throw new Error(`${entry.path} is a directory (use --recursive)`);
 			}
 			const root = under(destinationPath, nameFor(entry));
-			plannedDirectories.push(root);
+			plannedDirectories.push({ path: root, timestamp: entry.timestamp });
 			// The path alone, with no pattern after it, is what lists a whole
 			// subtree: a family pattern filters by its own rules, and the
 			// Atari ones would drop every name whose extension it did not
@@ -197,7 +215,10 @@ export function copyEntries(
 				// under the destination.
 				const relative = below.path.slice(entry.path.length + 1);
 				if (below.kind === "dir") {
-					plannedDirectories.push(safeUnder(root, relative));
+					plannedDirectories.push({
+						path: safeUnder(root, relative),
+						timestamp: below.timestamp,
+					});
 				} else {
 					planned.push({ from: below, to: safeUnder(root, relative) });
 				}
@@ -223,8 +244,13 @@ export function copyEntries(
 		}
 	}
 
-	for (const path of plannedDirectories) {
-		target.makeDirectory(path, { parents: true });
+	for (const { path, timestamp } of plannedDirectories) {
+		target.makeDirectory(path, {
+			parents: true,
+			...(request.preserveTimestamps === true && timestamp !== undefined
+				? { timestamp }
+				: {}),
+		});
 	}
 
 	const files: CopiedFile[] = [];
@@ -253,6 +279,9 @@ export function copyEntries(
 			...recoded,
 			...target.writeFile(to, payload, {
 				overwrite: request.force,
+				...(request.preserveTimestamps === true && from.timestamp !== undefined
+					? { timestamp: from.timestamp }
+					: {}),
 				attributes: [
 					...portableAttributes(target, from.attributes, request.noAttributes),
 					// After the drop, so "--to-fs atari/dos10 --no-attributes"
@@ -285,7 +314,7 @@ export function copyEntries(
 		}
 	}
 
-	return { files, directories: plannedDirectories };
+	return { files, directories: plannedDirectories.map((made) => made.path) };
 }
 
 function targetHas(target: FileStore, path: string): boolean {

@@ -7,6 +7,7 @@ import { createCommand } from "./commands/create.ts";
 import { extractBootSectorsCommand } from "./commands/extract-boot-sectors.ts";
 import { hexdumpCommand } from "./commands/hexdump.ts";
 import { installDosCommand } from "./commands/install-dos.ts";
+import { setDosFileCommand } from "./commands/set-dos-file.ts";
 import { lsCommand } from "./commands/ls.ts";
 import { mkdirCommand } from "./commands/mkdir.ts";
 import { mkfsCommand } from "./commands/mkfs.ts";
@@ -40,12 +41,6 @@ shell - so --from alone copies out and --to alone copies in. A host
 directory named outright is a container instead, and paths stay inside
 it. At least one side must be an image.`;
 
-// set-dos-file is deliberately not wired up. Pointing an Atari DOS boot
-// record at a file is not something to do by hand: mkfs --install-dos sets
-// it when it installs a DOS, and removing that file clears it again. The
-// command comes back for SpartaDOS, where the boot file is arbitrary and
-// naming it really is the user's business - src/commands/set-dos-file.ts
-// stays for that.
 const HELP: Record<string, string> = {
 	create: `  create -i FILE [-t TYPE] [-f] [--sd | --ed | --dd]
                  [--sector-size N] [--sector-count N]
@@ -53,8 +48,8 @@ const HELP: Record<string, string> = {
     the file name when omitted; supported types: atr. Defaults to --sd
     (720 x 128-byte sectors); --ed is 1040 x 128 and --dd is 720 x 256.
     Refuses to overwrite an existing file unless --force (-f) is given.`,
-	mkfs: `  mkfs -i IMAGE [--fs atari/VARIANT] [--master IMAGE|DIR]
-               [--install-dos] [--boot-sectors FILE]
+	mkfs: `  mkfs -i IMAGE [--fs FILESYSTEM] [--master IMAGE|DIR]
+               [--install-dos] [--boot-sectors FILE] [--volume-name NAME]
     Write an empty filesystem onto an image. Variants: dos10, dos20 (also
     spelled dos20s, dos20d or mydos) and dos25. DOS 2.0 and MyDOS are one
     filesystem - their VTOCs differ in a single bit, whether sector 720 is
@@ -63,10 +58,20 @@ const HELP: Record<string, string> = {
     at enhanced density, where DOS 2.5 and the DOS 2.0 layout both fit and
     you have to say which.
 
+    --fs sparta makes a SpartaDOS filesystem instead, matching SDX 4.50's
+    own FORMAT byte for byte; sdfs21 (what SDX writes everywhere) is the
+    default and sparta/sdfs20 spells the older revision. --volume-name is
+    required for SpartaDOS (it identifies the disk for change detection,
+    and 1.1 relies on it being unique). --master with --install-dos copies
+    the master's boot file - found through its boot pointer, since
+    SpartaDOS boot files have arbitrary names - and points the new disk at
+    the copy.
+
     The boot area gets spift's own record by default: it says the disk has
     no DOS and waits for RESET. --master takes the record from a disk (or
     an unpacked directory with .boot.bin) and fits it to this geometry -
-    two bytes, measured - and --install-dos then copies DOS.SYS, and
+    two bytes, measured, and nothing at all for SpartaDOS, whose record
+    travels verbatim - and --install-dos then copies DOS.SYS, and
     DUP.SYS unless DOS 1.0, and marks the disk bootable. --boot-sectors
     writes a file verbatim instead, and cannot be combined with --master.`,
 	ls: `  ls -i IMAGE [SPEC] [--fs FILESYSTEM] [-l] [-v] [-R]
@@ -102,13 +107,16 @@ const HELP: Record<string, string> = {
     copies and then removes, target written first. Moving off the host
     needs --remove-source: an image's entries survive deletion under the
     deleted flag, host files do not.`,
-	cp: `  cp [CONTAINERS] SOURCE... DESTINATION [-R] [-f] [--no-attributes]
-     [--text] [--strict] [--eol lf | crlf | native]
+	cp: `  cp [CONTAINERS] SOURCE... DESTINATION [-R] [-f] [-p]
+     [--no-attributes] [--text] [--strict] [--eol lf | crlf | native]
     Copy entries, with the same DESTINATION rules as mv - a template is
     the target's own rename rule, so '*.ttt' '*.txt' works copying out to
     the host as well as in. --recursive (-R) is needed to copy a
     directory. With the host on one side this puts files onto an image or
-    takes them off; with images on both it copies between them.`,
+    takes them off; with images on both it copies between them.
+    --preserve (-p) carries timestamps across, as cp -p does everywhere
+    (SpartaDOS entries and host mtimes carry them; Atari DOS has none);
+    without it the target stamps its own clock. mv always carries them.`,
 	chattr: `  chattr -i IMAGE SETTING... SPEC... [--fs FILESYSTEM] [-R] [-f]
     Change what an entry carries. A SETTING is name=on or name=off, and
     the leading positionals that hold an "=" are the settings; the rest
@@ -139,9 +147,10 @@ const HELP: Record<string, string> = {
     tilde looks like. --eol picks what EOL becomes (decoding only;
     encoding takes LF, CR, and CRLF alike). --in-place converts the files
     named rather than writing to stdout.`,
-	pack: `  pack -i IMAGE [DIR] [--fs atari/VARIANT] [--sd | --ed | --dd]
+	pack: `  pack -i IMAGE [DIR] [--fs FILESYSTEM] [--sd | --ed | --dd]
        [--sector-size N] [--sector-count N] [--write-boot-sectors]
        [--set-dos-file NAME] [--text SPEC]... [--strict] [-f]
+       [--no-timestamps]
     Build an image from a host directory (default: the current one):
     create it, put a filesystem on it, and copy the tree in. Geometry and
     filesystem options are create's and mkfs's. --write-boot-sectors
@@ -152,18 +161,22 @@ const HELP: Record<string, string> = {
     and needs --write-boot-sectors, since otherwise there is no boot code
     to follow the pointer. --text SPEC recodes the files it names into the family
     character set - a whole directory holds binaries too, so they have to
-    be named - with --strict to refuse what will not survive.
+    be named - with --strict to refuse what will not survive. Host mtimes
+    become entry timestamps where the filesystem has them (SpartaDOS),
+    as an archiver does; --no-timestamps stamps pack time instead.
     Refuses to overwrite an existing image without -f.`,
 	unpack: `  unpack -i IMAGE [DIR] [--fs FILESYSTEM] [--extract-boot-sectors]
          [--text SPEC]... [--eol lf | crlf | native] [-f]
+         [--no-timestamps]
     Explode an image into a host directory (default: the current one),
     made if missing, mirroring the whole tree.
     --extract-boot-sectors also writes the boot record to .boot.bin
     there, which is what lets pack rebuild a bootable disk. --text SPEC
     recodes the files it names out of the family character set (a whole
     disk holds binaries too) and repeats for more than one pattern, with
-    --eol picking what EOL becomes. Refuses to overwrite existing files
-    without -f.`,
+    --eol picking what EOL becomes. Entry timestamps become the extracted
+    files' mtimes, as an archiver does; --no-timestamps leaves extraction
+    time. Refuses to overwrite existing files without -f.`,
 	rmdir: `  rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
     Remove empty directories, freeing what they occupied. A directory
     holding anything is refused, as the DOSes refuse it.`,
@@ -177,6 +190,13 @@ const HELP: Record<string, string> = {
     record loads, and DUP.SYS beside it, then point the boot record at
     the copy. Refuses masters whose boot area or density does not match
     the target's filesystem. --force (-f) overwrites existing files.`,
+	"set-dos-file": `  set-dos-file -i IMAGE [NAME] [--fs FILESYSTEM] [--clear]
+    Point the boot record at the file the disk should boot. On SpartaDOS
+    the boot file is arbitrary and naming it is the point (there is no
+    default; XBW130.DOS, X32G.DOS, ...). On Atari DOS disks this is not
+    something to do by hand - mkfs --install-dos maintains it - but the
+    pointer can be repaired here; NAME defaults to dos.sys. --clear
+    makes the disk not boot.`,
 	cat: `  cat -i IMAGE SPEC... [--fs FILESYSTEM] [--eol lf | crlf | native]
     Write files from an image to stdout as text, reading them in the
     family character set - see recode, whose conversion this is. SPECs
@@ -317,6 +337,9 @@ async function main(): Promise<void> {
 			break;
 		case "install-dos":
 			await installDosCommand(args);
+			break;
+		case "set-dos-file":
+			await setDosFileCommand(args);
 			break;
 		case undefined:
 			process.stdout.write(usage());

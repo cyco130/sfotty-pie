@@ -81,12 +81,15 @@ export class DiskDrive implements SioDevice {
 				// protected, plus the density bits (AHRM table 44: D7
 				// enhanced, D5 double) - how software detects enhanced
 				// density on drives without the PERCOM commands; FDC status
-				// inverted (no error), format timeout.
+				// inverted (no error), format timeout. Bit 6 for a 512-byte
+				// disk follows the TOMS Turbo Drive, the one drive with a
+				// precedent to follow; PERCOM stays the honest channel.
 				return {
 					kind: "complete",
 					data: Uint8Array.of(
 						(disk.writeProtected ? 0x08 : 0) |
 							(disk.sectorSize === 256 ? 0x20 : 0) |
+							(disk.sectorSize === 512 ? 0x40 : 0) |
 							(disk.sectorSize === 128 && disk.sectorCount === 1040 ? 0x80 : 0),
 						0xff,
 						0xe0,
@@ -165,7 +168,7 @@ export class DiskDrive implements SioDevice {
 	// no disk medium can hold.
 	#configuredGeometry(
 		disk: AtrImage,
-	): { sectorSize: 128 | 256; sectorCount: number } | null {
+	): { sectorSize: 128 | 256 | 512; sectorCount: number } | null {
 		const percom = this.#pendingPercom;
 		if (percom === undefined) {
 			return { sectorSize: disk.sectorSize, sectorCount: disk.sectorCount };
@@ -176,7 +179,7 @@ export class DiskDrive implements SioDevice {
 		const sectorSize = (percom[6]! << 8) | percom[7]!;
 		const sectorCount = tracks * sectorsPerTrack * sides;
 		if (
-			(sectorSize !== 128 && sectorSize !== 256) ||
+			(sectorSize !== 128 && sectorSize !== 256 && sectorSize !== 512) ||
 			sectorCount < 1 ||
 			sectorCount > 0xffff
 		) {
@@ -190,7 +193,7 @@ export class DiskDrive implements SioDevice {
 	// bad-sector list, sized to the new sector length.
 	#format(
 		disk: AtrImage,
-		geometry: { sectorSize: 128 | 256; sectorCount: number } | null,
+		geometry: { sectorSize: 128 | 256 | 512; sectorCount: number } | null,
 	): SioCommandResponse {
 		if (disk.writeProtected || geometry === null) {
 			const frame = new Uint8Array(disk.sectorSize);
@@ -206,13 +209,14 @@ export class DiskDrive implements SioDevice {
 	}
 
 	// A sector's data-frame length. The stored sector is authoritative
-	// (boot sectors are 128 bytes even on double density); out-of-range
-	// sectors still need a length so a doomed write's data frame is
-	// consumed in step with the sender.
+	// (boot sectors are 128 bytes on double density, full size on 512-byte
+	// media); out-of-range sectors still need a length so a doomed write's
+	// data frame is consumed in step with the sender.
 	#sectorLength(sector: number): number {
 		const stored = this.disk!.readSector(sector);
 		if (stored) return stored.length;
-		return sector >= 1 && sector <= 3 ? 128 : this.disk!.sectorSize;
+		const size = this.disk!.sectorSize;
+		return sector >= 1 && sector <= 3 && size === 256 ? 128 : size;
 	}
 
 	// The 12-byte PERCOM block (AHRM table 46; two-byte fields MSB first,
@@ -240,7 +244,7 @@ export class DiskDrive implements SioDevice {
 			sectorsPerTrack = 18; // double-sided double density (XF551)
 			sides = 2;
 		}
-		const mfm = sectorSize === 256 || sectorsPerTrack === 26;
+		const mfm = sectorSize !== 128 || sectorsPerTrack === 26;
 		return Uint8Array.of(
 			tracks,
 			0, // step rate (widely ignored by software)

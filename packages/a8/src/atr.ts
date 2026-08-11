@@ -8,6 +8,11 @@
  * tools store them as full 256-byte slots; both layouts are detected by the
  * data length's remainder.
  *
+ * 512-byte-sector images (SDX-style hard disks) have no boot-sector
+ * exception at all: devices with 512-byte sectors - hard drives, the TOMS
+ * Turbo Drive - transfer every sector full size, the first ones included
+ * (AHRM ch. 10), so the layout is plain.
+ *
  * Sectors are mutable ({@link writeSector}); writes land in the same backing
  * buffer {@link toBytes} hands back, so a modified image round-trips to a
  * fresh `.atr` byte-for-byte (header included). `writeProtected` models the
@@ -25,7 +30,7 @@ export class AtrImage {
 		}
 
 		const sectorSize = contents[4]! | (contents[5]! << 8);
-		if (sectorSize !== 128 && sectorSize !== 256) {
+		if (sectorSize !== 128 && sectorSize !== 256 && sectorSize !== 512) {
 			throw new Error(`Unsupported ATR sector size (${sectorSize})`);
 		}
 
@@ -35,9 +40,9 @@ export class AtrImage {
 		this.#data = contents.subarray(16);
 
 		const length = this.#data.length;
-		if (sectorSize === 128) {
+		if (sectorSize !== 256) {
 			this.#boot128 = false;
-			this.#sectorCount = Math.floor(length / 128);
+			this.#sectorCount = Math.floor(length / sectorSize);
 		} else {
 			this.#boot128 = length % 256 === 128;
 			this.#sectorCount = this.#boot128
@@ -50,7 +55,7 @@ export class AtrImage {
 		}
 	}
 
-	get sectorSize(): 128 | 256 {
+	get sectorSize(): 128 | 256 | 512 {
 		return this.#sectorSize;
 	}
 
@@ -104,7 +109,7 @@ export class AtrImage {
 	 * the write-protect check, as with {@link writeSector}. Double-density
 	 * images get the customary 128-byte boot-sector slots.
 	 */
-	format(sectorSize: 128 | 256, sectorCount: number): void {
+	format(sectorSize: 128 | 256 | 512, sectorCount: number): void {
 		if (sectorCount < 1 || sectorCount > 0xffff) {
 			throw new Error(`Bad sector count (${sectorCount})`);
 		}
@@ -112,7 +117,7 @@ export class AtrImage {
 		const dataSize =
 			sectorSize === 256
 				? bootSlots * 128 + (sectorCount - bootSlots) * 256
-				: sectorCount * 128;
+				: sectorCount * sectorSize;
 		const raw = new Uint8Array(16 + dataSize);
 		const paragraphs = dataSize / 16;
 		raw[0] = 0x96;
@@ -130,7 +135,7 @@ export class AtrImage {
 		this.dirty = true;
 	}
 
-	#sectorSize: 128 | 256;
+	#sectorSize: 128 | 256 | 512;
 	#sectorCount: number;
 	// The full image (header + data); #data views the data region of the same
 	// buffer, so writes through #data are visible in #raw and thus toBytes().
@@ -142,11 +147,16 @@ export class AtrImage {
 	// The data-region offset and transfer length of a 1-based sector, or null
 	// when out of range. Boot sectors (1-3) always transfer 128 bytes; on a
 	// double-density image they occupy 128- or 256-byte slots per #boot128.
+	// The exception is 256-byte-only: 512-byte devices transfer every sector
+	// full size, the first ones included.
 	#locate(sector: number): { offset: number; length: number } | null {
 		if (sector < 1 || sector > this.sectorCount) return null;
 
-		if (this.sectorSize === 128) {
-			return { offset: (sector - 1) * 128, length: 128 };
+		if (this.sectorSize !== 256) {
+			return {
+				offset: (sector - 1) * this.sectorSize,
+				length: this.sectorSize,
+			};
 		}
 
 		if (sector <= 3) {

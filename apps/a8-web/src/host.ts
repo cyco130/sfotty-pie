@@ -157,11 +157,13 @@ export interface DriveBankEntry {
 	writeProtected: boolean;
 	/** Unsaved in-session writes (the disk's dirty flag). */
 	modified: boolean;
-	/** The ATR density tag: SD (128b/720), ED (128b/1040), DD (256b). */
-	density: "SD" | "ED" | "DD";
+	/** The ATR density tag: SD (128b/720), ED (128b/1040), DD (256b),
+	 *  HD (512b, SDX-style hard disk images). */
+	density: "SD" | "ED" | "DD" | "HD";
 }
 
 function density(disk: AtrImage): DriveBankEntry["density"] {
+	if (disk.sectorSize === 512) return "HD";
 	if (disk.sectorSize === 256) return "DD";
 	return disk.sectorCount > 720 ? "ED" : "SD";
 }

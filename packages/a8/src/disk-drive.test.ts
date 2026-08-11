@@ -123,3 +123,23 @@ test("format refuses protected media and impossible geometries", () => {
 	expect(d.command(frame(0x21)).kind).toBe("error");
 	expect(d.disk!.sectorCount).toBe(720); // untouched
 });
+
+test("512-byte disk: status bit 6, natural PERCOM, full-size sector 1", () => {
+	const d = drive(makeAtr(512, 64));
+	// The TOMS Turbo Drive precedent: bit 6 flags a 512-byte disk, and the
+	// PERCOM block is the honest channel ($0200 sector size, MFM).
+	expect(data(d.command(frame(0x53)))[0]).toBe(0x40);
+	expect(data(d.command(frame(0x4e)))).toEqual([
+		1, 0, 0, 64, 0, 4, 2, 0, 0xff, 0, 0, 0,
+	]);
+	// Every sector transfers full size, the first ones included.
+	expect(data(d.command(frame(0x52, 1)))).toHaveLength(512);
+});
+
+test("format to 512-byte sectors via a set PERCOM block", () => {
+	const d = drive(makeAtr(128, 720));
+	sendPercom(d, [1, 0, 0, 64, 0, 4, 2, 0, 0xff, 0, 0, 0]);
+	expect(data(d.command(frame(0x21)))).toHaveLength(512);
+	expect([d.disk!.sectorSize, d.disk!.sectorCount]).toEqual([512, 64]);
+	expect(d.disk!.readSector(1)).toHaveLength(512);
+});

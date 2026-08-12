@@ -56,12 +56,13 @@ const HELP: Record<string, string> = {
     time. Refuses to overwrite existing files without -f.`,
 	pack: `  pack -i IMAGE [DIR] [--fs FILESYSTEM] [--sd | --ed | --dd]
        [--sector-size N] [--sector-count N] [--volume-name NAME]
-       [--write-boot-sectors] [--set-dos-file NAME] [--text SPEC]...
-       [--strict] [-f] [--no-timestamps]
+       [--reserve-last-sector] [--write-boot-sectors] [--set-dos-file NAME]
+       [--text SPEC]... [--strict] [-f] [--no-timestamps]
     Build an image from a host directory (default: the current one):
     create it, put a filesystem on it, and copy the tree in. Geometry and
     filesystem options are create's and mkfs's, so --fs sparta packs a
-    SpartaDOS disk (--volume-name required, as mkfs requires it).
+    SpartaDOS disk (--volume-name required, as mkfs requires it, and
+    --reserve-last-sector carried over the same way).
     --write-boot-sectors takes the boot record from .boot.bin in the
     directory and points it at dos.sys wherever packing put it - the record
     carries its old disk's sector, which repacking rarely reuses - or marks
@@ -89,6 +90,7 @@ const HELP: Record<string, string> = {
     Refuses to overwrite an existing file unless --force (-f) is given.`,
 	mkfs: `  mkfs -i IMAGE [--fs FILESYSTEM] [--master IMAGE|DIR]
                [--install-dos] [--boot-sectors FILE] [--volume-name NAME]
+               [--reserve-last-sector]
     Write an empty filesystem onto an image, named FAMILY/VERSION. Atari
     DOS: atari/10, atari/20, atari/25, and atari/mydos - MyDOS is its own
     format, not a version, since it frees the last sector a 720-sector disk
@@ -96,11 +98,15 @@ const HELP: Record<string, string> = {
     Without a version the geometry decides, except at enhanced density,
     where atari/25 and atari/mydos both fit and you have to say which.
 
-    SpartaDOS: sparta/11, sparta/20, sparta/21, matching SDX 4.50's own
-    FORMAT byte for byte; sparta/21 (what SDX writes everywhere) is the
-    default and sparta/20 spells the older revision. --volume-name is
-    required for SpartaDOS (it identifies the disk for change detection,
-    and 1.1 relies on it being unique). --master with --install-dos copies
+    SpartaDOS: sparta/11, sparta/20, sparta/21; sparta/21 (what SDX writes
+    everywhere) is the default and sparta/20 and sparta/11 spell the older
+    revisions. spift reclaims the last disk sector on every revision, the
+    way SDX 4.50's FORMAT does with Optimize; --reserve-last-sector keeps it
+    out of the data area, as the pre-2.1 formatters (XINIT, BW-DOS) do - the
+    Atari DOS family has no such knob, reaching more sectors by variant
+    (MyDOS) instead. --volume-name is required for SpartaDOS (it identifies
+    the disk for change detection, and 1.1 relies on it being unique).
+    --master with --install-dos copies
     the master's boot file - found through its boot pointer, since
     SpartaDOS boot files have arbitrary names - and points the new disk at
     the copy.

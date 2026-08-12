@@ -16,6 +16,7 @@ test("parses the image, the directory, and the geometry", () => {
 		text: [],
 		strict: false,
 		volumeName: undefined,
+		reserveLastSector: false,
 	});
 	expect(parsePackArgs(["-i", "d.atr", "stuff", "--dd"])).toMatchObject({
 		directory: "stuff",
@@ -36,6 +37,22 @@ test("parses the image, the directory, and the geometry", () => {
 			"1440",
 		]),
 	).toMatchObject({ variant: "mydos", sectorCount: 1440 });
+});
+
+test("--reserve-last-sector parses and is SpartaDOS-only", async () => {
+	expect(parsePackArgs(["-i", "d.atr"]).reserveLastSector).toBe(false);
+	expect(
+		parsePackArgs(["-i", "d.atr", "--reserve-last-sector"]).reserveLastSector,
+	).toBe(true);
+
+	const { mkdtempSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { packCommand } = await import("./pack.ts");
+	const dir = mkdtempSync(join(tmpdir(), "spift-pack-"));
+	await expect(
+		packCommand(["-i", join(dir, "a.atr"), dir, "--reserve-last-sector"]),
+	).rejects.toThrow(/SpartaDOS option/);
 });
 
 test("--set-dos-file needs boot code to point at", () => {

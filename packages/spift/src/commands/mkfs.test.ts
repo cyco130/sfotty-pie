@@ -161,6 +161,55 @@ test("mkfs picks the family from the sector size, and refuses odd ones", async (
 	);
 });
 
+test("mkfs reclaims the last sector by default; --reserve-last-sector keeps it", async () => {
+	const { mkdtempSync, writeFileSync, readFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { mkfsCommand } = await import("./mkfs.ts");
+	const { createBlankAtr, openAtr } = await import("../atr.ts");
+	const { openSpartaDos } = await import("../sparta-dos.ts");
+
+	const dir = mkdtempSync(join(tmpdir(), "spift-mkfs-"));
+	const make = (name: string): string => {
+		const path = join(dir, name);
+		writeFileSync(path, createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
+		return path;
+	};
+	const free = (path: string): number =>
+		openSpartaDos(openAtr(readFileSync(path))).volume().freeSectors;
+
+	// Even sparta/20, whose era's formatters reserve the last sector, reclaims
+	// by default here (714 of 720), and the flag brings back the reserve (713).
+	const reclaimed = make("reclaimed.atr");
+	await mkfsCommand([
+		"-i",
+		reclaimed,
+		"--fs",
+		"sparta/20",
+		"--volume-name",
+		"v",
+	]);
+	expect(free(reclaimed)).toBe(714);
+
+	const reserved = make("reserved.atr");
+	await mkfsCommand([
+		"-i",
+		reserved,
+		"--fs",
+		"sparta/20",
+		"--volume-name",
+		"v",
+		"--reserve-last-sector",
+	]);
+	expect(free(reserved)).toBe(713);
+
+	// It is SpartaDOS-only: the Atari DOS family points at MyDOS instead.
+	const atari = make("atari.atr");
+	await expect(
+		mkfsCommand(["-i", atari, "--fs", "atari/20", "--reserve-last-sector"]),
+	).rejects.toThrow(/SpartaDOS option/);
+});
+
 test("atari/20 stays a single-VTOC 943-sector disk instead of going MyDOS", async () => {
 	const { openAtr, createBlankAtr } = await import("../atr.ts");
 	const { formatAtariDos, openAtariDos } = await import("../atari-dos.ts");

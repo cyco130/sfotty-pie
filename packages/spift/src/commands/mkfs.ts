@@ -40,6 +40,13 @@ export interface MkfsArgs {
 	installDos: boolean;
 	/** SpartaDOS volume name (the family with one). */
 	volumeName: string | undefined;
+	/**
+	 * Keep the last disk sector out of the data area, the way the pre-2.1
+	 * SpartaDOS formatters do. spift reclaims it by default (SDX 4.50's
+	 * "Optimize"); this is the SpartaDOS-only opt-out. The Atari DOS family
+	 * has no equivalent - its way to reach more sectors is the MyDOS variant.
+	 */
+	reserveLastSector: boolean;
 }
 
 export function parseMkfsArgs(args: string[]): MkfsArgs {
@@ -54,6 +61,7 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 				master: { type: "string" },
 				"install-dos": { type: "boolean" },
 				"volume-name": { type: "string" },
+				"reserve-last-sector": { type: "boolean" },
 			},
 			allowPositionals: true,
 		});
@@ -106,6 +114,7 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 		master: values.master,
 		installDos: values["install-dos"] ?? false,
 		volumeName: values["volume-name"],
+		reserveLastSector: values["reserve-last-sector"] === true,
 	};
 }
 
@@ -173,6 +182,15 @@ async function mkfsAtari(
 	bootSectors: Uint8Array | undefined,
 	master: MasterFiles | undefined,
 ): Promise<void> {
+	// The last-sector switch is a SpartaDOS bitmap detail; the Atari DOS
+	// family reaches more sectors by variant (MyDOS), not by a formatter knob.
+	if (parsed.reserveLastSector) {
+		throw new CliError(
+			"--reserve-last-sector is a SpartaDOS option; the Atari DOS family " +
+				"has no last-sector reserve - use --fs atari/mydos to reach past " +
+				"the DOS 2 sector limits instead",
+		);
+	}
 	// The master deliberately does NOT settle the variant. Its filesystem
 	// says how the master itself was formatted, not which DOS it carries:
 	// the DOS 2.5 distribution disk is 720 sectors of plain dos20s format,
@@ -294,6 +312,9 @@ async function mkfsSparta(
 			...(parsed.volumeName === undefined
 				? {}
 				: { volumeName: parsed.volumeName }),
+			// spift reclaims the last sector by default across every revision;
+			// --reserve-last-sector opts into the pre-2.1 reserve.
+			reclaimLastSector: !parsed.reserveLastSector,
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

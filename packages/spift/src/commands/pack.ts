@@ -51,6 +51,8 @@ export interface PackArgs {
 	strict: boolean;
 	/** SpartaDOS volume name (required there). */
 	volumeName: string | undefined;
+	/** Keep the last disk sector reserved (SpartaDOS-only; see mkfs). */
+	reserveLastSector: boolean;
 }
 
 // --sd and --dd name only a sector size; --ed is the whole enhanced-density
@@ -80,6 +82,7 @@ export function parsePackArgs(args: string[]): PackArgs {
 				"write-boot-sectors": { type: "boolean" },
 				"set-dos-file": { type: "string" },
 				"volume-name": { type: "string" },
+				"reserve-last-sector": { type: "boolean" },
 				text: { type: "string", multiple: true },
 				"no-timestamps": { type: "boolean" },
 				strict: { type: "boolean" },
@@ -203,6 +206,7 @@ export function parsePackArgs(args: string[]): PackArgs {
 		text: values.text ?? [],
 		strict: values.strict ?? false,
 		volumeName: values["volume-name"],
+		reserveLastSector: values["reserve-last-sector"] === true,
 	};
 }
 
@@ -301,6 +305,13 @@ export async function packCommand(args: string[]): Promise<void> {
 		throw new CliError(
 			`--volume-name is SpartaDOS's (the Atari DOS family has no label); ` +
 				`pack --fs sparta to make one`,
+		);
+	}
+	if (family === "atari" && parsed.reserveLastSector) {
+		throw new CliError(
+			"--reserve-last-sector is a SpartaDOS option; the Atari DOS family " +
+				"has no last-sector reserve - pack --fs atari/mydos to reach past " +
+				"the DOS 2 sector limits instead",
 		);
 	}
 	if (family === "sparta") {
@@ -444,6 +455,8 @@ async function packSparta(
 			// parsePackArgs guarantees a non-empty name for the sparta family.
 			volumeName: parsed.volumeName ?? "",
 			...(bootSectors === undefined ? {} : { bootSectors }),
+			// Reclaim the last sector by default, as mkfs does; the flag reserves.
+			reclaimLastSector: !parsed.reserveLastSector,
 		});
 	} catch (error) {
 		fail(error);

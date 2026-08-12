@@ -70,13 +70,21 @@ test("shorthands are mutually exclusive", () => {
 	);
 });
 
-test("a shorthand cannot be combined with explicit geometry", () => {
-	expect(() =>
-		parseCreateArgs(["-i", "a.atr", "--sd", "--sector-count", "100"]),
-	).toThrow(/cannot be combined/);
+test("--sd and --dd set only the size, so --sector-count rides along", () => {
+	// The reason to have them: a hard-disk-sized image at a chosen density.
+	expect(
+		parseCreateArgs(["-i", "a.atr", "--dd", "--sector-count", "65535"]),
+	).toMatchObject({ sectorSize: 256, sectorCount: 65535 });
+	expect(
+		parseCreateArgs(["-i", "a.atr", "--sd", "--sector-count", "1040"]),
+	).toMatchObject({ sectorSize: 128, sectorCount: 1040 });
+	// But not a second --sector-size, and --ed stays a whole geometry.
 	expect(() =>
 		parseCreateArgs(["-i", "a.atr", "--dd", "--sector-size", "128"]),
-	).toThrow(/cannot be combined/);
+	).toThrow(/--dd already sets the sector size/);
+	expect(() =>
+		parseCreateArgs(["-i", "a.atr", "--ed", "--sector-count", "720"]),
+	).toThrow(/--ed is a complete geometry/);
 });
 
 test("validates geometry values", () => {

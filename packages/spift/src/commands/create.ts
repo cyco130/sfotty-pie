@@ -16,12 +16,6 @@ export interface CreateSpec {
 	force: boolean;
 }
 
-const GEOMETRY_SHORTHANDS = {
-	sd: { sectorSize: 128, sectorCount: 720 },
-	ed: { sectorSize: 128, sectorCount: 1040 },
-	dd: { sectorSize: 256, sectorCount: 720 },
-} as const;
-
 export function parseCreateArgs(args: string[]): CreateSpec {
 	let parsed;
 	try {
@@ -73,21 +67,28 @@ export function parseCreateArgs(args: string[]): CreateSpec {
 		);
 	}
 	const shorthand = shorthands[0];
-	if (
-		shorthand !== undefined &&
-		(values["sector-size"] !== undefined ||
-			values["sector-count"] !== undefined)
-	) {
+	const sizeArg = values["sector-size"];
+	const countArg = values["sector-count"];
+	// --sd and --dd only name a sector size (128 and 256), so they combine
+	// with an explicit --sector-count - `--dd --sector-count 65535` is a
+	// 256-byte hard-disk image - but not a second --sector-size. --ed names a
+	// whole geometry, enhanced density's fixed 1040 x 128, so it takes neither.
+	if (shorthand === "ed" && (sizeArg !== undefined || countArg !== undefined)) {
 		throw new UsageError(
-			`--${shorthand} cannot be combined with --sector-size/--sector-count`,
+			`--ed is a complete geometry and cannot be combined with ` +
+				`--sector-size or --sector-count`,
+		);
+	}
+	if ((shorthand === "sd" || shorthand === "dd") && sizeArg !== undefined) {
+		throw new UsageError(
+			`--${shorthand} already sets the sector size; drop --sector-size`,
 		);
 	}
 
-	const base = GEOMETRY_SHORTHANDS[shorthand ?? "sd"];
-	let sectorSize: AtrSectorSize = base.sectorSize;
-	let sectorCount: number = base.sectorCount;
-	if (values["sector-size"] !== undefined) {
-		const size = parsePositiveInt(values["sector-size"], "--sector-size");
+	let sectorSize: AtrSectorSize = shorthand === "dd" ? 256 : 128;
+	let sectorCount = shorthand === "ed" ? 1040 : 720;
+	if (sizeArg !== undefined) {
+		const size = parsePositiveInt(sizeArg, "--sector-size");
 		if (!(ATR_SECTOR_SIZES as readonly number[]).includes(size)) {
 			throw new UsageError(
 				`invalid --sector-size ${size} ` +
@@ -96,8 +97,8 @@ export function parseCreateArgs(args: string[]): CreateSpec {
 		}
 		sectorSize = size as AtrSectorSize;
 	}
-	if (values["sector-count"] !== undefined) {
-		sectorCount = parsePositiveInt(values["sector-count"], "--sector-count");
+	if (countArg !== undefined) {
+		sectorCount = parsePositiveInt(countArg, "--sector-count");
 		if (sectorCount > ATR_MAX_SECTOR_COUNT) {
 			throw new UsageError(
 				`--sector-count ${sectorCount} is too large ` +

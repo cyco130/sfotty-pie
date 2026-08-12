@@ -53,11 +53,16 @@ export interface PackArgs {
 	volumeName: string | undefined;
 }
 
-const GEOMETRY_SHORTHANDS = {
-	sd: { sectorSize: 128, sectorCount: 720 },
+// --sd and --dd name only a sector size; --ed is the whole enhanced-density
+// geometry, so it alone fixes the count.
+const GEOMETRY_SHORTHANDS: Record<
+	"sd" | "ed" | "dd",
+	{ sectorSize: AtrSectorSize; sectorCount?: number }
+> = {
+	sd: { sectorSize: 128 },
 	ed: { sectorSize: 128, sectorCount: 1040 },
-	dd: { sectorSize: 256, sectorCount: 720 },
-} as const;
+	dd: { sectorSize: 256 },
+};
 
 export function parsePackArgs(args: string[]): PackArgs {
 	let parsed;
@@ -119,14 +124,21 @@ export function parsePackArgs(args: string[]): PackArgs {
 		);
 	}
 	const shorthand = shorthands[0];
-	if (
-		shorthand !== undefined &&
-		(values["sector-size"] !== undefined ||
-			values["sector-count"] !== undefined)
-	) {
+	const sizeGiven = values["sector-size"] !== undefined;
+	const countGiven = values["sector-count"] !== undefined;
+	// --sd and --dd only set the sector size, so they combine with an explicit
+	// --sector-count (--dd --sector-count 65535 is a 256-byte hard-disk image)
+	// but not a second --sector-size; --ed is a complete geometry and takes
+	// neither.
+	if (shorthand === "ed" && (sizeGiven || countGiven)) {
 		throw new UsageError(
-			`--${shorthand} cannot be combined with --sector-size or ` +
-				`--sector-count`,
+			`--ed is a complete geometry and cannot be combined with ` +
+				`--sector-size or --sector-count`,
+		);
+	}
+	if ((shorthand === "sd" || shorthand === "dd") && sizeGiven) {
+		throw new UsageError(
+			`--${shorthand} already sets the sector size; drop --sector-size`,
 		);
 	}
 

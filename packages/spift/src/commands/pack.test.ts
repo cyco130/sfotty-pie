@@ -22,6 +22,10 @@ test("parses the image, the directory, and the geometry", () => {
 		sectorSize: 256,
 		sectorCount: 720,
 	});
+	// --dd sets only the size, so --sector-count rides along.
+	expect(
+		parsePackArgs(["-i", "d.atr", "--dd", "--sector-count", "65535"]),
+	).toMatchObject({ sectorSize: 256, sectorCount: 65535 });
 	expect(
 		parsePackArgs([
 			"-i",

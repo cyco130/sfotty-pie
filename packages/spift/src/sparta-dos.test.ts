@@ -951,6 +951,26 @@ test("the last disk sector: reserved on sdfs20, reclaimed on sdfs21", () => {
 	});
 	expect(optimizedResult.freeSectors).toBe(714);
 	expect(lastFree(optimized, 720)).toBe(true);
+
+	// The reclaim is its own switch, defaulting to the revision but not tied
+	// to it - so an SDFS 2.1 disk can reserve (RealDOS's way) and a 2.0 disk
+	// can reclaim.
+	const reserved21 = createBlankAtr({ sectorSize: 128, sectorCount: 720 });
+	expect(
+		formatSpartaDos(openAtr(reserved21), "sdfs21", {
+			random: 1,
+			reclaimLastSector: false,
+		}).freeSectors,
+	).toBe(713);
+	expect(lastFree(reserved21, 720)).toBe(false);
+	const reclaimed20 = createBlankAtr({ sectorSize: 128, sectorCount: 720 });
+	expect(
+		formatSpartaDos(openAtr(reclaimed20), "sdfs20", {
+			random: 1,
+			reclaimLastSector: true,
+		}).freeSectors,
+	).toBe(714);
+	expect(lastFree(reclaimed20, 720)).toBe(true);
 });
 
 test("a no-DOS SpartaDOS 1.1 disk (zero revision byte) reads as 2.0", () => {

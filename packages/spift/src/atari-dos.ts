@@ -1524,21 +1524,25 @@ export function atariDosLabel(variant: AtariDosVariant): string {
 }
 
 /**
- * The variant to format a geometry with when the caller doesn't say: DOS
- * 2.5 for enhanced density, that geometry's own DOS, and the DOS 2.0 layout
- * for everything else - which covers big disks too, since the writer takes
- * MyDOS's extra bitmap pages from the sector count. MyDOS also fits enhanced
- * density, but 2.5 is the conventional disk there, so it is the default; ask
- * for atari/mydos to override.
+ * The variant to format a geometry with when the caller doesn't say. Only
+ * the two standard single-density-family disks get a plain DOS 2 default -
+ * DOS 2.0 for 720x128, DOS 2.5 for its home geometry 1040x128 - because
+ * those are the sizes stock DOS 2 actually formats. Every other 128- or
+ * 256-byte geometry (double density, and anything bigger) defaults to MyDOS,
+ * the one that uses the whole disk; ask for atari/20 to keep a single VTOC
+ * instead.
  */
 export function defaultAtariDosVariant(
 	sectorSize: number,
 	sectorCount: number,
 ): AtariDosVariant {
+	if (sectorSize === 128 && sectorCount === 720) {
+		return "dos20";
+	}
 	if (sectorSize === 128 && sectorCount === 1040) {
 		return "dos25";
 	}
-	return "dos20";
+	return "mydos";
 }
 
 /**

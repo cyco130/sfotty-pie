@@ -1599,6 +1599,15 @@ export interface FormatSpartaDosOptions {
 	random?: number;
 	/** Stamps the main directory's creation time, as SDX does. */
 	clock?: () => Date;
+	/**
+	 * Whether the last sector on the disk is handed to the data area. The
+	 * pre-2.1 formatters mark it used and leave it unused; SDX 4.50 reclaims
+	 * it (its "Optimize" option). This is a formatter choice, not strictly a
+	 * revision property - RealDOS writes SDFS 2.1 but does not reclaim - so it
+	 * has its own switch. Defaults to reclaiming on SDFS 2.1 and reserving
+	 * below it, matching the goldens.
+	 */
+	reclaimLastSector?: boolean;
 }
 
 export interface FormatSpartaDosResult {
@@ -1652,11 +1661,14 @@ export function formatSpartaDos(
 
 	// The last sector on the disk: the pre-2.1 formatters (XINIT, BW-DOS)
 	// mark it used and leave it unused - a historical quirk - while SDX
-	// 4.50's FORMAT reclaims it (its "Optimize" option, on by default in
-	// the golden templates), giving one more free sector. Keyed on the
-	// revision, since every rev-$20 formatter reserves it and rev $21
-	// reclaims it. `highestData` is the top sector the bitmap hands out.
-	const highestData = variant === "sdfs21" ? layout.total : layout.total - 1;
+	// 4.50's FORMAT reclaims it (its "Optimize" option), giving one more
+	// free sector. The default follows the revision, since every rev-$20
+	// formatter reserves it and SDX's rev $21 reclaims it, but it is a
+	// formatter choice rather than a property of the format (RealDOS writes
+	// rev $21 without reclaiming), so it has its own switch. `highestData`
+	// is the top sector the bitmap hands out.
+	const reclaimLastSector = options?.reclaimLastSector ?? variant === "sdfs21";
+	const highestData = reclaimLastSector ? layout.total : layout.total - 1;
 	const freeSectors = highestData - layout.dirData;
 
 	// Boot sectors first, the parameter block patched into the first.

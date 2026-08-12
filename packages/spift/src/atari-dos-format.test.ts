@@ -399,13 +399,14 @@ test("a formatted disk accepts files immediately", () => {
 });
 
 test("default variants follow the geometry", () => {
+	// The two standard single-density-family disks get a plain DOS 2 default.
 	expect(defaultAtariDosVariant(128, 720)).toBe("dos20");
-	// Enhanced density is DOS 2.5's home geometry, so it is the default there
-	// (MyDOS fits too, but you have to ask for atari/mydos).
 	expect(defaultAtariDosVariant(128, 1040)).toBe("dos25");
-	expect(defaultAtariDosVariant(256, 720)).toBe("dos20");
-	// Everything else is one DOS 2 filesystem, whatever its size.
-	expect(defaultAtariDosVariant(128, 400)).toBe("dos20");
+	// Double density and every other size default to MyDOS, the one that
+	// uses the whole disk.
+	expect(defaultAtariDosVariant(256, 720)).toBe("mydos");
+	expect(defaultAtariDosVariant(256, 1440)).toBe("mydos");
+	expect(defaultAtariDosVariant(128, 400)).toBe("mydos");
 });
 
 test("geometry checks reject impossible combinations", () => {

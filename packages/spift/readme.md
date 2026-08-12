@@ -59,7 +59,7 @@ Commands that take a file or directory specifier accept `*` and `?` as wildcards
   - `atari/25` (Atari DOS 2.5): The enhanced-density extension of Atari DOS. The file system supports 1040x128-byte sectors only. `mkfs` can create this file system on disks with a sector count of 1023 up to 65535 but only the first 1023 sectors will be used. The real DOS 2.5 can also read and write such images without any problem.
   - `atari/mydos` (MyDOS): MyDOS file system is an extension of DOS 2.0 file system that supports up to 65535 128- or 256-byte sectors. It is read-write compatible up to 720 sectors and read-compatible up to 943 sectors with DOS 2.0 and DOS 2.5. Beyond that, none of the earlier DOSes can read or write MyDOS file system. MyDOS also supports subdirectories. `spift` can create subdirectories on all variants but they will only be accessible by MyDOS.
 - SpartaDOS family. All variants support up to 65535 128- or 256-byte sectors. Revision 2.1 also supports 512-byte sectors. The variant labels are based on SpartaDOS X User Guide 4.50, which calls them SpartaDOS File System revisions 1.1, 2.0, and 2.1.
-  - `sparta/11` (SpartaDOS 1.1). `spift` can read and write this file system but `mkfs` cannot create it currently.
+  - `sparta/11` (SpartaDOS 1.1).
   - `sparta/20` (SpartaDOS 2.x, 3.x, SpartaDOS X 4.1x and 4.2x).
   - `sparta/21` (SpartaDOS X 4.4x and later): Adds support for 512-byte sectors, "hidden" and "archived" file attributes, and symbolic links. `spift` will create such files on any SpartaDOS file system but they will only be meaningful on SpartaDOS X 4.4x and later.
 

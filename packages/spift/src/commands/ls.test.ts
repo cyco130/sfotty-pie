@@ -31,7 +31,7 @@ test("validates the argument list", () => {
 		/unexpected argument/,
 	);
 	expect(() => parseLsArgs(["-i", "a.atr", "--fs", "cpm"])).toThrow(
-		/unknown filesystem/,
+		/wants a filesystem/,
 	);
 });
 
@@ -105,19 +105,21 @@ test("status leads with the container, then the filesystem", () => {
 		renderStatus(
 			{ format: "atr", sectorCount: 720, sectorSize: 128 },
 			{
-				id: "atari/dos20",
+				id: "atari/20",
 				volume: { totalSectors: 707, freeSectors: 227, details: [] },
 			},
 			false,
 		),
-	).toBe("atr  720 sectors x 128 bytes\natari/dos20  707 sectors, 227 free\n");
+	).toBe(
+		"atr  720 sectors x 128 bytes\natari/20 file system  707 sectors, 227 free\n",
+	);
 });
 
 test("status shows volume labels and family details", () => {
 	const status = renderStatus(
 		{ format: "atr", sectorCount: 1040, sectorSize: 128 },
 		{
-			id: "atari/dos25",
+			id: "atari/25",
 			volume: {
 				totalSectors: 1010,
 				freeSectors: 1011,
@@ -127,7 +129,9 @@ test("status shows volume labels and family details", () => {
 		},
 		false,
 	);
-	expect(status).toContain('atari/dos25  "GAMES"  1010 sectors, 1011 free');
+	expect(status).toContain(
+		'atari/25 file system  "GAMES"  1010 sectors, 1011 free',
+	);
 	expect(status).toContain("(707 below sector 720)");
 });
 

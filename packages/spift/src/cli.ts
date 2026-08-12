@@ -50,17 +50,16 @@ const HELP: Record<string, string> = {
     Refuses to overwrite an existing file unless --force (-f) is given.`,
 	mkfs: `  mkfs -i IMAGE [--fs FILESYSTEM] [--master IMAGE|DIR]
                [--install-dos] [--boot-sectors FILE] [--volume-name NAME]
-    Write an empty filesystem onto an image. Variants: dos10, dos20 (also
-    spelled dos20s, dos20d or mydos) and dos25. DOS 2.0 and MyDOS are one
-    filesystem - their VTOCs differ in a single bit, whether sector 720 is
-    reserved, and only on a 720-sector disk - so the two names part company
-    there and nowhere else. Without a variant the geometry decides, except
-    at enhanced density, where DOS 2.5 and the DOS 2.0 layout both fit and
-    you have to say which.
+    Write an empty filesystem onto an image, named FAMILY/VERSION. Atari
+    DOS: atari/10, atari/20, atari/25, and atari/mydos - MyDOS is its own
+    format, not a version, since it frees the last sector a 720-sector disk
+    otherwise reserves and reaches past sector 943 where DOS 2.0 cannot.
+    Without a version the geometry decides, except at enhanced density,
+    where atari/25 and atari/mydos both fit and you have to say which.
 
-    --fs sparta makes a SpartaDOS filesystem instead, matching SDX 4.50's
-    own FORMAT byte for byte; sdfs21 (what SDX writes everywhere) is the
-    default and sparta/sdfs20 spells the older revision. --volume-name is
+    SpartaDOS: sparta/11, sparta/20, sparta/21, matching SDX 4.50's own
+    FORMAT byte for byte; sparta/21 (what SDX writes everywhere) is the
+    default and sparta/20 spells the older revision. --volume-name is
     required for SpartaDOS (it identifies the disk for change detection,
     and 1.1 relies on it being unique). --master with --install-dos copies
     the master's boot file - found through its boot pointer, since

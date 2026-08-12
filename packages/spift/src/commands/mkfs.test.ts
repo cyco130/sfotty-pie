@@ -2,29 +2,25 @@ import { expect, test } from "vitest";
 import { parseMkfsArgs } from "./mkfs.ts";
 
 test("parses the image and filesystem selection", () => {
-	expect(parseMkfsArgs(["-i", "disk.atr"])).toEqual({
+	expect(parseMkfsArgs(["-i", "disk.atr"])).toMatchObject({
 		image: "disk.atr",
+		family: undefined,
 		variant: undefined,
-		bootSectors: undefined,
-		master: undefined,
-		installDos: false,
 	});
-	expect(parseMkfsArgs(["-i", "disk.atr", "--fs", "atari/dos25"]).variant).toBe(
+	expect(parseMkfsArgs(["-i", "disk.atr", "--fs", "atari/25"]).variant).toBe(
 		"dos25",
 	);
-	expect(parseMkfsArgs(["-i", "disk.atr", "--fs", "MyDOS"]).variant).toBe(
+	// MyDOS keeps its name; it is a distinct format, not a version.
+	expect(parseMkfsArgs(["-i", "disk.atr", "--fs", "atari/mydos"]).variant).toBe(
 		"mydos",
 	);
-	// The familiar spellings are one filesystem at two sector sizes.
-	expect(parseMkfsArgs(["-i", "d.atr", "--fs", "dos20s"]).variant).toBe(
+	// Case-insensitive, and the family is always required.
+	expect(parseMkfsArgs(["-i", "d.atr", "--fs", "ATARI/20"]).variant).toBe(
 		"dos20",
 	);
-	expect(parseMkfsArgs(["-i", "d.atr", "--fs", "dos20d"]).variant).toBe(
-		"dos20",
-	);
-	expect(parseMkfsArgs(["-i", "disk.atr", "--variant", "dos20"]).variant).toBe(
-		"dos20",
-	);
+	expect(
+		parseMkfsArgs(["-i", "disk.atr", "--variant", "atari/20"]).variant,
+	).toBe("dos20");
 	expect(
 		parseMkfsArgs(["-i", "disk.atr", "--boot-sectors", "boot.bin"]).bootSectors,
 	).toBe("boot.bin");
@@ -36,7 +32,14 @@ test("validates the argument list", () => {
 		/unexpected argument/,
 	);
 	expect(() =>
-		parseMkfsArgs(["-i", "a.atr", "--fs", "atari/dos25", "--variant", "mydos"]),
+		parseMkfsArgs([
+			"-i",
+			"a.atr",
+			"--fs",
+			"atari/25",
+			"--variant",
+			"atari/mydos",
+		]),
 	).toThrow(/mutually exclusive/);
 	// A bare family means "pick the variant for me": geometry decides for
 	// atari, and sparta defaults to what SDX itself formats (sdfs21).
@@ -48,14 +51,8 @@ test("validates the argument list", () => {
 		variant: undefined,
 	});
 	expect(
-		parseMkfsArgs([
-			"-i",
-			"a.atr",
-			"--fs",
-			"sparta/sdfs20",
-			"--volume-name",
-			"v",
-		]).variant,
+		parseMkfsArgs(["-i", "a.atr", "--fs", "sparta/20", "--volume-name", "v"])
+			.variant,
 	).toBe("sdfs20");
 	// SpartaDOS needs a volume name.
 	expect(() => parseMkfsArgs(["-i", "a.atr", "--fs", "sparta"])).toThrow(

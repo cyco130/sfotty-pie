@@ -10,7 +10,7 @@ test("parses the image and the directories to create", () => {
 		parents: false,
 	});
 	expect(
-		parseMkdirArgs(["-i", "d.atr", "a", "b", "-p", "--fs", "mydos"]),
+		parseMkdirArgs(["-i", "d.atr", "a", "b", "-p", "--fs", "atari/mydos"]),
 	).toMatchObject({ paths: ["a", "b"], parents: true, variant: "mydos" });
 });
 
@@ -18,6 +18,6 @@ test("validates the argument list", () => {
 	expect(() => parseMkdirArgs(["games"])).toThrow(/missing --image/);
 	expect(() => parseMkdirArgs(["-i", "a.atr"])).toThrow(/missing DIRECTORY/);
 	expect(() => parseMkdirArgs(["-i", "a.atr", "d", "--fs", "fat"])).toThrow(
-		/unknown filesystem/,
+		/wants a filesystem/,
 	);
 });

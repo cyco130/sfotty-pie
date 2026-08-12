@@ -1,8 +1,8 @@
-import { ATARI_DOS_VARIANTS, type AtariDosVariant } from "../atari-dos.ts";
-import { SPARTA_DOS_VARIANTS, type SpartaDosVariant } from "../sparta-dos.ts";
+import type { AtariDosVariant } from "../atari-dos.ts";
+import type { SpartaDosVariant } from "../sparta-dos.ts";
 import { UsageError } from "../cli-error.ts";
 
-/** Any family's variant name, as --fs speaks them. */
+/** Any family's variant, as the driver names it internally. */
 export type FsVariant = AtariDosVariant | SpartaDosVariant;
 
 export type FsSelection =
@@ -11,72 +11,95 @@ export type FsSelection =
 	| { family: "sparta"; variant: SpartaDosVariant | undefined };
 
 /**
- * The names people type that are not variants of their own. DOS 2.0S and
- * DOS 2.0D are one filesystem at two sector sizes - their VTOCs are
- * identical - so both spell the same variant. The Sparta revisions go by
- * their on-disk numbers too ("sparta/2.0" for sdfs20).
+ * What a user types after the family. DOS versions go by their number;
+ * MyDOS keeps its name, since it is a distinct format rather than a version
+ * of DOS 2 (it frees the last sector on a 720-sector disk and reaches past
+ * sector 943 where plain DOS 2 cannot). "20" alone would be a DOS 2.0 disk
+ * and an SDFS 2.0 disk both, so the family is always required.
  */
-const ALIASES: Record<string, string> = {
-	dos20s: "dos20",
-	dos20d: "dos20",
-	dos2: "dos20",
-	"1.1": "sdfs11",
-	"2.0": "sdfs20",
-	"2.1": "sdfs21",
-	bwdos: "sdfs20",
+const ATARI_SUFFIXES: Record<string, AtariDosVariant> = {
+	"10": "dos10",
+	"20": "dos20",
+	"25": "dos25",
+	mydos: "mydos",
+};
+const SPARTA_SUFFIXES: Record<string, SpartaDosVariant> = {
+	"11": "sdfs11",
+	"20": "sdfs20",
+	"21": "sdfs21",
 };
 
-function isAtari(variant: string): variant is AtariDosVariant {
-	return (ATARI_DOS_VARIANTS as readonly string[]).includes(variant);
+/** The suffix shown for a variant - the inverse of the tables above. */
+const ATARI_SUFFIX_OF: Record<AtariDosVariant, string> = {
+	dos10: "10",
+	dos20: "20",
+	dos25: "25",
+	mydos: "mydos",
+};
+const SPARTA_SUFFIX_OF: Record<SpartaDosVariant, string> = {
+	sdfs11: "11",
+	sdfs20: "20",
+	sdfs21: "21",
+};
+
+/** The user-facing id for a mounted filesystem, like "atari/20". */
+export function fsId(family: "atari" | "sparta", variant: FsVariant): string {
+	const suffix =
+		family === "atari"
+			? ATARI_SUFFIX_OF[variant as AtariDosVariant]
+			: SPARTA_SUFFIX_OF[variant as SpartaDosVariant];
+	return `${family}/${suffix}`;
 }
 
-function isSparta(variant: string): variant is SpartaDosVariant {
-	return (SPARTA_DOS_VARIANTS as readonly string[]).includes(variant);
-}
-
-const VALID =
-	`atari variants: ${ATARI_DOS_VARIANTS.join(", ")}; ` +
-	`sparta variants: ${SPARTA_DOS_VARIANTS.join(", ")}`;
+const ATARI_LIST = Object.keys(ATARI_SUFFIXES)
+	.map((s) => `atari/${s}`)
+	.join(", ");
+const SPARTA_LIST = Object.keys(SPARTA_SUFFIXES)
+	.map((s) => `sparta/${s}`)
+	.join(", ");
 
 /**
- * Parses a --fs value: a family ("atari", "sparta"), a family and variant
- * ("atari/dos25", "sparta/sdfs20"), or a bare variant ("dos25", "sdfs20")
- * since no variant name repeats across families. Case-insensitive.
+ * Parses a --fs value: a bare family ("atari", "sparta") to pick by
+ * geometry, or a family and specific filesystem ("atari/20", "atari/mydos",
+ * "sparta/21"). The suffix always carries its family, since a bare "20"
+ * belongs to both. Case-insensitive.
  */
 export function parseFsOption(text: string, flag: string): FsSelection {
-	const lowered = ALIASES[text.toLowerCase()] ?? text.toLowerCase();
+	const lowered = text.toLowerCase();
 	const slash = lowered.indexOf("/");
 	if (slash === -1) {
-		if (lowered === "atari" || lowered === "sparta") {
-			return { family: lowered, variant: undefined };
+		if (lowered === "atari") {
+			return { family: "atari", variant: undefined };
 		}
-		if (isAtari(lowered)) {
-			return { family: "atari", variant: lowered };
-		}
-		if (isSparta(lowered)) {
-			return { family: "sparta", variant: lowered };
+		if (lowered === "sparta") {
+			return { family: "sparta", variant: undefined };
 		}
 		throw new UsageError(
-			`unknown filesystem "${text}" in ${flag} ` +
-				`(families: atari, sparta; ${VALID})`,
+			`${flag} wants a filesystem (${ATARI_LIST}, ${SPARTA_LIST}) or a ` +
+				`bare family (atari, sparta) to pick by geometry; got "${text}"`,
 		);
 	}
 	const family = lowered.slice(0, slash);
-	const variant = ALIASES[lowered.slice(slash + 1)] ?? lowered.slice(slash + 1);
-	if (family === "atari" && isAtari(variant)) {
-		return { family, variant };
-	}
-	if (family === "sparta" && isSparta(variant)) {
-		return { family, variant };
-	}
-	if (family !== "atari" && family !== "sparta") {
+	const suffix = lowered.slice(slash + 1);
+	if (family === "atari") {
+		const variant = ATARI_SUFFIXES[suffix];
+		if (variant !== undefined) {
+			return { family: "atari", variant };
+		}
 		throw new UsageError(
-			`unsupported filesystem family "${family}" in ${flag} ` +
-				`(valid: atari, sparta)`,
+			`unknown atari filesystem "${text}" in ${flag} (valid: ${ATARI_LIST})`,
+		);
+	}
+	if (family === "sparta") {
+		const variant = SPARTA_SUFFIXES[suffix];
+		if (variant !== undefined) {
+			return { family: "sparta", variant };
+		}
+		throw new UsageError(
+			`unknown sparta filesystem "${text}" in ${flag} (valid: ${SPARTA_LIST})`,
 		);
 	}
 	throw new UsageError(
-		`unknown ${family} filesystem "${lowered.slice(slash + 1)}" in ${flag} ` +
-			`(${VALID})`,
+		`unsupported filesystem family "${family}" in ${flag} (valid: atari, sparta)`,
 	);
 }

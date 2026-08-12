@@ -27,7 +27,7 @@ test("parses the containers, sources, and destination", () => {
 
 test("--fs applies to both sides, --from-fs and --to-fs to one", () => {
 	expect(
-		parseMvArgs(["-i", "d.atr", "--fs", "mydos", "a", "b"]).containers,
+		parseMvArgs(["-i", "d.atr", "--fs", "atari/mydos", "a", "b"]).containers,
 	).toMatchObject({ fromVariant: "mydos", toVariant: "mydos" });
 	expect(
 		parseMvArgs([
@@ -36,7 +36,7 @@ test("--fs applies to both sides, --from-fs and --to-fs to one", () => {
 			"--to",
 			"b.atr",
 			"--to-fs",
-			"dos10",
+			"atari/10",
 			"x",
 			"y",
 		]).containers,
@@ -52,7 +52,7 @@ test("validates the argument list", () => {
 		parseMvArgs(["-i", "a.atr", "--from", "b.atr", "x", "y"]),
 	).toThrow(/already means both sides/);
 	expect(() => parseMvArgs(["-i", "a.atr", "--fs", "fat", "x", "y"])).toThrow(
-		/unknown filesystem/,
+		/wants a filesystem/,
 	);
 });
 

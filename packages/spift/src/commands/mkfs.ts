@@ -24,7 +24,7 @@ import {
 import { extractBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { openHostDirectory } from "../host-dir.ts";
-import { parseFsOption, type FsSelection } from "./fs-option.ts";
+import { fsId, parseFsOption, type FsSelection } from "./fs-option.ts";
 import { openImageFilesystem, type OpenedImage } from "./open-image.ts";
 import { BOOT_FILE } from "./pack.ts";
 
@@ -178,7 +178,7 @@ async function mkfsAtari(
 		if (variant === undefined) {
 			throw new CliError(
 				`${parsed.image}: enhanced density fits both DOS 2.5 and MyDOS ` +
-					`equally well; pick one with --fs atari/dos25 or --fs atari/mydos`,
+					`equally well; pick one with --fs atari/25 or --fs atari/mydos`,
 			);
 		}
 	}
@@ -242,7 +242,7 @@ async function mkfsAtari(
 					? `, boot record from ${parsed.bootSectors}`
 					: "";
 	process.stdout.write(
-		`made an atari/${result.variant} filesystem on ${parsed.image}: ` +
+		`made an ${fsId("atari", result.variant)} filesystem on ${parsed.image}: ` +
 			`${result.freeSectors} free sectors${wasted}${boot}\n`,
 	);
 }
@@ -294,7 +294,7 @@ async function mkfsSparta(
 					? `, boot record from ${parsed.bootSectors}`
 					: "";
 	process.stdout.write(
-		`made a sparta/${result.variant} filesystem on ${parsed.image}: ` +
+		`made a ${fsId("sparta", result.variant)} filesystem on ${parsed.image}: ` +
 			`${result.freeSectors} free sectors${wasted}${boot}\n`,
 	);
 }

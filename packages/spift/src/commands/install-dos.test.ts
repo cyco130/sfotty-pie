@@ -19,7 +19,7 @@ test("parses the target and the master it copies from", () => {
 			"m.atr",
 			"-f",
 			"--fs",
-			"mydos",
+			"atari/mydos",
 		]),
 	).toMatchObject({ force: true, variant: "mydos" });
 });

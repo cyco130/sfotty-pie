@@ -17,6 +17,6 @@ test("validates the argument list", () => {
 	expect(() => parseRmdirArgs(["games"])).toThrow(/missing --image/);
 	expect(() => parseRmdirArgs(["-i", "a.atr"])).toThrow(/missing DIRECTORY/);
 	expect(() => parseRmdirArgs(["-i", "a.atr", "d", "--fs", "fat"])).toThrow(
-		/unknown filesystem/,
+		/wants a filesystem/,
 	);
 });

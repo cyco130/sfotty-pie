@@ -21,7 +21,14 @@ test("parses the image, the directory, and the geometry", () => {
 		sectorCount: 720,
 	});
 	expect(
-		parsePackArgs(["-i", "d.atr", "--fs", "mydos", "--sector-count", "1440"]),
+		parsePackArgs([
+			"-i",
+			"d.atr",
+			"--fs",
+			"atari/mydos",
+			"--sector-count",
+			"1440",
+		]),
 	).toMatchObject({ variant: "mydos", sectorCount: 1440 });
 });
 

@@ -20,7 +20,7 @@ import { writeBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { copyEntries } from "../copy.ts";
 import { compileHostPattern, openHostDirectory } from "../host-dir.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { fsId, parseFsOption } from "./fs-option.ts";
 
 /** The boot record, kept beside the files as an ordinary host file. */
 export const BOOT_FILE = ".boot.bin";
@@ -194,7 +194,7 @@ export async function packCommand(args: string[]): Promise<void> {
 		if (variant === undefined) {
 			throw new CliError(
 				`enhanced density fits both DOS 2.5 and MyDOS equally well; ` +
-					`pick one with --fs atari/dos25 or --fs atari/mydos`,
+					`pick one with --fs atari/25 or --fs atari/mydos`,
 			);
 		}
 	}
@@ -324,7 +324,7 @@ export async function packCommand(args: string[]): Promise<void> {
 				: `, booting ${bootFile}`);
 	process.stdout.write(
 		`packed ${result.files.length} file(s) from ${parsed.directory} into ` +
-			`${parsed.image} as atari/${variant}${boot}\n`,
+			`${parsed.image} as ${fsId("atari", variant)}${boot}\n`,
 	);
 	if (damaged) {
 		process.exitCode = 1;

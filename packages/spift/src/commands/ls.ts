@@ -1,9 +1,7 @@
 import { parseArgs } from "node:util";
-import { atariDosLabel } from "../atari-dos.ts";
-import { spartaDosLabel } from "../sparta-dos.ts";
 import type { DirEntry, DirEntryAttribute, VolumeInfo } from "../filesystem.ts";
 import { CliError, UsageError } from "../cli-error.ts";
-import { parseFsOption, type FsVariant } from "./fs-option.ts";
+import { fsId, parseFsOption, type FsVariant } from "./fs-option.ts";
 import { openImageFilesystem } from "./open-image.ts";
 
 export interface LsArgs {
@@ -90,10 +88,7 @@ export async function lsCommand(args: string[]): Promise<void> {
 					sectorSize: medium.sectorSize,
 				},
 				{
-					id:
-						filesystem.family === "sparta"
-							? spartaDosLabel(filesystem.variant)
-							: atariDosLabel(filesystem.variant),
+					id: fsId(filesystem.family, filesystem.variant),
 					volume: filesystem.volume(),
 				},
 				color,
@@ -133,7 +128,7 @@ export function renderStatus(
 		"  " +
 		`${container.sectorCount} sectors x ${container.sectorSize} bytes`;
 	const parts = [
-		paint(filesystem.id, "1"),
+		`${paint(filesystem.id, "1")} file system`,
 		`${volume.totalSectors} sectors, ${volume.freeSectors} free`,
 	];
 	if (volume.label !== undefined) {

@@ -14,7 +14,7 @@ test("parses the image, an optional name, and options", () => {
 	);
 	expect(parseSetDosFileArgs(["-i", "disk.atr", "--clear"]).clear).toBe(true);
 	expect(
-		parseSetDosFileArgs(["-i", "disk.atr", "--fs", "atari/dos10"]).variant,
+		parseSetDosFileArgs(["-i", "disk.atr", "--fs", "atari/10"]).variant,
 	).toBe("dos10");
 });
 

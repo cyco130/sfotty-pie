@@ -8,7 +8,7 @@ import {
 } from "../atari-dos.ts";
 import { extractBootSectors, writeBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
-import { parseFsOption } from "./fs-option.ts";
+import { fsId, parseFsOption } from "./fs-option.ts";
 import { openImageFilesystem, saveImage } from "./open-image.ts";
 
 export interface InstallDosArgs {
@@ -138,7 +138,7 @@ export async function installDosCommand(args: string[]): Promise<void> {
 	if (boot.sectorCount !== expectedBoot) {
 		throw new CliError(
 			`${parsed.from} boots from ${boot.sectorCount} sector(s) but an ` +
-				`atari/${variant} disk reserves ${expectedBoot}; the filesystems ` +
+				`${fsId("atari", variant)} disk reserves ${expectedBoot}; the filesystems ` +
 				`do not match`,
 		);
 	}

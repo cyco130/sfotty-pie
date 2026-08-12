@@ -21,7 +21,7 @@ test("parses the image, the directory, and the flags", () => {
 			"--extract-boot-sectors",
 			"-f",
 			"--fs",
-			"mydos",
+			"atari/mydos",
 		]),
 	).toMatchObject({
 		directory: "out",
@@ -37,7 +37,7 @@ test("validates the argument list", () => {
 		/unexpected argument/,
 	);
 	expect(() => parseUnpackArgs(["-i", "d.atr", "--fs", "fat"])).toThrow(
-		/unknown filesystem/,
+		/wants a filesystem/,
 	);
 });
 

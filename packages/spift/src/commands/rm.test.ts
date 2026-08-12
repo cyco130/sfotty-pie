@@ -24,6 +24,6 @@ test("validates the argument list", () => {
 	expect(() => parseRmArgs([])).toThrow(/missing --image/);
 	expect(() => parseRmArgs(["-i", "disk.atr"])).toThrow(/missing SPEC/);
 	expect(() => parseRmArgs(["-i", "disk.atr", "a", "--fs", "ext4"])).toThrow(
-		/unknown filesystem/,
+		/wants a filesystem/,
 	);
 });

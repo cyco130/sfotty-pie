@@ -20,6 +20,7 @@ Currently, it consists of a web-based Atari 8-bit emulator and a set of NPM pack
 | [`@sfotty-pie/sfotty`](packages/sfotty/readme.md) | Cycle-exact 6502 emulator                     |
 | [`@sfotty-pie/cli`](packages/cli/readme.md)       | Emulator for a hypothetical 6502-based system |
 | [`@sfotty-pie/a8`](packages/a8/readme.md)         | A headless Atari 8-bit emulator               |
+| [`@sfotty-pie/fonts`](packages/fonts/readme.md)   | Retro character sets as Unicode fonts         |
 | [`@sfotty-pie/spasm`](packages/spasm/readme.md)   | A WIP 6502 cross-assembler/linker             |
 | [`@sfotty-pie/spift`](packages/spift/readme.md)   | Swiss army knife for retro file formats       |
 

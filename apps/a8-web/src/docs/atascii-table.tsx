@@ -194,11 +194,14 @@ export function AtasciiTable() {
 								/>
 							</td>
 							<td class={TD}>
-								<div class="text-lg leading-none">{f.glyph}</div>
+								<div class="font-a8 text-2xl leading-none">{f.glyph}</div>
 								<div class="mt-1 text-xs text-neutral-300">{glyphLabel(f)}</div>
 								{alt && (
 									<div class="mt-0.5 text-xs text-neutral-500">
-										intl: <span class="text-neutral-300">{alt.glyph}</span>{" "}
+										intl:{" "}
+										<span class="font-a8 text-base leading-none text-neutral-300">
+											{alt.glyph}
+										</span>{" "}
 										{alt.name}
 									</div>
 								)}

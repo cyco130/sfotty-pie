@@ -1,11 +1,23 @@
+import a8FontUrl from "@sfotty-pie/fonts/fonts/A8Screen-Regular.woff2";
 import { AtasciiTable } from "./atascii-table.tsx";
+import { CharsetGrid } from "./charset-grid.tsx";
 import { KeyboardMatrix } from "./keyboard-matrix.tsx";
 import { KeyboardTable } from "./keyboard-table.tsx";
 import { KeyboardView } from "./keyboard-view.tsx";
 
+// The real Atari character-set font, generated from the OS ROM by
+// @sfotty-pie/fonts. Declared here rather than in index.css so only the
+// pages that render Atari glyphs load it (Vite rewrites the import to the
+// hashed asset URL, which a plain CSS file can't reference).
+const a8FontFace = `@font-face {
+	font-family: "A8 Screen";
+	src: url(${JSON.stringify(a8FontUrl)}) format("woff2");
+}`;
+
 export function Docs() {
 	return (
 		<div class="min-h-screen bg-neutral-950 text-neutral-200">
+			<style>{a8FontFace}</style>
 			<header class="border-b border-neutral-800 p-4">
 				<h1 class="text-xl font-semibold text-neutral-100">
 					Atari 8-bit reference
@@ -19,6 +31,18 @@ export function Docs() {
 				<section>
 					<h2 class="mb-3 text-lg font-semibold text-neutral-100">Keyboard</h2>
 					<KeyboardView />
+				</section>
+				<section>
+					<h2 class="mb-3 text-lg font-semibold text-neutral-100">
+						Character set
+					</h2>
+					<p class="mb-4 text-sm text-neutral-500">
+						All 128 characters in ATASCII order, rendered in the actual
+						character-set font extracted from the OS ROM, followed by the
+						characters the international set replaces. Hover for the code and
+						name.
+					</p>
+					<CharsetGrid />
 				</section>
 				<section>
 					<h2 class="mb-3 text-lg font-semibold text-neutral-100">

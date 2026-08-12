@@ -26,8 +26,8 @@ The following subcommands are currently implemented:
 - `unpack`: Extract disk image contents into a directory
 - `pack`: Create a disk image from a directory
 - `convert`: Convert between disk image formats
-- `create`: Create an empty disk image
-- `mkfs`: Create an empty file system on a disk image
+- `create`: Create a disk image with a file system (`--fs none` creates a blank one)
+- `mkfs`: Create an empty file system on an existing disk image
 - `ls`: List files and directories on a disk image
 - `rm`: Remove files from a disk image
 - `mkdir`: Create a directory on a disk image
@@ -45,7 +45,7 @@ The following subcommands are currently implemented:
 
 Commands that operate on a disk image accept an `-i` or `--image` option to specify the disk image file. Commands that operate on a source and destination accept `--from` and `--to` options to specify the source and destination disk images, respectively (`-i` sets both `--from` and `--to` to the same image).
 
-For commands that operate on files inside a disk image, the file system and variant can be specified with `--fs`. It's normally not necessary to specify it except for `mkfs` since `spift` can usually automatically detect the file system and variant.
+For commands that operate on files inside a disk image, the file system and variant can be specified with `--fs`. It's normally not necessary to specify it except for `mkfs` and `create`, which write a new file system rather than detect one - and even they pick a sensible default from the disk geometry when `--fs` is omitted. The defaulting works both ways: given `--fs` but no geometry, `create` picks the file system's home geometry (720x128 for everything except `atari/25`, whose home is 1040x128). `--fs none` skips formatting and leaves the new image blank.
 
 Commands that take a file or directory specifier accept `*` and `?` as wildcards, and `>`, `:`, or `/` as directory separators. `<` is also supported for going up one level. Make sure to quote any wildcard patterns and `<` or `>` to prevent the shell from processing them before `spift` sees them. In most Unix shells, you can use single quotes (`'`) for this purpose.
 

@@ -83,11 +83,18 @@ const HELP: Record<string, string> = {
     the sectors an ATR does, so nothing is lost either way. Refuses to
     overwrite an existing file unless --force (-f) is given.`,
 	create: `  create -i FILE [-t TYPE] [-f] [--sd | --ed | --dd]
-                 [--sector-size N] [--sector-count N]
-    Create a blank image (all zeroes, no filesystem). TYPE is inferred from
-    the file name when omitted; supported types: atr. Defaults to --sd
-    (720 x 128-byte sectors); --ed is 1040 x 128 and --dd is 720 x 256.
-    Refuses to overwrite an existing file unless --force (-f) is given.`,
+                 [--sector-size N] [--sector-count N] [--fs FILESYSTEM]
+                 [--master IMAGE|DIR] [--install-dos] [--boot-sectors FILE]
+                 [--volume-name NAME] [--reserve-last-sector]
+    Create a disk image. TYPE is inferred from the file name when omitted;
+    supported types: atr. Defaults to --sd (720 x 128-byte sectors); --ed
+    is 1040 x 128 and --dd is 720 x 256. The image comes formatted: without
+    --fs the geometry picks the filesystem, with --fs the filesystem picks
+    its home geometry (720 x 128 for everything but atari/25, whose home is
+    enhanced density), and the formatting flags mean what they mean under
+    mkfs (which is create's second half). --fs none skips formatting and
+    leaves the image blank (all zeroes). Refuses to overwrite an existing
+    file unless --force (-f) is given.`,
 	mkfs: `  mkfs -i IMAGE [--fs FILESYSTEM] [--master IMAGE|DIR]
                [--install-dos] [--boot-sectors FILE] [--volume-name NAME]
                [--reserve-last-sector]

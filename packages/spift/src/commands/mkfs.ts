@@ -80,6 +80,26 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 	if (extra.length > 0) {
 		throw new UsageError(`unexpected argument "${extra[0]}"`);
 	}
+	return { image, ...parseFormatValues(values) };
+}
+
+/** The formatting flags mkfs owns and create forwards. */
+export interface FormatFlagValues {
+	fs?: string | undefined;
+	"boot-sectors"?: string | undefined;
+	master?: string | undefined;
+	"install-dos"?: boolean | undefined;
+	"volume-name"?: string | undefined;
+	"reserve-last-sector"?: boolean | undefined;
+}
+
+/**
+ * Cross-checks and resolves the formatting flags, shared between mkfs and
+ * create so the two spell formatting identically.
+ */
+export function parseFormatValues(
+	values: FormatFlagValues,
+): Omit<MkfsArgs, "image"> {
 	// Both name the boot area; one takes it verbatim, the other adapts it.
 	if (values["boot-sectors"] !== undefined && values.master !== undefined) {
 		throw new UsageError(
@@ -96,7 +116,7 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 	// Whether a volume name belongs here turns on the family, which a
 	// 512-byte image settles only once it is open (it defaults to SpartaDOS),
 	// so both checks - name-on-Atari and no-name-on-Sparta - wait for
-	// mkfsCommand. The one thing settled now: an explicit --fs sparta must
+	// formatImage. The one thing settled now: an explicit --fs sparta must
 	// carry a name, since that is the whole point of naming the family.
 	if (selection?.family === "sparta" && values["volume-name"] === undefined) {
 		throw new UsageError(
@@ -107,7 +127,6 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 	}
 
 	return {
-		image,
 		family: selection?.family,
 		variant: selection?.variant,
 		bootSectors: values["boot-sectors"],
@@ -118,24 +137,20 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 	};
 }
 
+async function readInput(path: string): Promise<Uint8Array> {
+	try {
+		return await readFile(path);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			throw new CliError(`${path}: no such file`);
+		}
+		throw error;
+	}
+}
+
 export async function mkfsCommand(args: string[]): Promise<void> {
 	const parsed = parseMkfsArgs(args);
-
-	const read = async (path: string): Promise<Uint8Array> => {
-		try {
-			return await readFile(path);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-				throw new CliError(`${path}: no such file`);
-			}
-			throw error;
-		}
-	};
-	const imageBytes = await read(parsed.image);
-	const bootSectors =
-		parsed.bootSectors === undefined
-			? undefined
-			: await read(parsed.bootSectors);
+	const imageBytes = await readInput(parsed.image);
 
 	let medium;
 	try {
@@ -144,6 +159,25 @@ export async function mkfsCommand(args: string[]): Promise<void> {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new CliError(`${parsed.image}: ${message}`);
 	}
+
+	const summary = await formatImage(parsed, medium);
+	await writeFile(parsed.image, medium.bytes);
+	process.stdout.write(summary);
+}
+
+/**
+ * The whole mkfs pipeline minus reading and writing the image file: formats
+ * the opened medium in memory and returns the summary line to print once
+ * the bytes are saved. create runs this on a freshly made blank image.
+ */
+export async function formatImage(
+	parsed: MkfsArgs,
+	medium: AtrImage,
+): Promise<string> {
+	const bootSectors =
+		parsed.bootSectors === undefined
+			? undefined
+			: await readInput(parsed.bootSectors);
 
 	const master =
 		parsed.master === undefined ? undefined : await openMaster(parsed.master);
@@ -170,18 +204,17 @@ export async function mkfsCommand(args: string[]): Promise<void> {
 		);
 	}
 	if (family === "sparta") {
-		await mkfsSparta(parsed, medium, bootSectors, master);
-		return;
+		return mkfsSparta(parsed, medium, bootSectors, master);
 	}
-	await mkfsAtari(parsed, medium, bootSectors, master);
+	return mkfsAtari(parsed, medium, bootSectors, master);
 }
 
-async function mkfsAtari(
+function mkfsAtari(
 	parsed: MkfsArgs,
 	medium: AtrImage,
 	bootSectors: Uint8Array | undefined,
 	master: MasterFiles | undefined,
-): Promise<void> {
+): string {
 	// The last-sector switch is a SpartaDOS bitmap detail; the Atari DOS
 	// family reaches more sectors by variant (MyDOS), not by a formatter knob.
 	if (parsed.reserveLastSector) {
@@ -257,7 +290,6 @@ async function mkfsAtari(
 		installed = installAtariFrom(master, medium, variant, parsed.image);
 	}
 
-	await writeFile(parsed.image, medium.bytes);
 	// DOS 2.5 addresses 1023 sectors, so a standard 1040-sector enhanced disk
 	// always leaves 17 past its reach - that is just the format, not worth
 	// mentioning. On any other size the leftover is the caller's own doing, so
@@ -274,18 +306,18 @@ async function mkfsAtari(
 				: parsed.bootSectors !== undefined
 					? `, boot record from ${parsed.bootSectors}`
 					: "";
-	process.stdout.write(
+	return (
 		`made an ${fsId("atari", result.variant)} filesystem on ${parsed.image}: ` +
-			`${result.freeSectors} free sectors${wasted}${boot}\n`,
+		`${result.freeSectors} free sectors${wasted}${boot}\n`
 	);
 }
 
-async function mkfsSparta(
+function mkfsSparta(
 	parsed: MkfsArgs,
 	medium: AtrImage,
 	bootSectors: Uint8Array | undefined,
 	master: MasterFiles | undefined,
-): Promise<void> {
+): string {
 	// parseMkfsArgs requires the volume name when --fs sparta is explicit; a
 	// 512-byte image that defaulted here (no --fs at all) has not passed that
 	// gate, so it is enforced again once the family is settled.
@@ -326,7 +358,6 @@ async function mkfsSparta(
 		installed = installSpartaFrom(master, medium, parsed.image);
 	}
 
-	await writeFile(parsed.image, medium.bytes);
 	const wasted =
 		result.unusableSectors > 0
 			? `, ${result.unusableSectors} sector(s) beyond its reach`
@@ -339,9 +370,9 @@ async function mkfsSparta(
 				: parsed.bootSectors !== undefined
 					? `, boot record from ${parsed.bootSectors}`
 					: "";
-	process.stdout.write(
+	return (
 		`made a ${fsId("sparta", result.variant)} filesystem on ${parsed.image}: ` +
-			`${result.freeSectors} free sectors${wasted}${boot}\n`,
+		`${result.freeSectors} free sectors${wasted}${boot}\n`
 	);
 }
 

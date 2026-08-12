@@ -5,8 +5,10 @@ import {
 	ATR_SECTOR_SIZES,
 	type AtrSectorSize,
 	createBlankAtr,
+	openAtr,
 } from "../atr.ts";
 import { CliError, UsageError } from "../cli-error.ts";
+import { formatImage, parseFormatValues, type MkfsArgs } from "./mkfs.ts";
 
 export interface CreateSpec {
 	image: string;
@@ -14,6 +16,8 @@ export interface CreateSpec {
 	sectorSize: AtrSectorSize;
 	sectorCount: number;
 	force: boolean;
+	/** The mkfs run that follows creation; undefined is --fs none, blank. */
+	format: MkfsArgs | undefined;
 }
 
 export function parseCreateArgs(args: string[]): CreateSpec {
@@ -30,6 +34,12 @@ export function parseCreateArgs(args: string[]): CreateSpec {
 				sd: { type: "boolean" },
 				ed: { type: "boolean" },
 				dd: { type: "boolean" },
+				fs: { type: "string" },
+				"boot-sectors": { type: "string" },
+				master: { type: "string" },
+				"install-dos": { type: "boolean" },
+				"volume-name": { type: "string" },
+				"reserve-last-sector": { type: "boolean" },
 			},
 			allowPositionals: true,
 		});
@@ -107,12 +117,55 @@ export function parseCreateArgs(args: string[]): CreateSpec {
 		}
 	}
 
+	// The image comes formatted unless --fs none asks for a blank one; the
+	// formatting flags are mkfs's, resolved by the same shared code so the
+	// two commands cannot drift apart.
+	let format: MkfsArgs | undefined;
+	if (values.fs?.toLowerCase() === "none") {
+		const stray = (
+			[
+				"master",
+				"boot-sectors",
+				"install-dos",
+				"volume-name",
+				"reserve-last-sector",
+			] as const
+		).find((flag) => values[flag] !== undefined);
+		if (stray !== undefined) {
+			throw new UsageError(
+				`--fs none makes a blank unformatted image; --${stray} is a ` +
+					`formatting option`,
+			);
+		}
+	} else {
+		if (values.fs === undefined && ![128, 256, 512].includes(sectorSize)) {
+			throw new UsageError(
+				`${sectorSize}-byte sectors hold no spift filesystem; ` +
+					`create the image blank with --fs none`,
+			);
+		}
+		format = { image, ...parseFormatValues(values) };
+		// The inverse of geometry-picks-the-filesystem: a filesystem choice
+		// picks its home geometry. Only DOS 2.5 differs from the global
+		// 720-sector default (its second VTOC lives at sector 1024). An
+		// explicit count still wins, and --sd keeps naming just the sector
+		// size, so it does not pin the count to 720 here either.
+		if (
+			format.variant === "dos25" &&
+			countArg === undefined &&
+			shorthand !== "ed"
+		) {
+			sectorCount = 1040;
+		}
+	}
+
 	return {
 		image,
 		type,
 		sectorSize,
 		sectorCount,
 		force: values.force ?? false,
+		format,
 	};
 }
 
@@ -129,8 +182,17 @@ export async function createCommand(args: string[]): Promise<void> {
 		sectorSize: spec.sectorSize,
 		sectorCount: spec.sectorCount,
 	});
+	// Formatting happens in memory before the file exists, so a bad format
+	// never leaves a half-made image behind.
+	let summary = "";
+	let output: Uint8Array = bytes;
+	if (spec.format !== undefined) {
+		const medium = openAtr(bytes);
+		summary = await formatImage(spec.format, medium);
+		output = medium.bytes;
+	}
 	try {
-		await writeFile(spec.image, bytes, { flag: spec.force ? "w" : "wx" });
+		await writeFile(spec.image, output, { flag: spec.force ? "w" : "wx" });
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "EEXIST") {
 			throw new CliError(
@@ -141,6 +203,8 @@ export async function createCommand(args: string[]): Promise<void> {
 	}
 	process.stdout.write(
 		`created ${spec.image}: ${spec.sectorCount} x ` +
-			`${spec.sectorSize}-byte sectors, ${bytes.length} bytes\n`,
+			`${spec.sectorSize}-byte sectors, ${output.length} bytes` +
+			`${spec.format === undefined ? ", no filesystem" : ""}\n` +
+			summary,
 	);
 }

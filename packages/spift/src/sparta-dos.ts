@@ -1574,6 +1574,12 @@ export function checkSpartaDosGeometry(
 	if (sectorSize !== 128 && sectorSize !== 256 && sectorSize !== 512) {
 		return `SpartaDOS needs 128-, 256- or 512-byte sectors, not ${sectorSize}`;
 	}
+	if (sectorSize === 512 && variant !== "sdfs21") {
+		return (
+			"512-byte sectors are an SDFS 2.1 feature; format sdfs21 " +
+			"for a 512-byte-sector disk"
+		);
+	}
 	const layout = spartaLayout(sectorSize, sectorCount);
 	if (sectorCount < layout.dirData + 1) {
 		return (

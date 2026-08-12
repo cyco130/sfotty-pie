@@ -798,6 +798,9 @@ test("refuses what cannot be formatted", () => {
 	expect(checkSpartaDosGeometry("sdfs11", 128, 720)).toMatch(/1\.1/);
 	expect(checkSpartaDosGeometry("sdfs21", 64, 720)).toMatch(/sectors/);
 	expect(checkSpartaDosGeometry("sdfs21", 128, 4)).toMatch(/cannot hold/);
+	// 512-byte sectors are a 2.1-only feature; the older revision refuses.
+	expect(checkSpartaDosGeometry("sdfs20", 512, 2048)).toMatch(/2\.1/);
+	expect(checkSpartaDosGeometry("sdfs21", 512, 2048)).toBeUndefined();
 	expect(checkSpartaDosGeometry("sdfs21", 128, 720)).toBeUndefined();
 	const medium = openAtr(createBlankAtr({ sectorSize: 128, sectorCount: 720 }));
 	expect(() =>

@@ -9,17 +9,28 @@ import {
 	type AtariDosVariant,
 } from "../atari-dos.ts";
 import {
+	formatSpartaDos,
+	openSpartaDos,
+	writeSpartaDosFilePointer,
+	type SpartaDosVariant,
+} from "../sparta-dos.ts";
+import {
 	ATR_MAX_SECTOR_COUNT,
 	ATR_SECTOR_SIZES,
 	createBlankAtr,
 	openAtr,
+	type AtrImage,
 	type AtrSectorSize,
 } from "../atr.ts";
 import { setBootable } from "../boot-record.ts";
 import { writeBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { copyEntries } from "../copy.ts";
-import { compileHostPattern, openHostDirectory } from "../host-dir.ts";
+import {
+	compileHostPattern,
+	openHostDirectory,
+	type HostDirectory,
+} from "../host-dir.ts";
 import { fsId, parseFsOption } from "./fs-option.ts";
 
 /** The boot record, kept beside the files as an ordinary host file. */
@@ -28,7 +39,8 @@ export const BOOT_FILE = ".boot.bin";
 export interface PackArgs {
 	image: string;
 	directory: string;
-	variant: AtariDosVariant | undefined;
+	family: "atari" | "sparta" | undefined;
+	variant: AtariDosVariant | SpartaDosVariant | undefined;
 	sectorSize: AtrSectorSize;
 	sectorCount: number;
 	writeBootSectors: boolean;
@@ -37,6 +49,8 @@ export interface PackArgs {
 	noTimestamps: boolean;
 	text: string[];
 	strict: boolean;
+	/** SpartaDOS volume name (required there). */
+	volumeName: string | undefined;
 }
 
 const GEOMETRY_SHORTHANDS = {
@@ -60,6 +74,7 @@ export function parsePackArgs(args: string[]): PackArgs {
 				dd: { type: "boolean" },
 				"write-boot-sectors": { type: "boolean" },
 				"set-dos-file": { type: "string" },
+				"volume-name": { type: "string" },
 				text: { type: "string", multiple: true },
 				"no-timestamps": { type: "boolean" },
 				strict: { type: "boolean" },
@@ -149,13 +164,29 @@ export function parsePackArgs(args: string[]): PackArgs {
 
 	const selection =
 		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
-	if (selection?.family === "sparta") {
-		throw new CliError("SpartaDOS filesystem support is not implemented yet");
+	if (values["volume-name"] !== undefined && selection?.family !== "sparta") {
+		throw new UsageError(
+			"--volume-name is SpartaDOS's (the Atari DOS family has no label); " +
+				"pack --fs sparta to make one",
+		);
+	}
+	// Same rule as mkfs: a SpartaDOS disk is identified by its volume name, so
+	// it is required rather than defaulted to blank.
+	if (
+		selection?.family === "sparta" &&
+		(values["volume-name"] ?? "").trim() === ""
+	) {
+		throw new UsageError(
+			"a SpartaDOS filesystem needs a volume name (--volume-name NAME): " +
+				"it identifies the disk for change detection, and SpartaDOS 1.1 " +
+				"relies on it being unique",
+		);
 	}
 
 	return {
 		image,
 		directory,
+		family: selection?.family,
 		variant: selection?.variant,
 		sectorSize:
 			(sectorSize as AtrSectorSize | undefined) ?? geometry?.sectorSize ?? 128,
@@ -166,7 +197,64 @@ export function parsePackArgs(args: string[]): PackArgs {
 		noTimestamps: values["no-timestamps"] ?? false,
 		text: values.text ?? [],
 		strict: values.strict ?? false,
+		volumeName: values["volume-name"],
 	};
+}
+
+/** Rethrows a driver error as a CliError, leaving our own CliErrors intact. */
+function fail(error: unknown): never {
+	if (error instanceof CliError) {
+		throw error;
+	}
+	throw new CliError(error instanceof Error ? error.message : String(error));
+}
+
+/** Reads the boot record an --write-boot-sectors pack lays down. */
+async function readBootRecord(directory: string): Promise<Uint8Array> {
+	const where = join(directory, BOOT_FILE);
+	try {
+		return await readFile(where);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			throw new CliError(
+				`${where}: no boot record to write (unpack writes one with ` +
+					`--extract-boot-sectors)`,
+			);
+		}
+		throw error;
+	}
+}
+
+/** Writes the finished image, refusing to clobber unless forced. */
+async function writeImage(
+	image: string,
+	medium: AtrImage,
+	force: boolean,
+): Promise<void> {
+	await writeFile(image, medium.bytes, { flag: force ? "w" : "wx" }).catch(
+		(error: NodeJS.ErrnoException) => {
+			if (error.code === "EEXIST") {
+				throw new CliError(
+					`${image} already exists, not overwriting (use --force)`,
+				);
+			}
+			throw error;
+		},
+	);
+}
+
+/** Prints per-file copy diagnostics; true when any file was damaged. */
+function reportDamaged(
+	files: readonly { from: string; diagnostics: readonly string[] }[],
+): boolean {
+	let damaged = false;
+	for (const file of files) {
+		for (const diagnostic of file.diagnostics) {
+			process.stderr.write(`spift: ${file.from}: ${diagnostic}\n`);
+			damaged = true;
+		}
+	}
+	return damaged;
 }
 
 export async function packCommand(args: string[]): Promise<void> {
@@ -188,7 +276,13 @@ export async function packCommand(args: string[]): Promise<void> {
 			sectorCount: parsed.sectorCount,
 		}),
 	);
-	let variant = parsed.variant;
+
+	if (parsed.family === "sparta") {
+		await packSparta(parsed, source, medium);
+		return;
+	}
+
+	let variant = parsed.variant as AtariDosVariant | undefined;
 	if (variant === undefined) {
 		variant = defaultAtariDosVariant(medium.sectorSize, medium.sectorCount);
 		if (variant === undefined) {
@@ -199,13 +293,6 @@ export async function packCommand(args: string[]): Promise<void> {
 		}
 	}
 
-	const fail = (error: unknown): never => {
-		if (error instanceof CliError) {
-			throw error;
-		}
-		throw new CliError(error instanceof Error ? error.message : String(error));
-	};
-
 	try {
 		formatAtariDos(medium, variant);
 	} catch (error) {
@@ -213,19 +300,7 @@ export async function packCommand(args: string[]): Promise<void> {
 	}
 
 	if (parsed.writeBootSectors) {
-		const where = join(parsed.directory, BOOT_FILE);
-		let boot;
-		try {
-			boot = await readFile(where);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-				throw new CliError(
-					`${where}: no boot record to write (unpack writes one with ` +
-						`--extract-boot-sectors)`,
-				);
-			}
-			throw error;
-		}
+		const boot = await readBootRecord(parsed.directory);
 		try {
 			// The boot record is laid down before the filesystem's own
 			// structures are anyone's concern, and a mismatched count byte is
@@ -298,24 +373,9 @@ export async function packCommand(args: string[]): Promise<void> {
 		}
 	}
 
-	await writeFile(parsed.image, medium.bytes, {
-		flag: parsed.force ? "w" : "wx",
-	}).catch((error: NodeJS.ErrnoException) => {
-		if (error.code === "EEXIST") {
-			throw new CliError(
-				`${parsed.image} already exists, not overwriting (use --force)`,
-			);
-		}
-		throw error;
-	});
+	await writeImage(parsed.image, medium, parsed.force);
 
-	let damaged = false;
-	for (const file of result.files) {
-		for (const diagnostic of file.diagnostics) {
-			process.stderr.write(`spift: ${file.from}: ${diagnostic}\n`);
-			damaged = true;
-		}
-	}
+	const damaged = reportDamaged(result.files);
 	const boot = !parsed.writeBootSectors
 		? ""
 		: `, boot record from ${BOOT_FILE}` +
@@ -325,6 +385,97 @@ export async function packCommand(args: string[]): Promise<void> {
 	process.stdout.write(
 		`packed ${result.files.length} file(s) from ${parsed.directory} into ` +
 			`${parsed.image} as ${fsId("atari", variant)}${boot}\n`,
+	);
+	if (damaged) {
+		process.exitCode = 1;
+	}
+}
+
+/**
+ * The SpartaDOS half of pack: format the image (SDX-golden layout, the
+ * volume name required as mkfs requires it), lay down the .boot.bin record
+ * when asked, copy the folder in, and point the boot record at a file with
+ * --set-dos-file. Morally mkfs --fs sparta followed by a folder copy.
+ */
+async function packSparta(
+	parsed: PackArgs,
+	source: HostDirectory,
+	medium: AtrImage,
+): Promise<void> {
+	const variant = (parsed.variant as SpartaDosVariant | undefined) ?? "sdfs21";
+	// --write-boot-sectors uses the packed record's boot code; its parameter
+	// block belongs to the filesystem and is rewritten by the formatter, so
+	// unlike Atari DOS there is nothing to fit. Without it, spift's own
+	// not-bootable record goes down.
+	const bootSectors = parsed.writeBootSectors
+		? await readBootRecord(parsed.directory)
+		: undefined;
+	try {
+		formatSpartaDos(medium, variant, {
+			// parsePackArgs guarantees a non-empty name for the sparta family.
+			volumeName: parsed.volumeName ?? "",
+			...(bootSectors === undefined ? {} : { bootSectors }),
+		});
+	} catch (error) {
+		fail(error);
+	}
+
+	const textPatterns = parsed.text.map((pattern) =>
+		compileHostPattern(pattern),
+	);
+	const filesystem = openSpartaDos(medium);
+	let result;
+	try {
+		result = copyEntries(source, filesystem, {
+			sources: ["*"],
+			destination: "/",
+			recursive: true,
+			force: true,
+			noAttributes: false,
+			text: textPatterns.length > 0,
+			textMatch:
+				textPatterns.length === 0
+					? undefined
+					: (entry) => textPatterns.some((matches) => matches(entry.name)),
+			strict: parsed.strict,
+			preserveTimestamps: !parsed.noTimestamps,
+			move: false,
+		});
+	} catch (error) {
+		fail(error);
+		return;
+	}
+
+	// SpartaDOS boot files have arbitrary names, so there is no default to
+	// point at - the pointer is set only when --set-dos-file names one.
+	let bootFile: string | undefined;
+	if (parsed.writeBootSectors && parsed.setDosFile !== undefined) {
+		// The boot file can live in a subdirectory (BW-DOS keeps its DOS in
+		// dos/), and its name is a path, so match the whole path across the
+		// tree rather than a bare name in the root.
+		const wanted = parsed.setDosFile.replaceAll(">", "/").toLowerCase();
+		const entry = [...filesystem.entries(undefined, { recursive: true })].find(
+			(candidate) => candidate.path === wanted && candidate.kind === "file",
+		);
+		if (entry?.startSector === undefined) {
+			throw new CliError(`no file named ${parsed.setDosFile} to boot from`);
+		}
+		writeSpartaDosFilePointer(medium, entry.startSector);
+		bootFile = entry.path;
+	}
+
+	await writeImage(parsed.image, medium, parsed.force);
+
+	const damaged = reportDamaged(result.files);
+	const boot = !parsed.writeBootSectors
+		? ""
+		: `, boot record from ${BOOT_FILE}` +
+			(bootFile === undefined
+				? " (no --set-dos-file, so not bootable)"
+				: `, booting ${bootFile}`);
+	process.stdout.write(
+		`packed ${result.files.length} file(s) from ${parsed.directory} into ` +
+			`${parsed.image} as ${fsId("sparta", variant)}${boot}\n`,
 	);
 	if (damaged) {
 		process.exitCode = 1;

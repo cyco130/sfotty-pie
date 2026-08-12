@@ -149,18 +149,21 @@ const HELP: Record<string, string> = {
     encoding takes LF, CR, and CRLF alike). --in-place converts the files
     named rather than writing to stdout.`,
 	pack: `  pack -i IMAGE [DIR] [--fs FILESYSTEM] [--sd | --ed | --dd]
-       [--sector-size N] [--sector-count N] [--write-boot-sectors]
-       [--set-dos-file NAME] [--text SPEC]... [--strict] [-f]
-       [--no-timestamps]
+       [--sector-size N] [--sector-count N] [--volume-name NAME]
+       [--write-boot-sectors] [--set-dos-file NAME] [--text SPEC]...
+       [--strict] [-f] [--no-timestamps]
     Build an image from a host directory (default: the current one):
     create it, put a filesystem on it, and copy the tree in. Geometry and
-    filesystem options are create's and mkfs's. --write-boot-sectors
-    takes the boot record from .boot.bin in the directory and points it at
-    dos.sys wherever packing put it - the record carries its old disk's
-    sector, which repacking rarely reuses - or marks the disk not bootable
-    when no dos.sys was packed. --set-dos-file NAME overrides that name,
-    and needs --write-boot-sectors, since otherwise there is no boot code
-    to follow the pointer. --text SPEC recodes the files it names into the family
+    filesystem options are create's and mkfs's, so --fs sparta packs a
+    SpartaDOS disk (--volume-name required, as mkfs requires it).
+    --write-boot-sectors takes the boot record from .boot.bin in the
+    directory and points it at dos.sys wherever packing put it - the record
+    carries its old disk's sector, which repacking rarely reuses - or marks
+    the disk not bootable when no dos.sys was packed. On SpartaDOS the boot
+    file has no default name, so --set-dos-file names it (a path, since it
+    may sit in a subdirectory). --set-dos-file overrides the name and needs
+    --write-boot-sectors, since otherwise there is no boot code to follow
+    the pointer. --text SPEC recodes the files it names into the family
     character set - a whole directory holds binaries too, so they have to
     be named - with --strict to refuse what will not survive. Host mtimes
     become entry timestamps where the filesystem has them (SpartaDOS),

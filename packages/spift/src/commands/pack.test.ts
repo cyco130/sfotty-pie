@@ -5,6 +5,7 @@ test("parses the image, the directory, and the geometry", () => {
 	expect(parsePackArgs(["-i", "disk.atr"])).toEqual({
 		image: "disk.atr",
 		directory: ".",
+		family: undefined,
 		variant: undefined,
 		sectorSize: 128,
 		sectorCount: 720,
@@ -14,6 +15,7 @@ test("parses the image, the directory, and the geometry", () => {
 		noTimestamps: false,
 		text: [],
 		strict: false,
+		volumeName: undefined,
 	});
 	expect(parsePackArgs(["-i", "d.atr", "stuff", "--dd"])).toMatchObject({
 		directory: "stuff",

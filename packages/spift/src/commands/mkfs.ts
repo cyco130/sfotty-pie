@@ -24,7 +24,7 @@ import {
 import { extractBootSectors } from "../boot-sectors.ts";
 import { CliError, UsageError } from "../cli-error.ts";
 import { openHostDirectory } from "../host-dir.ts";
-import { fsId, parseFsOption, type FsSelection } from "./fs-option.ts";
+import { fsId, parseFsOption } from "./fs-option.ts";
 import { openImageFilesystem, type OpenedImage } from "./open-image.ts";
 import { BOOT_FILE } from "./pack.ts";
 
@@ -49,7 +49,6 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 			options: {
 				image: { type: "string", short: "i" },
 				fs: { type: "string" },
-				variant: { type: "string" },
 				"boot-sectors": { type: "string" },
 				master: { type: "string" },
 				"install-dos": { type: "boolean" },
@@ -72,9 +71,6 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 	if (extra.length > 0) {
 		throw new UsageError(`unexpected argument "${extra[0]}"`);
 	}
-	if (values.fs !== undefined && values.variant !== undefined) {
-		throw new UsageError("--fs and --variant are mutually exclusive");
-	}
 	// Both name the boot area; one takes it verbatim, the other adapts it.
 	if (values["boot-sectors"] !== undefined && values.master !== undefined) {
 		throw new UsageError(
@@ -86,12 +82,8 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 		throw new UsageError("--install-dos needs --master to copy the DOS from");
 	}
 
-	let selection: FsSelection | undefined;
-	if (values.fs !== undefined) {
-		selection = parseFsOption(values.fs, "--fs");
-	} else if (values.variant !== undefined) {
-		selection = parseFsOption(values.variant, "--variant");
-	}
+	const selection =
+		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
 	if (values["volume-name"] !== undefined && selection?.family !== "sparta") {
 		throw new UsageError(
 			"--volume-name is SpartaDOS's (the Atari DOS family has no label); " +

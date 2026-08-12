@@ -19,9 +19,6 @@ test("parses the image and filesystem selection", () => {
 		"dos20",
 	);
 	expect(
-		parseMkfsArgs(["-i", "disk.atr", "--variant", "atari/20"]).variant,
-	).toBe("dos20");
-	expect(
 		parseMkfsArgs(["-i", "disk.atr", "--boot-sectors", "boot.bin"]).bootSectors,
 	).toBe("boot.bin");
 });
@@ -31,16 +28,6 @@ test("validates the argument list", () => {
 	expect(() => parseMkfsArgs(["-i", "a.atr", "b.atr"])).toThrow(
 		/unexpected argument/,
 	);
-	expect(() =>
-		parseMkfsArgs([
-			"-i",
-			"a.atr",
-			"--fs",
-			"atari/25",
-			"--variant",
-			"atari/mydos",
-		]),
-	).toThrow(/mutually exclusive/);
 	// A bare family means "pick the variant for me": geometry decides for
 	// atari, and sparta defaults to what SDX itself formats (sdfs21).
 	expect(

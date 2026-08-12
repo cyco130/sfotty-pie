@@ -42,6 +42,45 @@ directory named outright is a container instead, and paths stay inside
 it. At least one side must be an image.`;
 
 const HELP: Record<string, string> = {
+	unpack: `  unpack -i IMAGE [DIR] [--fs FILESYSTEM] [--extract-boot-sectors]
+         [--text SPEC]... [--eol lf | crlf | native] [-f]
+         [--no-timestamps]
+    Explode an image into a host directory (default: the current one),
+    made if missing, mirroring the whole tree.
+    --extract-boot-sectors also writes the boot record to .boot.bin
+    there, which is what lets pack rebuild a bootable disk. --text SPEC
+    recodes the files it names out of the family character set (a whole
+    disk holds binaries too) and repeats for more than one pattern, with
+    --eol picking what EOL becomes. Entry timestamps become the extracted
+    files' mtimes, as an archiver does; --no-timestamps leaves extraction
+    time. Refuses to overwrite existing files without -f.`,
+	pack: `  pack -i IMAGE [DIR] [--fs FILESYSTEM] [--sd | --ed | --dd]
+       [--sector-size N] [--sector-count N] [--volume-name NAME]
+       [--write-boot-sectors] [--set-dos-file NAME] [--text SPEC]...
+       [--strict] [-f] [--no-timestamps]
+    Build an image from a host directory (default: the current one):
+    create it, put a filesystem on it, and copy the tree in. Geometry and
+    filesystem options are create's and mkfs's, so --fs sparta packs a
+    SpartaDOS disk (--volume-name required, as mkfs requires it).
+    --write-boot-sectors takes the boot record from .boot.bin in the
+    directory and points it at dos.sys wherever packing put it - the record
+    carries its old disk's sector, which repacking rarely reuses - or marks
+    the disk not bootable when no dos.sys was packed. On SpartaDOS the boot
+    file has no default name, so --set-dos-file names it (a path, since it
+    may sit in a subdirectory). --set-dos-file overrides the name and needs
+    --write-boot-sectors, since otherwise there is no boot code to follow
+    the pointer. --text SPEC recodes the files it names into the family
+    character set - a whole directory holds binaries too, so they have to
+    be named - with --strict to refuse what will not survive. Host mtimes
+    become entry timestamps where the filesystem has them (SpartaDOS),
+    as an archiver does; --no-timestamps stamps pack time instead.
+    Refuses to overwrite an existing image without -f.`,
+	convert: `  convert -i IMAGE OUTPUT [-t TYPE] [-f]
+    Rewrite an image in another container format. The output type comes
+    from its file name, or --type (-t). spift reads atr and dcm (Disk
+    Communicator, also seen as .dc3) and writes atr - a DCM holds exactly
+    the sectors an ATR does, so nothing is lost either way. Refuses to
+    overwrite an existing file unless --force (-f) is given.`,
 	create: `  create -i FILE [-t TYPE] [-f] [--sd | --ed | --dd]
                  [--sector-size N] [--sector-count N]
     Create a blank image (all zeroes, no filesystem). TYPE is inferred from
@@ -94,6 +133,19 @@ const HELP: Record<string, string> = {
     and accepts one that already exists. A directory needs eight
     contiguous free sectors, so this can fail on a fragmented disk with
     plenty of room.`,
+	rmdir: `  rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
+    Remove empty directories, freeing what they occupied. A directory
+    holding anything is refused, as the DOSes refuse it.`,
+	cp: `  cp [CONTAINERS] SOURCE... DESTINATION [-R] [-f] [-p]
+     [--no-attributes] [--text] [--strict] [--eol lf | crlf | native]
+    Copy entries, with the same DESTINATION rules as mv - a template is
+    the target's own rename rule, so '*.ttt' '*.txt' works copying out to
+    the host as well as in. --recursive (-R) is needed to copy a
+    directory. With the host on one side this puts files onto an image or
+    takes them off; with images on both it copies between them.
+    --preserve (-p) carries timestamps across, as cp -p does everywhere
+    (SpartaDOS entries and host mtimes carry them; Atari DOS has none);
+    without it the target stamps its own clock. mv always carries them.`,
 	mv: `  mv [CONTAINERS] SOURCE... DESTINATION [-f] [--no-attributes]
      [--remove-source] [--text] [--strict] [--eol lf | crlf | native]
     Rename or move entries. DESTINATION is a directory when it ends in a
@@ -106,16 +158,6 @@ const HELP: Record<string, string> = {
     copies and then removes, target written first. Moving off the host
     needs --remove-source: an image's entries survive deletion under the
     deleted flag, host files do not.`,
-	cp: `  cp [CONTAINERS] SOURCE... DESTINATION [-R] [-f] [-p]
-     [--no-attributes] [--text] [--strict] [--eol lf | crlf | native]
-    Copy entries, with the same DESTINATION rules as mv - a template is
-    the target's own rename rule, so '*.ttt' '*.txt' works copying out to
-    the host as well as in. --recursive (-R) is needed to copy a
-    directory. With the host on one side this puts files onto an image or
-    takes them off; with images on both it copies between them.
-    --preserve (-p) carries timestamps across, as cp -p does everywhere
-    (SpartaDOS entries and host mtimes carry them; Atari DOS has none);
-    without it the target stamps its own clock. mv always carries them.`,
 	chattr: `  chattr -i IMAGE SETTING... SPEC... [--fs FILESYSTEM] [-R] [-f]
     Change what an entry carries. A SETTING is name=on or name=off, and
     the leading positionals that hold an "=" are the settings; the rest
@@ -128,72 +170,21 @@ const HELP: Record<string, string> = {
     read-only is one bit in the directory entry; dos1 is the data sector
     encoding, so changing it rewrites the file and reallocates its chain,
     which needs --force (-f) on a read-only one.`,
-	convert: `  convert -i IMAGE OUTPUT [-t TYPE] [-f]
-    Rewrite an image in another container format. The output type comes
-    from its file name, or --type (-t). spift reads atr and dcm (Disk
-    Communicator, also seen as .dc3) and writes atr - a DCM holds exactly
-    the sectors an ATR does, so nothing is lost either way. Refuses to
-    overwrite an existing file unless --force (-f) is given.`,
-	recode: `  recode [-f CODE] [-t CODE] [FILE...] [--in-place] [--strict]
-         [--eol lf | crlf | native]
-    Convert text between a family character set and Unicode, writing to
-    stdout (or reading stdin with no FILE). Codes: atascii, unicode,
-    escaped-unicode; whichever of --from (-f) and --to (-t) you leave out
-    is unicode. Inverse video is bracketed by "~", a line ending is EOL,
-    and {ddd} or {$hh} is a byte outright - so both Unicode flavours
-    round-trip, escaped-unicode writing the Atari graphics as escapes
-    rather than glyphs. Anything with no ATASCII character becomes "?";
-    --strict refuses instead, and also catches a "~" that opens inverse
-    video and never closes it, which is what ordinary text holding a
-    tilde looks like. --eol picks what EOL becomes (decoding only;
-    encoding takes LF, CR, and CRLF alike). --in-place converts the files
-    named rather than writing to stdout.`,
-	pack: `  pack -i IMAGE [DIR] [--fs FILESYSTEM] [--sd | --ed | --dd]
-       [--sector-size N] [--sector-count N] [--volume-name NAME]
-       [--write-boot-sectors] [--set-dos-file NAME] [--text SPEC]...
-       [--strict] [-f] [--no-timestamps]
-    Build an image from a host directory (default: the current one):
-    create it, put a filesystem on it, and copy the tree in. Geometry and
-    filesystem options are create's and mkfs's, so --fs sparta packs a
-    SpartaDOS disk (--volume-name required, as mkfs requires it).
-    --write-boot-sectors takes the boot record from .boot.bin in the
-    directory and points it at dos.sys wherever packing put it - the record
-    carries its old disk's sector, which repacking rarely reuses - or marks
-    the disk not bootable when no dos.sys was packed. On SpartaDOS the boot
-    file has no default name, so --set-dos-file names it (a path, since it
-    may sit in a subdirectory). --set-dos-file overrides the name and needs
-    --write-boot-sectors, since otherwise there is no boot code to follow
-    the pointer. --text SPEC recodes the files it names into the family
-    character set - a whole directory holds binaries too, so they have to
-    be named - with --strict to refuse what will not survive. Host mtimes
-    become entry timestamps where the filesystem has them (SpartaDOS),
-    as an archiver does; --no-timestamps stamps pack time instead.
-    Refuses to overwrite an existing image without -f.`,
-	unpack: `  unpack -i IMAGE [DIR] [--fs FILESYSTEM] [--extract-boot-sectors]
-         [--text SPEC]... [--eol lf | crlf | native] [-f]
-         [--no-timestamps]
-    Explode an image into a host directory (default: the current one),
-    made if missing, mirroring the whole tree.
-    --extract-boot-sectors also writes the boot record to .boot.bin
-    there, which is what lets pack rebuild a bootable disk. --text SPEC
-    recodes the files it names out of the family character set (a whole
-    disk holds binaries too) and repeats for more than one pattern, with
-    --eol picking what EOL becomes. Entry timestamps become the extracted
-    files' mtimes, as an archiver does; --no-timestamps leaves extraction
-    time. Refuses to overwrite existing files without -f.`,
-	rmdir: `  rmdir -i IMAGE DIRECTORY... [--fs FILESYSTEM]
-    Remove empty directories, freeing what they occupied. A directory
-    holding anything is refused, as the DOSes refuse it.`,
-	"write-boot-sectors": `  write-boot-sectors -i IMAGE BOOT_FILE [--pad] [-f]
-    Write a boot file over the image's first sectors (128-byte boot
-    sectors on 256-bps images are handled). The file must span a whole
-    number of sectors - --pad zero-fills the tail - and its second byte
-    must claim that count; --force (-f) writes despite a mismatch.`,
 	"install-dos": `  install-dos -i IMAGE --from MASTER_IMAGE [--fs FILESYSTEM] [-f]
     Copy a DOS from a master disk: its boot sectors, the file its boot
     record loads, and DUP.SYS beside it, then point the boot record at
     the copy. Refuses masters whose boot area or density does not match
     the target's filesystem. --force (-f) overwrites existing files.`,
+	"write-boot-sectors": `  write-boot-sectors -i IMAGE BOOT_FILE [--pad] [-f]
+    Write a boot file over the image's first sectors (128-byte boot
+    sectors on 256-bps images are handled). The file must span a whole
+    number of sectors - --pad zero-fills the tail - and its second byte
+    must claim that count; --force (-f) writes despite a mismatch.`,
+	"extract-boot-sectors": `  extract-boot-sectors -i IMAGE OUTPUT_FILE [--sector-count N] [-f]
+    Extract the boot sectors into a file. The count comes from the boot
+    record's second byte; when that claims zero or more sectors than the
+    image holds, --sector-count is required. Refuses to overwrite an
+    existing file unless --force (-f) is given.`,
 	"set-dos-file": `  set-dos-file -i IMAGE [NAME] [--fs FILESYSTEM] [--clear]
     Point the boot record at the file the disk should boot. On SpartaDOS
     the boot file is arbitrary and naming it is the point (there is no
@@ -216,11 +207,20 @@ const HELP: Record<string, string> = {
     graphics character as a dot. --sectors (-s) dumps sectors instead of
     files, which reaches the parts no file occupies - boot record, VTOC,
     directory.`,
-	"extract-boot-sectors": `  extract-boot-sectors -i IMAGE OUTPUT_FILE [--sector-count N] [-f]
-    Extract the boot sectors into a file. The count comes from the boot
-    record's second byte; when that claims zero or more sectors than the
-    image holds, --sector-count is required. Refuses to overwrite an
-    existing file unless --force (-f) is given.`,
+	recode: `  recode [-f CODE] [-t CODE] [FILE...] [--in-place] [--strict]
+         [--eol lf | crlf | native]
+    Convert text between a family character set and Unicode, writing to
+    stdout (or reading stdin with no FILE). Codes: atascii, unicode,
+    escaped-unicode; whichever of --from (-f) and --to (-t) you leave out
+    is unicode. Inverse video is bracketed by "~", a line ending is EOL,
+    and {ddd} or {$hh} is a byte outright - so both Unicode flavours
+    round-trip, escaped-unicode writing the Atari graphics as escapes
+    rather than glyphs. Anything with no ATASCII character becomes "?";
+    --strict refuses instead, and also catches a "~" that opens inverse
+    video and never closes it, which is what ordinary text holding a
+    tilde looks like. --eol picks what EOL becomes (decoding only;
+    encoding takes LF, CR, and CRLF alike). --in-place converts the files
+    named rather than writing to stdout.`,
 };
 
 /** Every command's block, which is what `spift help` alone prints. */

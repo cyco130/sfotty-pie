@@ -52,3 +52,32 @@ test("validates the argument list", () => {
 		/unsupported filesystem family "c64"/,
 	);
 });
+
+test("an impossible geometry errors alone, without the sectors-past-720 note", async () => {
+	const { mkdtempSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { mkfsCommand } = await import("./mkfs.ts");
+	const { createBlankAtr } = await import("../atr.ts");
+
+	const dir = mkdtempSync(join(tmpdir(), "spift-mkfs-"));
+	const image = join(dir, "big.atr");
+	// 1040 sectors (past 720) at 256 bytes - a size DOS 1.0 cannot take.
+	writeFileSync(image, createBlankAtr({ sectorSize: 256, sectorCount: 1040 }));
+
+	const warnings: string[] = [];
+	const original = process.stderr.write.bind(process.stderr);
+	process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+		warnings.push(chunk.toString());
+		return true;
+	}) as typeof process.stderr.write;
+	try {
+		await expect(
+			mkfsCommand(["-i", image, "--fs", "atari/10"]),
+		).rejects.toThrow(/only supports 128-byte sectors/);
+	} finally {
+		process.stderr.write = original;
+	}
+	// The geometry rejection fires first, so the warning never prints.
+	expect(warnings.join("")).not.toMatch(/never allocates at or above sector/);
+});

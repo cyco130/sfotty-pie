@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import {
+	checkAtariDosGeometry,
 	defaultAtariDosVariant,
 	formatAtariDos,
 	openAtariDos,
@@ -173,6 +174,18 @@ async function mkfsAtari(
 					`equally well; pick one with --fs atari/25 or --fs atari/mydos`,
 			);
 		}
+	}
+
+	// Refuse an impossible geometry before anything else, so the error stands
+	// on its own instead of trailing the sectors-past-720 warning below (which
+	// formatAtariDos would otherwise print on the way to the same rejection).
+	const problem = checkAtariDosGeometry(
+		variant,
+		medium.sectorSize,
+		medium.sectorCount,
+	);
+	if (problem !== undefined) {
+		throw new CliError(`${parsed.image}: ${problem}`);
 	}
 
 	// A boot record from a master is fitted to this disk; --boot-sectors is

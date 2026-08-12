@@ -294,16 +294,9 @@ export async function packCommand(args: string[]): Promise<void> {
 		return;
 	}
 
-	let variant = parsed.variant as AtariDosVariant | undefined;
-	if (variant === undefined) {
-		variant = defaultAtariDosVariant(medium.sectorSize, medium.sectorCount);
-		if (variant === undefined) {
-			throw new CliError(
-				`enhanced density fits both DOS 2.5 and MyDOS equally well; ` +
-					`pick one with --fs atari/25 or --fs atari/mydos`,
-			);
-		}
-	}
+	const variant =
+		(parsed.variant as AtariDosVariant | undefined) ??
+		defaultAtariDosVariant(medium.sectorSize, medium.sectorCount);
 
 	try {
 		formatAtariDos(medium, variant);

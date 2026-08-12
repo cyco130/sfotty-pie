@@ -400,10 +400,11 @@ test("a formatted disk accepts files immediately", () => {
 
 test("default variants follow the geometry", () => {
 	expect(defaultAtariDosVariant(128, 720)).toBe("dos20");
-	expect(defaultAtariDosVariant(128, 1040)).toBeUndefined(); // ambiguous
+	// Enhanced density is DOS 2.5's home geometry, so it is the default there
+	// (MyDOS fits too, but you have to ask for atari/mydos).
+	expect(defaultAtariDosVariant(128, 1040)).toBe("dos25");
 	expect(defaultAtariDosVariant(256, 720)).toBe("dos20");
-	// Everything that is not the ambiguous enhanced density is one DOS 2
-	// filesystem now, whatever its size.
+	// Everything else is one DOS 2 filesystem, whatever its size.
 	expect(defaultAtariDosVariant(128, 400)).toBe("dos20");
 });
 

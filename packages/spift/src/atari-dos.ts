@@ -1515,18 +1515,19 @@ export function atariDosLabel(variant: AtariDosVariant): string {
 }
 
 /**
- * The variant to format a geometry with when the caller doesn't say:
- * DOS 2.0S for a standard single-density disk, MyDOS for anything else,
- * and undefined for enhanced density - DOS 2.5 and MyDOS are equally
- * plausible there, so the caller has to choose.
+ * The variant to format a geometry with when the caller doesn't say: DOS
+ * 2.5 for enhanced density, that geometry's own DOS, and the DOS 2.0 layout
+ * for everything else - which covers big disks too, since the writer takes
+ * MyDOS's extra bitmap pages from the sector count. MyDOS also fits enhanced
+ * density, but 2.5 is the conventional disk there, so it is the default; ask
+ * for atari/mydos to override.
  */
 export function defaultAtariDosVariant(
 	sectorSize: number,
 	sectorCount: number,
-): AtariDosVariant | undefined {
+): AtariDosVariant {
 	if (sectorSize === 128 && sectorCount === 1040) {
-		// DOS 2.5 and MyDOS both fit; only the caller knows which is meant.
-		return undefined;
+		return "dos25";
 	}
 	return "dos20";
 }

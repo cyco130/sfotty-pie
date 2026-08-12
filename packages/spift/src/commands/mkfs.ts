@@ -165,16 +165,9 @@ async function mkfsAtari(
 	// the DOS 2.5 distribution disk is 720 sectors of plain dos20s format,
 	// because 2.5 only differs at enhanced density. Inferring from it would
 	// quietly build a DOS 2.0 filesystem for a DOS 2.5 disk.
-	let variant = parsed.variant as AtariDosVariant | undefined;
-	if (variant === undefined) {
-		variant = defaultAtariDosVariant(medium.sectorSize, medium.sectorCount);
-		if (variant === undefined) {
-			throw new CliError(
-				`${parsed.image}: enhanced density fits both DOS 2.5 and MyDOS ` +
-					`equally well; pick one with --fs atari/25 or --fs atari/mydos`,
-			);
-		}
-	}
+	const variant =
+		(parsed.variant as AtariDosVariant | undefined) ??
+		defaultAtariDosVariant(medium.sectorSize, medium.sectorCount);
 
 	// Refuse an impossible geometry before anything else, so the error stands
 	// on its own instead of trailing the sectors-past-720 warning below (which

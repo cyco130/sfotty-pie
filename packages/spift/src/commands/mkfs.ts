@@ -227,8 +227,12 @@ async function mkfsAtari(
 	}
 
 	await writeFile(parsed.image, medium.bytes);
+	// DOS 2.5 addresses 1023 sectors, so a standard 1040-sector enhanced disk
+	// always leaves 17 past its reach - that is just the format, not worth
+	// mentioning. On any other size the leftover is the caller's own doing, so
+	// it is worth a word.
 	const wasted =
-		result.unusableSectors > 0
+		result.unusableSectors > 0 && medium.sectorCount !== 1040
 			? `, ${result.unusableSectors} sector(s) beyond its reach`
 			: "";
 	const boot =

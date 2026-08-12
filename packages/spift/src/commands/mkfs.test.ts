@@ -81,3 +81,36 @@ test("an impossible geometry errors alone, without the sectors-past-720 note", a
 	// The geometry rejection fires first, so the warning never prints.
 	expect(warnings.join("")).not.toMatch(/never allocates at or above sector/);
 });
+
+test("a standard enhanced disk does not flag DOS 2.5's inherent 17 sectors", async () => {
+	const { mkdtempSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { mkfsCommand } = await import("./mkfs.ts");
+	const { createBlankAtr } = await import("../atr.ts");
+
+	const dir = mkdtempSync(join(tmpdir(), "spift-mkfs-"));
+	const ed = join(dir, "ed.atr");
+	writeFileSync(ed, createBlankAtr({ sectorSize: 128, sectorCount: 1040 }));
+	const big = join(dir, "big.atr");
+	writeFileSync(big, createBlankAtr({ sectorSize: 128, sectorCount: 1100 }));
+
+	const lines: string[] = [];
+	const original = process.stdout.write.bind(process.stdout);
+	process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+		lines.push(chunk.toString());
+		return true;
+	}) as typeof process.stdout.write;
+	try {
+		// 1040 is DOS 2.5's home; the 17 unreachable sectors are the format,
+		// not news.
+		await mkfsCommand(["-i", ed, "--fs", "atari/25"]);
+		// A non-standard size is the caller's own doing, so it is flagged.
+		await mkfsCommand(["-i", big, "--fs", "atari/25"]);
+	} finally {
+		process.stdout.write = original;
+	}
+	const [edLine, bigLine] = lines;
+	expect(edLine).not.toMatch(/beyond its reach/);
+	expect(bigLine).toMatch(/77 sector\(s\) beyond its reach/);
+});

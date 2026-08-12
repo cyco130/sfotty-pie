@@ -155,6 +155,15 @@ function vtocLayout(
 	if (variant === "dos10") {
 		return { extraPages: 0, limit: MAIN_VTOC_LIMIT, code: 1, hasVtoc2: false };
 	}
+	if (variant === "dos20") {
+		// DOS 2.0's single VTOC bitmap covers sectors 0-943 and no more, so a
+		// bigger disk leaves the rest unreachable rather than growing extra
+		// bitmap pages - that is MyDOS's trick, and asking for dos20 is asking
+		// not to do it.
+		return { extraPages: 0, limit: MAIN_VTOC_LIMIT, code: 2, hasVtoc2: false };
+	}
+	// MyDOS: extra whole-sector bitmap pages below the VTOC carry the map past
+	// sector 943 to cover the whole disk.
 	const extraPages = extraVtocPages(sectorSize, sectorCount);
 	return {
 		extraPages,

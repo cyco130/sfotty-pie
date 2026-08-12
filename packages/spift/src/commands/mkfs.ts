@@ -85,20 +85,12 @@ export function parseMkfsArgs(args: string[]): MkfsArgs {
 
 	const selection =
 		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
-	if (values["volume-name"] !== undefined && selection?.family !== "sparta") {
-		throw new UsageError(
-			"--volume-name is SpartaDOS's (the Atari DOS family has no label); " +
-				"say --fs sparta to make one",
-		);
-	}
-	// SpartaDOS identifies a disk by its volume name (with the sequence and
-	// random numbers) for the guest's disk-change detection - and 1.1 by the
-	// name alone - so a blank one risks two disks reading as the same. The
-	// formatters require it; so does mkfs.
-	if (
-		selection?.family === "sparta" &&
-		(values["volume-name"] ?? "").trim() === ""
-	) {
+	// Whether a volume name belongs here turns on the family, which a
+	// 512-byte image settles only once it is open (it defaults to SpartaDOS),
+	// so both checks - name-on-Atari and no-name-on-Sparta - wait for
+	// mkfsCommand. The one thing settled now: an explicit --fs sparta must
+	// carry a name, since that is the whole point of naming the family.
+	if (selection?.family === "sparta" && values["volume-name"] === undefined) {
 		throw new UsageError(
 			"a SpartaDOS filesystem needs a volume name (--volume-name NAME): " +
 				"it identifies the disk for change detection, and SpartaDOS 1.1 " +
@@ -147,7 +139,28 @@ export async function mkfsCommand(args: string[]): Promise<void> {
 	const master =
 		parsed.master === undefined ? undefined : await openMaster(parsed.master);
 
-	if (parsed.family === "sparta") {
+	// No filesystem spift makes uses a sector size other than 128, 256, or
+	// 512, so a larger one (an 8192-byte hard-disk block, say) is refused on
+	// its own terms rather than blamed on a particular family.
+	if (![128, 256, 512].includes(medium.sectorSize)) {
+		throw new CliError(
+			`${parsed.image}: spift's filesystems use 128-, 256-, or 512-byte ` +
+				`sectors, not ${medium.sectorSize}`,
+		);
+	}
+
+	// A 512-byte-sector image is hard-disk territory that only SpartaDOS
+	// reaches, so it defaults there when no family is named; everything else
+	// defaults to the Atari DOS family.
+	const family =
+		parsed.family ?? (medium.sectorSize === 512 ? "sparta" : "atari");
+	if (family === "atari" && parsed.volumeName !== undefined) {
+		throw new CliError(
+			`${parsed.image}: --volume-name is SpartaDOS's (the Atari DOS family ` +
+				`has no label); say --fs sparta to make one`,
+		);
+	}
+	if (family === "sparta") {
 		await mkfsSparta(parsed, medium, bootSectors, master);
 		return;
 	}
@@ -255,6 +268,16 @@ async function mkfsSparta(
 	bootSectors: Uint8Array | undefined,
 	master: MasterFiles | undefined,
 ): Promise<void> {
+	// parseMkfsArgs requires the volume name when --fs sparta is explicit; a
+	// 512-byte image that defaulted here (no --fs at all) has not passed that
+	// gate, so it is enforced again once the family is settled.
+	if ((parsed.volumeName ?? "").trim() === "") {
+		throw new CliError(
+			"a SpartaDOS filesystem needs a volume name (--volume-name NAME): " +
+				"it identifies the disk for change detection, and SpartaDOS 1.1 " +
+				"relies on it being unique",
+		);
+	}
 	// SDX 4.50 formats every geometry as SDFS 2.1, so that is the default;
 	// sdfs20 writes the same layout under the older revision byte.
 	const variant = (parsed.variant as SpartaDosVariant | undefined) ?? "sdfs21";

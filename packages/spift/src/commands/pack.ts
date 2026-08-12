@@ -176,18 +176,11 @@ export function parsePackArgs(args: string[]): PackArgs {
 
 	const selection =
 		values.fs === undefined ? undefined : parseFsOption(values.fs, "--fs");
-	if (values["volume-name"] !== undefined && selection?.family !== "sparta") {
-		throw new UsageError(
-			"--volume-name is SpartaDOS's (the Atari DOS family has no label); " +
-				"pack --fs sparta to make one",
-		);
-	}
-	// Same rule as mkfs: a SpartaDOS disk is identified by its volume name, so
-	// it is required rather than defaulted to blank.
-	if (
-		selection?.family === "sparta" &&
-		(values["volume-name"] ?? "").trim() === ""
-	) {
+	// As in mkfs: whether a volume name belongs here turns on the family,
+	// which a 512-byte geometry settles at build time (it defaults to
+	// SpartaDOS), so the family-dependent checks wait for packCommand. What is
+	// settled now: an explicit --fs sparta must carry a name.
+	if (selection?.family === "sparta" && values["volume-name"] === undefined) {
 		throw new UsageError(
 			"a SpartaDOS filesystem needs a volume name (--volume-name NAME): " +
 				"it identifies the disk for change detection, and SpartaDOS 1.1 " +
@@ -289,7 +282,28 @@ export async function packCommand(args: string[]): Promise<void> {
 		}),
 	);
 
-	if (parsed.family === "sparta") {
+	// No filesystem spift makes uses a sector size other than 128, 256, or
+	// 512, so a larger one is refused on its own terms rather than blamed on a
+	// particular family.
+	if (![128, 256, 512].includes(medium.sectorSize)) {
+		throw new CliError(
+			`spift's filesystems use 128-, 256-, or 512-byte sectors, not ` +
+				`${medium.sectorSize}`,
+		);
+	}
+
+	// A 512-byte-sector image is hard-disk territory that only SpartaDOS
+	// reaches, so it defaults there when no family is named; everything else
+	// defaults to the Atari DOS family.
+	const family =
+		parsed.family ?? (medium.sectorSize === 512 ? "sparta" : "atari");
+	if (family === "atari" && parsed.volumeName !== undefined) {
+		throw new CliError(
+			`--volume-name is SpartaDOS's (the Atari DOS family has no label); ` +
+				`pack --fs sparta to make one`,
+		);
+	}
+	if (family === "sparta") {
 		await packSparta(parsed, source, medium);
 		return;
 	}
@@ -407,6 +421,16 @@ async function packSparta(
 	source: HostDirectory,
 	medium: AtrImage,
 ): Promise<void> {
+	// parsePackArgs requires the volume name when --fs sparta is explicit; a
+	// 512-byte geometry that defaulted here (no --fs) has not passed that
+	// gate, so it is enforced again once the family is settled.
+	if ((parsed.volumeName ?? "").trim() === "") {
+		throw new CliError(
+			"a SpartaDOS filesystem needs a volume name (--volume-name NAME): " +
+				"it identifies the disk for change detection, and SpartaDOS 1.1 " +
+				"relies on it being unique",
+		);
+	}
 	const variant = (parsed.variant as SpartaDosVariant | undefined) ?? "sdfs21";
 	// --write-boot-sectors uses the packed record's boot code; its parameter
 	// block belongs to the filesystem and is rewritten by the formatter, so

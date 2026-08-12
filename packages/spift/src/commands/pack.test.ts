@@ -139,3 +139,83 @@ test("packing no dos.sys marks the record not bootable", async () => {
 	expect(record[0x0e]).toBe(0);
 	expect((record[0x0f] as number) | ((record[0x10] as number) << 8)).toBe(0);
 });
+
+test("an explicit --fs sparta pack needs a volume name", () => {
+	expect(
+		parsePackArgs(["-i", "d.atr", "--fs", "sparta/20", "--volume-name", "v"]),
+	).toMatchObject({ family: "sparta", variant: "sdfs20", volumeName: "v" });
+	expect(() => parsePackArgs(["-i", "d.atr", "--fs", "sparta"])).toThrow(
+		/needs a volume name/,
+	);
+	// With no --fs the sector size decides, which parsing cannot see, so the
+	// name is just carried.
+	expect(parsePackArgs(["-i", "d.atr", "--volume-name", "v"]).volumeName).toBe(
+		"v",
+	);
+});
+
+test("pack picks the family from the sector size like mkfs", async () => {
+	const { mkdtempSync, mkdirSync, writeFileSync, readFileSync } =
+		await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { packCommand } = await import("./pack.ts");
+	const { openAtr } = await import("../atr.ts");
+	const { openSpartaDos } = await import("../sparta-dos.ts");
+
+	const src = mkdtempSync(join(tmpdir(), "spift-pack-src-"));
+	writeFileSync(join(src, "readme.txt"), "hi\x9b");
+	mkdirSync(join(src, "sub"));
+	writeFileSync(join(src, "sub", "inner.dat"), new Uint8Array([1, 2, 3]));
+	const out = mkdtempSync(join(tmpdir(), "spift-pack-out-"));
+
+	// A 512-byte geometry defaults to SpartaDOS, which needs a volume name.
+	const hd = join(out, "hd.atr");
+	await expect(
+		packCommand([
+			"-i",
+			hd,
+			src,
+			"--sector-size",
+			"512",
+			"--sector-count",
+			"512",
+		]),
+	).rejects.toThrow(/needs a volume name/);
+	await packCommand([
+		"-i",
+		hd,
+		src,
+		"--sector-size",
+		"512",
+		"--sector-count",
+		"512",
+		"--volume-name",
+		"hd",
+		"-f",
+	]);
+	const filesystem = openSpartaDos(openAtr(readFileSync(hd)));
+	expect(filesystem.variant).toBe("sdfs21");
+	expect(filesystem.volume().label).toBe("hd");
+	expect(
+		[...filesystem.entries(undefined, { recursive: true })].map((e) => e.path),
+	).toContain("sub/inner.dat");
+
+	// A volume name on an Atari-defaulting geometry is rejected, family named.
+	await expect(
+		packCommand(["-i", join(out, "a.atr"), src, "--sd", "--volume-name", "x"]),
+	).rejects.toThrow(/--volume-name is SpartaDOS's/);
+
+	// A sector size no filesystem uses is refused without naming a family.
+	await expect(
+		packCommand([
+			"-i",
+			join(out, "o.atr"),
+			src,
+			"--sector-size",
+			"8192",
+			"--sector-count",
+			"100",
+		]),
+	).rejects.toThrow(/128-, 256-, or 512-byte sectors, not 8192/);
+});

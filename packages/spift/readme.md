@@ -19,7 +19,7 @@ npm install -S @sfotty-pie/spift # Local installation for Node.js projects
 
 ## CLI usage
 
-The command-line tool consists of multiple subcommands, invoked as `spift <SUBCOMMAND> [OPTIONS] [ARGS...]`. Subcommand names usually mirror the Unix commands they resemble, like `spift ls`, `spift cp`, and `spift mv` etc. Use `spift help <SUBCOMMAND>` or `spift <SUBCOMMAND> --help` (or `-h`) to see the options and arguments for a subcommand.
+The command-line tool consists of multiple subcommands, invoked as `spift <SUBCOMMAND> [OPTIONS] [ARGS...]`. Subcommand names usually mirror the Unix commands they resemble, like `spift ls`, `spift cp`, `spift mv`, etc. Use `spift help <SUBCOMMAND>` or `spift <SUBCOMMAND> --help` (or `-h`) to see the options and arguments for a subcommand.
 
 The following subcommands are currently implemented:
 
@@ -53,12 +53,12 @@ Commands that take a file or directory specifier accept `*` and `?` as wildcards
 
 `spift` currently supports the following file systems and variants:
 
-- Atari DOS family:
-  - `atari/10` (Atari DOS 1.0): A rarely used variant, incompatible with later versions. It supports 720x128-byte sectors only. `mkfs` can create this file system on larger disk and use up to 943 sectors. The real DOS 1.0 will be able to read such images but will not allocate sectors above 719.
-  - `atari/20` (Atari DOS 2.0S and 2.0D): The common denominator of the Atari DOS family. It supports 720x128- and 720x256-byte sectors. `mkfs` can create this file system on larger disk and use up to 943 sectors. The real DOS 2.0 will be able to read such images but will not allocate sectors above 719. MyDOS can use them fully, though.
-  - `atari/25` (Atari DOS 2.5): The enhanced-density extension of Atari DOS. The file system supports 1040x128-byte sectors only but DOS 2.5 can read and write DOS 2.0 file system on 128-byte sectors just fine. `mkfs` can create this file system on larger disk and use up to 1023 sectors and the real DOS 2.5 can read and write such images without any problem.
-  - `atari/mydos` (MyDOS): MyDOS file system is an extension of DOS 2.0 file system that supports up to 65535 128- or 256-byte sectors. It is read-write compatible up to 720 sectors and read-compatible up to 943 sectors with DOS 2.0. Beyond that, none of the earlier DOSes can read or write MyDOS file system. MyDOS also supports subdirectories. `spift` can create subdirectories on all variants but they will only be accessible by MyDOS.
-- SpartaDOS family. All variants support up to 65535 128- or 256-byte sectors. Revision 2.1 also supports 512-byte sectors.
+- Atari DOS family. The variant labels are based on the first DOS version that introduced the variant.
+  - `atari/10` (Atari DOS 1.0): A rarely used variant, incompatible with later versions. It supports 720x128-byte sectors only. `mkfs` can create this file system on disks with a sector count of 368 up to 65535 and use up to 943 sectors for data. The real DOS 1.0 will be able to read such images but will never allocate sectors above 719.
+  - `atari/20` (Atari DOS 2.0S and 2.0D): The common denominator of the Atari DOS family. It supports 720x128- and 720x256-byte sectors. `mkfs` can create this file system on disks with a sector count of 368 up to 65535 and use up to 943 sectors for data. The real DOS 2.0 will be able to read such images but will not allocate sectors above 719. MyDOS can use them fully, though.
+  - `atari/25` (Atari DOS 2.5): The enhanced-density extension of Atari DOS. The file system supports 1040x128-byte sectors only. `mkfs` can create this file system on disks with a sector count of 1023 up to 65535 but only the first 1023 sectors will be used. The real DOS 2.5 can also read and write such images without any problem.
+  - `atari/mydos` (MyDOS): MyDOS file system is an extension of DOS 2.0 file system that supports up to 65535 128- or 256-byte sectors. It is read-write compatible up to 720 sectors and read-compatible up to 943 sectors with DOS 2.0 and DOS 2.5. Beyond that, none of the earlier DOSes can read or write MyDOS file system. MyDOS also supports subdirectories. `spift` can create subdirectories on all variants but they will only be accessible by MyDOS.
+- SpartaDOS family. All variants support up to 65535 128- or 256-byte sectors. Revision 2.1 also supports 512-byte sectors. The variant labels are based on SpartaDOS X User Guide 4.50, which calls them SpartaDOS File System revisions 1.1, 2.0, and 2.1.
   - `sparta/11` (SpartaDOS 1.1). `spift` can read and write this file system but `mkfs` cannot create it currently.
   - `sparta/20` (SpartaDOS 2.x, 3.x, SpartaDOS X 4.1x and 4.2x).
   - `sparta/21` (SpartaDOS X 4.4x and later): Adds support for 512-byte sectors, "hidden" and "archived" file attributes, and symbolic links. `spift` will create such files on any SpartaDOS file system but they will only be meaningful on SpartaDOS X 4.4x and later.

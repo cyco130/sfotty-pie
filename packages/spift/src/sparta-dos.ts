@@ -1564,13 +1564,6 @@ export function checkSpartaDosGeometry(
 	sectorSize: number,
 	sectorCount: number,
 ): string | undefined {
-	if (variant === "sdfs11") {
-		return (
-			"SpartaDOS 1.1 lays its disks out differently (bitmap mid-disk, " +
-			"other boot fields) and no formatter template exists for it; " +
-			"format sdfs20 or sdfs21 instead - 1.1 reads those fine"
-		);
-	}
 	if (sectorSize !== 128 && sectorSize !== 256 && sectorSize !== 512) {
 		return `SpartaDOS needs 128-, 256- or 512-byte sectors, not ${sectorSize}`;
 	}
@@ -1696,21 +1689,34 @@ export function formatSpartaDos(
 	boot[BOOT_TRACKS] = tracksByte(medium.sectorSize, medium.sectorCount);
 	boot[BOOT_SECTOR_SIZE] =
 		medium.sectorSize === 128 ? 0x80 : medium.sectorSize === 256 ? 0x00 : 0x01;
-	boot[BOOT_REVISION] = variant === "sdfs21" ? 0x21 : 0x20;
+	boot[BOOT_REVISION] =
+		variant === "sdfs21" ? 0x21 : variant === "sdfs11" ? 0x11 : 0x20;
 	if (variant === "sdfs21") {
 		// The 2.1 self-description: sector size, map entries per sector,
 		// and the one supported physical-per-logical ratio.
 		putWord(0x21, medium.sectorSize);
 		putWord(0x23, Math.floor((medium.sectorSize - MAP_HEADER) / 2));
 		boot[0x25] = 1;
+	} else if (variant === "sdfs11") {
+		// SpartaDOS 1.1's own no-DOS FORMAT ("Write SpartaDOS? N") writes
+		// exactly this modern front layout, but zeros $21-$25 (no contiguous
+		// DOS boot region to describe) and identifies volumes by name alone,
+		// so it has no sequence or random number - writers must leave $26-$27
+		// untouched. We stamp the $11 revision even though 1.1's no-DOS format
+		// leaves $00: 1.1 mounts by the parameter block, not the revision
+		// byte, so the front layout still reads, while $11 makes the disk
+		// self-identify as 1.1 rather than reading back as a 2.0 disk.
+		boot.fill(0, 0x21, 0x28);
 	} else {
 		// The 2.0 spec calls $21-$25 reserved, but every rev-$20 formatter
 		// measured (XINIT 3.2g, BW-DOS 1.30, SpartaDOS 2.3b) writes this
 		// exact constant, so matching it keeps the output byte-identical.
 		boot.set([0x06, 0x01, 0xff, 0xff, 0x00], 0x21);
 	}
-	boot[BOOT_SEQUENCE] = 0;
-	boot[BOOT_RANDOM] = options?.random ?? Math.floor(Math.random() * 256);
+	if (variant !== "sdfs11") {
+		boot[BOOT_SEQUENCE] = 0;
+		boot[BOOT_RANDOM] = options?.random ?? Math.floor(Math.random() * 256);
+	}
 	putWord(BOOT_DOS_MAP, 0);
 	boot[BOOT_LOCK] = 0;
 	if (!writeSector(1, boot)) {

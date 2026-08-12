@@ -794,8 +794,31 @@ test("sdfs20 writes the older revision byte and its era's constant", () => {
 	expect(detectSpartaDos(medium)).toBe("sdfs20");
 });
 
+test("sdfs11 formats the front layout under the $11 revision", () => {
+	const bytes = createBlankAtr({ sectorSize: 128, sectorCount: 720 });
+	const medium = openAtr(bytes);
+	const result = formatSpartaDos(medium, "sdfs11", { volumeName: "DISK1" });
+	const boot = medium.readSector(1) as Uint8Array;
+	expect(boot[0x20]).toBe(0x11);
+	// The no-DOS 1.1 format zeros $21-$25 (no contiguous DOS region) and has
+	// no sequence or random number, so $21-$27 are all zero.
+	expect(Array.from(boot.subarray(0x21, 0x28))).toEqual([0, 0, 0, 0, 0, 0, 0]);
+	// Same front layout as sdfs20: bitmap at 4, and the last sector reserved,
+	// so a 720-sector disk frees 713 like XINIT and BW-DOS.
+	expect(boot[0x10]).toBe(4);
+	expect(result.freeSectors).toBe(713);
+	// Round-trips as 1.1, and its files read back through the same reader.
+	expect(detectSpartaDos(medium)).toBe("sdfs11");
+	const fs = openSpartaDos(medium);
+	fs.writeFile("hello.txt", text("hi"));
+	expect([...fs.entries()].map((e) => e.name)).toContain("hello.txt");
+	expect(detectSpartaDos(medium)).toBe("sdfs11");
+});
+
 test("refuses what cannot be formatted", () => {
-	expect(checkSpartaDosGeometry("sdfs11", 128, 720)).toMatch(/1\.1/);
+	// sdfs11 formats the same front layout as sdfs20, so it is accepted.
+	expect(checkSpartaDosGeometry("sdfs11", 128, 720)).toBeUndefined();
+	expect(checkSpartaDosGeometry("sdfs11", 512, 2048)).toMatch(/2\.1/);
 	expect(checkSpartaDosGeometry("sdfs21", 64, 720)).toMatch(/sectors/);
 	expect(checkSpartaDosGeometry("sdfs21", 128, 4)).toMatch(/cannot hold/);
 	// 512-byte sectors are a 2.1-only feature; the older revision refuses.

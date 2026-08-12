@@ -1,2 +1,9 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
+@theme {
+	/* The real Atari character-set font (@sfotty-pie/fonts). The
+	   @font-face itself is declared where the font is used (docs.tsx), so
+	   only pages that render Atari glyphs load it. */
+	--font-a8: "A8 Screen", monospace;
+}

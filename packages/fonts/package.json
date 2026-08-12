@@ -1,0 +1,51 @@
+{
+  "name": "@sfotty-pie/fonts",
+  "version": "0.3.0",
+  "description": "Retro computer character sets as modern Unicode fonts (TTF + WOFF2)",
+  "keywords": [
+    "atari",
+    "atari-8-bit",
+    "atascii",
+    "font",
+    "pixel-font",
+    "bitmap-font",
+    "ttf",
+    "woff2",
+    "retro"
+  ],
+  "license": "MIT",
+  "repository": "github:cyco130/sfotty-pie",
+  "files": [
+    "fonts"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./fonts/*": "./fonts/*",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node src/build.ts",
+    "dev": "node --watch src/build.ts",
+    "prepack": "pnpm build",
+    "test": "pnpm run /^test:/",
+    "test:unit": "vitest run",
+    "test:typecheck": "tsc -p tsconfig.json",
+    "test:lint": "eslint . --max-warnings 0",
+    "test:package": "publint"
+  },
+  "devDependencies": {
+    "@cyco130/eslint-config": "^9.0.2",
+    "@types/node": "^22.20.0",
+    "eslint": "^10.5.0",
+    "publint": "^0.3.21",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": "22 || 24 || 25 || 26"
+  }
+}

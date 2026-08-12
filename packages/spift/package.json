@@ -1,0 +1,55 @@
+{
+  "name": "@sfotty-pie/spift",
+  "version": "0.3.0",
+  "description": "Sfotty Pie Image File Tool - a Swiss army knife for retro disk images and file formats, as a library plus CLI.",
+  "keywords": [
+    "atari",
+    "atari-8-bit",
+    "disk-image",
+    "atr",
+    "xex",
+    "file-format",
+    "retro"
+  ],
+  "license": "MIT",
+  "repository": "github:cyco130/sfotty-pie",
+  "files": [
+    "dist",
+    "atari-src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "spift": "./dist/cli.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "pnpm run build:boot && tsdown --clean",
+    "build:boot": "node src/build-boot.ts",
+    "dev": "tsdown --watch",
+    "prepack": "pnpm build",
+    "test": "pnpm run /^test:/",
+    "test:unit": "vitest run",
+    "test:typecheck": "tsc -p tsconfig.json",
+    "test:lint": "eslint . --max-warnings 0",
+    "test:package": "publint"
+  },
+  "devDependencies": {
+    "@cyco130/eslint-config": "^9.0.2",
+    "@sfotty-pie/spasm": "workspace:*",
+    "@types/node": "^22.20.0",
+    "eslint": "^10.5.0",
+    "publint": "^0.3.21",
+    "tsdown": "0.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": "22 || 24 || 25 || 26"
+  }
+}

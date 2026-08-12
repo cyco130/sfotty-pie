@@ -1,6 +1,26 @@
 # OneDOS Design Document
 
-- Returning from `INITAD` with carry set and `INITAD` set to 0 aborts the loading process.
+## Components
+
+- Boot loaders
+  - AtariDOS-compatible
+  - SpartaDOS-compatible
+  - 512-byte SpartaDOS-compatible
+- Block device drivers
+  - Fast SIO driver
+  - RAM disk driver
+- D: handler
+  - AtariDOS file system driver
+  - SpartaDOS file system driver
+- Shells
+  - `sh`
+  - `menu`
+- Utilities
+  - BASIC loader
+
+## Ideas
+
+- Returning from `INITAD` with `INITAD` set to 0 and negative flag set aborts the loading process with the error code in `Y`.
 
 ## Drivers vs. programs
 

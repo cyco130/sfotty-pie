@@ -65,3 +65,81 @@ test("PERCOM write takes a 12-byte frame and is accepted", () => {
 	expect(response.length).toBe(12);
 	expect(response.then(new Uint8Array(12)).kind).toBe("complete");
 });
+
+function sendPercom(d: DiskDrive, bytes: number[]) {
+	const response = d.command(frame(0x4f));
+	if (response.kind !== "receive") throw new Error(response.kind);
+	response.then(Uint8Array.from(bytes));
+}
+
+test("format follows the set PERCOM block and zeroes the disk", () => {
+	const d = drive(makeAtr(128, 720));
+	const image = d.disk!;
+	image.writeSector(100, new Uint8Array(128).fill(0xaa));
+	// ED geometry: 40 tracks x 26 x 128 bytes.
+	sendPercom(d, [40, 0, 0, 26, 0, 4, 0, 128, 0xff, 0, 0, 0]);
+	const list = data(d.command(frame(0x21)));
+	expect(list).toHaveLength(128);
+	expect(list.slice(0, 2)).toEqual([0xff, 0xff]);
+	expect([image.sectorSize, image.sectorCount]).toEqual([128, 1040]);
+	expect(image.readSector(100)?.every((b) => b === 0)).toBe(true);
+	expect(image.dirty).toBe(true);
+	// The set block sticks and is echoed by PERCOM read.
+	expect(data(d.command(frame(0x4e)))).toEqual([
+		40, 0, 0, 26, 0, 4, 0, 128, 0xff, 0, 0, 0,
+	]);
+});
+
+test("format without a set PERCOM keeps the disk's own geometry", () => {
+	const d = drive(makeAtr(128, 720));
+	d.disk!.writeSector(5, new Uint8Array(128).fill(1));
+	data(d.command(frame(0x21)));
+	expect(d.disk!.sectorCount).toBe(720);
+	expect(d.disk!.readSector(5)?.every((b) => b === 0)).toBe(true);
+});
+
+test("format to double density: 256-byte list, 128-byte boot slots", () => {
+	const d = drive(makeAtr(128, 720));
+	sendPercom(d, [40, 0, 0, 18, 0, 4, 1, 0, 0xff, 0, 0, 0]);
+	expect(data(d.command(frame(0x21)))).toHaveLength(256);
+	expect(d.disk!.sectorSize).toBe(256);
+	expect(d.disk!.readSector(1)).toHaveLength(128);
+	expect(d.disk!.readSector(4)).toHaveLength(256);
+});
+
+test("format medium density always makes an ED disk", () => {
+	const d = drive(makeAtr(256, 720));
+	sendPercom(d, [40, 0, 0, 18, 0, 4, 1, 0, 0xff, 0, 0, 0]);
+	expect(data(d.command(frame(0x22)))).toHaveLength(128);
+	expect([d.disk!.sectorSize, d.disk!.sectorCount]).toEqual([128, 1040]);
+});
+
+test("format refuses protected media and impossible geometries", () => {
+	const d = drive(makeAtr(128, 720));
+	d.disk!.writeProtected = true;
+	expect(d.command(frame(0x21)).kind).toBe("error");
+	d.disk!.writeProtected = false;
+	sendPercom(d, [0, 0, 0, 0, 0, 0, 0, 128, 0xff, 0, 0, 0]);
+	expect(d.command(frame(0x21)).kind).toBe("error");
+	expect(d.disk!.sectorCount).toBe(720); // untouched
+});
+
+test("512-byte disk: status bit 6, natural PERCOM, full-size sector 1", () => {
+	const d = drive(makeAtr(512, 64));
+	// The TOMS Turbo Drive precedent: bit 6 flags a 512-byte disk, and the
+	// PERCOM block is the honest channel ($0200 sector size, MFM).
+	expect(data(d.command(frame(0x53)))[0]).toBe(0x40);
+	expect(data(d.command(frame(0x4e)))).toEqual([
+		1, 0, 0, 64, 0, 4, 2, 0, 0xff, 0, 0, 0,
+	]);
+	// Every sector transfers full size, the first ones included.
+	expect(data(d.command(frame(0x52, 1)))).toHaveLength(512);
+});
+
+test("format to 512-byte sectors via a set PERCOM block", () => {
+	const d = drive(makeAtr(128, 720));
+	sendPercom(d, [1, 0, 0, 64, 0, 4, 2, 0, 0xff, 0, 0, 0]);
+	expect(data(d.command(frame(0x21)))).toHaveLength(512);
+	expect([d.disk!.sectorSize, d.disk!.sectorCount]).toEqual([512, 64]);
+	expect(d.disk!.readSector(1)).toHaveLength(512);
+});

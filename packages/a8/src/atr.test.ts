@@ -94,3 +94,28 @@ test("write protection defaults off and is settable", () => {
 		new AtrImage(makeAtr(128, 4), { writeProtected: true }).writeProtected,
 	).toBe(true);
 });
+
+test("512-byte sectors have no boot-sector exception", () => {
+	const atr = new AtrImage(makeAtr(512, 100));
+	expect(atr.sectorSize).toBe(512);
+	expect(atr.sectorCount).toBe(100);
+
+	// Hard-disk-style media (SDX partitions, TOMS Turbo) store and transfer
+	// every sector full size, the first ones included.
+	expect(atr.readSector(1)).toHaveLength(512);
+	expect(atr.readSector(1)![0]).toBe(1);
+	expect(atr.readSector(100)![0]).toBe(100);
+	expect(atr.readSector(101)).toBeNull();
+});
+
+test("format to 512-byte sectors round-trips through the header", () => {
+	const atr = new AtrImage(makeAtr(128, 720));
+	atr.format(512, 64);
+	expect(atr.sectorSize).toBe(512);
+	expect(atr.sectorCount).toBe(64);
+	expect(atr.readSector(1)).toHaveLength(512);
+	expect(atr.toBytes()).toHaveLength(16 + 64 * 512);
+
+	const again = new AtrImage(atr.toBytes());
+	expect([again.sectorSize, again.sectorCount]).toEqual([512, 64]);
+});

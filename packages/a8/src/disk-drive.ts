@@ -8,8 +8,8 @@ import type {
 /**
  * An SIO disk drive holding an {@link AtrImage} - the medium keeps all
  * disk behavior (sector layout, write protection); the drive is the
- * protocol personality around it: read/write/put sector, status, the
- * PERCOM geometry block, and the ultra-speed query
+ * protocol personality around it: read/write/put sector, status, format,
+ * the PERCOM geometry block, and the ultra-speed query
  * ({@link highSpeedIndex}), on both SIO fronts (the SIOV trap and the
  * real serial bus).
  *
@@ -78,13 +78,19 @@ export class DiskDrive implements SioDevice {
 
 			case 0x53:
 				// Drive status: write-protect bit when the medium is
-				// protected, plus the density bit; FDC status inverted (no
-				// error), format timeout.
+				// protected, plus the density bits (AHRM table 44: D7
+				// enhanced, D5 double) - how software detects enhanced
+				// density on drives without the PERCOM commands; FDC status
+				// inverted (no error), format timeout. Bit 6 for a 512-byte
+				// disk follows the TOMS Turbo Drive, the one drive with a
+				// precedent to follow; PERCOM stays the honest channel.
 				return {
 					kind: "complete",
 					data: Uint8Array.of(
 						(disk.writeProtected ? 0x08 : 0) |
-							(disk.sectorSize === 256 ? 0x20 : 0),
+							(disk.sectorSize === 256 ? 0x20 : 0) |
+							(disk.sectorSize === 512 ? 0x40 : 0) |
+							(disk.sectorSize === 128 && disk.sectorCount === 1040 ? 0x80 : 0),
 						0xff,
 						0xe0,
 						0x00,
@@ -98,18 +104,39 @@ export class DiskDrive implements SioDevice {
 					? { kind: "nak" }
 					: { kind: "complete", data: Uint8Array.of(this.highSpeedIndex) };
 
+			case 0x21:
+				// Format: writes a fresh disk to the configured geometry (the
+				// last-set PERCOM block, else the mounted disk's own), fills
+				// every sector with $00, and returns a sector-sized list of
+				// 16-bit bad sector numbers terminated by $FFFF - which for
+				// an image medium is always empty (AHRM 10.2/10.3).
+				return this.#format(disk, this.#configuredGeometry(disk));
+
+			case 0x22:
+				// Format medium density: always enhanced density, ignoring
+				// the PERCOM configuration - the 1050's pre-PERCOM path.
+				return this.#format(disk, { sectorSize: 128, sectorCount: 1040 });
+
 			case 0x4e:
-				// Read PERCOM block: the mounted image's geometry.
-				return { kind: "complete", data: this.#percomBlock() };
+				// Read PERCOM block: the configured geometry (a set block
+				// sticks, like a real drive's config registers), else the
+				// mounted image's.
+				return {
+					kind: "complete",
+					data: this.#pendingPercom ?? this.#percomBlock(),
+				};
 
 			case 0x4f:
-				// Write PERCOM block: accepted and ignored. The geometry is
-				// re-derived from the mounted image on every read - the
-				// setting would only steer a future format command.
+				// Write PERCOM block: stored to steer later format commands.
+				// Reads keep reporting the mounted image's geometry only
+				// until a block is set.
 				return {
 					kind: "receive",
 					length: 12,
-					then: () => ({ kind: "complete" }),
+					then: (data) => {
+						this.#pendingPercom = Uint8Array.from(data);
+						return { kind: "complete" };
+					},
 				};
 
 			case 0x50:
@@ -131,14 +158,65 @@ export class DiskDrive implements SioDevice {
 		}
 	}
 
+	// The PERCOM block set by $4F, if any; steers $21 format geometry and
+	// is echoed by $4E. Kept until overwritten, like a real drive's config.
+	#pendingPercom: Uint8Array | undefined;
+
+	// The geometry a $21 format would produce: decoded from the set PERCOM
+	// block (tracks x sectors-per-track x sides, MSB-first fields), else the
+	// mounted disk's current shape. Null when the block describes something
+	// no disk medium can hold.
+	#configuredGeometry(
+		disk: AtrImage,
+	): { sectorSize: 128 | 256 | 512; sectorCount: number } | null {
+		const percom = this.#pendingPercom;
+		if (percom === undefined) {
+			return { sectorSize: disk.sectorSize, sectorCount: disk.sectorCount };
+		}
+		const tracks = percom[0]!;
+		const sectorsPerTrack = (percom[2]! << 8) | percom[3]!;
+		const sides = percom[4]! + 1;
+		const sectorSize = (percom[6]! << 8) | percom[7]!;
+		const sectorCount = tracks * sectorsPerTrack * sides;
+		if (
+			(sectorSize !== 128 && sectorSize !== 256 && sectorSize !== 512) ||
+			sectorCount < 1 ||
+			sectorCount > 0xffff
+		) {
+			return null;
+		}
+		return { sectorSize, sectorCount };
+	}
+
+	// Perform a format: refuse protected media and impossible geometries
+	// with an error frame; otherwise reformat in place and return the empty
+	// bad-sector list, sized to the new sector length.
+	#format(
+		disk: AtrImage,
+		geometry: { sectorSize: 128 | 256 | 512; sectorCount: number } | null,
+	): SioCommandResponse {
+		if (disk.writeProtected || geometry === null) {
+			const frame = new Uint8Array(disk.sectorSize);
+			frame[0] = 0xff;
+			frame[1] = 0xff;
+			return { kind: "error", data: frame };
+		}
+		disk.format(geometry.sectorSize, geometry.sectorCount);
+		const frame = new Uint8Array(geometry.sectorSize);
+		frame[0] = 0xff;
+		frame[1] = 0xff;
+		return { kind: "complete", data: frame };
+	}
+
 	// A sector's data-frame length. The stored sector is authoritative
-	// (boot sectors are 128 bytes even on double density); out-of-range
-	// sectors still need a length so a doomed write's data frame is
-	// consumed in step with the sender.
+	// (boot sectors are 128 bytes on double density, full size on 512-byte
+	// media); out-of-range sectors still need a length so a doomed write's
+	// data frame is consumed in step with the sender.
 	#sectorLength(sector: number): number {
 		const stored = this.disk!.readSector(sector);
 		if (stored) return stored.length;
-		return sector >= 1 && sector <= 3 ? 128 : this.disk!.sectorSize;
+		const size = this.disk!.sectorSize;
+		return sector >= 1 && sector <= 3 && size === 256 ? 128 : size;
 	}
 
 	// The 12-byte PERCOM block (AHRM table 46; two-byte fields MSB first,
@@ -166,7 +244,7 @@ export class DiskDrive implements SioDevice {
 			sectorsPerTrack = 18; // double-sided double density (XF551)
 			sides = 2;
 		}
-		const mfm = sectorSize === 256 || sectorsPerTrack === 26;
+		const mfm = sectorSize !== 128 || sectorsPerTrack === 26;
 		return Uint8Array.of(
 			tracks,
 			0, // step rate (widely ignored by software)

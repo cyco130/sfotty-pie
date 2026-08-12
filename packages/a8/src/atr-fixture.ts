@@ -1,15 +1,16 @@
 /**
  * Test fixture: build an ATR image whose every sector is filled with its own
  * sector number. `boot128` picks between the two double-density layouts
- * (128-byte vs full-size boot sector slots); ignored for single density.
+ * (128-byte vs full-size boot sector slots); ignored for single density and
+ * for 512-byte images, which have no boot-sector exception.
  */
 export function makeAtr(
-	sectorSize: 128 | 256,
+	sectorSize: 128 | 256 | 512,
 	sectorCount: number,
 	boot128 = true,
 ): Uint8Array {
 	const slotSize = (sector: number) =>
-		sectorSize === 128 || (boot128 && sector <= 3) ? 128 : 256;
+		sectorSize === 256 && boot128 && sector <= 3 ? 128 : sectorSize;
 
 	let dataLength = 0;
 	for (let sector = 1; sector <= sectorCount; sector++) {

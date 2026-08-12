@@ -25,7 +25,7 @@ import {
 export type ImageKind =
 	| { type: "os"; sizeClass: 10 | 16 }
 	| { type: "cart"; cartType: number } // the CART-table number = mapper/subtype
-	| { type: "disk"; sectorSize: 128 | 256; sectors: number }
+	| { type: "disk"; sectorSize: 128 | 256 | 512; sectors: number }
 	| { type: "xex" }
 	| { type: "bas" } // a tokenized (SAVEd) BASIC program
 	// A raw cartridge dump whose mapper couldn't be detected (its size matches
@@ -248,8 +248,8 @@ function carPiece(source: Uint8Array): CanonicalPiece {
 
 /** ATR passthrough - geometry only; container-stripping is deferred. */
 function diskPiece(source: Uint8Array): CanonicalPiece {
-	const sectorSize =
-		((source[4] ?? 0) | ((source[5] ?? 0) << 8)) === 256 ? 256 : 128;
+	const headerSize = (source[4] ?? 0) | ((source[5] ?? 0) << 8);
+	const sectorSize = headerSize === 256 ? 256 : headerSize === 512 ? 512 : 128;
 	// Paragraph (16-byte) count -> total image bytes.
 	const paragraphs =
 		(source[2] ?? 0) | ((source[3] ?? 0) << 8) | ((source[6] ?? 0) << 16);

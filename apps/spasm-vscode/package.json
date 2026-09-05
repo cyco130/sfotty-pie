@@ -10,7 +10,7 @@
   "type": "module",
   "main": "./dist/extension.cjs",
   "engines": {
-    "vscode": "^1.104.0"
+    "vscode": "^1.136.1"
   },
   "categories": [
     "Programming Languages"
@@ -46,17 +46,17 @@
   "dependencies": {
     "@sfotty-pie/spasm": "workspace:*",
     "jsonc-parser": "^3.3.1",
-    "vscode-languageclient": "^10.1.0",
-    "vscode-languageserver": "^10.1.0",
-    "vscode-languageserver-textdocument": "^1.0.12",
-    "vscode-uri": "^3.0.8"
+    "vscode-languageclient": "^10.1.1",
+    "vscode-languageserver": "^10.1.1",
+    "vscode-languageserver-textdocument": "^1.0.14",
+    "vscode-uri": "^3.2.0"
   },
   "devDependencies": {
     "@cyco130/eslint-config": "^9.0.2",
-    "@types/node": "^22.20.0",
-    "@types/vscode": "~1.104.0",
-    "esbuild": "^0.28.1",
-    "eslint": "^10.5.0",
+    "@types/node": "^22.20.1",
+    "@types/vscode": "~1.136.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.10.0",
     "typescript": "^6.0.3"
   }
 }

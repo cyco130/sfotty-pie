@@ -6,6 +6,6 @@
     "@sfotty-pie/sfotty": "^0.3.0"
   },
   "devDependencies": {
-    "@types/node": "^22.20.0"
+    "@types/node": "^22.20.1"
   }
 }

@@ -13,29 +13,29 @@
     "deploy": "pnpm build && wrangler pages deploy dist --project-name a8-web"
   },
   "dependencies": {
-    "@preact/signals": "^2.9.2",
+    "@preact/signals": "^2.11.2",
     "@sfotty-pie/a8": "workspace:*",
     "@sfotty-pie/fonts": "workspace:*",
     "@sfotty-pie/sfotty": "workspace:*",
     "fflate": "^0.8.3",
-    "preact": "^10.29.2",
-    "preact-iso": "^2.12.0"
+    "preact": "^10.29.8",
+    "preact-iso": "^2.12.2"
   },
   "devDependencies": {
     "@babel/core": "^8.0.1",
     "@cyco130/eslint-config": "^9.0.2",
     "@mdx-js/rollup": "^3.1.1",
-    "@preact/preset-vite": "^2.10.5",
+    "@preact/preset-vite": "^2.10.6",
     "@tailwindcss/typography": "^0.5.20",
-    "@tailwindcss/vite": "^4.3.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
-    "eslint": "^10.5.0",
-    "eslint-plugin-better-tailwindcss": "^4.6.1",
+    "eslint": "^10.10.0",
+    "eslint-plugin-better-tailwindcss": "^4.7.0",
     "fake-indexeddb": "^6.2.5",
-    "tailwindcss": "^4.3.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "vite": "^8.1.0",
-    "vitest": "^4.1.9",
-    "wrangler": "^4.104.0"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.129.0"
   }
 }

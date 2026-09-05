@@ -12,12 +12,12 @@
     "test:packages": "pnpm -r --filter \"!@sfotty-pie/template-*\" --stream run test",
     "test:format": "prettier --check ."
   },
-  "packageManager": "pnpm@11.9.0",
+  "packageManager": "pnpm@11.25.0",
   "devDependencies": {
     "husky": "^9.1.7",
-    "lint-staged": "^17.0.8",
-    "prettier": "^3.8.4",
-    "prettier-plugin-tailwindcss": "^0.8.0",
+    "lint-staged": "^17.4.1",
+    "prettier": "^3.9.6",
+    "prettier-plugin-tailwindcss": "^0.8.1",
     "typescript": "^6.0.3"
   }
 }

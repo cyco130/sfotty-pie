@@ -12,7 +12,7 @@
     "test:packages": "pnpm -r --filter \"!@sfotty-pie/template-*\" --stream run test",
     "test:format": "prettier --check ."
   },
-  "packageManager": "pnpm@11.9.0",
+  "packageManager": "pnpm@12.4.1",
   "devDependencies": {
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",

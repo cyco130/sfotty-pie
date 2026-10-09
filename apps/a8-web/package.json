@@ -18,7 +18,7 @@
     "@sfotty-pie/fonts": "workspace:*",
     "@sfotty-pie/sfotty": "workspace:*",
     "fflate": "^0.8.3",
-    "preact": "^10.29.2",
+    "preact": "^11.0.1",
     "preact-iso": "^2.12.0"
   },
   "devDependencies": {

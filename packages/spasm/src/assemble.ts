@@ -1,7 +1,7 @@
 import { Codes } from "./codes.ts";
 import { encodeInstruction } from "./encode.ts";
 import { evaluate, type EvalEnv } from "./evaluate.ts";
-import { render, Segment } from "./layout.ts";
+import { render, Segment, type ByteRun } from "./layout.ts";
 import { loadModules, type Host, type LoadedModule } from "./loader.ts";
 import {
 	expandModules,
@@ -57,7 +57,31 @@ export interface AssembleResult {
 	/** Per-module visibility (imports and export sets), for scope-aware
 	 * tooling like completion. */
 	moduleScopes: Map<string, ModuleScope>;
+	/**
+	 * Where each statement's bytes landed, in output order. The glue a
+	 * debugger needs in both directions: an address back to the line that
+	 * produced it, and a line forward to the addresses it assembled to (a
+	 * line may emit several runs, through a macro or several statements).
+	 * Reflects the converged pass only.
+	 */
+	sourceMap: SourceMapEntry[];
 	diagnostics: Message[];
+}
+
+/** One statement's bytes, tied to the line that emitted them. */
+export interface SourceMapEntry {
+	/** Run address of the first byte, after `.org` and segment placement. */
+	address: number;
+	/** Where the run's first byte sits in `output`, which `.org` does not move. */
+	offset: number;
+	/** How many bytes the statement emitted. */
+	length: number;
+	/** The module the statement came from. */
+	file: string;
+	/** 1-based line of the statement in its module. */
+	line: number;
+	/** Byte offsets of the statement's anchor token, for span-level tooling. */
+	span: readonly [number, number];
 }
 
 type Reporter = (
@@ -211,6 +235,7 @@ function assembleModules(
 	let bases = new Map<string, bigint>(); // segment bases from the previous render
 	let resSizes = new Map<string, bigint>(); // `res` sizes from the previous render
 	let sizes = new Map<string, bigint>(); // segment sizes from the previous render
+	let runs: ByteRun[] = []; // byte placements of the latest render
 
 	// Pessimistic shrink-only sizing is monotone; label values still flow a hop
 	// per pass (render defines them after collect). The cap is a generous
@@ -352,6 +377,7 @@ function assembleModules(
 		bases = result.bases;
 		resSizes = result.resSizes;
 		sizes = result.sizes;
+		runs = result.runs;
 
 		// Converged only when the symbol table, the output bytes, AND the
 		// layout-feedback maps are all stable. Symbols alone miss non-symbol
@@ -561,8 +587,55 @@ function assembleModules(
 		definitions,
 		references,
 		moduleScopes: scopes.moduleScopes(macroNav.exports),
+		sourceMap: toSourceMap(runs, sourceFiles),
 		diagnostics: all,
 	};
+}
+
+/**
+ * Offsets where each line of `source` starts, so a statement's span resolves
+ * to a line by binary search instead of rescanning the file per statement.
+ */
+function lineStarts(source: string): number[] {
+	const starts = [0];
+	for (let i = 0; i < source.length; i++) {
+		if (source[i] === "\n") starts.push(i + 1);
+	}
+	return starts;
+}
+
+/** The 1-based line holding `offset`. */
+function lineOf(starts: number[], offset: number): number {
+	let low = 0;
+	let high = starts.length - 1;
+	while (low < high) {
+		const mid = (low + high + 1) >> 1;
+		if (starts[mid]! <= offset) low = mid;
+		else high = mid - 1;
+	}
+	return low + 1;
+}
+
+function toSourceMap(
+	runs: readonly ByteRun[],
+	sourceFiles: Map<string, SourceFile>,
+): SourceMapEntry[] {
+	const index = new Map<string, number[]>();
+	return runs.map((run) => {
+		let starts = index.get(run.moduleId);
+		if (starts === undefined) {
+			starts = lineStarts(sourceFiles.get(run.moduleId)?.source ?? "");
+			index.set(run.moduleId, starts);
+		}
+		return {
+			address: Number(run.address),
+			offset: run.offset,
+			length: run.length,
+			file: run.moduleId,
+			line: lineOf(starts, run.span[0]),
+			span: run.span,
+		};
+	});
 }
 
 /**

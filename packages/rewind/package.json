@@ -1,0 +1,51 @@
+{
+  "name": "@sfotty-pie/rewind",
+  "version": "0.3.0",
+  "description": "Instruction-level reversible execution over a Sfotty 6502.",
+  "keywords": [
+    "6502",
+    "emulator",
+    "debugger",
+    "undo",
+    "reverse-debugging",
+    "time-travel"
+  ],
+  "license": "MIT",
+  "repository": "github:cyco130/sfotty-pie",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown --clean",
+    "dev": "tsdown --watch",
+    "prepack": "pnpm build",
+    "test": "pnpm run /^test:/",
+    "test:unit": "vitest run",
+    "test:typecheck": "tsc -p tsconfig.json",
+    "test:lint": "eslint . --max-warnings 0",
+    "test:package": "publint"
+  },
+  "dependencies": {
+    "@sfotty-pie/sfotty": "workspace:*"
+  },
+  "devDependencies": {
+    "@cyco130/eslint-config": "^9.0.2",
+    "@types/node": "^22.20.0",
+    "eslint": "^10.5.0",
+    "publint": "^0.3.21",
+    "tsdown": "0.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": "22 || 24 || 25 || 26"
+  }
+}

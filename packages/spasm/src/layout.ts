@@ -75,6 +75,20 @@ type Reporter = (
 	options?: { notes?: MessageNote[]; symbol?: string },
 ) => void;
 
+/**
+ * Where one statement's bytes landed. Recorded as render walks, so the
+ * address is the real run address after `.org` and segment placement, not an
+ * offset into the output.
+ */
+export interface ByteRun {
+	address: bigint;
+	/** Where the run's first byte sits in the rendered output. */
+	offset: number;
+	length: number;
+	moduleId: string;
+	span: readonly [number, number];
+}
+
 export interface RenderResult {
 	bytes: number[];
 	/** The base (absolute load address) each rendered segment landed at. */
@@ -92,6 +106,8 @@ export interface RenderResult {
 	 * so `*` after an `.emit`/`.emplace` (a bounds check, say) is meaningful.
 	 */
 	sizes: Map<string, bigint>;
+	/** Every emitted byte run, in output order. */
+	runs: ByteRun[];
 }
 
 /**
@@ -112,6 +128,7 @@ export function render(
 	const bases = new Map<string, bigint>();
 	const resSizes = new Map<string, bigint>();
 	const sizes = new Map<string, bigint>();
+	const runs: ByteRun[] = [];
 	const onStack = new Set<string>();
 	// The placement site (`.emit`/`.emplace` item) of each placed segment, for
 	// "first placed here" and cycle-chain notes; the root has no site.
@@ -159,6 +176,16 @@ export function render(
 							item.span,
 							item.moduleId,
 						);
+					}
+					// Emplaced bytes never reach the file, so they map to nothing.
+					if (!emplaced && item.bytes.length > 0) {
+						runs.push({
+							address: lc,
+							offset: bytes.length,
+							length: item.bytes.length,
+							moduleId: item.moduleId,
+							span: item.span,
+						});
 					}
 					bytes.push(...item.bytes);
 					lc += BigInt(item.bytes.length);
@@ -250,12 +277,22 @@ export function render(
 							item.moduleId,
 						);
 					}
+					const firstSubRun = runs.length;
 					const subBytes = renderSegment(
 						sub,
 						lc,
 						emplaced || item.kind === "emplace",
 					);
-					if (item.kind === "emit") bytes.push(...subBytes);
+					if (item.kind === "emit") {
+						// The child recorded offsets into its own byte array; it is
+						// about to be spliced in at the end of this one.
+						for (let i = firstSubRun; i < runs.length; i++) {
+							runs[i]!.offset += bytes.length;
+						}
+						bytes.push(...subBytes);
+					} else {
+						runs.length = firstSubRun; // emplaced bytes reach no file
+					}
 					lc += BigInt(subBytes.length); // emplace reserves without emitting
 					break;
 				}
@@ -270,5 +307,5 @@ export function render(
 
 	const root = segments.get(rootName);
 	const bytes = root ? renderSegment(root, 0n, false) : [];
-	return { bytes, bases, resSizes, sizes };
+	return { bytes, bases, resSizes, sizes, runs };
 }

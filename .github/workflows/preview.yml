@@ -32,7 +32,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           check-latest: true
           cache: "pnpm"
 
@@ -118,7 +118,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           check-latest: true
 
       # The script uses only Node built-ins + global fetch, so no install needed.
